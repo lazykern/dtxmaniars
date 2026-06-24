@@ -1,3 +1,5 @@
+#![allow(dead_code)]
+#![allow(clippy::type_complexity)]
 //! `CStageChangeSkin` — port of `Stage/09.ChangeSkin/CStageChangeSkin.cs` (95 LOC).
 //!
 //! Strict-port-first. The change-skin stage is intentionally bare — no

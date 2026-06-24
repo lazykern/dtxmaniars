@@ -171,9 +171,9 @@ mod tests {
 
     #[test]
     fn lane_label_roundtrip() {
-        for i in 0..5 {
+        for (i, expected) in GUITAR_LANES.iter().enumerate() {
             let l = lane_label(i as u8);
-            assert_eq!(l, GUITAR_LANES[i]);
+            assert_eq!(&l, expected);
         }
     }
 

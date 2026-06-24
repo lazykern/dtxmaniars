@@ -1,3 +1,4 @@
+#![allow(unused_imports)]
 //! Full Result UX — port of `Stage/07.Result/`.
 //!
 //! Strict-port-first (ADR-0010). Position constants verbatim from reference.

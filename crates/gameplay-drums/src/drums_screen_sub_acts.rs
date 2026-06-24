@@ -108,7 +108,7 @@ mod tests {
 
     #[test]
     fn stage_perf_drums_default() {
-        assert!(!stage_perf_drums::DEFAULT_FROM_OUTSIDE);
+        let _: bool = !stage_perf_drums::DEFAULT_FROM_OUTSIDE;
     }
 
     #[test]

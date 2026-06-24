@@ -1,3 +1,5 @@
+#![allow(dead_code)]
+#![allow(clippy::type_complexity)]
 //! CStageSongSelectionNew — song select screen (M5: real SongDb).
 //!
 //! Reference: `references/DTXmaniaNX-BocuD/DTXMania/Stage/04.SongSelectionNew/CStageSongSelectionNew.cs`

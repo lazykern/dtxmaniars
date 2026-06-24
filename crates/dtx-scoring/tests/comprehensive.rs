@@ -68,8 +68,6 @@ fn rank_equality_and_ordering() {
 }
 
 #[test]
-
-#[test]
 fn classify_symmetric_around_zero() {
     assert_eq!(classify(-1000), JudgmentKind::Miss);
     assert_eq!(classify(17), JudgmentKind::Great);

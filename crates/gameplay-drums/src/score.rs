@@ -6,11 +6,10 @@
 //! Combo: increments on Perfect/Great/Good/Ok, resets on Miss.
 
 use bevy::prelude::*;
-use bevy::prelude::{MessageReader as _, Resource as _};
+
 
 use crate::components::LastJudgment;
 use crate::events::{JudgmentEvent, NoteMissed};
-use crate::lane_map::{lane_channel, lane_of, LaneId, LANE_ORDER};
 use crate::resources::{Combo, Score};
 use dtx_scoring::JudgmentKind;
 

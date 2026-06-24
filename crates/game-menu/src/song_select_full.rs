@@ -1,3 +1,4 @@
+#![allow(clippy::type_complexity)]
 //! Full SongSelect UX — port of `Stage/04.SongSelectionNew/`.
 //!
 //! Strict-port-first (ADR-0010). Position constants verbatim from reference.
@@ -490,7 +491,7 @@ mod tests {
 
     #[test]
     fn search_query_matches_substring() {
-        let mut sel = SongSelectSelection {
+        let sel = SongSelectSelection {
             search_query: "abc".into(),
             ..Default::default()
         };
