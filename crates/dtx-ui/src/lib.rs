@@ -17,6 +17,8 @@
 
 #![allow(dead_code)] // Some helpers used by future Phase 0/1+ sub-acts.
 
+pub mod core_sub_acts;
+
 use bevy::asset::Handle;
 use bevy::prelude::*;
 use bevy::text::Font;
