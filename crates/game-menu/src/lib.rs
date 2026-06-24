@@ -33,6 +33,7 @@ pub mod config_list_audio;
 pub mod config_list_audio_driver;
 pub mod config_list_graphics;
 pub mod config_list_gameplay;
+pub mod config_list_menu;
 pub mod end;
 pub mod result;
 pub mod song_loading;
