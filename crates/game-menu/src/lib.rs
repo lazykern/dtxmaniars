@@ -27,18 +27,19 @@ use bevy::prelude::*;
 pub mod change_skin;
 pub mod config;
 pub mod config_full;
+pub mod config_key_assign;
 pub mod config_list;
-pub mod config_list_system;
 pub mod config_list_audio;
 pub mod config_list_audio_driver;
-pub mod config_list_graphics;
-pub mod config_list_gameplay;
-pub mod config_list_menu;
+pub mod config_list_bass;
 pub mod config_list_drums;
 pub mod config_list_drums_velocity;
+pub mod config_list_gameplay;
+pub mod config_list_graphics;
 pub mod config_list_guitar;
-pub mod config_list_bass;
+pub mod config_list_menu;
 pub mod config_list_skin;
+pub mod config_list_system;
 pub mod end;
 pub mod result;
 pub mod song_loading;
@@ -62,6 +63,7 @@ impl Plugin for GameMenuPlugin {
             config::plugin,
             config_full::plugin,
             config_list::plugin,
+            config_key_assign::plugin,
             song_loading::plugin,
             result::plugin,
             change_skin::plugin,
