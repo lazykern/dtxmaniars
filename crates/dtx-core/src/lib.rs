@@ -10,6 +10,7 @@ pub mod error;
 pub mod fdk_sub_acts;
 pub mod cdtx_model;
 pub mod cscore_ini;
+pub mod c_box_set_def;
 pub mod parser;
 pub mod score_song;
 
