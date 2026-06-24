@@ -8,6 +8,7 @@ pub mod channel;
 pub mod chart;
 pub mod error;
 pub mod fdk_sub_acts;
+pub mod cdtx_model;
 pub mod parser;
 pub mod score_song;
 
