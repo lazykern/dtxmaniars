@@ -13,12 +13,14 @@
 //! Lane order: LC, HH, SD, BD, HT, LT, FT, CY, LP, RD, HHO (BocuD CActPerfDrumsLaneFlushD.cs).
 
 pub mod components;
+pub mod drums_perf;
 pub mod events;
 pub mod hud;
 pub mod input;
 pub mod judge;
 pub mod lane_map;
 pub mod miss;
+pub mod orchestrator;
 pub mod perf_common;
 pub mod resources;
 pub mod score;

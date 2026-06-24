@@ -18,6 +18,7 @@
 #![allow(dead_code)] // Some helpers used by future Phase 0/1+ sub-acts.
 
 pub mod core_sub_acts;
+pub mod perf_common;
 
 use bevy::asset::Handle;
 use bevy::prelude::*;

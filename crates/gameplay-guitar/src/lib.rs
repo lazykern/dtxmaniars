@@ -14,10 +14,12 @@ use bevy::prelude::*;
 
 pub mod components;
 pub mod events;
+pub mod guitar_perf;
 pub mod hud;
 pub mod input;
 pub mod judge;
 pub mod lane_map;
+pub mod orchestrator;
 pub mod resources;
 pub mod score;
 pub mod scroll;
