@@ -1,0 +1,46 @@
+#TITLE: Real Chart Demo
+#ARTIST: dtxmaniars test
+#GENRE: Test
+#MAKER: p0-7
+#BPM: 120.00
+#DLEVEL: 75
+#GLEVEL: 60
+#BLEVEL: 50
+#COMMENT: Realistic fixture for p0-7 — multi-measure, BGM, BGA, BPM change.
+#PREVIEW: real_chart.ogg
+#PREIMAGE: real_chart.bmp
+
+// Drum chart — 4 measures, 120 BPM (2000ms/measure).
+// Measure 0: intro roll
+#00011: 1
+#00012: 10
+#00013: 100
+#00014: 1000
+#00015: 10000
+// Measure 1: full kit
+#00111: 1
+#00112: 10
+#00113: 100
+#00114: 1000
+#00115: 10000
+#00116: 100000
+#00117: 1000000
+#00118: 10000000
+// Measure 2: BPM change to 180 (1500ms/measure)
+#00208: 180.0
+#00211: 1
+#00213: 100
+#00216: 10000
+// Measure 3: 180 BPM cymbal hits
+#00316: 1
+#00316: 10
+#00316: 100
+#00316: 1000
+#00316: 10000
+
+// BGM (file present, audio skipped in test)
+#00101: real_chart.ogg
+
+// BGA — image layer 1 at measure 1, image layer 2 at measure 2
+#00104: 1
+#00207: 2
