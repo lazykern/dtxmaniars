@@ -12,6 +12,7 @@ unsafe_code = "forbid"
 
 [dependencies]
 thiserror = "2"
+dtx-timing = { workspace = true }
 
 [dev-dependencies]
 # tests use plain std::fs

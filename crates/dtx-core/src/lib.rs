@@ -10,6 +10,7 @@ pub mod c_box_set_def;
 pub mod c_chart_data;
 pub mod c_chip;
 pub mod c_song_list_node;
+pub mod cdtx_config;
 pub mod cdtx_model;
 pub mod cdtx_nested;
 pub mod channel;
