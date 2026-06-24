@@ -28,6 +28,7 @@ pub mod change_skin;
 pub mod config;
 pub mod config_full;
 pub mod config_key_assign;
+pub mod song_select_new_stage;
 pub mod config_list;
 pub mod config_list_audio;
 pub mod config_list_audio_driver;
@@ -64,6 +65,7 @@ impl Plugin for GameMenuPlugin {
             config_full::plugin,
             config_list::plugin,
             config_key_assign::plugin,
+            song_select_new_stage::plugin,
             song_loading::plugin,
             result::plugin,
             change_skin::plugin,
