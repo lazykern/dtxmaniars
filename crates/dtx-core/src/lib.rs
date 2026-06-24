@@ -21,6 +21,7 @@ pub mod enum_converter;
 pub mod error;
 pub mod fdk_sub_acts;
 pub mod parser;
+pub mod random_mode;
 pub mod score_song;
 
 pub use channel::EChannel;

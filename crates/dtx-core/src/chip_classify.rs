@@ -122,6 +122,9 @@ pub const fn classify(ch: EChannel) -> ChipClass {
         | EChannel::HiHatOpen
         | EChannel::RideCymbal => ChipClass::Drum,
 
+        // Open hi-hat family
+        EChannel::LeftCymbal | EChannel::LeftPedal | EChannel::LeftBassDrum => ChipClass::OpenNote,
+
         // Drums fill-in (visual only)
         EChannel::DrumsFillin => ChipClass::DrumsFillin,
 

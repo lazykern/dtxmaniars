@@ -25,6 +25,10 @@ pub enum EChannel {
     FloorTom = 0x17,
     HiHatOpen = 0x18,
     RideCymbal = 0x19,
+    // Open hi-hat family (BocuD EChannel.cs:27-30)
+    LeftCymbal = 0x1A,
+    LeftPedal = 0x1B,
+    LeftBassDrum = 0x1C,
 
     // Drums fill-in
     DrumsFillin = 0x1F,
@@ -85,6 +89,9 @@ impl EChannel {
             0x17 => Self::FloorTom,
             0x18 => Self::HiHatOpen,
             0x19 => Self::RideCymbal,
+            0x1A => Self::LeftCymbal,
+            0x1B => Self::LeftPedal,
+            0x1C => Self::LeftBassDrum,
             0x1F => Self::DrumsFillin,
             0x20 => Self::GuitarOpen,
             0x21 => Self::GuitarRxxBxx,
