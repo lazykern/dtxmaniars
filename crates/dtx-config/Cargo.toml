@@ -5,7 +5,12 @@ edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 publish.workspace = true
-description = "Pure configuration schema (RON). No bevy."
+description = "Pure configuration schema (TOML). No bevy."
 
 [lints.rust]
 unsafe_code = "forbid"
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+toml = "0.8"
+thiserror = { workspace = true }

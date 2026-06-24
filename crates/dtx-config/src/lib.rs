@@ -1,13 +1,316 @@
-//! Pure configuration schema. RON load/save. Lands in M1+.
+//! dtx-config — persisted user configuration (TOML).
+//!
+//! Port of `references/DTXmaniaNX-BocuD/DTXMania/Core/CConfigIni.cs:3926` (baseline sections).
+//! Full CConfigIni (KeyAssign, Drums/Guitar/Bass tables, skin) is ported in Phase 1 sub-acts.
+//!
+//! ## Sections ported
+//! - `System` — nBGAlpha, nMovieAlpha, bAVIEnabled, bBGAEnabled, bVerticalSyncWait (subset)
+//! - `Gameplay` — bTight, bReverse, scroll speed
+//! - `Audio` — bBGMを発声する, bドラム打音を発声する (subset)
+//!
+//! Reference: `references/DTXmaniaNX-BocuD/DTXMania/Core/CConfigIni.cs:1-100` (field names).
+//! Reference: `references/DTXmaniaNX-BocuD/DTXMania/Stage/03.Config/CActConfigList.System.cs:1-50` (System tab fields).
 
-#![allow(dead_code)] // scaffold stub; populated in M1
+#![allow(dead_code)] // Some fields used by Phase 1 sub-acts, not yet wired.
 
-#[derive(Debug, Clone, Default)]
+use std::path::{Path, PathBuf};
+
+use serde::{Deserialize, Serialize};
+use thiserror::Error;
+
+/// Top-level persisted configuration. Each BocuD section becomes a sub-struct.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Config {
-    /// Master volume 0.0..1.0
-    pub volume: f32,
-    /// Scroll speed multiplier
+    /// System: windowing, BGA, BGM, logging.
+    #[serde(default)]
+    pub system: SystemConfig,
+    /// Gameplay: scroll, dark mode, reverse.
+    #[serde(default)]
+    pub gameplay: GameplayConfig,
+    /// Audio: volumes and device flags.
+    #[serde(default)]
+    pub audio: AudioConfig,
+    /// Skin subfolder name (relative to `Graphics/Default`).
+    #[serde(default)]
+    pub skin: String,
+}
+
+impl Default for Config {
+    fn default() -> Self {
+        Self {
+            system: SystemConfig::default(),
+            gameplay: GameplayConfig::default(),
+            audio: AudioConfig::default(),
+            skin: "Default".to_string(),
+        }
+    }
+}
+
+/// System section — CConfigIni.cs:1-100 (subset).
+///
+/// Reference: `CActConfigList.System.cs:1-50` — Windowed, FullScreen, VSyncWait, BGAEnabled.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct SystemConfig {
+    /// `bVerticalSyncWait` — CConfigIni.cs:99
+    pub vsync: bool,
+    /// `nBGAlpha` (0..255) — CConfigIni.cs:55
+    pub bg_alpha: u8,
+    /// `nMovieAlpha` (0..255) — CConfigIni.cs:56
+    pub movie_alpha: u8,
+    /// `bAVIEnabled` — CConfigIni.cs:57
+    pub bga_enabled: bool,
+    /// `bBGAEnabled` — CConfigIni.cs:58
+    pub movie_enabled: bool,
+    /// `bOutputLogs` — CConfigIni.cs:99
+    pub log_enabled: bool,
+    /// `bShowPerformanceInformation` — CConfigIni.cs:99
+    pub show_perf_info: bool,
+}
+
+impl Default for SystemConfig {
+    fn default() -> Self {
+        Self {
+            vsync: true,
+            bg_alpha: 255,
+            movie_alpha: 255,
+            bga_enabled: true,
+            movie_enabled: true,
+            log_enabled: false,
+            show_perf_info: false,
+        }
+    }
+}
+
+/// Gameplay section — CConfigIni.cs:100-200 (subset).
+///
+/// Reference: `CActConfigList.Gameplay.cs:1-50`.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct GameplayConfig {
+    /// `bTight` — CConfigIni.cs:99 (Tight mode = stricter judgment windows).
+    pub tight: bool,
+    /// `bReverse.Drums` — reverse scroll direction (CActConfigList.Gameplay.cs).
+    pub reverse: bool,
+    /// Scroll speed multiplier 0.5..4.0.
     pub scroll_speed: f32,
-    /// Show FPS overlay
-    pub show_fps: bool,
+    /// `bDark` — hide notes / show only judgment (CActConfigList.Gameplay.cs).
+    pub dark_mode: bool,
+    /// `bFillInEnabled` — CConfigIni.cs:99.
+    pub fillin_enabled: bool,
+    /// `bSTAGEFAILEDEnabled` — CConfigIni.cs:99.
+    pub stage_failed_enabled: bool,
+}
+
+impl Default for GameplayConfig {
+    fn default() -> Self {
+        Self {
+            tight: false,
+            reverse: false,
+            scroll_speed: 1.0,
+            dark_mode: false,
+            fillin_enabled: true,
+            stage_failed_enabled: true,
+        }
+    }
+}
+
+/// Audio section — CConfigIni.cs:200-300 (subset).
+///
+/// Reference: `CActConfigList.Audio.cs:1-50`.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct AudioConfig {
+    /// `bBGMを発声する` (BGM play enabled) — CConfigIni.cs:99.
+    pub bgm_enabled: bool,
+    /// `bドラム打音を発声する` (drum hit sound) — CConfigIni.cs:99.
+    pub drum_sound_enabled: bool,
+    /// Master volume 0.0..1.0.
+    pub master_volume: f32,
+    /// BGM volume 0.0..1.0.
+    pub bgm_volume: f32,
+    /// Drum hit volume 0.0..1.0.
+    pub drum_volume: f32,
+}
+
+impl Default for AudioConfig {
+    fn default() -> Self {
+        Self {
+            bgm_enabled: true,
+            drum_sound_enabled: true,
+            master_volume: 0.8,
+            bgm_volume: 0.7,
+            drum_volume: 0.8,
+        }
+    }
+}
+
+/// Config I/O errors.
+#[derive(Debug, Error)]
+pub enum ConfigError {
+    /// I/O failure.
+    #[error("io: {0}")]
+    Io(#[from] std::io::Error),
+    /// TOML parse failure.
+    #[error("parse: {0}")]
+    Parse(#[from] toml::de::Error),
+    /// TOML serialize failure.
+    #[error("serialize: {0}")]
+    Serialize(#[from] toml::ser::Error),
+}
+
+/// Default config path: `$XDG_CONFIG_HOME/dtxmaniars/config.toml` or
+/// `$HOME/.config/dtxmaniars/config.toml` or `config.toml` (cwd fallback).
+///
+/// Reference: CConfigIni.cs:75 (`ConfigIniファイル名`).
+pub fn default_path() -> PathBuf {
+    if let Some(xdg) = std::env::var_os("XDG_CONFIG_HOME") {
+        let mut p = PathBuf::from(xdg);
+        p.push("dtxmaniars");
+        p.push("config.toml");
+        return p;
+    }
+    if let Some(home) = std::env::var_os("HOME") {
+        let mut p = PathBuf::from(home);
+        p.push(".config");
+        p.push("dtxmaniars");
+        p.push("config.toml");
+        return p;
+    }
+    PathBuf::from("config.toml")
+}
+
+/// Load config from `path`. Returns `Config::default()` if file is missing or unreadable.
+/// Logs a warning on parse failure but still returns defaults.
+pub fn load(path: &Path) -> Config {
+    let contents = match std::fs::read_to_string(path) {
+        Ok(s) => s,
+        Err(_) => return Config::default(),
+    };
+    match toml::from_str(&contents) {
+        Ok(cfg) => cfg,
+        Err(e) => {
+            eprintln!("dtx-config: parse failed for {path:?}: {e}; using defaults");
+            Config::default()
+        }
+    }
+}
+
+/// Save config to `path`. Creates parent dirs.
+pub fn save(path: &Path, cfg: &Config) -> Result<(), ConfigError> {
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    let s = toml::to_string_pretty(cfg)?;
+    std::fs::write(path, s)?;
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn default_config_has_skin_default() {
+        // CConfigIni default skin name.
+        let cfg = Config::default();
+        assert_eq!(cfg.skin, "Default");
+    }
+
+    #[test]
+    fn default_system_vsync_on() {
+        let s = SystemConfig::default();
+        assert!(s.vsync);
+        assert_eq!(s.bg_alpha, 255);
+        assert!(s.bga_enabled);
+    }
+
+    #[test]
+    fn default_gameplay_scroll_one() {
+        let g = GameplayConfig::default();
+        assert!((g.scroll_speed - 1.0).abs() < f32::EPSILON);
+        assert!(!g.tight);
+        assert!(!g.reverse);
+        assert!(g.fillin_enabled);
+    }
+
+    #[test]
+    fn default_audio_master_eighty_pct() {
+        let a = AudioConfig::default();
+        assert!((a.master_volume - 0.8).abs() < 0.01);
+        assert!(a.bgm_enabled);
+    }
+
+    #[test]
+    fn round_trip_serde_toml() {
+        let cfg = Config::default();
+        let s = toml::to_string_pretty(&cfg).unwrap();
+        let back: Config = toml::from_str(&s).unwrap();
+        assert_eq!(cfg, back);
+    }
+
+    #[test]
+    fn save_load_round_trip() {
+        let tmp = std::env::temp_dir().join("dtxmaniars_cfg_test");
+        let _ = std::fs::remove_dir_all(&tmp);
+        let p = tmp.join("config.toml");
+        let mut cfg = Config {
+            skin: "MySkin".to_string(),
+            ..Config::default()
+        };
+        cfg.gameplay.scroll_speed = 1.5;
+        cfg.audio.bgm_volume = 0.42;
+        save(&p, &cfg).unwrap();
+        let back = load(&p);
+        assert_eq!(back.skin, "MySkin");
+        assert!((back.gameplay.scroll_speed - 1.5).abs() < 0.001);
+        assert!((back.audio.bgm_volume - 0.42).abs() < 0.001);
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn load_missing_returns_defaults() {
+        let p = PathBuf::from("/nonexistent/dtxmaniars/no_such_config.toml");
+        let cfg = load(&p);
+        assert_eq!(cfg, Config::default());
+    }
+
+    #[test]
+    fn load_corrupt_returns_defaults() {
+        let tmp = std::env::temp_dir().join("dtxmaniars_cfg_corrupt");
+        let _ = std::fs::create_dir_all(&tmp);
+        let p = tmp.join("config.toml");
+        std::fs::write(&p, "this is = not valid toml = [[").unwrap();
+        let cfg = load(&p);
+        assert_eq!(cfg, Config::default());
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn partial_config_fills_defaults() {
+        // Missing sections must be filled with defaults.
+        let s = r#"
+            skin = "Foo"
+        "#;
+        let cfg: Config = toml::from_str(s).unwrap();
+        assert_eq!(cfg.skin, "Foo");
+        assert_eq!(cfg.system, SystemConfig::default());
+        assert_eq!(cfg.gameplay, GameplayConfig::default());
+    }
+
+    #[test]
+    fn save_creates_parent_dirs() {
+        let tmp = std::env::temp_dir()
+            .join("dtxmaniars_cfg_nested")
+            .join("deep")
+            .join("path");
+        let p = tmp.join("config.toml");
+        save(&p, &Config::default()).unwrap();
+        assert!(p.exists());
+        let _ = std::fs::remove_dir_all(tmp.parent().unwrap().parent().unwrap());
+    }
+
+    #[test]
+    fn default_path_resolves_to_a_filename() {
+        let p = default_path();
+        assert!(p.file_name().is_some());
+        assert_eq!(p.file_name().unwrap(), "config.toml");
+    }
 }
