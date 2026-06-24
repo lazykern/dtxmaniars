@@ -33,6 +33,7 @@ pub mod status_panel;
 pub mod density_graph;
 pub mod sort_menu;
 pub mod song_search;
+pub mod song_selection;
 pub mod config_list;
 pub mod config_list_audio;
 pub mod config_list_audio_driver;
@@ -71,6 +72,7 @@ impl Plugin for GameMenuPlugin {
             config_key_assign::plugin,
             song_select_new_stage::plugin,
             song_loading::plugin,
+            song_selection::plugin,
             result::plugin,
             change_skin::plugin,
             end::plugin,
