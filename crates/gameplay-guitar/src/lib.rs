@@ -17,6 +17,7 @@ pub mod components;
 pub mod events;
 pub mod hud;
 pub mod input;
+pub mod guitar_screen_sub_acts;
 pub mod judge;
 pub mod lane_map;
 pub mod resources;
