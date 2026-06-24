@@ -1,3 +1,4 @@
+#![allow(missing_docs)]
 //! Score,Song sub-acts — batched port (p6-1..p6-10).
 //! Reference: `references/DTXmaniaNX-BocuD/DTXMania/Score,Song/`
 

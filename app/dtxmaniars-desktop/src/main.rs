@@ -61,7 +61,7 @@ fn log_boot() {
 
 fn log_state_transitions(state: Res<State<AppState>>, mut last: Local<Option<AppState>>) {
     let current = *state.get();
-    if last.map_or(true, |s| s != current) {
+    if last.is_none_or(|s| s != current) {
         info!("AppState: {:?}", current);
         *last = Some(current);
     }
@@ -69,7 +69,7 @@ fn log_state_transitions(state: Res<State<AppState>>, mut last: Local<Option<App
 
 /// Phase 0 wiring: load user config from disk on boot and log summary.
 fn load_config_summary() {
-    use dtx_config::{load, default_path};
+    use dtx_config::{default_path, load};
     let cfg = load(&default_path());
     info!(
         "config: skin={}, master_vol={:.0}%, scroll={:.2}x, vsync={}",

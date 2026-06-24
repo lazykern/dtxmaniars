@@ -99,7 +99,7 @@ fn scroll_notes_system(
 fn despawn_missed_notes_system(
     clock: Res<AudioClock>,
     mode: Res<EGameMode>,
-    mut notes: Query<(Entity, &Note), With<NoteVisual>>,
+    notes: Query<(Entity, &Note), With<NoteVisual>>,
     mut missed: MessageWriter<NoteMissed>,
     mut commands: Commands,
 ) {

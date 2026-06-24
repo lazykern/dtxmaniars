@@ -1,3 +1,4 @@
+#![allow(missing_docs)]
 //! DrumsScreen sub-acts — batched port (p3-23..p3-33).
 //! Reference: `references/DTXmaniaNX-BocuD/DTXMania/Stage/06.Performance/DrumsScreen/`
 

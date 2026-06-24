@@ -8,12 +8,11 @@
 //!
 //! Lookahead default = 2000ms (notes spawn 2s before their target).
 
-use bevy::prelude::Component as _;
 use bevy::prelude::*;
 
 use crate::components::{Note, NoteVisual};
 use crate::events::NoteMissed;
-use crate::lane_map::{lane_of, LaneId};
+use crate::lane_map::lane_of;
 use crate::resources::ActiveChart;
 use dtx_timing::AudioClock;
 use game_shell::EGameMode;
@@ -102,7 +101,7 @@ fn scroll_notes_system(
 fn despawn_missed_notes_system(
     clock: Res<AudioClock>,
     mode: Res<EGameMode>,
-    mut notes: Query<(Entity, &Note), With<NoteVisual>>,
+    notes: Query<(Entity, &Note), With<NoteVisual>>,
     mut missed: MessageWriter<NoteMissed>,
     mut commands: Commands,
 ) {
@@ -128,6 +127,7 @@ fn despawn_missed_notes_system(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::lane_map::LaneId;
 
     #[test]
     fn y_decreases_as_target_approaches() {

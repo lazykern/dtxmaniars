@@ -1,3 +1,4 @@
+#![allow(missing_docs)]
 //! `StatusPanel` — port of `Stage/04.SongSelectionNew/StatusPanel.cs` (143 LOC).
 //!
 //! Strict-port-first. Status panel showing drum/guitar/bass difficulty per row.

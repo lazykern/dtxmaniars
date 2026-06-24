@@ -14,9 +14,8 @@
 //!
 //! Reference: `references/DTXmaniaNX-BocuD/DTXMania/Stage/07.Result/`
 
-use bevy::prelude::Component as _;
 use bevy::prelude::*;
-use dtx_scoring::{JudgmentKind, Rank};
+use dtx_scoring::Rank;
 
 use crate::ResultEntity;
 use gameplay_drums::resources::{ActiveChart, Combo, JudgmentCounts, Score};

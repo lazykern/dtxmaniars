@@ -1,3 +1,4 @@
+#![allow(missing_docs)]
 //! Guitar HUD — minimal text overlay showing score + combo.
 //!
 //! M6b ships a single screen-center text. Visual lane strip + judgment
@@ -5,7 +6,6 @@
 //! CActPerfGuitarLaneFlushGB.cs + CActPerfGuitarJudgementString.cs).
 
 use bevy::prelude::*;
-use bevy::prelude::{Component as _, Message as _, Resource as _};
 
 use crate::resources::{Combo, JudgmentCounts, Score};
 

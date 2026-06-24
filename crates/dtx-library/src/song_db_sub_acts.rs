@@ -1,3 +1,4 @@
+#![allow(missing_docs)]
 //! SongDb sub-acts — batched port (p7-1..p7-6).
 //! Reference: `references/DTXmaniaNX-BocuD/DTXMania/SongDb/`
 

@@ -8,7 +8,6 @@
 //! digits 1-9 don't accidentally fire drum hits. Mirror gating is in
 //! `gameplay-guitar::input`.
 
-use bevy::prelude::MessageWriter as _;
 use bevy::prelude::*;
 use game_shell::EGameMode;
 

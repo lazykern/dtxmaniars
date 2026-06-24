@@ -14,7 +14,7 @@
 //! - ESC/ENTER → SongSelect
 
 use bevy::prelude::*;
-use dtx_scoring::{compute_chart_hash, Rank, ScoreEntry, ScoreStore, ScoreStoreError};
+use dtx_scoring::{compute_chart_hash, Rank, ScoreEntry, ScoreStore};
 use game_shell::fade::start_fade;
 use game_shell::{despawn_stage, AppState};
 use gameplay_drums::resources::{ActiveChart, Combo, JudgmentCounts, Score};
@@ -128,7 +128,7 @@ fn result_input(keys: Res<ButtonInput<KeyCode>>, mut next: ResMut<NextState<AppS
 ///
 /// Order: save FIRST so despawn errors can't lose the entry.
 fn save_result_then_despawn(
-    mut commands: Commands,
+    commands: Commands,
     score: Res<Score>,
     combo: Res<Combo>,
     counts: Res<JudgmentCounts>,

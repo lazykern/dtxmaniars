@@ -121,7 +121,7 @@ pub mod math {
             return 0;
         }
         // Sort changes by measure (BocuD does this once on chart load).
-        let mut sorted: Vec<BpmChange> = bpm_changes.iter().copied().collect();
+        let mut sorted: Vec<BpmChange> = bpm_changes.to_vec();
         sorted.sort_by_key(|c| c.measure);
 
         let mut total_ms: f64 = 0.0;

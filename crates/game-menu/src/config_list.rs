@@ -1,3 +1,4 @@
+#![allow(unreachable_patterns)]
 //! Base `CActConfigList` — port of `Stage/03.Config/CActConfigList.cs` (818 LOC).
 //!
 //! Strict-port-first. This is the base list/iterator/ESC dispatch. Per-tab
@@ -14,7 +15,7 @@ use bevy::prelude::*;
 use game_shell::AppState;
 
 /// All 17 menu types in BocuD (CActConfigList.cs:122-141).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 pub enum EMenuType {
     /// Top-level System tab.
     System,
@@ -47,6 +48,7 @@ pub enum EMenuType {
     /// Bass > KeyAssign sub-tab.
     KeyAssignBass,
     /// Default for unselected state.
+    #[default]
     Unknown,
 }
 
@@ -109,12 +111,6 @@ impl EMenuType {
             // with no action.
             _ => *self,
         }
-    }
-}
-
-impl Default for EMenuType {
-    fn default() -> Self {
-        Self::Unknown
     }
 }
 

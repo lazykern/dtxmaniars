@@ -1,3 +1,4 @@
+#![allow(missing_docs)]
 //! `CActConfigList.System` — port of `Stage/03.Config/CActConfigList.System.cs` (396 LOC).
 //!
 //! Strict-port-first. Returns the System sub-menu items per the reference.
@@ -19,7 +20,7 @@
 //!
 //! (Items 13-39 deferred — System Key Mapping, Import/Export Config, etc.)
 
-use super::config_list::{ConfigListItem, EMenuType};
+use super::config_list::ConfigListItem;
 
 /// Build the System sub-menu items (CActConfigList.System.cs:9-396).
 pub fn build_system_items() -> Vec<ConfigListItem> {
@@ -43,6 +44,9 @@ pub fn build_system_items() -> Vec<ConfigListItem> {
 /// Reference has 39; we port 12 (Return + 5 folders + 2 actions + 5 settings).
 /// Items 13-39 are deferred to p1-3.1+.
 pub const SYSTEM_ITEMS_PORTED: usize = 12;
+
+// Re-export EMenuType so callers can use it.
+pub use super::config_list::EMenuType as _EMenuType;
 
 #[cfg(test)]
 mod tests {
@@ -110,6 +114,3 @@ mod tests {
         // The 5 folders in C#: Graphics, Skin, Audio, Gameplay, Menu
     }
 }
-
-// Re-export EMenuType so callers can use it.
-pub use super::config_list::EMenuType as _EMenuType;

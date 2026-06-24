@@ -117,17 +117,9 @@ pub struct KeyAssignSlot {
 }
 
 /// 16-slot key assignment for one (part, pad) pair.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct PadKeyAssign {
     pub slots: [KeyAssignSlot; 16],
-}
-
-impl Default for PadKeyAssign {
-    fn default() -> Self {
-        Self {
-            slots: [KeyAssignSlot::default(); 16],
-        }
-    }
 }
 
 impl PadKeyAssign {
@@ -276,8 +268,10 @@ mod tests {
 
     #[test]
     fn key_assign_state_move_next_wraps_18() {
-        let mut s = KeyAssignState::default();
-        s.selected_row = 17;
+        let mut s = KeyAssignState {
+            selected_row: 17,
+            ..Default::default()
+        };
         s.move_next();
         assert_eq!(s.selected_row, 0);
     }
@@ -285,40 +279,47 @@ mod tests {
     #[test]
     fn key_assign_state_move_previous_wraps() {
         let mut s = KeyAssignState::default();
-        s.selected_row = 0;
         s.move_previous();
         assert_eq!(s.selected_row, 17);
     }
 
     #[test]
     fn key_assign_state_move_blocked_when_waiting() {
-        let mut s = KeyAssignState::default();
-        s.waiting_for_input = true;
-        s.selected_row = 5;
+        let mut s = KeyAssignState {
+            selected_row: 5,
+            waiting_for_input: true,
+            ..Default::default()
+        };
         s.move_next();
         assert_eq!(s.selected_row, 5);
     }
 
     #[test]
     fn key_assign_press_enter_sets_waiting() {
-        let mut s = KeyAssignState::default();
-        s.selected_row = 3;
+        let mut s = KeyAssignState {
+            selected_row: 3,
+            ..Default::default()
+        };
         s.press_enter();
         assert!(s.waiting_for_input);
     }
 
     #[test]
     fn key_assign_press_enter_reset_row() {
-        let mut s = KeyAssignState::default();
-        s.selected_row = 16;
+        let mut s = KeyAssignState {
+            selected_row: 16,
+            ..Default::default()
+        };
         s.press_enter();
         assert!(!s.waiting_for_input);
     }
 
     #[test]
     fn key_assign_capture_clears_waiting() {
-        let mut s = KeyAssignState::default();
-        s.waiting_for_input = true;
+        let mut s = KeyAssignState {
+            waiting_for_input: true,
+            ..Default::default()
+        };
         s.capture_key(KeyCode::Digit1);
         assert!(!s.waiting_for_input);
     }

@@ -11,7 +11,6 @@
 
 #![warn(missing_docs)]
 
-use bevy::prelude::Resource as _;
 use bevy::prelude::*;
 use dtx_core::bga::{BgaEvent, BgaLayer};
 use dtx_timing::AudioClock;
@@ -113,7 +112,7 @@ fn tick_bga_player(
     }
 
     // Clean up overlay entities whose layer state went to Ended.
-    let active_layers: std::collections::HashSet<_> = player
+    let _active_layers: std::collections::HashSet<_> = player
         .layers
         .iter()
         .filter(|(_, s)| **s == BgaLayerState::Displaying)

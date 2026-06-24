@@ -2,7 +2,6 @@
 
 use std::path::PathBuf;
 
-use bevy::prelude::Resource as _;
 use bevy::prelude::*;
 use dtx_core::{Chart, Metadata};
 

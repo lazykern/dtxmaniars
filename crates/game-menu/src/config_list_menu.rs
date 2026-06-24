@@ -1,3 +1,4 @@
+#![allow(missing_docs)]
 //! `CActConfigList.Menu` — port of `Stage/03.Config/CActConfigList.Menu.cs` (74 LOC).
 //!
 //! Strict-port-first. Menu sub-menu items.

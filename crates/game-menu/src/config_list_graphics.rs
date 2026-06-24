@@ -1,3 +1,4 @@
+#![allow(missing_docs)]
 //! `CActConfigList.Graphics` — port of `Stage/03.Config/CActConfigList.Graphics.cs` (119 LOC).
 //!
 //! Strict-port-first. Graphics sub-menu items.

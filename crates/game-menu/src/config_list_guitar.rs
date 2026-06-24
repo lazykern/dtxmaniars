@@ -1,3 +1,4 @@
+#![allow(missing_docs)]
 //! `CActConfigList.Guitar` — port of `Stage/03.Config/CActConfigList.Guitar.cs` (439 LOC).
 //!
 //! Strict-port-first. Guitar sub-menu items (first 25 of 39).

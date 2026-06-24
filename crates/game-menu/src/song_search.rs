@@ -1,3 +1,4 @@
+#![allow(missing_docs)]
 //! `SongSearchMenu` + `CommandHistory` — port of
 //! `Stage/04.SongSelectionNew/SongSearchMenu.cs` (107 LOC) + `CommandHistory.cs` (99 LOC).
 //!

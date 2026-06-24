@@ -1,3 +1,4 @@
+#![allow(missing_docs)]
 //! `CActConfigList.Bass` — port of `Stage/03.Config/CActConfigList.Bass.cs` (427 LOC).
 //!
 //! Strict-port-first. Bass sub-menu items (first 25 of 39).

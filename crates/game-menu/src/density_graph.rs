@@ -1,3 +1,4 @@
+#![allow(missing_docs)]
 //! `DensityGraph` — port of `Stage/04.SongSelectionNew/DensityGraph.cs` (279 LOC).
 //!
 //! Strict-port-first. Note-density histogram per instrument.

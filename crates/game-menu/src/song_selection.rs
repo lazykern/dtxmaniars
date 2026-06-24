@@ -1,3 +1,4 @@
+#![allow(missing_docs)]
 //! Song selection container/element/presound/quick-config — port of
 //! `Stage/04.SongSelectionNew/SongSelectionContainer.cs` (588 LOC) +
 //! `SongSelectionElement.cs` (319 LOC) +
@@ -152,6 +153,11 @@ impl QuickConfigState {
     }
 }
 
+pub(super) fn plugin(app: &mut App) {
+    app.init_resource::<CActSelectPresound>()
+        .init_resource::<QuickConfigState>();
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -250,9 +256,4 @@ mod tests {
         assert!(!q.auto_play);
         assert!((q.scroll_speed - 1.0).abs() < 0.01);
     }
-}
-
-pub(super) fn plugin(app: &mut App) {
-    app.init_resource::<CActSelectPresound>()
-        .init_resource::<QuickConfigState>();
 }

@@ -16,7 +16,6 @@
 //!
 //! Reference: `references/DTXmaniaNX-BocuD/DTXMania/Stage/04.SongSelectionNew/`
 
-use bevy::prelude::Component as _;
 use bevy::prelude::*;
 use dtx_library::{SongInfo, SortMode};
 
@@ -491,8 +490,10 @@ mod tests {
 
     #[test]
     fn search_query_matches_substring() {
-        let mut sel = SongSelectSelection::default();
-        sel.search_query = "abc".into();
+        let mut sel = SongSelectSelection {
+            search_query: "abc".into(),
+            ..Default::default()
+        };
         assert!(sel.matches_search(&make_song("ABCDEF", "X")));
         assert!(sel.matches_search(&make_song("X", "ABcdef")));
         assert!(!sel.matches_search(&make_song("X", "Y")));
@@ -506,8 +507,10 @@ mod tests {
 
     #[test]
     fn recompute_sorts_by_title() {
-        let mut sel = SongSelectSelection::default();
-        sel.sort_mode = SortMode::ByTitle;
+        let mut sel = SongSelectSelection {
+            sort_mode: SortMode::ByTitle,
+            ..Default::default()
+        };
         let all = vec![
             make_song("Charlie", "X"),
             make_song("Alpha", "Y"),
@@ -521,8 +524,10 @@ mod tests {
 
     #[test]
     fn recompute_filters_via_search() {
-        let mut sel = SongSelectSelection::default();
-        sel.search_query = "bra".into();
+        let mut sel = SongSelectSelection {
+            search_query: "bra".into(),
+            ..Default::default()
+        };
         let all = vec![
             make_song("Charlie", "X"),
             make_song("Alpha", "Y"),

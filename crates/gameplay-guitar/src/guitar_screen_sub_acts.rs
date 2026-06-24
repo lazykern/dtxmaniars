@@ -1,3 +1,4 @@
+#![allow(missing_docs)]
 //! GuitarScreen sub-acts — batched port (p3-34..p3-46).
 //! Reference: `references/DTXmaniaNX-BocuD/DTXMania/Stage/06.Performance/GuitarScreen/`
 
@@ -49,11 +50,11 @@ pub mod guitar_status_panel {
 pub mod guitar_rgb {
     /// 5 lane colors (R/G/B/Y/P).
     pub const RGB_COLORS: [[u8; 4]; 5] = [
-        [255, 0, 0, 255],     // R
-        [0, 255, 0, 255],     // G
-        [0, 0, 255, 255],     // B
-        [255, 255, 0, 255],   // Y
-        [128, 0, 128, 255],   // P
+        [255, 0, 0, 255],   // R
+        [0, 255, 0, 255],   // G
+        [0, 0, 255, 255],   // B
+        [255, 255, 0, 255], // Y
+        [128, 0, 128, 255], // P
     ];
 }
 

@@ -1,3 +1,4 @@
+#![allow(missing_docs)]
 //! `CActConfigList.Audio` — port of `Stage/03.Config/CActConfigList.Audio.cs` (189 LOC).
 //!
 //! Strict-port-first. Audio sub-menu items.

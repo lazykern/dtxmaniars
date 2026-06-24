@@ -1,8 +1,8 @@
+#![allow(missing_docs)]
 //! Guitar mode resources. Mirror of gameplay-drums::resources shape.
 
 use std::path::PathBuf;
 
-use bevy::prelude::Resource as _;
 use bevy::prelude::*;
 use dtx_core::{Chart, Metadata};
 

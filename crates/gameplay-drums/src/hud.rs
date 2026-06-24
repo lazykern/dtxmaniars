@@ -23,7 +23,6 @@
 //! Orchestrator: CStagePerfDrumsScreen.cs (3671 LOC) — implemented as DrumsHudPlugin
 //! that aggregates the sub-acts above.
 
-use bevy::prelude::Component as _;
 use bevy::prelude::*;
 use dtx_scoring::JudgmentKind;
 
@@ -418,7 +417,7 @@ fn update_combo_bomb_visibility(
 }
 
 fn update_gauge_bar(
-    score: Res<Score>,
+    _score: Res<Score>,
     counts: Res<JudgmentCounts>,
     mut q: Query<&mut Node, With<DrumsHudKind>>,
 ) {

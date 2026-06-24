@@ -2,7 +2,6 @@
 //! extract shared message types into a common crate.
 
 use bevy::prelude::*;
-use bevy::prelude::{Component as _, Message as _, Resource as _};
 use serde::{Deserialize, Serialize};
 
 pub use crate::lane_map::LaneId;

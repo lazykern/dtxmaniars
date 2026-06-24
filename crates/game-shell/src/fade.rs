@@ -82,7 +82,7 @@ fn update_fade_system(
     }
 
     let dt_ms = time.delta().as_millis() as u64;
-    fade.elapsed_ms = Some((fade.elapsed_ms.unwrap_or(0) + dt_ms).min(FADE_DURATION_MS as u64));
+    fade.elapsed_ms = Some((fade.elapsed_ms.unwrap_or(0) + dt_ms).min(FADE_DURATION_MS));
 
     let alpha = fade.alpha();
 

@@ -1,6 +1,5 @@
 //! LaneHit message — a single key/note press or release on a lane.
 
-use bevy::prelude::Message as _;
 use bevy::prelude::*;
 use serde::{Deserialize, Serialize};
 

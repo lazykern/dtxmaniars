@@ -1,3 +1,4 @@
+#![allow(missing_docs)]
 //! Performance sub-acts batched port (p3-11..p3-22).
 //! Reference: `references/DTXmaniaNX-BocuD/DTXMania/Stage/06.Performance/`
 

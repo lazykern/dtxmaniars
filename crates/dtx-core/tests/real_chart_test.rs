@@ -19,7 +19,7 @@ fn chip_time_ms_with_bpm_changes(
     if base_bpm <= 0.0 {
         return 0;
     }
-    let mut sorted: Vec<(u32, f32)> = changes.iter().copied().collect();
+    let mut sorted: Vec<(u32, f32)> = changes.to_vec();
     sorted.sort_by_key(|c| c.0);
     let mut total_ms: f64 = 0.0;
     let mut current_bpm: f64 = base_bpm as f64;
@@ -84,7 +84,7 @@ fn real_chart_chip_count() {
 #[test]
 fn real_chart_chip_timing_with_bpm_change() {
     let f = File::open("tests/fixtures/real_chart.dtx").unwrap();
-    let chart = parse(f).unwrap();
+    let _chart = parse(f).unwrap();
     let changes = [(2u32, 180.0f32)];
     let t0 = chip_time_ms_with_bpm_changes(0, 0.0, 120.0, &changes);
     assert_eq!(t0, 0);

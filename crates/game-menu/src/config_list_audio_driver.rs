@@ -1,3 +1,4 @@
+#![allow(missing_docs)]
 //! `CActConfigList.Audio.Driver` — port of `Stage/03.Config/CActConfigList.Audio.Driver.cs` (128 LOC).
 //!
 //! Strict-port-first. Audio Driver sub-menu items.

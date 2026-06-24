@@ -1,3 +1,4 @@
+#![allow(missing_docs)]
 //! Core sub-acts — batched port (p8-1..p8-3).
 //! Reference: `references/DTXmaniaNX-BocuD/DTXMania/Core/`
 

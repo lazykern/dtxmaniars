@@ -1,3 +1,4 @@
+#![allow(missing_docs)]
 //! Guitar judge: LaneHit → JudgmentEvent.
 //!
 //! Consumes `LaneHit` messages, finds the closest un-judged note in the same
@@ -17,7 +18,6 @@ use dtx_timing::math::{chip_time_ms_with_bpm_changes, BpmChange};
 use dtx_timing::AudioClock;
 use game_shell::EGameMode;
 
-use crate::components::{Note, NoteVisual};
 use crate::events::{JudgmentEvent, LaneHit};
 use crate::lane_map::lane_channel;
 use crate::resources::{ActiveChart, Combo, JudgmentCounts, Score};

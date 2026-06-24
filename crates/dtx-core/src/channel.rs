@@ -31,16 +31,16 @@ pub enum EChannel {
 
     // Guitar open / RGBxxx pattern
     GuitarOpen = 0x20,
-    Guitar_xxBxx = 0x21,
-    Guitar_xGxxx = 0x22,
-    Guitar_xGBxx = 0x23,
+    GuitarRxxBxx = 0x21,
+    GuitarRxGxx = 0x22,
+    GuitarRxGBxx = 0x23,
     GuitarRxxxx = 0x24,
     GuitarRxBxx = 0x25,
     GuitarRGxxx = 0x26,
     GuitarRGBxx = 0x27,
     // Y / P frets (BocuD EChannel.cs lines 109-131)
-    Guitar_xxxYx = 0x93,
-    Guitar_xxxxP = 0xA3,
+    GuitarYxxYx = 0x93,
+    GuitarPxx = 0xA3,
 
     // BGA image/video layers (BocuD EChannel.cs lines 10-13, 64-76)
     BGALayer4 = 0x56,
@@ -87,15 +87,21 @@ impl EChannel {
             0x19 => Self::RideCymbal,
             0x1F => Self::DrumsFillin,
             0x20 => Self::GuitarOpen,
-            0x21 => Self::Guitar_xxBxx,
-            0x22 => Self::Guitar_xGxxx,
-            0x23 => Self::Guitar_xGBxx,
+            0x21 => Self::GuitarRxxBxx,
+            0x22 => Self::GuitarRxGxx,
+            0x23 => Self::GuitarRxGBxx,
             0x24 => Self::GuitarRxxxx,
             0x25 => Self::GuitarRxBxx,
             0x26 => Self::GuitarRGxxx,
             0x27 => Self::GuitarRGBxx,
-            0x93 => Self::Guitar_xxxYx,
-            0xA3 => Self::Guitar_xxxxP,
+            0x93 => {
+                Self::// Renamed: was Guitar_xxxYx
+    GuitarYxxYx
+            }
+            0xA3 => {
+                Self::// Renamed: was Guitar_xxxxP
+    GuitarPxx
+            }
             0x56 => Self::BGALayer4,
             0x57 => Self::BGALayer5,
             0x58 => Self::BGALayer6,

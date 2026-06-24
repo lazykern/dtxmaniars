@@ -7,7 +7,6 @@
 //! only consumes already-judged events. The actual judge is M6.1.
 
 use bevy::prelude::*;
-use bevy::prelude::{MessageReader as _, Resource as _};
 
 use crate::events::{JudgmentEvent, NoteMissed};
 use crate::resources::{Combo, JudgmentCounts, Score};

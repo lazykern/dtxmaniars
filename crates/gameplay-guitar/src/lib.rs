@@ -10,14 +10,13 @@
 
 #![warn(missing_docs)]
 
-use bevy::prelude::Resource as _;
 use bevy::prelude::*;
 
 pub mod components;
 pub mod events;
+pub mod guitar_screen_sub_acts;
 pub mod hud;
 pub mod input;
-pub mod guitar_screen_sub_acts;
 pub mod judge;
 pub mod lane_map;
 pub mod resources;

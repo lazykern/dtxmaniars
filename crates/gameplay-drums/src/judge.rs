@@ -19,10 +19,9 @@
 use std::collections::HashSet;
 
 use bevy::prelude::*;
-use bevy::prelude::{MessageReader as _, MessageWriter as _, Resource as _};
 
 use crate::events::{JudgmentEvent, LaneHit};
-use crate::lane_map::{lane_channel, lane_of, LaneId, LANE_ORDER};
+use crate::lane_map::{lane_channel, lane_of};
 use crate::resources::ActiveChart;
 use dtx_scoring::classify;
 use dtx_timing::math::{chip_time_ms_with_bpm_changes, BpmChange};
@@ -118,6 +117,7 @@ fn chip_target_ms(chip: &dtx_core::Chip, base_bpm: f32, bpm_changes: &[BpmChange
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::lane_map::{lane_of, LaneId, LANE_ORDER};
 
     #[test]
     fn classifies_zero_delta_as_perfect() {
@@ -188,7 +188,7 @@ mod tests {
         let bpm_changes = BpmChangeList::from_chart(&chart.chart);
         let base_bpm = chart.chart.metadata.bpm.unwrap_or(120.0);
         let lane_channel = lane_channel(2).unwrap();
-        let mut judged = JudgedChips::default();
+        let judged = JudgedChips::default();
         let hit = LaneHit {
             lane: 2,
             audio_ms: 1000,

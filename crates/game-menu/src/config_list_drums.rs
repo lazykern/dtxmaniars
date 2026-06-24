@@ -1,3 +1,4 @@
+#![allow(missing_docs)]
 //! `CActConfigList.Drums` — port of `Stage/03.Config/CActConfigList.Drums.cs` (879 LOC).
 //!
 //! Strict-port-first. Drums sub-menu items (first 30 of 66 ported).

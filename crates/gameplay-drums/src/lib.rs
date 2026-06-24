@@ -13,23 +13,22 @@
 //! Lane order: LC, HH, SD, BD, HT, LT, FT, CY, LP, RD, HHO (BocuD CActPerfDrumsLaneFlushD.cs).
 
 pub mod components;
+pub mod drawable_sub_acts;
+pub mod drums_screen_sub_acts;
 pub mod events;
 pub mod hud;
 pub mod input;
-pub mod perf_common;
-pub mod perf_common_acts;
-pub mod perf_sub_acts;
-pub mod drums_screen_sub_acts;
-pub mod drawable_sub_acts;
 pub mod judge;
 pub mod lane_map;
 pub mod miss;
+pub mod perf_common;
+pub mod perf_common_acts;
+pub mod perf_sub_acts;
 pub mod resources;
 pub mod score;
 pub mod scroll;
 
 use bevy::prelude::*;
-use bevy::prelude::{Component as _, Message as _, Resource as _};
 
 /// Root plugin: register all sub-plugins in dependency order.
 ///
@@ -94,7 +93,7 @@ mod midi_consumer {
             return;
         }
         let mut buf: Vec<dtx_input::LaneHit> = Vec::new();
-        (&mut *source).poll(&mut buf);
+        (*source).poll(&mut buf);
         for h in buf {
             // Convert dtx_input::LaneHit to gameplay-drums LaneHit.
             hits.write(LaneHit {

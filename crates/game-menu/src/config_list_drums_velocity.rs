@@ -1,3 +1,4 @@
+#![allow(missing_docs)]
 //! `CActConfigList.Drums.Velocity` — port of `Stage/03.Config/CActConfigList.Drums.Velocity.cs` (85 LOC).
 //!
 //! Strict-port-first. Per-drum velocity min threshold settings.
@@ -24,9 +25,9 @@ pub fn build_drums_velocity_items() -> Vec<ConfigListItem> {
         ConfigListItem::leaf("<< Return to Menu", ""),
         ConfigListItem::leaf(
             "Left cymbal",
-            &default_velocity_min("Left cymbal").to_string(),
+            default_velocity_min("Left cymbal").to_string(),
         ),
-        ConfigListItem::leaf("Hi-hat", &default_velocity_min("Hi-hat").to_string()),
+        ConfigListItem::leaf("Hi-hat", default_velocity_min("Hi-hat").to_string()),
         ConfigListItem::leaf("Snare drum", "0"),
         ConfigListItem::leaf("Bass drum", "0"),
         ConfigListItem::leaf("High tom", "0"),

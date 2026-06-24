@@ -1,3 +1,4 @@
+#![allow(missing_docs)]
 //! `SortMenuContainer` + `SortMenuElement` — port of
 //! `Stage/04.SongSelectionNew/SortMenuContainer.cs` (205 LOC) + `SortMenuElement.cs` (48 LOC).
 //!

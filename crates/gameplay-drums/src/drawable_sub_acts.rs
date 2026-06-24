@@ -1,3 +1,4 @@
+#![allow(missing_docs)]
 //! Performance Drawable sub-acts — batched port (p3-47..p3-49).
 //! Reference: `references/DTXmaniaNX-BocuD/DTXMania/Stage/06.Performance/Drawable/`
 

@@ -18,7 +18,6 @@
 
 #![warn(missing_docs)]
 
-use bevy::prelude::Message as _;
 use bevy::prelude::*;
 
 pub mod events;

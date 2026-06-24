@@ -1,7 +1,6 @@
 //! Gameplay events (beve 0.19: `Event` was renamed to `Message`).
 
 use crate::lane_map::LaneId;
-use bevy::prelude::Message as _;
 use bevy::prelude::*;
 use dtx_scoring::JudgmentKind;
 

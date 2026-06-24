@@ -9,7 +9,6 @@
 use std::collections::HashMap;
 
 use bevy::prelude::KeyCode;
-use bevy::prelude::Resource as _;
 use bevy::prelude::*;
 use dtx_core::EChannel;
 

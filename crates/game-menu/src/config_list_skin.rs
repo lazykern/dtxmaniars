@@ -1,3 +1,4 @@
+#![allow(missing_docs)]
 //! `CActConfigList.Skin` — port of `Stage/03.Config/CActConfigList.Skin.cs` (161 LOC).
 //!
 //! Strict-port-first. Skin sub-menu items.

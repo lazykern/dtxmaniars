@@ -1,3 +1,4 @@
+#![allow(missing_docs)]
 //! `CActConfigList.Gameplay` — port of `Stage/03.Config/CActConfigList.Gameplay.cs` (185 LOC).
 //!
 //! Strict-port-first. Gameplay sub-menu items.

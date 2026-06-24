@@ -1,3 +1,4 @@
+#![allow(missing_docs)]
 //! FDK sub-acts — batched port (p9-1..p9-3).
 //! Reference: `references/DTXmaniaNX-BocuD/FDK/`
 

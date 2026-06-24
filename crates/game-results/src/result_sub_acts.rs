@@ -1,3 +1,4 @@
+#![allow(missing_docs)]
 //! Result sub-acts — batched port (p4-2..p4-5).
 //! Reference: `references/DTXmaniaNX-BocuD/DTXMania/Stage/07.Result/`
 

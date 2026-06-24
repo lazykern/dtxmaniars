@@ -86,7 +86,7 @@ fn start_load(
                 guitar_chart.chart = chart.clone();
                 guitar_chart.source_path = Some(path.clone());
                 // M7: populate BGA events for the player.
-                let events = dtx_core::bga::bga_events(&chart);
+                let events = dtx_core::bga::bga_events(chart);
                 bga_player.reset();
                 bga_player.event_count = events.len();
                 let bga_res = ActiveChartRes {

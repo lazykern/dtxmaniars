@@ -29,8 +29,9 @@ pub enum ELoadPhase {
 }
 
 /// Available sorters (CStageSongSelectionNew.cs:56-66).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 pub enum ESortMode {
+    #[default]
     Default,
     Box,
     Title,
@@ -74,32 +75,14 @@ impl ESortMode {
     }
 }
 
-impl Default for ESortMode {
-    fn default() -> Self {
-        Self::Default
-    }
-}
-
 /// State for the SongSelectionNew stage.
-#[derive(Resource, Debug, Clone)]
+#[derive(Resource, Debug, Clone, Default)]
 pub struct SongSelectionNewState {
     pub return_value: EReturnValue,
     pub load_phase: ELoadPhase,
     pub current_sort: ESortMode,
     pub selected_box: Option<String>,
     pub scroll_position: usize,
-}
-
-impl Default for SongSelectionNewState {
-    fn default() -> Self {
-        Self {
-            return_value: EReturnValue::default(),
-            load_phase: ELoadPhase::default(),
-            current_sort: ESortMode::default(),
-            selected_box: None,
-            scroll_position: 0,
-        }
-    }
 }
 
 pub(super) fn plugin(app: &mut App) {

@@ -282,7 +282,7 @@ fn render_selected_song(
     if let Some(song) = db.songs.get(selection.0) {
         let detail = format_song_detail(song);
         for mut text in &mut text_query {
-            if text.0 == "" || text.0.starts_with("Selected") {
+            if text.0.is_empty() || text.0.starts_with("Selected") {
                 *text = Text::new(detail.clone());
             } else if text.0.starts_with("Sort") {
                 *text = Text::new(format!("Sort: {:?}", db.sort_mode));

@@ -2,7 +2,6 @@
 
 use crate::lane_map::LaneId;
 use bevy::prelude::*;
-use bevy::prelude::{Component as _, Resource as _};
 
 /// A single chip currently on the highway (spawned by `scroll::spawn_notes_system`).
 ///

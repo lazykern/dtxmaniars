@@ -39,6 +39,10 @@ impl ChangeSkinState {
     }
 }
 
+pub(super) fn plugin(app: &mut App) {
+    app.init_resource::<ChangeSkinState>();
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -84,8 +88,4 @@ mod tests {
         s.reload("X");
         assert!(!s.reloading);
     }
-}
-
-pub(super) fn plugin(app: &mut App) {
-    app.init_resource::<ChangeSkinState>();
 }

@@ -1,3 +1,4 @@
+#![allow(missing_docs)]
 //! Common Performance sub-acts — batched port of CActPerfCommon*.cs files
 //! (p3-2..p3-10). Each is a small sub-act; constants verbatim from reference.
 //!

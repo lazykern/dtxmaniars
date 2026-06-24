@@ -13,7 +13,6 @@
 use std::collections::HashMap;
 
 use bevy::prelude::KeyCode;
-use bevy::prelude::Resource as _;
 use bevy::prelude::*;
 
 /// Lane index in the visual order (0..4).
@@ -32,10 +31,10 @@ pub const GUITAR_LANE_COUNT: u8 = 5;
 /// ## M6b coverage
 ///
 /// - 0x24 (Guitar_Rxxxx) → R lane (0)
-/// - 0x22 (Guitar_xGxxx) → G lane (1)
-/// - 0x21 (Guitar_xxBxx) → B lane (2)
-/// - 0x93 (Guitar_xxxYx) → Y lane (3)
-/// - 0xA3 (Guitar_xxxxP) → P lane (4)
+/// - 0x22 (GuitarRxGxx) → G lane (1)
+/// - 0x21 (GuitarRxxBxx) → B lane (2)
+/// - 0x93 (GuitarYxxYx) → Y lane (3)
+/// - 0xA3 (GuitarPxx) → P lane (4)
 ///
 /// Open (0x20) and chords return None — M6.1.
 pub fn lane_of(channel: dtx_core::EChannel) -> Option<LaneId> {
@@ -45,11 +44,11 @@ pub fn lane_of(channel: dtx_core::EChannel) -> Option<LaneId> {
         C::GuitarRGxxx => 0,  // R+G chord → R lane (M6b: lowest lane wins)
         C::GuitarRxBxx => 0,  // R+B → R
         C::GuitarRGBxx => 0,  // R+G+B → R
-        C::Guitar_xGxxx => 1, // G  (0x22)
-        C::Guitar_xGBxx => 1, // G+B → G
-        C::Guitar_xxBxx => 2, // B  (0x21)
-        C::Guitar_xxxYx => 3, // Y  (0x93)
-        C::Guitar_xxxxP => 4, // P  (0xA3)
+        C::GuitarRxGxx => 1,  // G  (0x22)
+        C::GuitarRxGBxx => 1, // G+B → G
+        C::GuitarRxxBxx => 2, // B  (0x21)
+        C::GuitarYxxYx => 3,  // Y  (0x93)
+        C::GuitarPxx => 4,    // P  (0xA3)
         _ => return None,
     };
     Some(lane)
@@ -65,10 +64,10 @@ pub fn lane_channel(lane: LaneId) -> Option<dtx_core::EChannel> {
     use dtx_core::EChannel as C;
     match lane {
         0 => Some(C::GuitarRxxxx),
-        1 => Some(C::Guitar_xGxxx),
-        2 => Some(C::Guitar_xxBxx),
-        3 => Some(C::Guitar_xxxYx),
-        4 => Some(C::Guitar_xxxxP),
+        1 => Some(C::GuitarRxGxx),
+        2 => Some(C::GuitarRxxBxx),
+        3 => Some(C::GuitarYxxYx),
+        4 => Some(C::GuitarPxx),
         _ => None,
     }
 }
@@ -148,10 +147,10 @@ mod tests {
     #[test]
     fn lane_of_single_notes() {
         assert_eq!(lane_of(EChannel::GuitarRxxxx), Some(0));
-        assert_eq!(lane_of(EChannel::Guitar_xGxxx), Some(1));
-        assert_eq!(lane_of(EChannel::Guitar_xxBxx), Some(2));
-        assert_eq!(lane_of(EChannel::Guitar_xxxYx), Some(3));
-        assert_eq!(lane_of(EChannel::Guitar_xxxxP), Some(4));
+        assert_eq!(lane_of(EChannel::GuitarRxGxx), Some(1));
+        assert_eq!(lane_of(EChannel::GuitarRxxBxx), Some(2));
+        assert_eq!(lane_of(EChannel::GuitarYxxYx), Some(3));
+        assert_eq!(lane_of(EChannel::GuitarPxx), Some(4));
     }
 
     #[test]
@@ -160,7 +159,7 @@ mod tests {
         // M6.1 will replace with multi-lane judgment.
         assert_eq!(lane_of(EChannel::GuitarRGxxx), Some(0));
         assert_eq!(lane_of(EChannel::GuitarRGBxx), Some(0));
-        assert_eq!(lane_of(EChannel::Guitar_xGBxx), Some(1));
+        assert_eq!(lane_of(EChannel::GuitarRxGBxx), Some(1));
     }
 
     #[test]
