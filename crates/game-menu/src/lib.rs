@@ -27,6 +27,7 @@ use bevy::prelude::*;
 pub mod change_skin;
 pub mod config;
 pub mod config_full;
+pub mod config_list;
 pub mod end;
 pub mod result;
 pub mod song_loading;
@@ -49,6 +50,7 @@ impl Plugin for GameMenuPlugin {
             song_select_full::plugin,
             config::plugin,
             config_full::plugin,
+            config_list::plugin,
             song_loading::plugin,
             result::plugin,
             change_skin::plugin,
