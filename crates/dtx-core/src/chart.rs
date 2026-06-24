@@ -103,9 +103,11 @@ mod tests {
 
     #[test]
     fn metadata_clone() {
-        let mut m = Metadata::default();
-        m.title = Some("Test".to_string());
-        m.bpm = Some(120.0);
+        let m = Metadata {
+            title: Some("Test".to_string()),
+            bpm: Some(120.0),
+            ..Default::default()
+        };
         let m2 = m.clone();
         assert_eq!(m.title, m2.title);
         assert_eq!(m.bpm, m2.bpm);
@@ -113,13 +115,21 @@ mod tests {
 
     #[test]
     fn metadata_equality() {
-        let mut a = Metadata::default();
-        let mut b = Metadata::default();
-        a.title = Some("X".into());
-        b.title = Some("X".into());
+        let a = Metadata {
+            title: Some("X".into()),
+            ..Default::default()
+        };
+        let b = Metadata {
+            title: Some("X".into()),
+            ..Default::default()
+        };
         assert_eq!(a, b);
-        a.bpm = Some(120.0);
-        assert_ne!(a, b);
+        let c = Metadata {
+            title: Some("X".into()),
+            bpm: Some(120.0),
+            ..Default::default()
+        };
+        assert_ne!(a, c);
     }
 
     #[test]
