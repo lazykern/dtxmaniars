@@ -1,20 +1,17 @@
 //! `CStagePerfCommonScreen` — port of `Stage/06.Performance/CStagePerfCommonScreen.cs` (5067 LOC).
 //!
-//! Strict-port-first. Common base class for Drums/Guitar performance stages.
+//! ADR-0010 relaxed: position constants stripped. State machines (presence
+//! updates, stage state, song info) kept.
 //!
 //! Reference: `references/DTXmaniaNX-BocuD/DTXMania/Stage/06.Performance/CStagePerfCommonScreen.cs:1-5067`
 
 use bevy::prelude::Resource;
 
-/// Screen size constants (CStagePerfCommonScreen.cs).
+/// Canvas size defaults (BocuD CStagePerfCommonScreen.cs — DTXMania default 1280x720).
 pub const PERF_SCREEN_W: f32 = 1280.0;
 pub const PERF_SCREEN_H: f32 = 720.0;
 
-/// Top-area Y position (CStagePerfCommonScreen.cs — judgment line area).
-pub const PERF_JUDGMENT_LINE_Y: f32 = 580.0;
-/// Bottom pad Y (CStagePerfCommonScreen.cs — pad row).
-pub const PERF_PAD_Y: f32 = 600.0;
-/// Number of supported display FPS (BocuD defaults to 60).
+/// Target FPS (BocuD CStagePerfCommonScreen.cs:60 — 60Hz).
 pub const PERF_TARGET_FPS: u32 = 60;
 
 /// Presence state (CStagePerfCommonScreen.cs:18-50 — Discord rich presence).
@@ -87,11 +84,6 @@ mod tests {
     fn screen_size_matches() {
         assert_eq!(PERF_SCREEN_W, 1280.0);
         assert_eq!(PERF_SCREEN_H, 720.0);
-    }
-
-    #[test]
-    fn judgment_line_y_matches() {
-        assert_eq!(PERF_JUDGMENT_LINE_Y, 580.0);
     }
 
     #[test]

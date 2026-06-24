@@ -21,7 +21,7 @@
 use bevy::prelude::*;
 use dtx_assets::DtxCache;
 use dtx_bga::{ActiveChartRes, BgaPlayer};
-use game_shell::fade::start_fade;
+// fade UI removed (ADR-0010 relaxed)
 use game_shell::{AppState, despawn_stage};
 use gameplay_drums::resources::ActiveChart as DrumsActiveChart;
 use gameplay_guitar::resources::ActiveChart as GuitarActiveChart;
@@ -49,7 +49,7 @@ pub fn plugin(app: &mut App) {
         .init_resource::<LoadPhase>()
         .add_systems(
             OnEnter(AppState::SongLoading),
-            (start_load, spawn_loading, start_fade).chain(),
+            (start_load, spawn_loading).chain(),
         )
         .add_systems(
             OnExit(AppState::SongLoading),

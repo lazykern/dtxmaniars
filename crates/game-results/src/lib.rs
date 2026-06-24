@@ -1,21 +1,16 @@
-//! CStageResult port — post-play results screen.
+//! CStageResult port — post-play results screen (mechanics only).
 //!
 //! Reference: `references/DTXmaniaNX-BocuD/DTXMania/Stage/07.Result/CStageResult.cs` (811 lines)
 //!
-//! ## M6a: CScoreIni persistence
+//! ## ADR-0010 relaxed: UI/skin stripped
 //!
-//! On OnExit(Result), append a `ScoreEntry` to the global `ScoreStore` and
-//! save it to disk. The store is loaded on Startup by `main.rs`.
-//!
-//! ## M5 scope
-//!
-//! - Display: title, difficulty, score, max combo, per-judgment counts + %
-//! - Rank from perfect percentage (S/A/B/C/D/E)
-//! - ESC/ENTER → SongSelect
+//! - `result_full` and `result_stage` UI modules deleted.
+//! - Mechanics only: rank, score, max-combo, per-judgment counts, persistence.
+//! - `commands.spawn` is allowed here for the minimal result text overlay
+//!   (no longer a "gameplay" crate — visual layer is allowed).
 
 use bevy::prelude::*;
 use dtx_scoring::{compute_chart_hash, Rank, ScoreEntry, ScoreStore};
-use game_shell::fade::start_fade;
 use game_shell::{despawn_stage, AppState};
 use gameplay_drums::resources::{ActiveChart, Combo, JudgmentCounts, Score};
 
@@ -28,18 +23,13 @@ pub struct ResultEntity;
 pub struct ScoreStoreResource(pub ScoreStore);
 
 pub fn plugin(app: &mut App) {
-    app.add_systems(OnEnter(AppState::Result), (spawn_result, start_fade))
+    app.add_systems(OnEnter(AppState::Result), spawn_result)
         .add_systems(OnExit(AppState::Result), save_result_then_despawn)
-        .add_systems(Update, result_input.run_if(in_state(AppState::Result)))
-        .add_plugins(result_full::plugin)
-        .init_resource::<result_stage::CStageResultState>();
+        .add_systems(Update, result_input.run_if(in_state(AppState::Result)));
 }
 
 /// Re-export as struct form for callers that prefer `add_plugins(...)` syntax.
 pub use plugin as GameResultsPlugin;
-
-pub mod result_full;
-pub mod result_stage;
 
 fn spawn_result(
     mut commands: Commands,
@@ -124,8 +114,6 @@ fn result_input(keys: Res<ButtonInput<KeyCode>>, mut next: ResMut<NextState<AppS
 }
 
 /// OnExit(Result): persist current play to ScoreStore, then despawn UI.
-///
-/// Order: save FIRST so despawn errors can't lose the entry.
 fn save_result_then_despawn(
     commands: Commands,
     score: Res<Score>,
@@ -155,7 +143,6 @@ fn save_result_then_despawn(
     };
     let rank = Rank::from_perfect_pct(pct);
 
-    // Chart hash: SHA-256 of file contents; fall back to path if file missing.
     let chart_hash = chart
         .source_path
         .as_ref()

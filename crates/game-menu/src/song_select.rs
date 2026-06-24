@@ -29,7 +29,7 @@ use bevy_kira_audio::prelude::*;
 use dtx_audio::{BgmHandle, play_bgm, stop_bgm_system};
 use dtx_library::{SongDb, SongInfo, SortMode};
 use game_shell::AppState;
-use game_shell::fade::start_fade;
+// fade UI removed (ADR-0010 relaxed)
 
 // ===== Layout positions (verbatim from reference files) =====
 
@@ -228,7 +228,7 @@ pub fn plugin(app: &mut App) {
         .add_systems(Startup, spawn_song_select_overlay)
         .add_systems(
             OnEnter(AppState::SongSelect),
-            (ensure_song_db_loaded, spawn_song_select, start_fade).chain(),
+            (ensure_song_db_loaded, spawn_song_select).chain(),
         )
         .add_systems(
             OnExit(AppState::SongSelect),

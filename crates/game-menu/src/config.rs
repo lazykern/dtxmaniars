@@ -9,7 +9,7 @@
 //! Audio / Graphics / Gameplay / Menu / Velocity). Each is a CActConfigList.
 
 use bevy::prelude::*;
-use game_shell::fade::start_fade;
+// fade UI removed (ADR-0010 relaxed)
 use game_shell::{AppState, despawn_stage};
 
 // === Layout positions (verbatim from CStageConfig.cs:45-85) ===
@@ -118,7 +118,7 @@ pub fn plugin(app: &mut App) {
         .add_systems(Startup, spawn_config_layout)
         .add_systems(
             OnEnter(AppState::Config),
-            (populate_default_tab, spawn_config, start_fade),
+            (populate_default_tab, spawn_config),
         )
         .add_systems(OnExit(AppState::Config), despawn_stage::<ConfigEntity>)
         .add_systems(

@@ -1,27 +1,29 @@
-//! GuitarScreen CActPerf sub-acts — port of `references/DTXmaniaNX-BocuD/DTXMania/Stage/06.Performance/GuitarScreen/`.
+//! GuitarScreen CActPerf sub-acts — mechanics-only port.
 //!
-//! Strict-port-first (ADR-0010). Position constants verbatim from reference;
-//! rendering deferred to Bevy systems in `hud.rs`.
+//! ADR-0010 relaxed: position constants stripped (UI layer is osu-style
+//! redesigned). State machines (GuitarLane, GuitarGaugeState, GuitarLaneFlush,
+//! GuitarRgbState, GuitarDangerState, GuitarWailingBonus, GuitarBonus,
+//! HoldNote) kept.
 //!
 //! ## Sub-acts ported
 //!
-//! | Sub-act | Reference | LOC | Status |
-//! |---------|-----------|----:|--------|
-//! | `CActPerfGuitarScore`           | 116 | port (positions) |
-//! | `CActPerfGuitarCombo`           |  23 | port (positions) |
-//! | `CActPerfGuitarGauge`           | 131 | port (positions + state) |
-//! | `CActPerfGuitarStatusPanel`     | 237 | port (positions) |
-//! | `CActPerfGuitarJudgementString` |  71 | port (positions) |
-//! | `CActPerfGuitarLaneFlushGB`     | 112 | port (real) |
-//! | `CActPerfGuitarRGB`             | 202 | port (state) |
-//! | `CActPerfGuitarDanger`          |  78 | port (state) |
-//! | `CActPerfGuitarWailingBonus`    | 197 | port (state) |
-//! | `CActPerfGuitarBonus`           |  86 | port (state) |
-//! | `HoldNote`                      |  93 | port (state) |
+//! | Sub-act | Reference | Status |
+//! |---------|-----------|--------|
+//! | `CActPerfGuitarScore`           | 116 | state only (positions stripped) |
+//! | `CActPerfGuitarCombo`           |  23 | state only (positions stripped) |
+//! | `CActPerfGuitarGauge`           | 131 | state machine (gauge_guitar, gauge_bass) |
+//! | `CActPerfGuitarStatusPanel`     | 237 | state only (positions stripped) |
+//! | `CActPerfGuitarJudgementString` |  71 | state only (positions stripped) |
+//! | `CActPerfGuitarLaneFlushGB`     | 112 | full state |
+//! | `CActPerfGuitarRGB`             | 202 | full state |
+//! | `CActPerfGuitarDanger`          |  78 | full state |
+//! | `CActPerfGuitarWailingBonus`    | 197 | full state |
+//! | `CActPerfGuitarBonus`           |  86 | full state |
+//! | `HoldNote`                      |  93 | full state |
 //!
 //! Reference: `references/DTXmaniaNX-BocuD/DTXMania/Stage/06.Performance/GuitarScreen/`
 
-#![allow(dead_code)] // Sub-acts consumed by hud.rs / systems.
+#![allow(dead_code)] // Sub-acts consumed by gameplay systems.
 
 use std::time::Duration;
 
@@ -48,52 +50,6 @@ impl GuitarLane {
         [Self::R, Self::G, Self::B, Self::Y, Self::P]
     }
 }
-
-// === Score positions (BocuD CActPerfGuitarScore.cs:16-22) ===
-
-/// Guitar P1 score X position (BocuD CActPerfGuitarScore.cs:16).
-pub const GUITAR_SCORE_X_P1: f32 = 373.0;
-/// Guitar P2 (= Bass) score X position (BocuD CActPerfGuitarScore.cs:17).
-pub const GUITAR_SCORE_X_P2: f32 = 665.0;
-/// Score Y position (BocuD CActPerfGuitarScore.cs:18).
-pub const GUITAR_SCORE_Y: f32 = 12.0;
-/// Score digit width (BocuD CActPerfGuitarScore.cs:65).
-pub const GUITAR_SCORE_DIGIT_W: f32 = 36.0;
-/// Score digit horizontal gap (BocuD CActPerfGuitarScore.cs:65).
-pub const GUITAR_SCORE_DIGIT_GAP: f32 = 34.0;
-/// Score digit Y offset from main Y (BocuD CActPerfGuitarScore.cs:67).
-pub const GUITAR_SCORE_DIGIT_Y_OFFSET: f32 = 28.0;
-/// Score total digits displayed (BocuD CActPerfGuitarScore.cs:65).
-pub const GUITAR_SCORE_DIGITS: usize = 7;
-
-// === Combo positions (BocuD CActPerfGuitarCombo.cs:6-17) ===
-
-/// Guitar combo position (BocuD CActPerfGuitarCombo.cs:6-8).
-pub const GUITAR_COMBO_X: f32 = 560.0;
-/// Guitar combo Y position (BocuD CActPerfGuitarCombo.cs:7).
-pub const GUITAR_COMBO_Y: f32 = 220.0;
-/// Bass combo position (BocuD CActPerfGuitarCombo.cs:16-18).
-/// Bass combo X position (BocuD CActPerfGuitarCombo.cs:16).
-pub const GUITAR_BASS_COMBO_X: f32 = 845.0;
-/// Bass combo Y position (BocuD CActPerfGuitarCombo.cs:17).
-pub const GUITAR_BASS_COMBO_Y: f32 = 220.0;
-
-// === Gauge positions (BocuD CActPerfGuitarGauge.cs:23-25) ===
-
-/// Guitar gauge X (BocuD CActPerfGuitarGauge.cs:23).
-pub const GUITAR_GAUGE_X: f32 = 80.0;
-/// Bass gauge X (BocuD CActPerfGuitarGauge.cs:24 — 912 + 290 + 38 = 1240).
-pub const BASS_GAUGE_X: f32 = 1240.0;
-/// Gauge Y top of frame (BocuD CActPerfGuitarGauge.cs).
-pub const GUITAR_GAUGE_Y: f32 = 0.0;
-/// Gauge frame top half height (BocuD CActPerfGuitarGauge.cs).
-pub const GUITAR_GAUGE_FRAME_H: f32 = 68.0;
-/// Gauge bar height (BocuD CActPerfGuitarGauge.cs).
-pub const GUITAR_GAUGE_BAR_H: f32 = 30.0;
-/// Gauge bar X offset (BocuD CActPerfGuitarGauge.cs).
-pub const GUITAR_GAUGE_BAR_X_OFFSET: f32 = 6.0;
-/// Gauge bar Y (BocuD CActPerfGuitarGauge.cs).
-pub const GUITAR_GAUGE_BAR_Y: f32 = 31.0;
 
 // === Gauge state (BocuD CActPerfGuitarGauge.cs:35-37) ===
 
@@ -135,24 +91,6 @@ impl GuitarGaugeState {
         }
     }
 }
-
-// === Status panel positions (BocuD CActPerfGuitarStatusPanel.cs) ===
-
-/// Guitar status panel X (BocuD CActPerfGuitarStatusPanel.cs — left side).
-pub const GUITAR_STATUS_PANEL_X: f32 = 0.0;
-/// Guitar status panel Y (BocuD CActPerfGuitarStatusPanel.cs).
-pub const GUITAR_STATUS_PANEL_Y: f32 = 250.0;
-/// Bass status panel X (BocuD CActPerfGuitarStatusPanel.cs).
-pub const BASS_STATUS_PANEL_X: f32 = 920.0;
-/// Bass status panel Y (BocuD CActPerfGuitarStatusPanel.cs).
-pub const BASS_STATUS_PANEL_Y: f32 = 250.0;
-
-// === Judgement string positions (BocuD CActPerfGuitarJudgementString.cs) ===
-
-/// Judgement string Y position (BocuD CActPerfGuitarJudgementString.cs).
-pub const GUITAR_JUDGE_STRING_Y: f32 = 200.0;
-/// Judgement string X offset per lane (BocuD CActPerfGuitarJudgementString.cs).
-pub const GUITAR_JUDGE_STRING_LANE_DX: f32 = 100.0;
 
 // === Lane flush (BocuD CActPerfGuitarLaneFlushGB.cs) ===
 
@@ -408,55 +346,7 @@ mod tests {
         }
     }
 
-    // === Score positions ===
-
-    #[test]
-    fn guitar_score_x_p1_matches_reference() {
-        // CActPerfGuitarScore.cs:16
-        assert_eq!(GUITAR_SCORE_X_P1, 373.0);
-    }
-
-    #[test]
-    fn guitar_score_x_p2_matches_reference() {
-        // CActPerfGuitarScore.cs:17
-        assert_eq!(GUITAR_SCORE_X_P2, 665.0);
-    }
-
-    #[test]
-    fn guitar_score_y_matches_reference() {
-        // CActPerfGuitarScore.cs:18
-        assert_eq!(GUITAR_SCORE_Y, 12.0);
-    }
-
-    // === Combo positions ===
-
-    #[test]
-    fn guitar_combo_position_matches_reference() {
-        // CActPerfGuitarCombo.cs:6-8
-        assert_eq!(GUITAR_COMBO_X, 560.0);
-        assert_eq!(GUITAR_COMBO_Y, 220.0);
-    }
-
-    #[test]
-    fn bass_combo_position_matches_reference() {
-        // CActPerfGuitarCombo.cs:16-18
-        assert_eq!(GUITAR_BASS_COMBO_X, 845.0);
-        assert_eq!(GUITAR_BASS_COMBO_Y, 220.0);
-    }
-
     // === Gauge ===
-
-    #[test]
-    fn guitar_gauge_x_matches_reference() {
-        // CActPerfGuitarGauge.cs:23
-        assert_eq!(GUITAR_GAUGE_X, 80.0);
-    }
-
-    #[test]
-    fn bass_gauge_x_matches_reference() {
-        // CActPerfGuitarGauge.cs:24 — 912 + 290 + 38
-        assert_eq!(BASS_GAUGE_X, 1240.0);
-    }
 
     #[test]
     fn guitar_gauge_state_tick_advances_counters() {

@@ -1,12 +1,11 @@
-//! Guitar mode vertical slice (M6b).
+//! Guitar mode vertical slice.
+//!
+//! 5-lane standard (R/G/B/Y/P). Mechanics-only port: scroll + judge +
+//! score + input. Visual layer (HUD) is in the osu-style HUD crate.
 //!
 //! Reference: `references/DTXmaniaNX-BocuD/DTXMania/Stage/06.Performance/GuitarScreen/CStagePerfGuitarScreen.cs`
 //!
-//! 5-lane standard (R/G/B/Y/P). M6b ships a full playable mode: scroll +
-//! judge + score + input + HUD, gated on `EGameMode::Guitar`. Chord
-//! judgment + hold notes land in M6.1.
-//!
-//! Layer: Game. Mirrors `gameplay-drums` so M6.1 can extract shared bits.
+//! Layer: Game. Mirrors `gameplay-drums`.
 
 #![warn(missing_docs)]
 
@@ -15,7 +14,6 @@ use bevy::prelude::*;
 pub mod components;
 pub mod events;
 pub mod guitar_perf;
-pub mod hud;
 pub mod input;
 pub mod judge;
 pub mod lane_map;
@@ -28,8 +26,7 @@ pub use events::{JudgmentEvent, LaneHit, NoteMissed};
 pub use lane_map::{lane_channel, lane_of, LaneId, LaneMap, GUITAR_LANES};
 pub use resources::{ActiveChart, Combo, GameStartMs, JudgmentCounts, Score};
 
-/// Plugin assembly. Mirrors `gameplay_drums::plugin` shape so M6.1 can
-/// extract shared systems cleanly.
+/// Plugin assembly. Mirrors `gameplay_drums::plugin` shape.
 pub fn plugin(app: &mut App) {
     app.init_resource::<resources::ActiveChart>()
         .init_resource::<resources::Score>()
@@ -40,13 +37,7 @@ pub fn plugin(app: &mut App) {
         .add_message::<events::LaneHit>()
         .add_message::<events::JudgmentEvent>()
         .add_message::<events::NoteMissed>()
-        .add_plugins((
-            input::plugin,
-            judge::plugin,
-            score::plugin,
-            scroll::plugin,
-            hud::plugin,
-        ));
+        .add_plugins((input::plugin, judge::plugin, score::plugin, scroll::plugin));
 }
 
 /// Re-export as struct form for callers that prefer `add_plugins(...)` syntax.

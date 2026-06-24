@@ -1,13 +1,14 @@
-//! Drums gameplay vertical slice (M2).
+//! Drums gameplay vertical slice.
 //!
 //! Game layer. Owns the per-frame loop:
-//!   input → LaneHit → judge vs AudioClock → JudgmentEvent → score/combo → HUD
+//!   input → LaneHit → judge vs AudioClock → JudgmentEvent → score/combo
 //!
 //! Wires together: `dtx-core` (chart), `dtx-scoring` (judgment classify),
 //! `dtx-timing` (audio clock), `dtx-audio` (BGM).
 //!
-//! v1 minimal — no skins, no animations, just colored note entities + text score.
-//! Visual richness lands in M3 alongside `game-shell` (osu-style fades).
+//! v1 mechanics-only — no UI/skin, no commands.spawn. Visual layer lives
+//! in the osu-style HUD crate (separate). The gameplay loop and state
+//! machines (DrumsPad, DrumsDanger, DrumsFillingEffect) are kept here.
 //!
 //! Reference: `references/DTXmaniaNX-BocuD/DTXMania/Stage/06.Performance/DrumsScreen/*`
 //! Lane order: LC, HH, SD, BD, HT, LT, FT, CY, LP, RD, HHO (BocuD CActPerfDrumsLaneFlushD.cs).
@@ -15,7 +16,6 @@
 pub mod components;
 pub mod drums_perf;
 pub mod events;
-pub mod hud;
 pub mod input;
 pub mod judge;
 pub mod lane_map;
@@ -29,15 +29,6 @@ pub mod scroll;
 use bevy::prelude::*;
 
 /// Root plugin: register all sub-plugins in dependency order.
-///
-/// Usage:
-/// ```ignore
-/// app.add_plugins((
-///     dtx_audio::plugin,
-///     dtx_timing::plugin,
-///     gameplay_drums::plugin,
-/// ));
-/// ```
 pub fn plugin(app: &mut App) {
     app.init_resource::<resources::ActiveChart>()
         .init_resource::<resources::Score>()
@@ -56,7 +47,6 @@ pub fn plugin(app: &mut App) {
             judge::plugin,
             score::plugin,
             miss::plugin,
-            hud::plugin,
             midi_consumer::plugin,
         ));
 }
@@ -93,7 +83,6 @@ mod midi_consumer {
         let mut buf: Vec<dtx_input::LaneHit> = Vec::new();
         (*source).poll(&mut buf);
         for h in buf {
-            // Convert dtx_input::LaneHit to gameplay-drums LaneHit.
             hits.write(LaneHit {
                 lane: h.lane,
                 audio_ms: h.audio_ms,
@@ -104,4 +93,3 @@ mod midi_consumer {
 
 /// Re-export as struct form for callers that prefer `add_plugins(...)` syntax.
 pub use plugin as DrumsPlugin;
-pub mod perf_sub_acts_3;

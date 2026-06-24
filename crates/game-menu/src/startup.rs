@@ -5,14 +5,14 @@
 
 use bevy::prelude::*;
 
-use game_shell::fade::start_fade;
+// fade UI removed (ADR-0010 relaxed)
 use game_shell::{AppState, despawn_stage};
 
 #[derive(Component)]
 pub struct StartupEntity;
 
 pub fn plugin(app: &mut App) {
-    app.add_systems(OnEnter(AppState::Startup), (spawn_startup, start_fade))
+    app.add_systems(OnEnter(AppState::Startup), spawn_startup)
         .add_systems(OnExit(AppState::Startup), despawn_stage::<StartupEntity>)
         .add_systems(Update, advance_to_title.run_if(in_state(AppState::Startup)));
 }
