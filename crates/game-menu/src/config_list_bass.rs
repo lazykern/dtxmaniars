@@ -16,7 +16,7 @@ pub fn build_bass_items() -> Vec<ConfigListItem> {
         ConfigListItem::leaf("Card Name", ""),
         ConfigListItem::leaf("Group Name", ""),
         ConfigListItem::leaf("AutoPlay (All)", "Off"),
-        ConfigListItem::leaf("    R", "OFF"),       // bAutoPlay.BsR
+        ConfigListItem::leaf("    R", "OFF"), // bAutoPlay.BsR
         ConfigListItem::leaf("    G", "OFF"),
         ConfigListItem::leaf("    B", "OFF"),
         ConfigListItem::leaf("    Y", "OFF"),

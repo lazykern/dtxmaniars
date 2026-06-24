@@ -115,7 +115,11 @@ impl CommandHistory {
         if self.entries.len() >= self.buffer_size {
             self.entries.remove(0);
         }
-        self.entries.push(CommandEntry { instrument, pad, time_ms });
+        self.entries.push(CommandEntry {
+            instrument,
+            pad,
+            time_ms,
+        });
     }
 
     /// Remove entry at index (CommandHistory.cs:55-58).

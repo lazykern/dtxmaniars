@@ -15,10 +15,10 @@ pub fn build_audio_items() -> Vec<ConfigListItem> {
         ConfigListItem::leaf("Return to Menu", ""),
         ConfigListItem::submenu("Audio Driver"),
         ConfigListItem::leaf("MasterVolume", "80"), // 0..100
-        ConfigListItem::leaf("ChipVolume", "80"),    // 0..100, 手動再生音量
-        ConfigListItem::leaf("AutoVolume", "80"),    // 0..100, 自動再生音量
-        ConfigListItem::leaf("BGM Offset", "0"),     // -99..99 ms, nCommonBGMAdjustMs
-        ConfigListItem::leaf("BGM Sound", "ON"),     // bBGM音を発声する
+        ConfigListItem::leaf("ChipVolume", "80"),   // 0..100, 手動再生音量
+        ConfigListItem::leaf("AutoVolume", "80"),   // 0..100, 自動再生音量
+        ConfigListItem::leaf("BGM Offset", "0"),    // -99..99 ms, nCommonBGMAdjustMs
+        ConfigListItem::leaf("BGM Sound", "ON"),    // bBGM音を発声する
         ConfigListItem::leaf("Time Stretch", "OFF"),
     ]
 }

@@ -15,7 +15,7 @@ pub fn build_drums_items() -> Vec<ConfigListItem> {
         ConfigListItem::leaf("Return to Menu", ""),
         ConfigListItem::leaf("Card Name", ""),
         ConfigListItem::leaf("Group Name", ""),
-        ConfigListItem::leaf("AutoPlay (All)", "Off"),         // 3-state
+        ConfigListItem::leaf("AutoPlay (All)", "Off"), // 3-state
         ConfigListItem::leaf("    LeftCymbal", "OFF"),
         ConfigListItem::leaf("    HiHat", "OFF"),
         ConfigListItem::leaf("    LeftPedal", "OFF"),
@@ -28,7 +28,7 @@ pub fn build_drums_items() -> Vec<ConfigListItem> {
         ConfigListItem::leaf("    Cymbal", "OFF"),
         ConfigListItem::leaf("    Ride", "OFF"),
         ConfigListItem::leaf("HID-SUD", "OFF"),
-        ConfigListItem::leaf("       Dark", "OFF"),             // eDark enum
+        ConfigListItem::leaf("       Dark", "OFF"), // eDark enum
         ConfigListItem::leaf("LaneDisp", "ON"),
         ConfigListItem::leaf("JudgeLineDisp", "ON"),
         ConfigListItem::leaf("LaneFlush", "ON"),
@@ -41,7 +41,7 @@ pub fn build_drums_items() -> Vec<ConfigListItem> {
         ConfigListItem::leaf("Tight", "OFF"),
         ConfigListItem::leaf("FillIn", "ON"),
         ConfigListItem::leaf("FillInEffect", "ON"),
-        ConfigListItem::submenu("Velocity"),                      // submenu
+        ConfigListItem::submenu("Velocity"), // submenu
     ]
 }
 
@@ -74,8 +74,17 @@ mod tests {
         // CActConfigList.Drums.cs:30-150
         let items = build_drums_items();
         let lanes = [
-            "LeftCymbal", "HiHat", "LeftPedal", "LBassDrum", "Snare",
-            "BassDrum", "HighTom", "LowTom", "FloorTom", "Cymbal", "Ride",
+            "LeftCymbal",
+            "HiHat",
+            "LeftPedal",
+            "LBassDrum",
+            "Snare",
+            "BassDrum",
+            "HighTom",
+            "LowTom",
+            "FloorTom",
+            "Cymbal",
+            "Ride",
         ];
         for lane in lanes {
             assert!(

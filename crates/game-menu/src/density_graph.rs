@@ -32,7 +32,11 @@ pub struct DensityBar {
 
 impl DensityBar {
     pub fn new(count: u32, color: [u8; 4], height: f32) -> Self {
-        Self { count, color, height }
+        Self {
+            count,
+            color,
+            height,
+        }
     }
 }
 

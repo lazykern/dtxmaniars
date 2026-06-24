@@ -37,7 +37,9 @@ impl SongSelectionContainer {
 
     /// Get element at index (wrapped).
     pub fn get(&self, index: i32) -> Option<&SongSelectionElement> {
-        self.elements.get(self.wrap_index(index)).and_then(|e| e.as_ref())
+        self.elements
+            .get(self.wrap_index(index))
+            .and_then(|e| e.as_ref())
     }
 }
 
@@ -195,7 +197,13 @@ mod tests {
     #[test]
     fn rank_distinct() {
         let all = [
-            Rank::S, Rank::A, Rank::B, Rank::C, Rank::D, Rank::E, Rank::None,
+            Rank::S,
+            Rank::A,
+            Rank::B,
+            Rank::C,
+            Rank::D,
+            Rank::E,
+            Rank::None,
         ];
         let unique: std::collections::HashSet<_> = all.iter().collect();
         assert_eq!(unique.len(), 7);

@@ -13,13 +13,13 @@ pub const GAMEPLAY_ITEMS_PORTED: usize = 12;
 pub fn build_gameplay_items() -> Vec<ConfigListItem> {
     vec![
         ConfigListItem::leaf("Return to Menu", ""),
-        ConfigListItem::leaf("Risky", "0"),                 // 0..10
-        ConfigListItem::leaf("DamageLevel", "Normal"),       // Small/Normal/Large
-        ConfigListItem::leaf("PlaySpeed", "1.00"),           // PLAYSPEED_MIN..MAX
-        ConfigListItem::leaf("SkillMode", "CLASSIC"),        // CLASSIC/XG
+        ConfigListItem::leaf("Risky", "0"),            // 0..10
+        ConfigListItem::leaf("DamageLevel", "Normal"), // Small/Normal/Large
+        ConfigListItem::leaf("PlaySpeed", "1.00"),     // PLAYSPEED_MIN..MAX
+        ConfigListItem::leaf("SkillMode", "CLASSIC"),  // CLASSIC/XG
         ConfigListItem::leaf("CLASSIC Notes", "OFF"),
         ConfigListItem::leaf("AutoAddGage", "OFF"),
-        ConfigListItem::leaf("StageFailed", "ON"),           // bSTAGEFAILEDEnabled
+        ConfigListItem::leaf("StageFailed", "ON"), // bSTAGEFAILEDEnabled
         ConfigListItem::leaf("ShowScore", "ON"),
         ConfigListItem::leaf("ShowMusicInfo", "ON"),
         ConfigListItem::leaf("StageEffect", "ON"),

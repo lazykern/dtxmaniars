@@ -16,7 +16,7 @@ pub fn build_guitar_items() -> Vec<ConfigListItem> {
         ConfigListItem::leaf("Card Name", ""),
         ConfigListItem::leaf("Group Name", ""),
         ConfigListItem::leaf("AutoPlay (All)", "Off"),
-        ConfigListItem::leaf("    R", "OFF"),       // bAutoPlay.GtR
+        ConfigListItem::leaf("    R", "OFF"), // bAutoPlay.GtR
         ConfigListItem::leaf("    G", "OFF"),
         ConfigListItem::leaf("    B", "OFF"),
         ConfigListItem::leaf("    Y", "OFF"),
@@ -32,10 +32,10 @@ pub fn build_guitar_items() -> Vec<ConfigListItem> {
         ConfigListItem::leaf("Reverse", "OFF"),
         ConfigListItem::leaf("Position", "Center"),
         ConfigListItem::leaf("Light", "OFF"),
-        ConfigListItem::leaf("Performance Mode", "Off"),     // bSpecialist
+        ConfigListItem::leaf("Performance Mode", "Off"), // bSpecialist
         ConfigListItem::leaf("Random", "Off"),
         ConfigListItem::leaf("Left", "OFF"),
-        ConfigListItem::leaf("JudgeLinePos", "50"),          // nJudgeLine.Guitar
+        ConfigListItem::leaf("JudgeLinePos", "50"), // nJudgeLine.Guitar
         ConfigListItem::leaf("ShutterInPos", "50"),
     ]
 }

@@ -25,16 +25,10 @@
 use bevy::prelude::*;
 
 pub mod change_skin;
+pub mod change_skin_full;
 pub mod config;
 pub mod config_full;
 pub mod config_key_assign;
-pub mod song_select_new_stage;
-pub mod status_panel;
-pub mod density_graph;
-pub mod sort_menu;
-pub mod song_search;
-pub mod song_selection;
-pub mod change_skin_full;
 pub mod config_list;
 pub mod config_list_audio;
 pub mod config_list_audio_driver;
@@ -47,12 +41,18 @@ pub mod config_list_guitar;
 pub mod config_list_menu;
 pub mod config_list_skin;
 pub mod config_list_system;
+pub mod density_graph;
 pub mod end;
 pub mod result;
 pub mod song_loading;
+pub mod song_search;
 pub mod song_select;
 pub mod song_select_full;
+pub mod song_select_new_stage;
+pub mod song_selection;
+pub mod sort_menu;
 pub mod startup;
+pub mod status_panel;
 pub mod title;
 
 pub use song_select::SelectedSong;

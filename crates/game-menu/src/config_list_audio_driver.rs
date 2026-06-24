@@ -15,10 +15,10 @@ pub fn build_audio_driver_items() -> Vec<ConfigListItem> {
         ConfigListItem::leaf("Return to Menu", ""),
         ConfigListItem::leaf("AdjustWaves", "ON"),
         ConfigListItem::leaf("ASIO device", "(none)"),
-        ConfigListItem::leaf("WASAPIBufSize", "0"),       // 0..99999 ms
+        ConfigListItem::leaf("WASAPIBufSize", "0"), // 0..99999 ms
         ConfigListItem::leaf("WASAPIEventDriven", "OFF"),
-        ConfigListItem::leaf("UseOSTimer", "OFF"),          // bUseOSTimer
-        ConfigListItem::leaf("Audio Driver", "WASAPI"),    // 0..3 DirectSound/ASIO/ExclWASAPI/SharedWASAPI
+        ConfigListItem::leaf("UseOSTimer", "OFF"), // bUseOSTimer
+        ConfigListItem::leaf("Audio Driver", "WASAPI"), // 0..3 DirectSound/ASIO/ExclWASAPI/SharedWASAPI
     ]
 }
 

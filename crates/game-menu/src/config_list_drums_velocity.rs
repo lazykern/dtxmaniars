@@ -22,7 +22,10 @@ pub fn default_velocity_min(lane: &str) -> u32 {
 pub fn build_drums_velocity_items() -> Vec<ConfigListItem> {
     vec![
         ConfigListItem::leaf("<< Return to Menu", ""),
-        ConfigListItem::leaf("Left cymbal", &default_velocity_min("Left cymbal").to_string()),
+        ConfigListItem::leaf(
+            "Left cymbal",
+            &default_velocity_min("Left cymbal").to_string(),
+        ),
         ConfigListItem::leaf("Hi-hat", &default_velocity_min("Hi-hat").to_string()),
         ConfigListItem::leaf("Snare drum", "0"),
         ConfigListItem::leaf("Bass drum", "0"),
@@ -57,9 +60,17 @@ mod tests {
         // CActConfigList.Drums.Velocity.cs:32-78 — AddDrumVelocityItem x 11
         let items = build_drums_velocity_items();
         let names = [
-            "Left cymbal", "Hi-hat", "Snare drum", "Bass drum",
-            "High tom", "Low tom", "Floor tom", "Cymbal",
-            "Ride cymbal", "Left pedal", "Left bass drum",
+            "Left cymbal",
+            "Hi-hat",
+            "Snare drum",
+            "Bass drum",
+            "High tom",
+            "Low tom",
+            "Floor tom",
+            "Cymbal",
+            "Ride cymbal",
+            "Left pedal",
+            "Left bass drum",
         ];
         for n in names {
             assert!(items.iter().any(|i| i.name == n), "missing: {n}");

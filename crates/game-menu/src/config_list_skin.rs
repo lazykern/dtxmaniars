@@ -13,9 +13,9 @@ pub const SKIN_ITEMS_PORTED: usize = 4;
 pub fn build_skin_items() -> Vec<ConfigListItem> {
     vec![
         ConfigListItem::leaf("Return to Menu", ""),
-        ConfigListItem::leaf("Skin (Legacy)", "Default"),    // nSkinIndex
-        ConfigListItem::leaf("Skin (New)", "Default"),        // nNewSkinIndex
-        ConfigListItem::leaf("Skin (Box)", "OFF"),            // bUseBoxDefSkin
+        ConfigListItem::leaf("Skin (Legacy)", "Default"), // nSkinIndex
+        ConfigListItem::leaf("Skin (New)", "Default"),    // nNewSkinIndex
+        ConfigListItem::leaf("Skin (Box)", "OFF"),        // bUseBoxDefSkin
     ]
 }
 

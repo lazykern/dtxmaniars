@@ -13,11 +13,11 @@ pub const MENU_ITEMS_PORTED: usize = 6;
 pub fn build_menu_items() -> Vec<ConfigListItem> {
     vec![
         ConfigListItem::leaf("Return to Menu", ""),
-        ConfigListItem::leaf("MusicNameDispDEF", "OFF"),     // b曲名表示をdefのものにする
-        ConfigListItem::leaf("Difficulty Display", "XG"),     // bDisplayDifficultyXGStyle
-        ConfigListItem::leaf("RandSubBox", "OFF"),             // bランダムセレクトで子BOXを検索対象とする
-        ConfigListItem::leaf("PreSoundWait", "1000"),          // 0..10000 ms, nSongSelectSoundPreviewWaitTimeMs
-        ConfigListItem::leaf("PreImageWait", "1000"),          // 0..10000 ms, nSongSelectImagePreviewWaitTimeMs
+        ConfigListItem::leaf("MusicNameDispDEF", "OFF"), // b曲名表示をdefのものにする
+        ConfigListItem::leaf("Difficulty Display", "XG"), // bDisplayDifficultyXGStyle
+        ConfigListItem::leaf("RandSubBox", "OFF"),       // bランダムセレクトで子BOXを検索対象とする
+        ConfigListItem::leaf("PreSoundWait", "1000"), // 0..10000 ms, nSongSelectSoundPreviewWaitTimeMs
+        ConfigListItem::leaf("PreImageWait", "1000"), // 0..10000 ms, nSongSelectImagePreviewWaitTimeMs
     ]
 }
 
@@ -49,7 +49,10 @@ mod tests {
     fn menu_items_have_difficulty_display() {
         // CActConfigList.Menu.cs:21-34
         let items = build_menu_items();
-        let d = items.iter().find(|i| i.name == "Difficulty Display").unwrap();
+        let d = items
+            .iter()
+            .find(|i| i.name == "Difficulty Display")
+            .unwrap();
         assert_eq!(d.value, "XG");
     }
 
