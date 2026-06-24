@@ -62,7 +62,7 @@ pub(super) fn plugin(app: &mut App) {
         .add_systems(Update, judge_lane_hit);
 }
 
-fn judge_lane_hit(
+pub fn judge_lane_hit(
     mut events: MessageReader<LaneHit>,
     mut score: ResMut<Score>,
     mut combo: ResMut<Combo>,
