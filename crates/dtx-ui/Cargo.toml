@@ -11,4 +11,4 @@ description = "Reusable UI widgets, screen fade constants, animation helpers. Be
 unsafe_code = "forbid"
 
 [dependencies]
-bevy = { workspace = true }
+bevy = { workspace = true, default-features = false, features = ["bevy_asset", "bevy_text", "bevy_audio", "bevy_ui", "bevy_image"] }
