@@ -45,7 +45,14 @@ pub mod video {
             use VideoState::*;
             matches!(
                 (self, target),
-                (Stopped, Playing) | (Playing, Paused) | (Paused, Playing) | (Playing, Stopped) | (Paused, Stopped) | (Stopped, Error) | (Playing, Error) | (Error, Stopped)
+                (Stopped, Playing)
+                    | (Playing, Paused)
+                    | (Paused, Playing)
+                    | (Playing, Stopped)
+                    | (Paused, Stopped)
+                    | (Stopped, Error)
+                    | (Playing, Error)
+                    | (Error, Stopped)
             )
         }
 

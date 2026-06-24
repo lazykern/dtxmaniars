@@ -7,7 +7,6 @@
 
 use bevy::prelude::*;
 
-
 use crate::components::LastJudgment;
 use crate::events::{JudgmentEvent, NoteMissed};
 use crate::resources::{Combo, Score};

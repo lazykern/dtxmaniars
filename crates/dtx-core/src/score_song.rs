@@ -146,12 +146,7 @@ pub mod c_song_list_node {
         if node.children.is_empty() {
             return 1;
         }
-        1 + node
-            .children
-            .iter()
-            .map(depth_of)
-            .max()
-            .unwrap_or(0)
+        1 + node.children.iter().map(depth_of).max().unwrap_or(0)
     }
 }
 

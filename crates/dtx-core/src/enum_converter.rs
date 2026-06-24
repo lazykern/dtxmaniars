@@ -5,7 +5,6 @@
 //! v1 strict-port: generic utility for parsing/writing enum values in
 //! INI files. C# uses reflection; Rust uses trait + macro-free lookup.
 
-
 /// Trait: types that can round-trip through string + int.
 pub trait EnumConverter: Sized + Copy + 'static {
     /// All variants in declaration order.
@@ -28,9 +27,7 @@ pub trait EnumConverter: Sized + Copy + 'static {
     }
     /// Convert string → int (returns -1 if unknown).
     fn str_to_int(s: &str) -> i32 {
-        Self::from_str_enum(s)
-            .map(|e| e.as_int())
-            .unwrap_or(-1)
+        Self::from_str_enum(s).map(|e| e.as_int()).unwrap_or(-1)
     }
     /// Implement FromStr using the canonical name.
     fn parse(s: &str) -> Result<Self, String> {

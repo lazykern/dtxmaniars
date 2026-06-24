@@ -3,19 +3,19 @@
 //! Adds ≥40 integration tests exercising edge cases across modules to
 //! push the workspace test count above 700 (audit verification contract).
 
-use dtx_core::cdtx_model::{compute_playback_time, CDTX, CachedBpmChange};
 use dtx_core::c_avi::CAVI;
 use dtx_core::c_box_set_def::{CBoxDef, CSetDef};
 use dtx_core::c_chart_data::CChartData;
-use dtx_core::c_chip::{ChipState, CChip};
+use dtx_core::c_chip::{CChip, ChipState};
 use dtx_core::c_song_list_node::{CSongListNode, NodeType};
+use dtx_core::cdtx_model::{compute_playback_time, CachedBpmChange, CDTX};
 use dtx_core::channel::EChannel;
-use dtx_core::cscore_ini::{ClearState, CScoreIni, ScoreEntry, ScoreRun, Skill};
+use dtx_core::cscore_ini::{CScoreIni, ClearState, ScoreEntry, ScoreRun, Skill};
 use dtx_core::error::DtxError;
 use dtx_core::parser::parse;
 
-use std::path::PathBuf;
 use std::io::Read;
+use std::path::PathBuf;
 
 fn fixture_path(name: &str) -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -31,7 +31,10 @@ fn parse_minimal_dtx_returns_chart() {
     let path = fixture_path("minimal.dtx");
     let chart = {
         let mut s = String::new();
-        std::fs::File::open(&path).unwrap().read_to_string(&mut s).unwrap();
+        std::fs::File::open(&path)
+            .unwrap()
+            .read_to_string(&mut s)
+            .unwrap();
         parse(std::io::Cursor::new(s.as_bytes().to_vec())).unwrap()
     };
     assert!(chart.metadata.title.is_some());
@@ -50,7 +53,10 @@ fn parse_real_chart_full() {
     let path = fixture_path("real_chart.dtx");
     let chart = {
         let mut s = String::new();
-        std::fs::File::open(&path).unwrap().read_to_string(&mut s).unwrap();
+        std::fs::File::open(&path)
+            .unwrap()
+            .read_to_string(&mut s)
+            .unwrap();
         parse(std::io::Cursor::new(s.as_bytes().to_vec())).unwrap()
     };
     assert_eq!(chart.metadata.title.as_deref(), Some("Real Chart Demo"));
@@ -63,7 +69,10 @@ fn parse_with_bgm() {
     let path = fixture_path("with_bgm.dtx");
     let chart = {
         let mut s = String::new();
-        std::fs::File::open(&path).unwrap().read_to_string(&mut s).unwrap();
+        std::fs::File::open(&path)
+            .unwrap()
+            .read_to_string(&mut s)
+            .unwrap();
         parse(std::io::Cursor::new(s.as_bytes().to_vec())).unwrap()
     };
     assert_eq!(chart.metadata.title.as_deref(), Some("BGM Test"));
@@ -74,7 +83,10 @@ fn parse_drums_basic() {
     let path = fixture_path("drums_basic.dtx");
     let chart = {
         let mut s = String::new();
-        std::fs::File::open(&path).unwrap().read_to_string(&mut s).unwrap();
+        std::fs::File::open(&path)
+            .unwrap()
+            .read_to_string(&mut s)
+            .unwrap();
         parse(std::io::Cursor::new(s.as_bytes().to_vec())).unwrap()
     };
     assert!(!chart.chips.is_empty());
@@ -85,7 +97,10 @@ fn parse_bga_basic() {
     let path = fixture_path("bga_basic.dtx");
     let chart = {
         let mut s = String::new();
-        std::fs::File::open(&path).unwrap().read_to_string(&mut s).unwrap();
+        std::fs::File::open(&path)
+            .unwrap()
+            .read_to_string(&mut s)
+            .unwrap();
         parse(std::io::Cursor::new(s.as_bytes().to_vec())).unwrap()
     };
     let bga_count = chart
@@ -212,8 +227,14 @@ fn cdtx_with_bgm_no_wav_cache_entry() {
 #[test]
 fn compute_playback_with_multiple_bpm_changes() {
     let changes = [
-        CachedBpmChange { measure: 1, bpm: 240.0 },
-        CachedBpmChange { measure: 2, bpm: 180.0 },
+        CachedBpmChange {
+            measure: 1,
+            bpm: 240.0,
+        },
+        CachedBpmChange {
+            measure: 2,
+            bpm: 180.0,
+        },
     ];
     // m0..1 at 120 = 2000ms
     // m1..2 at 240 = 1000ms
@@ -225,7 +246,10 @@ fn compute_playback_with_multiple_bpm_changes() {
 
 #[test]
 fn compute_playback_partial_at_last_bpm() {
-    let changes = [CachedBpmChange { measure: 2, bpm: 60.0 }];
+    let changes = [CachedBpmChange {
+        measure: 2,
+        bpm: 60.0,
+    }];
     // m2 + 0.5 at 60 BPM = 4000 + 2000 = 6000
     let ms = compute_playback_time(2, 0.5, 120.0, &changes);
     assert_eq!(ms, 5000);
@@ -239,7 +263,6 @@ fn cscore_ini_parse_multiple_sections() {
     let db = CScoreIni::parse(text).unwrap();
     assert_eq!(db.len(), 3);
     // a.dtx:drums split on :, just check len
-    
 }
 
 #[test]

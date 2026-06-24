@@ -157,7 +157,12 @@ mod tests {
     fn walk_dfs_includes_descendants() {
         let mut root = CSongListNode::folder("root", PathBuf::from("/"));
         let mut child = CSongListNode::folder("child", PathBuf::from("/c"));
-        child.add_child(CSongListNode::chart("chart1", PathBuf::from("/c1.dtx"), 1, 120.0));
+        child.add_child(CSongListNode::chart(
+            "chart1",
+            PathBuf::from("/c1.dtx"),
+            1,
+            120.0,
+        ));
         root.add_child(child);
         let walked = root.walk();
         assert_eq!(walked.len(), 3);

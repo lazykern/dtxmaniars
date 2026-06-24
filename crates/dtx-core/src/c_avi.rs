@@ -39,7 +39,8 @@ impl CAVI {
             return false;
         }
         let exists = path.exists();
-        self.clips.insert(name.clone(), CaviClip { name, path, exists });
+        self.clips
+            .insert(name.clone(), CaviClip { name, path, exists });
         true
     }
 

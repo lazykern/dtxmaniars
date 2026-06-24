@@ -5,8 +5,6 @@
 //! Replaces constants-only SongDb sub-acts with real state machine +
 //! cache model + sort comparators + status transitions.
 
-
-
 #[allow(unused_imports)]
 use std::path::PathBuf as _;
 
@@ -374,9 +372,7 @@ pub mod sorting {
             "Artist"
         }
         fn compare(&self, a: &SongSummary, b: &SongSummary) -> Ordering {
-            a.artist
-                .cmp(&b.artist)
-                .then_with(|| a.title.cmp(&b.title))
+            a.artist.cmp(&b.artist).then_with(|| a.title.cmp(&b.title))
         }
     }
 
@@ -550,7 +546,10 @@ mod tests {
     #[test]
     fn cache_model_types() {
         assert_eq!(cache_models::CACHE_MODEL_TYPES, 3);
-        assert_ne!(cache_models::CacheModel::Song, cache_models::CacheModel::Box);
+        assert_ne!(
+            cache_models::CacheModel::Song,
+            cache_models::CacheModel::Box
+        );
     }
 
     #[test]

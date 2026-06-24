@@ -110,20 +110,18 @@ impl CChartData {
 
     /// Average difficulty across instruments.
     pub fn average_difficulty(&self) -> f32 {
-        let (sum, count) = [
-            self.dlevel,
-            self.glevel,
-            self.blevel,
-            self.drumlevel,
-        ]
-        .iter()
-        .fold((0i32, 0i32), |(s, c), &v| {
-            if v > 0 {
-                (s + v, c + 1)
-            } else {
-                (s, c)
-            }
-        });
+        let (sum, count) = [self.dlevel, self.glevel, self.blevel, self.drumlevel]
+            .iter()
+            .fold(
+                (0i32, 0i32),
+                |(s, c), &v| {
+                    if v > 0 {
+                        (s + v, c + 1)
+                    } else {
+                        (s, c)
+                    }
+                },
+            );
         if count == 0 {
             0.0
         } else {

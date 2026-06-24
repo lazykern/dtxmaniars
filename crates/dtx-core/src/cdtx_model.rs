@@ -154,7 +154,10 @@ impl CDTX {
 
     /// First chip's playback time (always 0 for charts starting at measure 0).
     pub fn start_time_ms(&self) -> i64 {
-        self.chips.first().map(|c| c.n_playback_time_ms).unwrap_or(0)
+        self.chips
+            .first()
+            .map(|c| c.n_playback_time_ms)
+            .unwrap_or(0)
     }
 
     /// Number of chips per channel.
@@ -355,7 +358,10 @@ mod tests {
 
     #[test]
     fn compute_playback_with_bpm_change() {
-        let changes = [CachedBpmChange { measure: 2, bpm: 240.0 }];
+        let changes = [CachedBpmChange {
+            measure: 2,
+            bpm: 240.0,
+        }];
         // m0..2 at 120 BPM = 4000ms
         // m2..3 at 240 BPM = 1000ms
         let ms = compute_playback_time(3, 0.0, 120.0, &changes);

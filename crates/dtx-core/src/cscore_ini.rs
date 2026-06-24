@@ -238,7 +238,9 @@ impl CScoreIni {
             }
             if line.starts_with('[') && line.ends_with(']') {
                 let key = line[1..line.len() - 1].to_string();
-                db.scores.entry(key.clone()).or_insert_with(|| ScoreEntry::fresh(key.clone()));
+                db.scores
+                    .entry(key.clone())
+                    .or_insert_with(|| ScoreEntry::fresh(key.clone()));
                 current = Some(key);
                 continue;
             }
@@ -458,7 +460,13 @@ mod tests {
 
     #[test]
     fn skill_from_int_and_back() {
-        for s in [Skill::Perfect, Skill::Great, Skill::Good, Skill::Ok, Skill::Miss] {
+        for s in [
+            Skill::Perfect,
+            Skill::Great,
+            Skill::Good,
+            Skill::Ok,
+            Skill::Miss,
+        ] {
             assert_eq!(Skill::from_int(s as i32), Some(s));
         }
         assert_eq!(Skill::from_int(99), None);

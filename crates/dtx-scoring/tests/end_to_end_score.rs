@@ -14,7 +14,7 @@ use std::path::PathBuf;
 
 use dtx_core::cdtx_model::CDTX;
 use dtx_core::channel::EChannel;
-use dtx_core::cscore_ini::{ClearState, CScoreIni, ScoreEntry, ScoreRun, Skill};
+use dtx_core::cscore_ini::{CScoreIni, ClearState, ScoreEntry, ScoreRun, Skill};
 use dtx_scoring::{classify, JudgmentKind};
 
 fn fixture_path() -> PathBuf {

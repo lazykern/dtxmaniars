@@ -65,11 +65,11 @@ pub mod common {
         /// Elapsed milliseconds.
         pub fn elapsed_ms(&self) -> u64 {
             match (self.start, self.paused_at) {
-                (Some(start), None) => self.accumulated.as_millis() as u64
-                    + start.elapsed().as_millis() as u64,
+                (Some(start), None) => {
+                    self.accumulated.as_millis() as u64 + start.elapsed().as_millis() as u64
+                }
                 (Some(_), Some(paused)) => {
-                    self.accumulated.as_millis() as u64
-                        + paused.elapsed().as_millis() as u64
+                    self.accumulated.as_millis() as u64 + paused.elapsed().as_millis() as u64
                 }
                 _ => self.accumulated.as_millis() as u64,
             }
@@ -422,12 +422,7 @@ pub mod input {
     impl EInputDeviceType {
         /// All variants in order.
         pub fn all() -> &'static [Self] {
-            &[
-                Self::Keyboard,
-                Self::Joystick,
-                Self::Mouse,
-                Self::MIDI,
-            ]
+            &[Self::Keyboard, Self::Joystick, Self::Mouse, Self::MIDI]
         }
 
         /// Convert to int tag.
@@ -513,7 +508,7 @@ pub mod input {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use common::{ActivityState, CActivity, CFPS, CTimer};
+    use common::{ActivityState, CActivity, CTimer, CFPS};
 
     #[test]
     fn common_constants() {
