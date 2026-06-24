@@ -8,6 +8,7 @@ pub mod channel;
 pub mod chart;
 pub mod error;
 pub mod parser;
+pub mod score_song;
 
 pub use channel::EChannel;
 pub use chart::{Chart, Chip, Metadata};
