@@ -15,4 +15,5 @@ thiserror = "2"
 dtx-timing = { workspace = true }
 
 [dev-dependencies]
+dtx-scoring = { workspace = true }
 # tests use plain std::fs

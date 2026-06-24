@@ -182,7 +182,7 @@ pub const fn classify(ch: EChannel) -> ChipClass {
 /// Note: channel.rs doesn't yet enumerate 0x1A-0x1C, so this is checked
 /// against the raw byte form (channel id 0x11-0x1C range).
 pub const fn is_open_note_byte(b: u8) -> bool {
-    matches!(b, 0x1A | 0x1B | 0x1C)
+    matches!(b, 0x1A..=0x1C)
 }
 
 /// Detect Bad Notes from a chip's byte value.

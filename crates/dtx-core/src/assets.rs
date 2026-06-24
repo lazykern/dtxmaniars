@@ -125,6 +125,11 @@ impl AviRegistry {
     pub fn len(&self) -> usize {
         self.by_id.len()
     }
+
+    /// True if no AVIs are registered.
+    pub fn is_empty(&self) -> bool {
+        self.by_id.is_empty()
+    }
 }
 
 /// BGA asset registry (BocuD `listBGA` + `listBGAPAN`).
@@ -158,6 +163,11 @@ impl BgaRegistry {
     /// Total registered BGAs.
     pub fn len(&self) -> usize {
         self.by_id.len()
+    }
+
+    /// True if no BGAs are registered.
+    pub fn is_empty(&self) -> bool {
+        self.by_id.is_empty()
     }
 }
 

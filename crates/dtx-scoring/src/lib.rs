@@ -37,6 +37,7 @@ pub enum JudgmentKind {
 }
 
 /// Default DTXmaniaNX timing windows in milliseconds.
+#[allow(missing_docs)]
 pub const DEFAULT_WINDOWS_MS: &[(JudgmentKind, i32)] = &[
     (JudgmentKind::Perfect, 16),
     (JudgmentKind::Great, 32),

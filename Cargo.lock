@@ -2604,6 +2604,7 @@ dependencies = [
 name = "dtx-core"
 version = "0.0.0"
 dependencies = [
+ "dtx-scoring",
  "dtx-timing",
  "thiserror 2.0.18",
 ]

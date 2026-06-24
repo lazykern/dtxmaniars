@@ -10,9 +10,12 @@
 use crate::JudgmentKind;
 
 /// Gauge thresholds (BocuD CActPerfCommonGauge.cs).
-pub const GAUGE_GOOD: f32 = 80.0; // >=80% clears the song
-pub const GAUGE_EXCELLENT: f32 = 100.0; // >=100% = full clear
-pub const GAUGE_START: f32 = 20.0; // starting gauge value
+/// >=80% clears the song.
+pub const GAUGE_GOOD: f32 = 80.0;
+/// >=100% = full clear.
+pub const GAUGE_EXCELLENT: f32 = 100.0;
+/// Starting gauge value.
+pub const GAUGE_START: f32 = 20.0;
 
 /// Gauge state (BocuD CActPerfCommonGauge.cs:StatePlay).
 ///

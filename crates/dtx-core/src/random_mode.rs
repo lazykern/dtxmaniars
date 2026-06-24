@@ -68,11 +68,12 @@ pub const MIRROR_10: [EChannel; 10] = [
 /// `HyperRandom`/`MasterRandom` permute + randomize chip times within
 /// ±1 frame for "expert" play.
 pub fn apply_random_mode(chips: &[Chip], mode: RandomMode, seed: u64) -> Vec<Chip> {
+    let _ = seed; // Seeded in inner functions; kept for API parity.
     match mode {
         RandomMode::OFF => chips.to_vec(),
         RandomMode::MIRROR => apply_mirror(chips),
-        RandomMode::RANDOM => apply_permute(chips, seed, false),
-        RandomMode::SUPERRANDOM => apply_permute(chips, seed, true),
+        RandomMode::RANDOM => apply_permute(chips, seed),
+        RandomMode::SUPERRANDOM => apply_permute(chips, seed.wrapping_add(1)),
         RandomMode::HYPERRANDOM => apply_permute_with_jitter(chips, seed, 1),
         RandomMode::MASTERRANDOM => apply_permute_with_jitter(chips, seed, 5),
         RandomMode::ANOTHERRANDOM => apply_another(chips, seed),
@@ -97,15 +98,11 @@ fn apply_mirror(chips: &[Chip]) -> Vec<Chip> {
 }
 
 /// Apply permutation: build a new lane→lane map by shuffling LANE_10.
-fn apply_permute(chips: &[Chip], seed: u64, super_random: bool) -> Vec<Chip> {
+fn apply_permute(chips: &[Chip], seed: u64) -> Vec<Chip> {
     let mut perm = LANE_10;
     let mut rng = SimpleRng::new(seed);
     for i in (1..perm.len()).rev() {
-        let j = if super_random {
-            rng.next_u32() as usize % (i + 1)
-        } else {
-            (rng.next_u32() as usize) % (i + 1)
-        };
+        let j = rng.next_u32() as usize % (i + 1);
         perm.swap(i, j);
     }
     chips
@@ -125,7 +122,7 @@ fn apply_permute(chips: &[Chip], seed: u64, super_random: bool) -> Vec<Chip> {
 
 /// Apply permutation with time jitter (1 or 5 frames).
 fn apply_permute_with_jitter(chips: &[Chip], seed: u64, jitter_ms: i64) -> Vec<Chip> {
-    let mut out = apply_permute(chips, seed, true);
+    let mut out = apply_permute(chips, seed);
     let mut rng = SimpleRng::new(seed.wrapping_mul(0x9E3779B97F4A7C15));
     let range = (jitter_ms * 2 + 1).max(1) as u64;
     for c in &mut out {
@@ -141,7 +138,7 @@ fn apply_permute_with_jitter(chips: &[Chip], seed: u64, jitter_ms: i64) -> Vec<C
 
 /// Another random: a BocuD variant — permute + reverse.
 fn apply_another(chips: &[Chip], seed: u64) -> Vec<Chip> {
-    let mut out = apply_permute(chips, seed, true);
+    let mut out = apply_permute(chips, seed);
     out.reverse();
     out
 }
