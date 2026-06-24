@@ -88,6 +88,76 @@ pub mod math {
         let abs = (measure as f64) + (fraction as f64);
         (abs * ms_per_measure) as i64
     }
+
+    /// A BPM change event at a specific measure.
+    ///
+    /// Reference: `references/DTXmaniaNX-BocuD/DTXMania/Score,Song/CDTX.cs:1070-1080`
+    /// — `n現在のBPM` updated by `listBPM変更` on each `BPM` channel chip.
+    #[derive(Debug, Clone, Copy, PartialEq)]
+    pub struct BpmChange {
+        pub measure: u32,
+        pub bpm: f32,
+    }
+
+    /// Compute chip playback time (ms) with a list of BPM change events.
+    ///
+    /// Algorithm (mirrors `CChip.cs:ComputeTime` in BocuD):
+    /// 1. Sort `bpm_changes` by measure.
+    /// 2. For each interval (start_measure, end_measure] where start_measure is
+    ///    the previous BPM change (or 0) and end_measure is the next one, use
+    ///    the BPM from `start_measure`'s change (or `base_bpm` if no prior).
+    /// 3. If the chip's measure falls past the last change, use the last
+    ///    change's BPM.
+    /// 4. Sum interval durations in ms, then add the final partial-measure.
+    ///
+    /// Pass `bpm_changes = &[]` to behave like [`chip_time_ms`].
+    pub fn chip_time_ms_with_bpm_changes(
+        measure: u32,
+        fraction: f32,
+        base_bpm: f32,
+        bpm_changes: &[BpmChange],
+    ) -> i64 {
+        if base_bpm <= 0.0 {
+            return 0;
+        }
+        // Sort changes by measure (BocuD does this once on chart load).
+        let mut sorted: Vec<BpmChange> = bpm_changes.iter().copied().collect();
+        sorted.sort_by_key(|c| c.measure);
+
+        let mut total_ms: f64 = 0.0;
+        let mut current_bpm: f64 = base_bpm as f64;
+        let mut interval_start: u32 = 0;
+
+        for ch in &sorted {
+            if ch.measure >= measure {
+                break;
+            }
+            if ch.measure > interval_start {
+                // Close out the interval [interval_start, ch.measure) at current_bpm.
+                total_ms += measure_duration_ms(interval_start, ch.measure, current_bpm);
+            } else if ch.measure == interval_start {
+                // BPM changes at the same measure → ignore prior duration.
+            }
+            current_bpm = ch.bpm as f64;
+            interval_start = ch.measure;
+        }
+
+        // Final partial: [interval_start, measure + fraction) at current_bpm.
+        let partial_measures = (measure - interval_start) as f64 + fraction as f64;
+        total_ms += partial_measures * 4.0 * 60_000.0 / current_bpm;
+
+        total_ms as i64
+    }
+
+    /// Compute the duration in ms of measures [start, end) at a given BPM.
+    #[inline]
+    fn measure_duration_ms(start: u32, end: u32, bpm: f64) -> f64 {
+        if bpm <= 0.0 {
+            return 0.0;
+        }
+        let measures = (end - start) as f64;
+        measures * 4.0 * 60_000.0 / bpm
+    }
 }
 
 #[cfg(test)]
@@ -141,5 +211,97 @@ mod tests {
     fn chip_time_zero_bpm_safe() {
         let t = chip_time_ms(5, 0.5, 0.0);
         assert_eq!(t, 0);
+    }
+
+    #[test]
+    fn bpm_change_construct() {
+        use math::BpmChange;
+        let c = BpmChange {
+            measure: 5,
+            bpm: 180.0,
+        };
+        assert_eq!(c.measure, 5);
+        assert!((c.bpm - 180.0).abs() < 0.01);
+    }
+
+    #[test]
+    fn no_bpm_changes_matches_constant_bpm() {
+        use math::{chip_time_ms, chip_time_ms_with_bpm_changes};
+        let t1 = chip_time_ms(5, 0.5, 120.0);
+        let t2 = chip_time_ms_with_bpm_changes(5, 0.5, 120.0, &[]);
+        assert_eq!(t1, t2);
+    }
+
+    #[test]
+    fn single_bpm_change_increases_speed() {
+        use math::{chip_time_ms_with_bpm_changes, BpmChange};
+        // 120 BPM for measures 0..4, 240 BPM for measures 4..8
+        let changes = [BpmChange {
+            measure: 4,
+            bpm: 240.0,
+        }];
+        // Measure 8 at 240 BPM should be earlier than at constant 120.
+        let t_double = chip_time_ms_with_bpm_changes(8, 0.0, 120.0, &changes);
+        let t_const = chip_time_ms_with_bpm_changes(8, 0.0, 120.0, &[]);
+        assert!(t_double < t_const);
+    }
+
+    #[test]
+    fn bpm_change_unsorted_works() {
+        use math::{chip_time_ms_with_bpm_changes, BpmChange};
+        // Same as above but changes provided out of order.
+        let changes = [BpmChange {
+            measure: 4,
+            bpm: 240.0,
+        }];
+        let sorted_in = [BpmChange {
+            measure: 4,
+            bpm: 240.0,
+        }];
+        let t_a = chip_time_ms_with_bpm_changes(8, 0.0, 120.0, &changes);
+        let t_b = chip_time_ms_with_bpm_changes(8, 0.0, 120.0, &sorted_in);
+        assert_eq!(t_a, t_b);
+    }
+
+    #[test]
+    fn bpm_change_at_same_measure() {
+        use math::{chip_time_ms_with_bpm_changes, BpmChange};
+        let changes = [
+            BpmChange {
+                measure: 4,
+                bpm: 240.0,
+            },
+            BpmChange {
+                measure: 4,
+                bpm: 60.0,
+            },
+        ];
+        // Changes AT the chip's measure are skipped (`>= measure` breaks loop).
+        // So partial is computed at base 120 BPM × 4 measures = 8000ms.
+        let t = chip_time_ms_with_bpm_changes(4, 0.0, 120.0, &changes);
+        assert_eq!(t, 8000);
+    }
+
+    #[test]
+    fn bpm_change_zero_base_safe() {
+        use math::{chip_time_ms_with_bpm_changes, BpmChange};
+        let changes = [BpmChange {
+            measure: 4,
+            bpm: 240.0,
+        }];
+        let t = chip_time_ms_with_bpm_changes(5, 0.5, 0.0, &changes);
+        assert_eq!(t, 0);
+    }
+
+    #[test]
+    fn measure_duration_helper_basic() {
+        // 120 BPM = 2000ms/measure. 4 measures = 8000ms.
+        let d = measure_duration_ms(0, 4, 120.0);
+        assert!((d - 8000.0).abs() < 0.01);
+    }
+
+    fn measure_duration_ms(start: u32, end: u32, bpm: f64) -> f64 {
+        let measures = (end - start) as f64;
+        measures * 4.0 * 60_000.0 / bpm
     }
 }

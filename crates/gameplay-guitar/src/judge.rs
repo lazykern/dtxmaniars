@@ -4,9 +4,16 @@
 //! lane within the judgment window, emits a `JudgmentEvent`.
 //!
 //! Gated on `EGameMode::Guitar` so only the active mode's pipeline runs.
+//!
+//! ## Phase 0 p0-5
+//!
+//! Uses `chip_time_ms_with_bpm_changes` so chips after a `#BPMxx` change
+//! are timed against the new BPM. The `BpmChangeList` resource is built
+//! from `EChannel::BPM` / `BPMEx` chips when the chart is loaded.
 
 use bevy::prelude::*;
 use dtx_scoring::JudgmentKind;
+use dtx_timing::math::{chip_time_ms_with_bpm_changes, BpmChange};
 use dtx_timing::AudioClock;
 use game_shell::EGameMode;
 
@@ -21,8 +28,36 @@ const MAX_JUDGE_WINDOW_MS: i64 = 200;
 #[derive(Default, Resource, Debug)]
 pub struct JudgedChips(pub std::collections::HashSet<usize>);
 
+/// Sorted list of BPM changes parsed from `#BPM` / `#BPMxx` chips.
+#[derive(Resource, Default, Debug, Clone)]
+pub struct BpmChangeList {
+    pub changes: Vec<BpmChange>,
+}
+
+impl BpmChangeList {
+    pub fn from_chart(chart: &dtx_core::Chart) -> Self {
+        let mut changes: Vec<BpmChange> = chart
+            .chips
+            .iter()
+            .filter(|c| {
+                matches!(
+                    c.channel,
+                    dtx_core::EChannel::BPM | dtx_core::EChannel::BPMEx
+                )
+            })
+            .map(|c| BpmChange {
+                measure: c.measure,
+                bpm: c.value,
+            })
+            .collect();
+        changes.sort_by_key(|c| c.measure);
+        Self { changes }
+    }
+}
+
 pub(super) fn plugin(app: &mut App) {
     app.init_resource::<JudgedChips>()
+        .init_resource::<BpmChangeList>()
         .add_systems(Update, judge_lane_hit);
 }
 
@@ -34,6 +69,7 @@ fn judge_lane_hit(
     clock: Res<AudioClock>,
     mode: Res<EGameMode>,
     chart: Res<ActiveChart>,
+    bpm_changes: Res<BpmChangeList>,
     mut judged: ResMut<JudgedChips>,
     mut out: MessageWriter<JudgmentEvent>,
 ) {
@@ -43,6 +79,7 @@ fn judge_lane_hit(
     let Some(now) = clock.current_ms else {
         return;
     };
+    let base_bpm = chart.chart.metadata.bpm.unwrap_or(120.0);
     for ev in events.read() {
         let Some(target_channel) = lane_channel(ev.lane) else {
             continue;
@@ -52,10 +89,11 @@ fn judge_lane_hit(
             if chip.channel != target_channel || judged.0.contains(&idx) {
                 continue;
             }
-            let target_ms = dtx_timing::math::chip_time_ms(
+            let target_ms = chip_time_ms_with_bpm_changes(
                 chip.measure,
                 chip.value,
-                chart.chart.metadata.bpm.unwrap_or(120.0),
+                base_bpm,
+                &bpm_changes.changes,
             );
             let delta = now - target_ms;
             if delta.abs() > MAX_JUDGE_WINDOW_MS {
