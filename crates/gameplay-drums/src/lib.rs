@@ -15,6 +15,7 @@
 
 pub mod autoplay;
 pub mod components;
+pub mod damage_level;
 pub mod drums_perf;
 pub mod events;
 pub mod input;
