@@ -2588,6 +2588,8 @@ dependencies = [
  "anyhow",
  "clap",
  "dtx-core",
+ "dtx-scoring",
+ "dtx-timing",
 ]
 
 [[package]]

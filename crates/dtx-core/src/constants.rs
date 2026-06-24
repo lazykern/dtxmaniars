@@ -55,8 +55,16 @@ pub enum DarkMode {
 }
 
 /// Damage level (BocuD `EDamageLevel` CConstants.cs:44-48).
+///
+/// 4 levels per Phase F6 goal spec:
+/// - `None`: no damage taken at all (player can play with HP=0 forever)
+/// - `Small`: minimal drain on miss (default — matches BocuD `Small = 0`)
+/// - `Normal`: standard drain (matches BocuD `Normal = 1`)
+/// - `High`: heavy drain + Extreme behavior (matches BocuD `High = 2`)
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
 pub enum DamageLevel {
+    /// No damage (Extreme behavior: HP=0 doesn't fail the song).
+    None,
     /// Small damage (BocuD `Small = 0`).
     #[default]
     Small,
@@ -70,6 +78,7 @@ impl DamageLevel {
     /// Numeric value (BocuD `Small=0, Normal=1, High=2`).
     pub fn value(self) -> u8 {
         match self {
+            Self::None => 255,
             Self::Small => 0,
             Self::Normal => 1,
             Self::High => 2,
@@ -308,6 +317,8 @@ mod tests {
         assert_eq!(DamageLevel::Small.value(), 0);
         assert_eq!(DamageLevel::Normal.value(), 1);
         assert_eq!(DamageLevel::High.value(), 2);
+        // None = no damage level (sentinel 255, doesn't match reference)
+        assert_eq!(DamageLevel::None.value(), 255);
     }
 
     // === InstrumentPart ===

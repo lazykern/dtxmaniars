@@ -29,10 +29,14 @@ pub enum DamageEvent {
 
 /// Per-level damage table: HP delta per judgment kind.
 ///
-/// Each level has different gain/loss magnitudes. None=ignore; Small=±1;
-/// Normal=±2; High=±3 (lose more on miss, gain less on hit).
+/// 4 levels per Phase F6 spec:
+/// - `None`: no HP change at all (player can play freely)
+/// - `Small`: ±1 default (BocuD `Small = 0`)
+/// - `Normal`: ±2 standard (BocuD `Normal = 1`)
+/// - `High`: ±3 heavy + Extreme behavior (BocuD `High = 2`)
 pub fn hp_delta_for_judgment(level: DamageLevel, kind: JudgmentKind) -> i8 {
     match level {
+        DamageLevel::None => 0,
         DamageLevel::Small => match kind {
             JudgmentKind::Perfect => 1,
             JudgmentKind::Great => 0,
@@ -148,6 +152,37 @@ mod tests {
             hp_delta_for_judgment(DamageLevel::Small, JudgmentKind::Perfect),
             1
         );
+    }
+
+    #[test]
+    fn none_level_zero_delta() {
+        // None = no damage at all.
+        for kind in [
+            JudgmentKind::Perfect,
+            JudgmentKind::Great,
+            JudgmentKind::Good,
+            JudgmentKind::Ok,
+            JudgmentKind::Miss,
+        ] {
+            assert_eq!(hp_delta_for_judgment(DamageLevel::None, kind), 0);
+        }
+    }
+
+    #[test]
+    fn none_level_default_not_changed() {
+        // Apply all kinds at None level — HP unchanged.
+        let mut hp = HpState::new(100);
+        for kind in [
+            JudgmentKind::Perfect,
+            JudgmentKind::Great,
+            JudgmentKind::Good,
+            JudgmentKind::Ok,
+            JudgmentKind::Miss,
+        ] {
+            hp.apply_judgment(DamageLevel::None, kind);
+        }
+        assert_eq!(hp.current, 100);
+        assert!(!hp.stage_failed);
     }
 
     #[test]

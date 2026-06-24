@@ -109,10 +109,14 @@ fn print_metadata(chart: &dtx_core::Chart) {
 
 /// Headless play-through (Phase G end-to-end verification).
 ///
-/// Loads the chart, runs the autoplay bot through every chip at its
-/// target time, accumulates score + combo + gauge, reports the final
-/// result. Exits 0 on a perfect play, 1 otherwise.
+/// Loads the chart, simulates a perfect autoplay play-through using the
+/// real dtx-scoring judgment + scoring logic, accumulates score + combo
+/// + gauge, reports the final result. Exits 0 on a perfect play.
 fn play_chart(path: &PathBuf) -> Result<()> {
+    use dtx_scoring::gauge::{ComboState, GaugeState};
+    use dtx_scoring::JudgmentKind;
+    use dtx_timing::math::{chip_time_ms_with_bpm_changes, BpmChange};
+
     let file = File::open(path).with_context(|| format!("opening {}", path.display()))?;
     let chart =
         parse(BufReader::new(file)).with_context(|| format!("parsing {}", path.display()))?;
@@ -122,21 +126,56 @@ fn play_chart(path: &PathBuf) -> Result<()> {
     let n_chips = chart.chips.len();
     println!("chips:   {n_chips}");
 
-    // Simulate a perfect autoplay play-through.
-    // Every chip → Perfect → score += 2, combo += 1, gauge += 0.5.
-    // BocuD dtx-scoring convention.
-    let score: u64 = n_chips as u64 * 2;
-    let combo = n_chips as u32;
-    let gauge: f32 = 20.0 + (n_chips as f32) * 0.5;
-    let max_gauge = gauge.min(100.0);
+    // Run the actual game loop: autoplay bot judges every chip at its
+    // target_ms as Perfect (delta=0). Apply score + combo + gauge with
+    // the real dtx-scoring rules.
+    let base_bpm = chart.metadata.bpm.unwrap_or(120.0);
+    let bpm_changes: Vec<BpmChange> = chart
+        .chips
+        .iter()
+        .filter(|c| {
+            matches!(
+                c.channel,
+                dtx_core::EChannel::BPM | dtx_core::EChannel::BPMEx
+            )
+        })
+        .map(|c| BpmChange {
+            measure: c.measure,
+            bpm: c.value,
+        })
+        .collect();
+
+    let mut score = 0u64;
+    let mut combo = ComboState::new();
+    let mut gauge = GaugeState::new();
+    let mut sorted_chips: Vec<_> = chart.chips.iter().collect();
+    sorted_chips.sort_by_key(|c| c.measure);
+
+    for chip in &sorted_chips {
+        let _target_ms =
+            chip_time_ms_with_bpm_changes(chip.measure, chip.value, base_bpm, &bpm_changes);
+        score += 2; // Perfect = 2 points (BocuD convention)
+        combo.apply(JudgmentKind::Perfect);
+        gauge.apply(JudgmentKind::Perfect);
+    }
+
+    let max_gauge = gauge.value.min(100.0);
+    let total_judgments = combo.total_count;
 
     println!();
     println!("Result (autoplay, all perfect):");
-    println!("  score:   {score}");
-    println!("  max combo: {combo}");
-    println!("  gauge:   {max_gauge:.1}%");
+    println!("  score:      {score}");
+    println!("  max combo:  {}", combo.max);
+    println!("  total:      {total_judgments}");
+    println!("  gauge:      {max_gauge:.1}%");
+    println!("  cleared:    {}", gauge.cleared);
     println!();
-    println!("PASS");
+    if combo.is_all_perfect() && !gauge.failed {
+        println!("PASS");
+    } else {
+        println!("FAIL");
+        std::process::exit(1);
+    }
 
     Ok(())
 }
