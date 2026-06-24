@@ -217,6 +217,7 @@ fn build_items_for(menu_type: EMenuType) -> Vec<ConfigListItem> {
         EMenuType::VelocityDrums => crate::config_list_drums_velocity::build_drums_velocity_items(),
         EMenuType::Guitar => crate::config_list_guitar::build_guitar_items(),
         EMenuType::Bass => crate::config_list_bass::build_bass_items(),
+        EMenuType::SystemSkin => crate::config_list_skin::build_skin_items(),
         EMenuType::Drums => vec![
             ConfigListItem::submenu("Auto Play"),
             ConfigListItem::submenu("Lane Type"),
