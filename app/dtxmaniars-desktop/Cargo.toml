@@ -1,0 +1,28 @@
+[package]
+name = "dtxmaniars-desktop"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+description = "DTXManiaRS desktop binary entrypoint."
+
+[lints.rust]
+unsafe_code = "forbid"
+
+[[bin]]
+name = "dtxmaniars"
+path = "src/main.rs"
+
+[dependencies]
+bevy = { workspace = true, features = ["default"] }
+dtx-assets = { workspace = true }
+dtx-input = { workspace = true }
+dtx-library = { workspace = true }
+dtx-scoring = { workspace = true }
+dtx-timing = { workspace = true }
+game-shell = { workspace = true }
+game-menu = { workspace = true }
+game-results = { workspace = true }
+gameplay-drums = { workspace = true }
+gameplay-guitar = { workspace = true }

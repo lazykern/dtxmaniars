@@ -1,0 +1,56 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/*",
+    "app/*",
+    "tools/*",
+]
+
+[workspace.package]
+version = "0.0.0"
+edition = "2021"
+rust-version = "1.95"
+license = "MIT OR Apache-2.0"
+publish = false
+
+[workspace.lints.rust]
+unsafe_code = "forbid"
+
+[workspace.dependencies]
+# Internal
+dtx-core = { path = "crates/dtx-core" }
+dtx-scoring = { path = "crates/dtx-scoring" }
+dtx-config = { path = "crates/dtx-config" }
+dtx-timing = { path = "crates/dtx-timing" }
+dtx-audio = { path = "crates/dtx-audio" }
+dtx-ui = { path = "crates/dtx-ui" }
+dtx-assets = { path = "crates/dtx-assets" }
+dtx-library = { path = "crates/dtx-library" }
+dtx-input = { path = "crates/dtx-input" }
+gameplay-drums = { path = "crates/gameplay-drums" }
+gameplay-guitar = { path = "crates/gameplay-guitar" }
+game-shell = { path = "crates/game-shell" }
+game-menu = { path = "crates/game-menu" }
+game-results = { path = "crates/game-results" }
+dev-tools = { path = "crates/dev-tools" }
+
+# Bevy 0.19 — see docs/BEVY_PATTERNS.md
+bevy = { version = "0.19", default-features = false }
+
+# Third-party (added per-crate as needed)
+bevy_kira_audio = { version = "0.26", default-features = false, features = ["ogg"] }
+thiserror = "1"
+# bevy_framepace  = "..."    # M2
+# kira            = "..."    # M1 (kira already pulled by bevy_kira_audio)
+# bevy_tween      = "..."    # M5+
+# ron             = "0.10"   # M1 (config)
+
+[profile.dev]
+opt-level = 1   # faster runtime while keeping fast compile
+
+[profile.dev.package."*"]
+opt-level = 3   # optimize dependencies in dev (big speed win for bevy)
+
+[profile.release]
+lto = "thin"
+codegen-units = 1

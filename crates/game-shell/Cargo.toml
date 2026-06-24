@@ -1,0 +1,13 @@
+[package]
+name = "game-shell"
+version = "0.1.0"
+edition = "2024"
+description = "AppState machine, stage transitions, DTXManiaNX-style fade (StageManager.cs:29)"
+license = "MIT OR Apache-2.0"
+
+[lints]
+workspace = true
+
+[dependencies]
+bevy = { workspace = true, features = ["default"] }
+dtx-ui = { path = "../dtx-ui" }

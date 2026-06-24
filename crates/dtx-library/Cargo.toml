@@ -1,0 +1,14 @@
+[package]
+name = "dtx-library"
+version = "0.1.0"
+edition = "2024"
+description = "Song database (DTX directory scan + sort modes)"
+license = "MIT OR Apache-2.0"
+
+[lints]
+workspace = true
+
+[dependencies]
+bevy = { workspace = true, features = ["default"] }
+dtx-core = { path = "../dtx-core" }
+thiserror = { workspace = true }

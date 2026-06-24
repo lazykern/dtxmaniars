@@ -1,0 +1,25 @@
+[package]
+name = "dtx-input"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+description = "Keyboard + MIDI input sources (Engine layer). Per ADR-0009."
+
+[lints]
+workspace = true
+
+[features]
+default = []
+# Enable MIDI source via the `midir` crate. Pulled in only when a MIDI
+# device is available; tests use the in-memory VirtualSource so the default
+# feature set stays light.
+midi = ["dep:midir"]
+
+[dependencies]
+bevy = { workspace = true, default-features = false, features = ["serialize", "keyboard"] }
+dtx-core = { workspace = true }
+serde = { version = "1", features = ["derive"] }
+thiserror = { workspace = true }
+midir = { version = "0.9", optional = true }

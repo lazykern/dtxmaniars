@@ -1,0 +1,20 @@
+[package]
+name = "gameplay-guitar"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+description = "Guitar mode vertical slice (M6b). Mirror of gameplay-drums but stripped."
+
+[lints]
+workspace = true
+
+[dependencies]
+bevy = { workspace = true, features = ["default"] }
+dtx-core = { workspace = true }
+dtx-input = { workspace = true }
+dtx-scoring = { workspace = true }
+dtx-timing = { workspace = true }
+game-shell = { path = "../game-shell" }
+serde = { version = "1", features = ["derive"] }

@@ -1,0 +1,21 @@
+[package]
+name = "game-menu"
+version = "0.1.0"
+edition = "2024"
+description = "Menu stages (Title, SongSelect, Config, Result) — DTXManiaNX ports"
+license = "MIT OR Apache-2.0"
+
+[lints]
+workspace = true
+
+[dependencies]
+bevy = { workspace = true, features = ["default"] }
+bevy_kira_audio = { workspace = true }
+dtx-core = { path = "../dtx-core" }
+dtx-assets = { path = "../dtx-assets" }
+dtx-audio = { path = "../dtx-audio" }
+dtx-bga = { path = "../dtx-bga" }
+dtx-library = { path = "../dtx-library" }
+gameplay-drums = { path = "../gameplay-drums" }
+gameplay-guitar = { path = "../gameplay-guitar" }
+game-shell = { path = "../game-shell" }

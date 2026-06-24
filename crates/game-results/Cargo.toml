@@ -1,0 +1,18 @@
+[package]
+name = "game-results"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+description = "CStageResult port — post-play results screen + CScoreIni save"
+
+[lints]
+workspace = true
+
+[dependencies]
+bevy = { workspace = true, features = ["default"] }
+dtx-scoring = { workspace = true }
+gameplay-drums = { path = "../gameplay-drums" }
+game-shell = { path = "../game-shell" }
+serde = { version = "1", features = ["derive"] }

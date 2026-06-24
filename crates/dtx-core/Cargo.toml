@@ -1,0 +1,17 @@
+[package]
+name = "dtx-core"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+description = "Pure DTX file parser, Chart and Chip data model. No bevy dependency."
+
+[lints.rust]
+unsafe_code = "forbid"
+
+[dependencies]
+thiserror = "2"
+
+[dev-dependencies]
+# tests use plain std::fs

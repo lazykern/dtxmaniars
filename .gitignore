@@ -1,0 +1,29 @@
+# Rust
+/target
+**/*.rs.bk
+Cargo.lock.bak
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Local-only references (huge; use ctx7/ctx_index instead)
+/references/
+
+# Assets: keep skin defaults tracked, ignore user content
+/assets/songs/
+/assets/skins/local/
+/assets/cache/
+
+# Generated docs
+/docs/generated/
+
+# Local notes scratch
+/docs/notes/local/
+

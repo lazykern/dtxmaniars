@@ -1,0 +1,42 @@
+//! Keyboard + MIDI input sources (Engine layer).
+//!
+//! Per ADR-0009 this crate was deferred from M2 to M6. M6c extracts
+//! `gameplay-drums/src/input.rs` here and adds a MIDI source abstraction.
+//!
+//! ## Module map
+//!
+//! - [`events`] — `LaneHit`, `LaneHitKind` (moved here from gameplay-drums)
+//! - [`keyboard`] — keyboard → LaneHit system (BEVY_SYSTEM)
+//! - [`midi`] — `MidiSource` trait + `VirtualSource` + (optional) real-device impl
+//! - [`mapping`] — note/byte → LaneId helpers
+//!
+//! ## LaneId is opaque
+//!
+//! `LaneHit::lane` is just a `u8`. The mapping to a game-specific meaning
+//! (drums HH = 0, guitar R = 0, etc.) is owned by each gameplay crate's
+//! `LaneMap`. dtx-input only knows "key pressed on lane X at audio_ms Y".
+
+#![warn(missing_docs)]
+
+use bevy::prelude::Message as _;
+use bevy::prelude::*;
+
+pub mod events;
+pub mod keyboard;
+pub mod mapping;
+pub mod midi;
+
+pub use events::{LaneHit, LaneHitKind, LaneId};
+
+/// Plugin assembly: registers LaneHit message. The keyboard-to-LaneHit
+/// system lives in each gameplay crate (which owns the concrete LaneMap).
+pub struct InputPlugin;
+
+impl Plugin for InputPlugin {
+    fn build(&self, app: &mut App) {
+        app.add_message::<LaneHit>();
+    }
+}
+
+/// Re-export for callers that prefer `add_plugins(...)` syntax.
+pub use InputPlugin as DtxInputPlugin;
