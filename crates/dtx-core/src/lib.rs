@@ -9,6 +9,7 @@ pub mod chart;
 pub mod error;
 pub mod parser;
 pub mod score_song;
+pub mod fdk_sub_acts;
 
 pub use channel::EChannel;
 pub use chart::{Chart, Chip, Metadata};
