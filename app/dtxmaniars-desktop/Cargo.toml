@@ -17,10 +17,12 @@ path = "src/main.rs"
 [dependencies]
 bevy = { workspace = true, features = ["default"] }
 dtx-assets = { workspace = true }
+dtx-config = { workspace = true }
 dtx-input = { workspace = true }
 dtx-library = { workspace = true }
 dtx-scoring = { workspace = true }
 dtx-timing = { workspace = true }
+dtx-ui = { workspace = true }
 game-shell = { workspace = true }
 game-menu = { workspace = true }
 game-results = { workspace = true }

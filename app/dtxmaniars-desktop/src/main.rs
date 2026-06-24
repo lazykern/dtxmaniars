@@ -32,7 +32,7 @@ fn main() {
         .add_plugins(GuitarPlugin)
         .init_resource::<EGameMode>()
         .init_resource::<ScoreStoreResource>()
-        .add_systems(Startup, (load_score_store, log_boot))
+        .add_systems(Startup, (load_score_store, load_config_summary, log_boot))
         .add_systems(Update, log_state_transitions)
         .run();
 }
@@ -65,4 +65,17 @@ fn log_state_transitions(state: Res<State<AppState>>, mut last: Local<Option<App
         info!("AppState: {:?}", current);
         *last = Some(current);
     }
+}
+
+/// Phase 0 wiring: load user config from disk on boot and log summary.
+fn load_config_summary() {
+    use dtx_config::{load, default_path};
+    let cfg = load(&default_path());
+    info!(
+        "config: skin={}, master_vol={:.0}%, scroll={:.2}x, vsync={}",
+        cfg.skin,
+        cfg.audio.master_volume * 100.0,
+        cfg.gameplay.scroll_speed,
+        cfg.system.vsync,
+    );
 }
