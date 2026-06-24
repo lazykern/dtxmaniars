@@ -31,13 +31,15 @@ pub fn plugin(app: &mut App) {
     app.add_systems(OnEnter(AppState::Result), (spawn_result, start_fade))
         .add_systems(OnExit(AppState::Result), save_result_then_despawn)
         .add_systems(Update, result_input.run_if(in_state(AppState::Result)))
-        .add_plugins(result_full::plugin);
+        .add_plugins(result_full::plugin)
+        .init_resource::<result_stage::CStageResultState>();
 }
 
 /// Re-export as struct form for callers that prefer `add_plugins(...)` syntax.
 pub use plugin as GameResultsPlugin;
 
 pub mod result_full;
+pub mod result_stage;
 
 fn spawn_result(
     mut commands: Commands,
