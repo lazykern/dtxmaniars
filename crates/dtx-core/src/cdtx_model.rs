@@ -80,6 +80,77 @@ pub struct CDTX {
     pub wav_cache: HashMap<u32, String>,
     /// BMP filename cache (BGA channel → path).
     pub bmp_cache: HashMap<u32, String>,
+    /// Full WAV registry (BocuD `listWAV`).
+    /// Maps WAV #id → (filename, internal index).
+    pub wav_registry: HashMap<u32, WavEntry>,
+    /// Full BMP registry (BocuD `listBMP` + `listBMPTEX`).
+    pub bmp_registry: HashMap<u32, BmpEntry>,
+    /// Full AVI registry (BocuD `listAVI` + `listAVIPAN`).
+    pub avi_registry: HashMap<u32, AviEntry>,
+    /// Full BGA registry (BocuD `listBGA` + `listBGAPAN`).
+    pub bga_registry: HashMap<u32, BgaEntry>,
+    /// Per-instrument BPM array (BocuD `nBPM` 0x00..0xFF + BPMEx).
+    /// Indexed by channel number 0x00..0xFF (256 entries).
+    pub bpm_array: [f32; 256],
+    /// Per-instrument chip counts (BocuD `STHASCHIPS`).
+    pub has_chips: HasChips,
+    /// DTX text lines (BocuD `listDTXManiaFormat`) — the raw file lines
+    /// for debugging / round-trip serialization.
+    pub raw_lines: Vec<String>,
+}
+
+/// One WAV entry in the registry (BocuD `listWAV`).
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct WavEntry {
+    /// WAV #id (BocuD `n表記上の番号`).
+    pub id: u32,
+    /// Filename (BocuD `strファイル名`).
+    pub filename: String,
+    /// Internal index (BocuD `n内部番号`).
+    pub internal_index: u32,
+    /// Volume (BocuD `nVolume` 0..100).
+    pub volume: u8,
+}
+
+/// One BMP entry in the registry (BocuD `listBMP` + `listBMPTEX`).
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct BmpEntry {
+    /// BMP #id (BocuD `n番号`).
+    pub id: u32,
+    /// Filename (BocuD `strファイル名`).
+    pub filename: String,
+}
+
+/// One AVI entry in the registry (BocuD `listAVI` + `listAVIPAN`).
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct AviEntry {
+    /// AVI #id (BocuD `nAVI番号`).
+    pub id: u32,
+    /// Filename.
+    pub filename: String,
+}
+
+/// One BGA entry in the registry (BocuD `listBGA` + `listBGAPAN`).
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct BgaEntry {
+    /// BGA #id.
+    pub id: u32,
+    /// Filename.
+    pub filename: String,
+}
+
+/// Per-instrument chip availability (BocuD `STHASCHIPS`).
+///
+/// Tracks whether each instrument has any chips in the chart, used by
+/// the guitar/bass gauge sub-acts to skip rendering when no chips.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
+pub struct HasChips {
+    /// Drums has chips.
+    pub drums: bool,
+    /// Guitar has chips.
+    pub guitar: bool,
+    /// Bass has chips.
+    pub bass: bool,
 }
 
 impl CDTX {
@@ -128,6 +199,13 @@ impl CDTX {
             bpm_changes,
             wav_cache,
             bmp_cache,
+            wav_registry: HashMap::new(),
+            bmp_registry: HashMap::new(),
+            avi_registry: HashMap::new(),
+            bga_registry: HashMap::new(),
+            bpm_array: [DEFAULT_BPM; 256],
+            has_chips: HasChips::default(),
+            raw_lines: Vec::new(),
         }
     }
 

@@ -3,6 +3,7 @@
 //! Parses DTX files into [`Chart`] / [`Chip`] / [`EChannel`] data.
 //! See `docs/decisions/0005-flat-workspace-layout.md` for layering rules.
 
+pub mod assets;
 pub mod bga;
 pub mod c_avi;
 pub mod c_box_set_def;
