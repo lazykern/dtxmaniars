@@ -30,6 +30,7 @@ pub mod config_full;
 pub mod config_list;
 pub mod config_list_system;
 pub mod config_list_audio;
+pub mod config_list_audio_driver;
 pub mod end;
 pub mod result;
 pub mod song_loading;

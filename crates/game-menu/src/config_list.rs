@@ -209,6 +209,7 @@ fn build_items_for(menu_type: EMenuType) -> Vec<ConfigListItem> {
     match menu_type {
         EMenuType::System => crate::config_list_system::build_system_items(),
         EMenuType::SystemAudio => crate::config_list_audio::build_audio_items(),
+        EMenuType::SystemAudioDriver => crate::config_list_audio_driver::build_audio_driver_items(),
         EMenuType::Drums => vec![
             ConfigListItem::submenu("Auto Play"),
             ConfigListItem::submenu("Lane Type"),
