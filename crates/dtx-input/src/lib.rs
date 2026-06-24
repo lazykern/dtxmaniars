@@ -24,6 +24,7 @@ pub mod events;
 pub mod keyboard;
 pub mod mapping;
 pub mod midi;
+pub mod pad;
 
 pub use events::{LaneHit, LaneHitKind, LaneId};
 

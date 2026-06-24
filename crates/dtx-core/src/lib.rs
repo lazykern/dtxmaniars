@@ -13,6 +13,7 @@ pub mod cdtx_model;
 pub mod cdtx_nested;
 pub mod channel;
 pub mod chart;
+pub mod constants;
 pub mod cscore_ini;
 pub mod enum_converter;
 pub mod error;
