@@ -110,7 +110,7 @@ fn judge_lane_hit_system(
     }
 }
 
-fn chip_target_ms(chip: &dtx_core::Chip, base_bpm: f32, bpm_changes: &[BpmChange]) -> i64 {
+pub fn chip_target_ms(chip: &dtx_core::Chip, base_bpm: f32, bpm_changes: &[BpmChange]) -> i64 {
     chip_time_ms_with_bpm_changes(chip.measure, chip.value, base_bpm, bpm_changes)
 }
 

@@ -13,6 +13,7 @@
 //! Reference: `references/DTXmaniaNX-BocuD/DTXMania/Stage/06.Performance/DrumsScreen/*`
 //! Lane order: LC, HH, SD, BD, HT, LT, FT, CY, LP, RD, HHO (BocuD CActPerfDrumsLaneFlushD.cs).
 
+pub mod autoplay;
 pub mod components;
 pub mod drums_perf;
 pub mod events;
@@ -47,6 +48,7 @@ pub fn plugin(app: &mut App) {
             judge::plugin,
             score::plugin,
             miss::plugin,
+            autoplay::plugin,
             midi_consumer::plugin,
         ));
 }
