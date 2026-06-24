@@ -136,6 +136,38 @@ impl EChannel {
                 | Self::DrumsFillin
         )
     }
+
+    pub const fn is_guitar(self) -> bool {
+        matches!(
+            self,
+            Self::GuitarOpen
+                | Self::GuitarRxxBxx
+                | Self::GuitarRxGxx
+                | Self::GuitarRxGBxx
+                | Self::GuitarRxxxx
+                | Self::GuitarRxBxx
+                | Self::GuitarRGxxx
+                | Self::GuitarRGBxx
+                | Self::GuitarYxxYx
+                | Self::GuitarPxx
+        )
+    }
+
+    pub const fn is_bga(self) -> bool {
+        matches!(
+            self,
+            Self::BGALayer1
+                | Self::BGALayer2
+                | Self::BGALayer3
+                | Self::BGALayer4
+                | Self::BGALayer5
+                | Self::BGALayer6
+                | Self::BGALayer7
+                | Self::BGALayer8
+                | Self::Movie
+                | Self::MovieFull
+        )
+    }
 }
 
 #[cfg(test)]

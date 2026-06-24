@@ -11,6 +11,11 @@ pub mod fdk_sub_acts;
 pub mod cdtx_model;
 pub mod cscore_ini;
 pub mod c_box_set_def;
+pub mod c_chip;
+pub mod enum_converter;
+pub mod c_avi;
+pub mod c_song_list_node;
+pub mod c_chart_data;
 pub mod parser;
 pub mod score_song;
 
