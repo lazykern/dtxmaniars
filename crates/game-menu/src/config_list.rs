@@ -207,13 +207,7 @@ impl ConfigListState {
 /// p1-7 (Gameplay), p1-8 (Menu), p1-13 (Skin).
 fn build_items_for(menu_type: EMenuType) -> Vec<ConfigListItem> {
     match menu_type {
-        EMenuType::System => vec![
-            ConfigListItem::submenu("Graphics"),
-            ConfigListItem::submenu("Audio"),
-            ConfigListItem::submenu("Gameplay"),
-            ConfigListItem::submenu("Menu"),
-            ConfigListItem::submenu("Skin"),
-        ],
+        EMenuType::System => crate::config_list_system::build_system_items(),
         EMenuType::Drums => vec![
             ConfigListItem::submenu("Auto Play"),
             ConfigListItem::submenu("Lane Type"),
@@ -334,8 +328,8 @@ mod tests {
         let mut s = ConfigListState::default();
         s.load(EMenuType::System);
         assert_eq!(s.menu_type, EMenuType::System);
-        // System tab has 5 sub-items per CActConfigList.cs:152-200 (Graphics/Audio/Gameplay/Menu/Skin)
-        assert_eq!(s.items.len(), 5);
+        // System tab now has 12 items (p1-3 port) per CActConfigList.System.cs:9-396.
+        assert_eq!(s.items.len(), 12);
         assert_eq!(s.selection, 0);
     }
 
@@ -360,7 +354,8 @@ mod tests {
     fn config_list_is_on_submenu_true_for_submenu_item() {
         let mut s = ConfigListState::default();
         s.load(EMenuType::System);
-        s.selection = 0; // Graphics — submenu
+        // Item 1 is "Graphics Options" (submenu); 0 is "Return to Menu" (leaf).
+        s.selection = 1;
         assert!(s.is_on_submenu());
     }
 

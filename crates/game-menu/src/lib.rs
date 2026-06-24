@@ -28,6 +28,7 @@ pub mod change_skin;
 pub mod config;
 pub mod config_full;
 pub mod config_list;
+pub mod config_list_system;
 pub mod end;
 pub mod result;
 pub mod song_loading;
