@@ -1,3 +1,4 @@
+#![allow(non_snake_case)]
 //! `CBoxDef` (260 LOC) + `CSetDef` (240 LOC) — chip-pattern definitions.
 //!
 //! Reference: `references/DTXmaniaNX-BocuD/DTXMania/Score,Song/CBoxDef.cs:1-260`

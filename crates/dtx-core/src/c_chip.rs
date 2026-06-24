@@ -1,3 +1,4 @@
+#![allow(non_snake_case)]
 //! `CChip` (644 LOC) — chip with rich metadata.
 //!
 //! Reference: `references/DTXmaniaNX-BocuD/DTXMania/Score,Song/CChip.cs:1-644`

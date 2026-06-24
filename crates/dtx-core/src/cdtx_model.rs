@@ -1,3 +1,4 @@
+#![allow(non_snake_case)]
 //! `CDTX` (7295 LOC) — real DTX model port.
 //!
 //! Reference: `references/DTXmaniaNX-BocuD/DTXMania/Score,Song/CDTX.cs:1-7295`
@@ -10,8 +11,8 @@ use std::collections::HashMap;
 use std::path::Path;
 
 use crate::channel::EChannel;
-use crate::chart::{Chart, Chip, Metadata};
-use crate::error::{DtxError, Result};
+use crate::chart::{Chart, Chip};
+use crate::error::Result;
 use crate::parser::parse;
 
 /// BPM channel range: 0x08 (BPMEx) covers 0x00..0xFF. We store up to 256.

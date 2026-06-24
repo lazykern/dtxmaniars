@@ -1,3 +1,4 @@
+#![allow(non_snake_case)]
 //! `CSongListNode` (92 LOC) — a single node in the song tree.
 //!
 //! Reference: `references/DTXmaniaNX-BocuD/DTXMania/Score,Song/CSongListNode.cs:1-92`
@@ -97,12 +98,9 @@ impl CSongListNode {
 
     /// Find the first chart descendant by title (case-sensitive).
     pub fn find_chart(&self, title: &str) -> Option<&CSongListNode> {
-        for node in self.walk() {
-            if node.node_type == NodeType::Chart && node.title == title {
-                return Some(node);
-            }
-        }
-        None
+        self.walk()
+            .into_iter()
+            .find(|n| n.node_type == NodeType::Chart && n.title == title)
     }
 
     /// All chart descendants in DFS order.

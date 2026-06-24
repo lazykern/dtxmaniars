@@ -21,7 +21,7 @@ use std::collections::HashSet;
 use bevy::prelude::*;
 
 use crate::events::{JudgmentEvent, LaneHit};
-use crate::lane_map::{lane_channel, lane_of};
+use crate::lane_map::{lane_channel, lane_of, LANE_ORDER};
 use crate::resources::ActiveChart;
 use dtx_scoring::classify;
 use dtx_timing::math::{chip_time_ms_with_bpm_changes, BpmChange};
@@ -116,8 +116,9 @@ fn chip_target_ms(chip: &dtx_core::Chip, base_bpm: f32, bpm_changes: &[BpmChange
 
 #[cfg(test)]
 mod tests {
+    #![allow(unused_imports)]
     use super::*;
-    use crate::lane_map::{lane_of, LaneId, LANE_ORDER};
+    use crate::lane_map::lane_of;
 
     #[test]
     fn classifies_zero_delta_as_perfect() {

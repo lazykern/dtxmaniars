@@ -14,3 +14,5 @@ unsafe_code = "forbid"
 bevy = { workspace = true }
 bevy_kira_audio = { workspace = true }
 dtx-audio = { path = "../dtx-audio" }
+[dev-dependencies]
+dtx-core = { path = "../dtx-core" }

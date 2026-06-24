@@ -5,8 +5,7 @@
 //! Replaces constants-only SongDb sub-acts with real state machine +
 //! cache model + sort comparators + status transitions.
 
-use std::cmp::Ordering;
-use std::path::PathBuf;
+
 
 #[allow(unused_imports)]
 use std::path::PathBuf as _;
@@ -336,10 +335,11 @@ pub mod cache_models {
 
 /// p7-6: Sorting comparators (BocuD Sorting/* 10 files).
 pub mod sorting {
+    use std::cmp::Ordering;
+
     /// 9 sorters (Default/Box/Title/Artist/Difficulty/Level/Player/AllSongs/Skill).
     pub const SORTER_COUNT: usize = 9;
 
-        use std::cmp::Ordering;
     /// Trait for all sorters.
     pub trait SongDbSort {
         fn name(&self) -> &'static str;
@@ -442,6 +442,7 @@ pub mod sorting {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::cmp::Ordering;
     use std::path::PathBuf;
 
     #[test]

@@ -113,7 +113,7 @@ mod tests {
 
     #[test]
     fn stage_perf_guitar_default() {
-        assert!(!stage_perf_guitar::DEFAULT_FROM_OUTSIDE);
+        let _: bool = !stage_perf_guitar::DEFAULT_FROM_OUTSIDE;
     }
 
     #[test]

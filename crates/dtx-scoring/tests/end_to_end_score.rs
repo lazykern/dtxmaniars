@@ -59,7 +59,7 @@ fn end_to_end_load_chart_judge_persist() {
     let mut miss = 0i32;
     let mut combo = 0i32;
     let mut best_combo = 0i32;
-    for chip in &drum_chips {
+    for _chip in &drum_chips {
         let kind = classify(0); // delta_ms = 0 → perfect
         match kind {
             JudgmentKind::Perfect => perfect += 1,
@@ -182,7 +182,7 @@ fn end_to_end_persist_across_two_runs() {
     let _ = std::fs::remove_file(&tmp);
 
     // Just so drum_chips isn't a dead binding.
-    assert!(drum_chips.len() > 0);
+    assert!(!drum_chips.is_empty());
 }
 
 #[test]

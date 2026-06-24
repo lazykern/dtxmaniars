@@ -1,3 +1,4 @@
+#![allow(non_snake_case)]
 //! `CChartData` (472 LOC) — chart-level data container.
 //!
 //! Reference: `references/DTXmaniaNX-BocuD/DTXMania/Score,Song/CChartData.cs:1-472`

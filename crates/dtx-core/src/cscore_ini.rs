@@ -1,3 +1,4 @@
+#![allow(clippy::inherent_to_string)]
 //! `CScoreIni` (1773 LOC) — score persistence to/from DTX-compatible INI file.
 //!
 //! Reference: `references/DTXmaniaNX-BocuD/DTXMania/Score,Song/CScoreIni.cs:1-1773`

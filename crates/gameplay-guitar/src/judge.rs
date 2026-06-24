@@ -1,3 +1,4 @@
+#![allow(clippy::too_many_arguments)]
 #![allow(missing_docs)]
 //! Guitar judge: LaneHit → JudgmentEvent.
 //!

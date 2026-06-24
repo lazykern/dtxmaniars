@@ -2644,6 +2644,7 @@ dependencies = [
  "bevy",
  "bevy_kira_audio",
  "dtx-audio",
+ "dtx-core",
 ]
 
 [[package]]
