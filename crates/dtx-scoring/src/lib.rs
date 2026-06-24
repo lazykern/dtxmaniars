@@ -12,6 +12,7 @@
 
 #![warn(missing_docs)]
 
+pub mod gauge;
 pub mod hit_ranges;
 
 use std::path::{Path, PathBuf};
