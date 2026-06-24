@@ -37,6 +37,7 @@ pub mod config_list_menu;
 pub mod config_list_drums;
 pub mod config_list_drums_velocity;
 pub mod config_list_guitar;
+pub mod config_list_bass;
 pub mod end;
 pub mod result;
 pub mod song_loading;
