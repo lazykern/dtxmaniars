@@ -40,7 +40,6 @@ pub use plugin as GameResultsPlugin;
 
 pub mod result_full;
 pub mod result_stage;
-pub mod result_sub_acts;
 
 fn spawn_result(
     mut commands: Commands,

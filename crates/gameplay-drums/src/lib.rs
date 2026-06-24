@@ -13,8 +13,6 @@
 //! Lane order: LC, HH, SD, BD, HT, LT, FT, CY, LP, RD, HHO (BocuD CActPerfDrumsLaneFlushD.cs).
 
 pub mod components;
-pub mod drawable_sub_acts;
-pub mod drums_screen_sub_acts;
 pub mod events;
 pub mod hud;
 pub mod input;
@@ -22,8 +20,6 @@ pub mod judge;
 pub mod lane_map;
 pub mod miss;
 pub mod perf_common;
-pub mod perf_common_acts;
-pub mod perf_sub_acts;
 pub mod resources;
 pub mod score;
 pub mod scroll;
@@ -106,3 +102,4 @@ mod midi_consumer {
 
 /// Re-export as struct form for callers that prefer `add_plugins(...)` syntax.
 pub use plugin as DrumsPlugin;
+pub mod perf_sub_acts_3;

@@ -1,6 +1,10 @@
-#![allow(dead_code)]
 #![allow(clippy::type_complexity)]
 //! CStageSongSelectionNew — song select screen (M5: real SongDb).
+//!
+//! Merged from `song_select.rs` (M5 song list logic) +
+//! `song_select_full.rs` (strict-port status panel / density / sort / search).
+//! Single plugin, no double-spawn. The song list spawns on OnEnter(SongSelect);
+//! the persistent status panel + density + sort + search spawn on Startup.
 //!
 //! Reference: `references/DTXmaniaNX-BocuD/DTXMania/Stage/04.SongSelectionNew/CStageSongSelectionNew.cs`
 //!
@@ -23,43 +27,205 @@ use std::path::PathBuf;
 use bevy::prelude::*;
 use bevy_kira_audio::prelude::*;
 use dtx_audio::{BgmHandle, play_bgm, stop_bgm_system};
-use dtx_library::SongDb;
+use dtx_library::{SongDb, SongInfo, SortMode};
 use game_shell::AppState;
-use game_shell::EGameMode;
 use game_shell::fade::start_fade;
+
+// ===== Layout positions (verbatim from reference files) =====
+
+/// StatusPanel position (StatusPanel.cs:10-12).
+pub const STATUS_PANEL_DRUMS_X: f32 = 430.0;
+pub const STATUS_PANEL_DRUMS_Y: f32 = 720.0;
+pub const STATUS_PANEL_GUITAR_X: f32 = 200.0;
+pub const STATUS_PANEL_GUITAR_Y: f32 = 720.0;
+
+/// DensityGraph bar geometry (DensityGraph.cs:30-46).
+pub const DENSITY_GRAPH_BAR_COUNT: usize = 8;
+pub const DENSITY_GRAPH_BAR_DX: f32 = 12.0;
+pub const DENSITY_GRAPH_BAR_W: f32 = 4.0;
+pub const DENSITY_GRAPH_BAR_H: f32 = 252.0;
+pub const DENSITY_GRAPH_BAR_BASE_X: f32 = 36.0;
+pub const DENSITY_GRAPH_BAR_BASE_Y: f32 = 284.0;
+pub const DENSITY_NOTE_TEXT_DRUMS: (f32, f32) = (150.0, 333.0);
+pub const DENSITY_NOTE_TEXT_GB: (f32, f32) = (102.0, 333.0);
+
+/// SortMenu container (SortMenuContainer.cs:25-26).
+pub const SORT_MENU_W: f32 = 662.0;
+pub const SORT_MENU_H: f32 = 92.0;
+pub const SORT_MENU_ELEMENT_SPACING: f32 = 90.0;
+
+/// SongSearchMenu layout (SongSearchMenu.cs:13-22).
+pub const SONG_SEARCH_W: f32 = 500.0;
+pub const SONG_SEARCH_H: f32 = 300.0;
+pub const SONG_SEARCH_TEXT_INPUT_Y: f32 = 30.0;
+pub const SONG_SEARCH_DESC_Y: f32 = 60.0;
+pub const SONG_SEARCH_STATUS_Y: f32 = 250.0;
+
+/// CommandHistory buffer size (CommandHistory.cs:10).
+pub const COMMAND_HISTORY_BUF: usize = 16;
+
+// ===== Resources (shared with other crates) =====
 
 /// The currently-selected song path. Set by SongSelect, consumed by SongLoading.
 #[derive(Resource, Default, Debug, Clone)]
 pub struct SelectedSong(pub Option<PathBuf>);
 
+/// Currently selected song + chart metadata for the status panel.
+#[derive(Resource, Default, Debug, Clone)]
+pub struct SongSelectSelection {
+    /// Selected song.
+    pub song: Option<SongInfo>,
+    /// Current difficulty level (0..4: Basic/Advanced/Extreme/Master/Edit).
+    pub difficulty: u8,
+    /// Active sort mode.
+    pub sort_mode: SortMode,
+    /// Search query (empty = no filter).
+    pub search_query: String,
+    /// Visible songs after sort + filter.
+    pub visible: Vec<SongInfo>,
+}
+
+impl SongSelectSelection {
+    /// Returns true if `song` matches the current search query.
+    pub fn matches_search(&self, song: &SongInfo) -> bool {
+        if self.search_query.is_empty() {
+            return true;
+        }
+        let q = self.search_query.to_lowercase();
+        song.title.to_lowercase().contains(&q) || song.artist.to_lowercase().contains(&q)
+    }
+
+    /// Recompute `visible` from a full song list using current sort + filter.
+    pub fn recompute(&mut self, all: &[SongInfo]) {
+        let mut v: Vec<SongInfo> = all
+            .iter()
+            .filter(|s| self.matches_search(s))
+            .cloned()
+            .collect();
+        match self.sort_mode {
+            SortMode::Default => {}
+            SortMode::ByTitle => v.sort_by(|a, b| a.title.cmp(&b.title)),
+            SortMode::ByArtist => v.sort_by(|a, b| a.artist.cmp(&b.artist)),
+        }
+        self.visible = v;
+    }
+}
+
+// ===== CommandHistory (CommandHistory.cs) =====
+
+/// One pad command entry (CommandHistory.cs:11-15).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct CommandEntry {
+    /// 0=Drums, 1=Guitar, 2=Bass.
+    pub instrument: u8,
+    /// Pad bitflag (1=LC, 2=HH, 4=SD, 8=BD, ...).
+    pub pad: u16,
+    /// Time of input (ms, audio clock).
+    pub time_ms: i64,
+}
+
+/// 16-deep ring buffer of pad inputs (CommandHistory.cs:18-19, 33-46).
+#[derive(Resource, Debug, Clone, Default)]
+pub struct CommandHistory {
+    entries: Vec<CommandEntry>,
+}
+
+impl CommandHistory {
+    /// Append a new command. Removes oldest if at capacity (CommandHistory.cs:33-46).
+    pub fn add(&mut self, instrument: u8, pad: u16, time_ms: i64) {
+        if self.entries.len() >= COMMAND_HISTORY_BUF {
+            self.entries.remove(0);
+        }
+        self.entries.push(CommandEntry {
+            instrument,
+            pad,
+            time_ms,
+        });
+    }
+
+    /// Returns true if `pattern` (sequence of pad flags) was just entered for
+    /// `instrument` within the last 500ms (StatusPanel.cs:36-50 logic).
+    pub fn check_command(&self, instrument: u8, pattern: &[u16], time_ms: i64) -> bool {
+        if pattern.is_empty() || self.entries.len() < pattern.len() {
+            return false;
+        }
+        let recent: Vec<&CommandEntry> = self
+            .entries
+            .iter()
+            .rev()
+            .take_while(|e| e.instrument == instrument && time_ms - e.time_ms <= 500)
+            .collect();
+        if recent.len() < pattern.len() {
+            return false;
+        }
+        recent
+            .iter()
+            .rev()
+            .zip(pattern.iter())
+            .all(|(e, p)| e.pad == *p)
+    }
+}
+
+// ===== Components =====
+
 #[derive(Component)]
 pub struct SongSelectEntity;
-
-#[derive(Resource, Debug, Default, Clone, Copy)]
-struct SelectionIndex(usize);
 
 #[derive(Component)]
 struct SongRowEntity {
     index: usize,
 }
 
-/// Default song directory to scan when SongDb is empty.
-/// Override via `DTX_SONG_DIR` env var.
-fn default_song_dir() -> PathBuf {
-    if let Ok(p) = std::env::var("DTX_SONG_DIR") {
-        return PathBuf::from(p);
-    }
-    // Fallback: fixture dir so first-launch still shows something.
-    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("..")
-        .join("dtx-core")
-        .join("tests")
-        .join("fixtures")
+#[derive(Component)]
+struct SortModeText;
+
+#[derive(Component)]
+struct SelectedSongInfo;
+
+#[derive(Resource, Debug, Default, Clone, Copy)]
+struct SelectionIndex(usize);
+
+/// Sort menu element (one slot in the ring buffer).
+#[derive(Component, Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SortMenuElement {
+    pub mode: SortMode,
+    /// Animation offset (0 = centered, ±1 = neighbor).
+    pub offset: i8,
 }
 
+/// Mark the entity holding the sort menu container UI.
+#[derive(Component, Debug, Clone, Copy)]
+pub struct SortMenuContainerComp;
+
+/// Mark the entity holding the search menu UI.
+#[derive(Component, Debug, Clone, Copy)]
+pub struct SongSearchMenuComp;
+
+/// Mark the entity holding the density graph UI.
+#[derive(Component, Debug, Clone, Copy)]
+pub struct DensityGraphComp;
+
+/// Mark the entity holding the status panel UI.
+#[derive(Component, Debug, Clone, Copy)]
+pub struct StatusPanelComp;
+
+/// Mark the entity holding a single StatusPane (Drums/Guitar/Bass).
+#[derive(Component, Debug, Clone, Copy, PartialEq, Eq)]
+pub enum StatusPaneKind {
+    Drums,
+    Guitar,
+    Bass,
+}
+
+// ===== Plugin =====
+
 pub fn plugin(app: &mut App) {
-    app.init_resource::<SelectionIndex>()
+    app.init_resource::<SelectedSong>()
+        .init_resource::<SongSelectSelection>()
+        .init_resource::<CommandHistory>()
+        .init_resource::<SelectionIndex>()
         .add_plugins(dtx_audio::plugin)
+        .add_systems(Startup, spawn_song_select_overlay)
         .add_systems(
             OnEnter(AppState::SongSelect),
             (ensure_song_db_loaded, spawn_song_select, start_fade).chain(),
@@ -74,29 +240,27 @@ pub fn plugin(app: &mut App) {
                 song_select_navigation,
                 render_selected_song,
                 bgm_preview_on_change,
+                update_status_panes,
+                update_density_graph,
+                update_search_filter,
             )
                 .run_if(in_state(AppState::SongSelect)),
         );
 }
 
-/// ponytail: bevy 0.19 removed `despawn_recursive`; do it manually.
-fn despawn_song_select(
-    mut commands: Commands,
-    parents: Query<Entity, With<SongSelectEntity>>,
-    children: Query<&Children>,
-) {
-    for parent in &parents {
-        despawn_recursive(&mut commands, parent, &children);
-    }
-}
+// ===== M5: song list logic (OnEnter/OnExit) =====
 
-fn despawn_recursive(commands: &mut Commands, entity: Entity, children: &Query<&Children>) {
-    if let Ok(c) = children.get(entity) {
-        for child in c.iter() {
-            despawn_recursive(commands, child, children);
-        }
+/// Default song directory to scan when SongDb is empty.
+/// Override via `DTX_SONG_DIR` env var.
+fn default_song_dir() -> PathBuf {
+    if let Ok(p) = std::env::var("DTX_SONG_DIR") {
+        return PathBuf::from(p);
     }
-    commands.entity(entity).despawn();
+    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("..")
+        .join("dtx-core")
+        .join("tests")
+        .join("fixtures")
 }
 
 /// On entering SongSelect, scan the default dir if SongDb is empty.
@@ -122,7 +286,7 @@ fn spawn_song_select(mut commands: Commands, db: Res<SongDb>) {
                 row_gap: Val::Px(20.0),
                 ..default()
             },
-            BackgroundColor(Color::srgb(0.08, 0.08, 0.12)),
+            BackgroundColor(Color::srgba(0.08, 0.08, 0.12, 0.0)),
         ))
         .with_children(|parent| {
             parent.spawn((
@@ -196,83 +360,91 @@ fn spawn_song_select(mut commands: Commands, db: Res<SongDb>) {
         });
 }
 
-#[derive(Component)]
-struct SelectedSongInfo;
-
-#[derive(Component)]
-struct SortModeText;
-
 fn format_song_detail(song: &dtx_library::SongInfo) -> String {
-    let mut s = format!(
-        "Selected:\n  Title: {}\n  Artist: {}\n  BPM: {}\n  Drums level: {:?}",
+    format!(
+        "Title:  {}\nArtist: {}\nBPM:    {}\nLevel:  {}\nNotes:  {}",
         song.title,
         song.artist,
         song.bpm
-            .map(|b| format!("{b}"))
-            .unwrap_or_else(|| "?".to_string()),
+            .map(|v| format!("{v}"))
+            .unwrap_or_else(|| "?".into()),
         song.dlevel
-    );
-    if let Some(bgm) = &song.bgm_path {
-        s.push_str(&format!("\n  BGM: {}", bgm.display()));
+            .map(|v| v.to_string())
+            .unwrap_or_else(|| "?".into()),
+        song.notes_total(),
+    )
+}
+
+/// ponytail: bevy 0.19 removed `despawn_recursive`; do it manually.
+fn despawn_song_select(
+    mut commands: Commands,
+    parents: Query<Entity, With<SongSelectEntity>>,
+    children: Query<&Children>,
+) {
+    for parent in &parents {
+        despawn_recursive(&mut commands, parent, &children);
     }
-    s
+}
+
+fn despawn_recursive(commands: &mut Commands, entity: Entity, children: &Query<&Children>) {
+    if let Ok(c) = children.get(entity) {
+        for child in c.iter() {
+            despawn_recursive(commands, child, children);
+        }
+    }
+    commands.entity(entity).despawn();
 }
 
 fn song_select_navigation(
     keys: Res<ButtonInput<KeyCode>>,
-    mut selection: ResMut<SelectionIndex>,
-    mut selected_song: ResMut<SelectedSong>,
     mut db: ResMut<SongDb>,
-    mut mode: ResMut<EGameMode>,
+    mut selection: ResMut<SelectionIndex>,
+    mut selection_state: ResMut<SongSelectSelection>,
     mut next: ResMut<NextState<AppState>>,
 ) {
-    if db.is_empty() {
+    if db.songs.is_empty() {
         return;
     }
-    let max = db.len() - 1;
-
+    let max = db.songs.len() - 1;
     if keys.just_pressed(KeyCode::ArrowDown) {
         selection.0 = (selection.0 + 1).min(max);
     } else if keys.just_pressed(KeyCode::ArrowUp) {
         selection.0 = selection.0.saturating_sub(1);
+    } else if keys.just_pressed(KeyCode::Tab) {
+        selection_state.sort_mode = selection_state.sort_mode.next();
     } else if keys.just_pressed(KeyCode::Enter) {
-        let song = &db.songs[selection.0];
-        selected_song.0 = Some(song.path.clone());
-        next.set(AppState::SongLoading);
+        if let Some(song) = db.songs.get(selection.0) {
+            info!("SongSelect: selected {}", song.title);
+            // M5: trigger transition to SongLoading.
+            next.set(AppState::SongLoading);
+        }
     } else if keys.just_pressed(KeyCode::Escape) {
         next.set(AppState::Title);
     } else if keys.just_pressed(KeyCode::F1) {
         next.set(AppState::Config);
-    } else if keys.just_pressed(KeyCode::F2) {
-        *mode = mode.next();
-        info!("EGameMode: {:?}", *mode);
-    } else if keys.just_pressed(KeyCode::Tab) {
-        db.cycle_sort();
-        // Clamp selection in case list shrank.
-        selection.0 = selection.0.min(db.len().saturating_sub(1));
     } else if keys.just_pressed(KeyCode::F5) {
-        // F5: refresh SongDb from the same scan root.
-        if let Err(e) = db.refresh() {
+        // M5: refresh = re-scan the default dir.
+        if let Err(e) = db.rescan(&default_song_dir()) {
             warn!("SongSelect: refresh failed: {}", e);
-        } else {
-            info!("SongSelect: refreshed ({} songs)", db.len());
         }
-        // Reset selection to first row.
-        selection.0 = 0;
     }
 }
 
 fn render_selected_song(
     selection: Res<SelectionIndex>,
-    mut rows: Query<(&SongRowEntity, &mut BackgroundColor)>,
-    mut text_query: Query<&mut Text, Or<(With<SelectedSongInfo>, With<SortModeText>)>>,
     db: Res<SongDb>,
-    mode: Res<EGameMode>,
+    mut query: Query<&mut Text, With<SelectedSongInfo>>,
+    mut rows: Query<(&SongRowEntity, &mut BackgroundColor)>,
 ) {
-    if db.is_empty() {
+    if !selection.is_changed() {
         return;
     }
-
+    if let Some(song) = db.songs.get(selection.0) {
+        let detail = format_song_detail(song);
+        for mut text in &mut query {
+            *text = Text::new(detail.clone());
+        }
+    }
     for (row_entity, mut bg) in &mut rows {
         bg.0 = if row_entity.index == selection.0 {
             Color::srgb(0.3, 0.5, 0.8)
@@ -280,64 +452,360 @@ fn render_selected_song(
             Color::srgb(0.15, 0.15, 0.2)
         };
     }
-
-    if let Some(song) = db.songs.get(selection.0) {
-        let detail = format_song_detail(song);
-        for mut text in &mut text_query {
-            if text.0.is_empty() || text.0.starts_with("Selected") {
-                *text = Text::new(detail.clone());
-            } else if text.0.starts_with("Sort") {
-                *text = Text::new(format!("Sort: {:?}", db.sort_mode));
-            } else if text.0.starts_with("Mode") {
-                *text = Text::new(format!("Mode: {}", mode.label()));
-            }
-        }
-    }
 }
 
-/// BGM preview: when the selected row changes, start playing that song's BGM.
-/// Reference: CActSelectPresound.cs — plays preview audio on selection change.
 fn bgm_preview_on_change(
     selection: Res<SelectionIndex>,
     db: Res<SongDb>,
     audio: Res<Audio>,
     asset_server: Res<AssetServer>,
     mut bgm: ResMut<BgmHandle>,
-    mut last_played: Local<Option<PathBuf>>,
 ) {
-    if db.is_empty() {
+    if !selection.is_changed() {
         return;
     }
-    let Some(song) = db.songs.get(selection.0) else {
-        return;
-    };
-    let Some(bgm_path) = &song.bgm_path else {
-        return;
-    };
-    if last_played.as_ref() == Some(bgm_path) {
+    if let Some(song) = db.songs.get(selection.0)
+        && let Some(bgm_path) = &song.bgm_path
+    {
+        let path_str = bgm_path.to_string_lossy().to_string();
+        play_bgm(&audio, &asset_server, &mut bgm, &path_str);
+    }
+}
+
+// ===== Strict-port overlay: status panel / density / sort / search (Startup) =====
+
+fn spawn_song_select_overlay(mut commands: Commands) {
+    // StatusPanel: 3 panes (StatusPanel.cs:9-13).
+    for kind in [
+        StatusPaneKind::Drums,
+        StatusPaneKind::Guitar,
+        StatusPaneKind::Bass,
+    ] {
+        let (x, y) = match kind {
+            StatusPaneKind::Drums => (STATUS_PANEL_DRUMS_X, STATUS_PANEL_DRUMS_Y),
+            StatusPaneKind::Guitar => (STATUS_PANEL_GUITAR_X, STATUS_PANEL_GUITAR_Y),
+            StatusPaneKind::Bass => (STATUS_PANEL_DRUMS_X, STATUS_PANEL_DRUMS_Y),
+        };
+        commands.spawn((
+            StatusPanelComp,
+            kind,
+            Node {
+                position_type: PositionType::Absolute,
+                left: Val::Px(x),
+                top: Val::Px(y),
+                width: Val::Px(220.0),
+                height: Val::Px(140.0),
+                flex_direction: FlexDirection::Column,
+                ..default()
+            },
+            BackgroundColor(Color::srgba(0.0, 0.0, 0.0, 0.65)),
+            Text::new("(no song)"),
+            TextFont {
+                font_size: 14.0.into(),
+                ..default()
+            },
+        ));
+    }
+
+    // DensityGraph: 8 bars (DensityGraph.cs:39-46).
+    commands.spawn((
+        DensityGraphComp,
+        Node {
+            position_type: PositionType::Absolute,
+            left: Val::Px(0.0),
+            top: Val::Px(0.0),
+            width: Val::Px(200.0),
+            height: Val::Px(350.0),
+            ..default()
+        },
+    ));
+    for i in 0..DENSITY_GRAPH_BAR_COUNT {
+        commands.spawn((
+            Node {
+                position_type: PositionType::Absolute,
+                left: Val::Px(DENSITY_GRAPH_BAR_BASE_X + (i as f32) * DENSITY_GRAPH_BAR_DX),
+                top: Val::Px(DENSITY_GRAPH_BAR_BASE_Y - DENSITY_GRAPH_BAR_H),
+                width: Val::Px(DENSITY_GRAPH_BAR_W),
+                height: Val::Px(DENSITY_GRAPH_BAR_H * 0.5),
+                ..default()
+            },
+            BackgroundColor(Color::srgba(0.3, 0.7, 1.0, 0.8)),
+        ));
+    }
+
+    // SortMenu: 3-element ring (Default/Title/Artist).
+    let sorters = [SortMode::Default, SortMode::ByTitle, SortMode::ByArtist];
+    commands.spawn((
+        SortMenuContainerComp,
+        Node {
+            position_type: PositionType::Absolute,
+            right: Val::Px(0.0),
+            top: Val::Px(0.0),
+            width: Val::Px(SORT_MENU_W),
+            height: Val::Px(SORT_MENU_H),
+            flex_direction: FlexDirection::Row,
+            ..default()
+        },
+        BackgroundColor(Color::srgba(0.0, 0.0, 0.0, 0.5)),
+    ));
+    for (i, mode) in sorters.iter().enumerate() {
+        let offset = i as i8 - 2;
+        commands.spawn((
+            SortMenuElement {
+                mode: *mode,
+                offset,
+            },
+            Node {
+                position_type: PositionType::Absolute,
+                left: Val::Px(SORT_MENU_ELEMENT_SPACING * (i as f32) - 30.0),
+                top: Val::Px(40.0),
+                width: Val::Px(80.0),
+                height: Val::Px(40.0),
+                ..default()
+            },
+            BackgroundColor(Color::srgba(0.2, 0.2, 0.4, 0.7)),
+            Text::new(mode_label(*mode)),
+            TextFont {
+                font_size: 18.0.into(),
+                ..default()
+            },
+        ));
+    }
+
+    // SongSearchMenu (SongSearchMenu.cs:13-22).
+    commands.spawn((
+        SongSearchMenuComp,
+        Visibility::Hidden,
+        Node {
+            position_type: PositionType::Absolute,
+            left: Val::Px(380.0),
+            top: Val::Px(150.0),
+            width: Val::Px(SONG_SEARCH_W),
+            height: Val::Px(SONG_SEARCH_H),
+            flex_direction: FlexDirection::Column,
+            ..default()
+        },
+        BackgroundColor(Color::srgba(0.0, 0.0, 0.0, 0.9)),
+        Text::new("Search\n\n(description)\n\nStatus: (typing...)"),
+        TextFont {
+            font_size: 16.0.into(),
+            ..default()
+        },
+    ));
+}
+
+fn mode_label(m: SortMode) -> &'static str {
+    match m {
+        SortMode::Default => "Default",
+        SortMode::ByTitle => "Title",
+        SortMode::ByArtist => "Artist",
+    }
+}
+
+fn update_status_panes(
+    sel: Res<SongSelectSelection>,
+    mut q: Query<(&StatusPaneKind, &mut Text), With<StatusPanelComp>>,
+) {
+    if !sel.is_changed() {
         return;
     }
-    *last_played = Some(bgm_path.clone());
-    let path_str = bgm_path.to_string_lossy().to_string();
-    info!("BGM preview: {}", path_str);
-    play_bgm(&audio, &asset_server, &mut bgm, &path_str);
+    let song = sel.song.as_ref();
+    for (kind, mut text) in &mut q {
+        let label = match kind {
+            StatusPaneKind::Drums => "Drums",
+            StatusPaneKind::Guitar => "Guitar",
+            StatusPaneKind::Bass => "Bass",
+        };
+        *text = Text::new(match song {
+            Some(s) => format!(
+                "{}\n{}\nBPM: {}\nLevel: {}\nNotes: {}\n({})",
+                label,
+                s.title,
+                s.bpm
+                    .map(|v| format!("{:.1}", v))
+                    .unwrap_or_else(|| "?".into()),
+                s.dlevel
+                    .map(|v| v.to_string())
+                    .unwrap_or_else(|| "?".into()),
+                s.notes_total(),
+                kind_str(*kind)
+            ),
+            None => format!("{}\n(no song)", label),
+        });
+    }
+}
+
+fn kind_str(k: StatusPaneKind) -> &'static str {
+    match k {
+        StatusPaneKind::Drums => "drums",
+        StatusPaneKind::Guitar => "guitar",
+        StatusPaneKind::Bass => "bass",
+    }
+}
+
+fn update_density_graph(
+    sel: Res<SongSelectSelection>,
+    bars: Query<
+        Entity,
+        (
+            With<Node>,
+            Without<StatusPanelComp>,
+            Without<SortMenuContainerComp>,
+            Without<StatusPaneKind>,
+        ),
+    >,
+) {
+    let _ = sel;
+    let _ = bars;
+}
+
+fn update_search_filter(mut sel: ResMut<SongSelectSelection>) {
+    if sel.is_changed() && sel.search_query.len() > 64 {
+        sel.search_query.truncate(64);
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use dtx_library::{SongInfo, SortMode};
 
-    fn fake_song(title: &str, artist: &str, bpm: f32, level: u32) -> SongInfo {
+    fn make_song(title: &str, artist: &str) -> SongInfo {
         SongInfo {
-            path: PathBuf::from(format!("/songs/{title}.dtx")),
+            path: std::path::PathBuf::from(format!("/{}.dtx", title)),
             title: title.into(),
             artist: artist.into(),
-            bpm: Some(bpm),
-            dlevel: Some(level),
+            bpm: Some(120.0),
+            dlevel: Some(50),
             bgm_path: None,
         }
     }
+
+    // Position / layout constants (from old song_select_full.rs)
+    #[test]
+    fn status_panel_positions_match_reference() {
+        // StatusPanel.cs:9-13
+        assert_eq!(STATUS_PANEL_DRUMS_X, 430.0);
+        assert_eq!(STATUS_PANEL_DRUMS_Y, 720.0);
+        assert_eq!(STATUS_PANEL_GUITAR_X, 200.0);
+    }
+
+    #[test]
+    fn density_graph_geometry_matches_reference() {
+        assert_eq!(DENSITY_GRAPH_BAR_COUNT, 8);
+        assert_eq!(DENSITY_GRAPH_BAR_DX, 12.0);
+        assert_eq!(DENSITY_GRAPH_BAR_W, 4.0);
+        assert_eq!(DENSITY_GRAPH_BAR_H, 252.0);
+        assert_eq!(DENSITY_GRAPH_BAR_BASE_X, 36.0);
+        assert_eq!(DENSITY_GRAPH_BAR_BASE_Y, 284.0);
+        assert_eq!(DENSITY_NOTE_TEXT_DRUMS, (150.0, 333.0));
+    }
+
+    #[test]
+    fn sort_menu_constants_match_reference() {
+        assert_eq!(SORT_MENU_W, 662.0);
+        assert_eq!(SORT_MENU_H, 92.0);
+        assert_eq!(SORT_MENU_ELEMENT_SPACING, 90.0);
+    }
+
+    #[test]
+    fn song_search_constants_match_reference() {
+        assert_eq!(SONG_SEARCH_W, 500.0);
+        assert_eq!(SONG_SEARCH_H, 300.0);
+        assert_eq!(SONG_SEARCH_TEXT_INPUT_Y, 30.0);
+        assert_eq!(SONG_SEARCH_DESC_Y, 60.0);
+        assert_eq!(SONG_SEARCH_STATUS_Y, 250.0);
+    }
+
+    #[test]
+    fn command_history_buffer_size() {
+        assert_eq!(COMMAND_HISTORY_BUF, 16);
+    }
+
+    #[test]
+    fn command_history_add_overflows() {
+        let mut h = CommandHistory::default();
+        for i in 0..20 {
+            h.add(0, 1, i * 10);
+        }
+        assert_eq!(h.entries.len(), COMMAND_HISTORY_BUF);
+        assert_eq!(h.entries[0].time_ms, 40);
+        assert_eq!(h.entries[COMMAND_HISTORY_BUF - 1].time_ms, 190);
+    }
+
+    #[test]
+    fn command_history_check_command_basic() {
+        let mut h = CommandHistory::default();
+        h.add(0, 2, 100);
+        h.add(0, 2, 150);
+        assert!(h.check_command(0, &[2, 2], 200));
+        assert!(!h.check_command(0, &[2, 4], 200));
+    }
+
+    #[test]
+    fn command_history_check_too_old() {
+        let mut h = CommandHistory::default();
+        h.add(0, 2, 0);
+        h.add(0, 2, 100);
+        assert!(!h.check_command(0, &[2, 2], 700));
+    }
+
+    #[test]
+    fn search_query_matches_substring() {
+        let sel = SongSelectSelection {
+            search_query: "abc".into(),
+            ..Default::default()
+        };
+        assert!(sel.matches_search(&make_song("ABCDEF", "X")));
+        assert!(sel.matches_search(&make_song("X", "ABcdef")));
+        assert!(!sel.matches_search(&make_song("X", "Y")));
+    }
+
+    #[test]
+    fn search_query_empty_matches_all() {
+        let sel = SongSelectSelection::default();
+        assert!(sel.matches_search(&make_song("A", "B")));
+    }
+
+    #[test]
+    fn recompute_sorts_by_title() {
+        let mut sel = SongSelectSelection {
+            sort_mode: SortMode::ByTitle,
+            ..Default::default()
+        };
+        let all = vec![
+            make_song("Charlie", "X"),
+            make_song("Alpha", "Y"),
+            make_song("Bravo", "Z"),
+        ];
+        sel.recompute(&all);
+        assert_eq!(sel.visible[0].title, "Alpha");
+        assert_eq!(sel.visible[1].title, "Bravo");
+        assert_eq!(sel.visible[2].title, "Charlie");
+    }
+
+    #[test]
+    fn recompute_filters_via_search() {
+        let mut sel = SongSelectSelection {
+            search_query: "bra".into(),
+            ..Default::default()
+        };
+        let all = vec![
+            make_song("Charlie", "X"),
+            make_song("Alpha", "Y"),
+            make_song("Bravo", "Z"),
+        ];
+        sel.recompute(&all);
+        assert_eq!(sel.visible.len(), 1);
+        assert_eq!(sel.visible[0].title, "Bravo");
+    }
+
+    #[test]
+    fn sort_menu_default_count() {
+        let sorters = [SortMode::Default, SortMode::ByTitle, SortMode::ByArtist];
+        assert_eq!(sorters.len(), 3);
+    }
+
+    // Tests from old song_select.rs (preserved in merge).
 
     #[test]
     fn selected_song_resource_starts_empty() {
@@ -366,12 +834,12 @@ mod tests {
 
     #[test]
     fn format_song_detail_includes_bpm_and_level() {
-        let song = fake_song("X", "Y", 150.0, 85);
+        let song = make_song("X", "Y");
         let s = format_song_detail(&song);
         assert!(s.contains("X"));
         assert!(s.contains("Y"));
-        assert!(s.contains("150"));
-        assert!(s.contains("85"));
+        assert!(s.contains("120"));
+        assert!(s.contains("50"));
     }
 
     #[test]

@@ -14,7 +14,6 @@ use bevy::prelude::*;
 
 pub mod components;
 pub mod events;
-pub mod guitar_screen_sub_acts;
 pub mod hud;
 pub mod input;
 pub mod judge;
