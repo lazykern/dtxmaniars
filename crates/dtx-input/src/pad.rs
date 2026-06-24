@@ -142,10 +142,14 @@ pub struct KeyAssign {
 /// Input device kind (BocuD `EInputDevice`).
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
 pub enum InputDevice {
+    /// Keyboard (BocuD `EInputDevice.Keyboard`).
     #[default]
     Keyboard,
+    /// MIDI input (BocuD `EInputDevice.MIDI入力`).
     MidiIn,
+    /// Joypad / joystick (BocuD `EInputDevice.Joypad`).
     Joypad,
+    /// Mouse (BocuD `EInputDevice.Mouse`).
     Mouse,
 }
 

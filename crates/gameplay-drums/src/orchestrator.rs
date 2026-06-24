@@ -99,14 +99,14 @@ pub fn plugin(app: &mut App) {
 }
 
 /// On enter: capture chart end time for end-of-stage detection.
-fn on_enter_performance(chart: Res<ActiveChart>, mut completion: ResMut<DrumsStageCompletion>) {
+pub fn on_enter_performance(chart: Res<ActiveChart>, mut completion: ResMut<DrumsStageCompletion>) {
     completion.chart_end_ms = chart_end_ms(&chart.chart);
     completion.end_requested = false;
     completion.gauge_failed = false;
 }
 
 /// On exit: clear completion state for the next stage entry.
-fn on_exit_performance(mut completion: ResMut<DrumsStageCompletion>) {
+pub fn on_exit_performance(mut completion: ResMut<DrumsStageCompletion>) {
     completion.end_requested = false;
     completion.gauge_failed = false;
 }
@@ -147,7 +147,7 @@ pub fn chart_end_ms(chart: &Chart) -> i64 {
 ///
 /// Mirrors the chart-end check in CStagePerfCommonScreen.cs (Presence
 /// property) + the CStage return logic in CStagePerfDrumsScreen.
-fn detect_end_of_stage(
+pub fn detect_end_of_stage(
     clock: Res<AudioClock>,
     mut completion: ResMut<DrumsStageCompletion>,
     _chart: Res<ActiveChart>,

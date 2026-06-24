@@ -70,9 +70,12 @@ pub const GUITAR_SCORE_DIGITS: usize = 7;
 
 /// Guitar combo position (BocuD CActPerfGuitarCombo.cs:6-8).
 pub const GUITAR_COMBO_X: f32 = 560.0;
+/// Guitar combo Y position (BocuD CActPerfGuitarCombo.cs:7).
 pub const GUITAR_COMBO_Y: f32 = 220.0;
 /// Bass combo position (BocuD CActPerfGuitarCombo.cs:16-18).
+/// Bass combo X position (BocuD CActPerfGuitarCombo.cs:16).
 pub const GUITAR_BASS_COMBO_X: f32 = 845.0;
+/// Bass combo Y position (BocuD CActPerfGuitarCombo.cs:17).
 pub const GUITAR_BASS_COMBO_Y: f32 = 220.0;
 
 // === Gauge positions (BocuD CActPerfGuitarGauge.cs:23-25) ===
