@@ -19,6 +19,7 @@ pub mod input;
 pub mod perf_common;
 pub mod perf_common_acts;
 pub mod perf_sub_acts;
+pub mod drums_screen_sub_acts;
 pub mod judge;
 pub mod lane_map;
 pub mod miss;
