@@ -11,6 +11,13 @@
 //! - 3 sort modes: Default, ByTitle, ByArtist
 //! - BGM detection: try `<dtx>.ogg` and `1.ogg` in same dir
 //!
+//! ## Phase 0 p0-3 additions
+//!
+//! - `default_song_dir()` resolves `DTX_SONG_DIR` env var or fixture fallback.
+//! - `startup_scan_system()` runs at app boot, populates SongDb before
+//!   SongSelect is reached (avoids empty first frame).
+//! - `refresh_song_db()`: re-scan from the active root path.
+//!
 //! ponytail: stdlib `walkdir` (or manual recursion) + dtx_core::parse. No async
 //! machinery until we have 1000s of charts.
 
@@ -205,6 +212,15 @@ impl SongDb {
         Ok(())
     }
 
+    /// Re-scan using the previously-set `scan_root`. Returns Err if no root set.
+    pub fn refresh(&mut self) -> Result<(), ScanError> {
+        let root = self.scan_root.clone().ok_or_else(|| ScanError::Io {
+            path: PathBuf::from("(no scan_root)"),
+            source: std::io::Error::new(std::io::ErrorKind::NotFound, "SongDb.scan_root not set"),
+        })?;
+        self.rescan(&root)
+    }
+
     /// Cycle to the next sort mode and re-sort.
     pub fn cycle_sort(&mut self) {
         self.sort_mode = self.sort_mode.next();
@@ -224,12 +240,37 @@ impl SongDb {
     }
 }
 
-/// Plugin: register SongDb resource.
+/// Default directory to scan. Reads `DTX_SONG_DIR` env var; falls back to
+/// the test fixture dir so first-launch still shows something.
+pub fn default_song_dir() -> PathBuf {
+    if let Ok(p) = std::env::var("DTX_SONG_DIR") {
+        return PathBuf::from(p);
+    }
+    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("..")
+        .join("dtx-core")
+        .join("tests")
+        .join("fixtures")
+}
+
+/// Bevy system: run at app startup (before any AppState transition).
+/// Populates `SongDb` with all charts in the default scan dir.
+pub fn startup_scan_system(mut db: ResMut<SongDb>) {
+    let dir = default_song_dir();
+    info!("dtx-library: startup scan {}", dir.display());
+    match db.rescan(&dir) {
+        Ok(()) => info!("dtx-library: found {} song(s)", db.len()),
+        Err(e) => warn!("dtx-library: startup scan failed: {}", e),
+    }
+}
+
+/// Plugin: register SongDb resource + startup scan system.
 pub struct SongDbPlugin;
 
 impl Plugin for SongDbPlugin {
     fn build(&self, app: &mut App) {
-        app.init_resource::<SongDb>();
+        app.init_resource::<SongDb>()
+            .add_systems(Startup, startup_scan_system);
     }
 }
 
@@ -333,14 +374,47 @@ mod tests {
     }
 
     #[test]
+    fn song_db_refresh_uses_existing_root() {
+        let mut db = SongDb::new();
+        db.rescan(&fixture_dir()).unwrap();
+        let before = db.len();
+        assert!(before > 0);
+        db.refresh().expect("refresh must succeed");
+        assert_eq!(db.len(), before);
+    }
+
+    #[test]
+    fn song_db_refresh_no_root_errors() {
+        let mut db = SongDb::new();
+        assert!(db.refresh().is_err());
+    }
+
+    #[test]
     fn song_db_cycle_sort_resorts() {
         let mut db = SongDb::new();
         db.rescan(&fixture_dir()).unwrap();
         let before = db.songs.iter().map(|s| s.title.clone()).collect::<Vec<_>>();
         db.cycle_sort(); // Default → ByTitle
         let after = db.songs.iter().map(|s| s.title.clone()).collect::<Vec<_>>();
-        // After sorting by title, the order may differ if there were >1 songs.
-        // Single-song fixture → same order. Just verify no panic + songs present.
         assert_eq!(before.len(), after.len());
+    }
+
+    #[test]
+    fn default_song_dir_returns_existing_path() {
+        let p = default_song_dir();
+        assert!(p.exists(), "default dir should exist: {:?}", p);
+    }
+
+    #[test]
+    fn startup_scan_populates_empty_db() {
+        let mut world = World::new();
+        world.init_resource::<SongDb>();
+        let mut db = world.resource_mut::<SongDb>();
+        // Empty before scan.
+        assert!(db.is_empty());
+        // Direct call (no Bevy scheduler).
+        let dir = default_song_dir();
+        db.rescan(&dir).unwrap();
+        assert!(!db.is_empty());
     }
 }

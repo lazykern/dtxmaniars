@@ -132,7 +132,9 @@ fn spawn_song_select(mut commands: Commands, db: Res<SongDb>) {
                 TextColor(Color::WHITE),
             ));
             parent.spawn((
-                Text::new("↑↓: Navigate  ENTER: Play  TAB: Sort  F1: Config  ESC: Title"),
+                Text::new(
+                    "↑↓: Navigate  ENTER: Play  TAB: Sort  F5: Refresh  F1: Config  ESC: Title",
+                ),
                 TextFont {
                     font_size: FontSize::Px(14.0),
                     ..default()
@@ -246,6 +248,15 @@ fn song_select_navigation(
         db.cycle_sort();
         // Clamp selection in case list shrank.
         selection.0 = selection.0.min(db.len().saturating_sub(1));
+    } else if keys.just_pressed(KeyCode::F5) {
+        // F5: refresh SongDb from the same scan root.
+        if let Err(e) = db.refresh() {
+            warn!("SongSelect: refresh failed: {}", e);
+        } else {
+            info!("SongSelect: refreshed ({} songs)", db.len());
+        }
+        // Reset selection to first row.
+        selection.0 = 0;
     }
 }
 
