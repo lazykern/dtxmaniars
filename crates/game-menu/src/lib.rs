@@ -32,6 +32,7 @@ pub mod song_select_new_stage;
 pub mod status_panel;
 pub mod density_graph;
 pub mod sort_menu;
+pub mod song_search;
 pub mod config_list;
 pub mod config_list_audio;
 pub mod config_list_audio_driver;
