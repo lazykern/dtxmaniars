@@ -19,6 +19,7 @@
 
 pub mod core_sub_acts;
 pub mod perf_common;
+pub mod skin;
 
 use bevy::asset::Handle;
 use bevy::prelude::*;

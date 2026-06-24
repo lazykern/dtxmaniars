@@ -18,6 +18,10 @@ use std::path::{Path, PathBuf};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
+pub mod key_assign;
+
+pub use key_assign::{KeyAssignPad, KeyAssignPart, KeyAssignTable, STKeyAssign};
+
 /// Top-level persisted configuration. Each BocuD section becomes a sub-struct.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Config {

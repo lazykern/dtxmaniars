@@ -2594,6 +2594,7 @@ dependencies = [
 name = "dtx-config"
 version = "0.0.0"
 dependencies = [
+ "dtx-input",
  "serde",
  "thiserror 1.0.69",
  "toml",
