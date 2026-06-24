@@ -16,6 +16,7 @@ pub mod components;
 pub mod events;
 pub mod hud;
 pub mod input;
+pub mod perf_common;
 pub mod judge;
 pub mod lane_map;
 pub mod miss;
@@ -47,6 +48,7 @@ pub fn plugin(app: &mut App) {
         .add_message::<events::LaneHit>()
         .add_message::<events::JudgmentEvent>()
         .add_message::<events::NoteMissed>()
+        .init_resource::<perf_common::PerformanceStageState>()
         .add_plugins((
             input::plugin,
             scroll::plugin,
