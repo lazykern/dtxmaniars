@@ -24,10 +24,11 @@ jobs:
         # build time via pkg-config on linux. ubuntu-latest runners ship
         # none of these by default. List covers window + audio + input.
         # Adding one here is cheaper than chasing each failure piecemeal.
-        run: sudo apt-get update && sudo apt-get install -y \
-              libwayland-dev libxkbcommon-dev libx11-dev \
-              libasound2-dev \
-              libudev-dev
+        # NOTE: keep the entire apt-get command on ONE shell line. YAML
+        # line-folding + backslash continuation has bitten us before — the
+        # backslash was passed through literally and apt saw a single
+        # malformed package name. One line = one shell argv = no surprises.
+        run: sudo apt-get update && sudo apt-get install -y libwayland-dev libxkbcommon-dev libx11-dev libasound2-dev libudev-dev
 
       - name: Cache cargo
         uses: Swatinem/rust-cache@v2
