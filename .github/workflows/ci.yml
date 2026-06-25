@@ -20,9 +20,14 @@ jobs:
           components: rustfmt, clippy
 
       - name: Install system deps
-        # bevy pulls in wayland-sys on linux; its build.rs pkg-config probes
-        # for libwayland-dev. CI runners don't have it by default.
-        run: sudo apt-get update && sudo apt-get install -y libwayland-dev libxkbcommon-dev
+        # bevy + bevy_kira_audio + bevy_audio probe several native libs at
+        # build time via pkg-config on linux. ubuntu-latest runners ship
+        # none of these by default. List covers window + audio + input.
+        # Adding one here is cheaper than chasing each failure piecemeal.
+        run: sudo apt-get update && sudo apt-get install -y \
+              libwayland-dev libxkbcommon-dev libx11-dev \
+              libasound2-dev \
+              libudev-dev
 
       - name: Cache cargo
         uses: Swatinem/rust-cache@v2
