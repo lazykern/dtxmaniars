@@ -19,6 +19,11 @@ jobs:
         with:
           components: rustfmt, clippy
 
+      - name: Install system deps
+        # bevy pulls in wayland-sys on linux; its build.rs pkg-config probes
+        # for libwayland-dev. CI runners don't have it by default.
+        run: sudo apt-get update && sudo apt-get install -y libwayland-dev libxkbcommon-dev
+
       - name: Cache cargo
         uses: Swatinem/rust-cache@v2
 
