@@ -251,16 +251,9 @@ pub fn plugin(app: &mut App) {
 // ===== M5: song list logic (OnEnter/OnExit) =====
 
 /// Default song directory to scan when SongDb is empty.
-/// Override via `DTX_SONG_DIR` env var.
+/// Delegates to `dtx_library::default_song_dir` (XDG-aware, env-overridable).
 fn default_song_dir() -> PathBuf {
-    if let Ok(p) = std::env::var("DTX_SONG_DIR") {
-        return PathBuf::from(p);
-    }
-    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("..")
-        .join("dtx-core")
-        .join("tests")
-        .join("fixtures")
+    dtx_library::default_song_dir()
 }
 
 /// On entering SongSelect, scan the default dir if SongDb is empty.

@@ -14,6 +14,7 @@ use bevy::prelude::*;
 pub mod components;
 pub mod events;
 pub mod guitar_perf;
+pub mod hud;
 pub mod input;
 pub mod judge;
 pub mod lane_map;
@@ -37,7 +38,13 @@ pub fn plugin(app: &mut App) {
         .add_message::<events::LaneHit>()
         .add_message::<events::JudgmentEvent>()
         .add_message::<events::NoteMissed>()
-        .add_plugins((input::plugin, judge::plugin, score::plugin, scroll::plugin));
+        .add_plugins((
+            input::plugin,
+            judge::plugin,
+            score::plugin,
+            scroll::plugin,
+            hud::plugin,
+        ));
 }
 
 /// Re-export as struct form for callers that prefer `add_plugins(...)` syntax.

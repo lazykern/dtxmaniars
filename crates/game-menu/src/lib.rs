@@ -12,6 +12,7 @@ pub mod config_key_assign;
 pub mod song_loading;
 pub mod song_select;
 pub mod startup;
+pub mod title;
 
 pub use song_select::SelectedSong;
 
@@ -22,6 +23,7 @@ impl Plugin for GameMenuPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<SelectedSong>().add_plugins((
             startup::plugin,
+            title::plugin,
             song_select::plugin,
             config::plugin,
             config_key_assign::plugin,

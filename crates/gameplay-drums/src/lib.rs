@@ -18,6 +18,7 @@ pub mod components;
 pub mod damage_level;
 pub mod drums_perf;
 pub mod events;
+pub mod hud;
 pub mod input;
 pub mod judge;
 pub mod lane_map;
@@ -49,6 +50,7 @@ pub fn plugin(app: &mut App) {
             judge::plugin,
             score::plugin,
             miss::plugin,
+            hud::plugin,
             autoplay::plugin,
             midi_consumer::plugin,
         ));

@@ -32,9 +32,25 @@ fn main() {
         .add_plugins(GuitarPlugin)
         .init_resource::<EGameMode>()
         .init_resource::<ScoreStoreResource>()
-        .add_systems(Startup, (load_score_store, load_config_summary, log_boot))
+        .add_systems(
+            Startup,
+            (
+                load_score_store,
+                load_config_summary,
+                log_boot,
+                spawn_ui_camera,
+            ),
+        )
         .add_systems(Update, log_state_transitions)
         .run();
+}
+
+/// Spawn the UI camera required for Bevy UI rendering.
+///
+/// Without Camera2d, UI Nodes/Text spawn but never render — the window
+/// stays blank. Camera2d is the default 2D camera used by Node/Text bundles.
+fn spawn_ui_camera(mut commands: Commands) {
+    commands.spawn(Camera2d);
 }
 
 /// Load persisted scores from disk on startup. M6a.
