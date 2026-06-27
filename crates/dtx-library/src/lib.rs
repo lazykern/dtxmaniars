@@ -242,9 +242,13 @@ impl SongDb {
 
 /// Default directory to scan. Priority:
 /// 1. `DTX_SONG_DIR` env var (explicit override)
-/// 2. `$XDG_CONFIG_HOME/dtxmaniars/charts/` (XDG)
-/// 3. `$HOME/.config/dtxmaniars/charts/` (XDG fallback)
+/// 2. `$XDG_CONFIG_HOME/dtxmaniars/` (XDG) — standard DTXMania layout
+/// 3. `$HOME/.config/dtxmaniars/` (XDG fallback)
 /// 4. Bundled test fixtures (dev/headless fallback)
+///
+/// The XDG path is the standard DTXMania layout: each song gets its own
+/// subfolder under the root (e.g. `~/.config/dtxmaniars/Song A/bsc.dtx`).
+/// The scanner recurses, so this single root finds everything.
 ///
 /// Returns the path. Does NOT create it — callers should `create_dir_all`
 /// if they want to ensure the dir exists.
@@ -252,7 +256,7 @@ pub fn default_song_dir() -> PathBuf {
     if let Ok(p) = std::env::var("DTX_SONG_DIR") {
         return PathBuf::from(p);
     }
-    if let Some(dir) = user_charts_dir() {
+    if let Some(dir) = user_data_dir() {
         return dir;
     }
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -262,33 +266,31 @@ pub fn default_song_dir() -> PathBuf {
         .join("fixtures")
 }
 
-/// XDG-style user charts directory: `$XDG_CONFIG_HOME/dtxmaniars/charts/`
-/// or `$HOME/.config/dtxmaniars/charts/`. Returns `None` if neither env var
-/// is set (e.g. exotic environments without HOME).
-pub fn user_charts_dir() -> Option<PathBuf> {
-    charts_dir_from(
+/// XDG-style user data directory: `$XDG_CONFIG_HOME/dtxmaniars/` or
+/// `$HOME/.config/dtxmaniars/`. Returns `None` if neither env var is set
+/// (e.g. exotic environments without HOME).
+pub fn user_data_dir() -> Option<PathBuf> {
+    data_dir_from(
         std::env::var_os("XDG_CONFIG_HOME"),
         std::env::var_os("HOME"),
     )
 }
 
-/// Compute the user charts dir from explicit env var values (testable
+/// Compute the user data dir from explicit env var values (testable
 /// without unsafe env mutation).
-fn charts_dir_from(
+fn data_dir_from(
     xdg: Option<std::ffi::OsString>,
     home: Option<std::ffi::OsString>,
 ) -> Option<PathBuf> {
     if let Some(xdg) = xdg {
         let mut p = PathBuf::from(xdg);
         p.push("dtxmaniars");
-        p.push("charts");
         return Some(p);
     }
     if let Some(home) = home {
         let mut p = PathBuf::from(home);
         p.push(".config");
         p.push("dtxmaniars");
-        p.push("charts");
         return Some(p);
     }
     None
@@ -455,33 +457,33 @@ mod tests {
     }
 
     #[test]
-    fn charts_dir_from_xdg_takes_priority() {
+    fn data_dir_from_xdg_takes_priority() {
         let xdg = std::ffi::OsString::from("/tmp/xdg_test");
         let home = std::ffi::OsString::from("/tmp/fakehome");
-        let p = charts_dir_from(Some(xdg), Some(home)).expect("should resolve");
-        assert_eq!(p, PathBuf::from("/tmp/xdg_test/dtxmaniars/charts"));
+        let p = data_dir_from(Some(xdg), Some(home)).expect("should resolve");
+        assert_eq!(p, PathBuf::from("/tmp/xdg_test/dtxmaniars"));
     }
 
     #[test]
-    fn charts_dir_from_falls_back_to_home() {
+    fn data_dir_from_falls_back_to_home() {
         let home = std::ffi::OsString::from("/tmp/fakehome");
-        let p = charts_dir_from(None, Some(home)).expect("should resolve via HOME");
-        assert_eq!(p, PathBuf::from("/tmp/fakehome/.config/dtxmaniars/charts"));
+        let p = data_dir_from(None, Some(home)).expect("should resolve via HOME");
+        assert_eq!(p, PathBuf::from("/tmp/fakehome/.config/dtxmaniars"));
     }
 
     #[test]
-    fn charts_dir_from_none_without_either() {
-        let p = charts_dir_from(None, None);
+    fn data_dir_from_none_without_either() {
+        let p = data_dir_from(None, None);
         assert_eq!(p, None);
     }
 
     #[test]
-    fn user_charts_dir_returns_current_path() {
+    fn user_data_dir_returns_current_path() {
         // No env manipulation — just verify the function returns *some*
         // valid PathBuf given the current process env.
         if std::env::var_os("XDG_CONFIG_HOME").is_some() || std::env::var_os("HOME").is_some() {
-            let p = user_charts_dir().expect("should resolve on a normal system");
-            assert!(p.ends_with("dtxmaniars/charts"));
+            let p = user_data_dir().expect("should resolve on a normal system");
+            assert!(p.ends_with("dtxmaniars"));
         }
     }
 

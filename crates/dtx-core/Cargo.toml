@@ -13,6 +13,7 @@ unsafe_code = "forbid"
 [dependencies]
 thiserror = "2"
 dtx-timing = { workspace = true }
+encoding_rs = "0.8"
 
 [dev-dependencies]
 dtx-scoring = { workspace = true }

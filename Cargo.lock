@@ -2608,6 +2608,7 @@ version = "0.0.0"
 dependencies = [
  "dtx-scoring",
  "dtx-timing",
+ "encoding_rs",
  "thiserror 2.0.18",
 ]
 
