@@ -11,8 +11,10 @@
 
 use std::io::Read;
 
+use crate::base36;
 use crate::channel::EChannel;
-use crate::chart::{Chart, Chip, Metadata};
+use crate::chart::{Chart, Chip, EmptyHitEvent, Metadata};
+use crate::chip_classify::{is_bad_note_byte, nosound_byte_to_lane};
 use crate::error::{DtxError, Result};
 
 /// Parse a DTX stream.
@@ -54,12 +56,10 @@ fn process_line(line: &str, line_no: usize, chart: &mut Chart) -> Result<()> {
     }
 
     let Some(body) = trimmed.strip_prefix('#') else {
-        // Non-command line — silently ignore (some DTX files have stray text).
         return Ok(());
     };
 
     let Some((head, value)) = body.split_once(':') else {
-        // `#START` / `#END` markers have no value.
         return Ok(());
     };
     let head = head.trim();
@@ -70,8 +70,31 @@ fn process_line(line: &str, line_no: usize, chart: &mut Chart) -> Result<()> {
         return Ok(());
     }
 
-    parse_chip_line(head, value, line_no, &mut chart.chips)?;
+    if chart.assets.process_line(trimmed) {
+        return Ok(());
+    }
+
+    if head.eq_ignore_ascii_case("BGMWAV") {
+        let param = strip_dtx_param(value);
+        if let Some(slot) = base36::parse_id_suffix(param) {
+            chart.metadata.bgm_wav_slots.push(slot);
+        }
+        return Ok(());
+    }
+
+    parse_chip_line(
+        head,
+        value,
+        line_no,
+        &mut chart.chips,
+        &mut chart.empty_hit_events,
+    )?;
     Ok(())
+}
+
+/// Strip trailing DTX inline comment / tab-separated annotation.
+fn strip_dtx_param(s: &str) -> &str {
+    s.split([';', '\t']).next().unwrap_or(s).trim()
 }
 
 enum MetadataField {
@@ -155,7 +178,13 @@ fn apply_metadata(
 /// DTX files contain many other commands (WAV, VOLUME, PAN, BMP, AVI defs)
 /// that share the `#XXXX:` prefix shape. We silently skip those rather
 /// than erroring out — they're definitions we don't model yet.
-fn parse_chip_line(head: &str, value: &str, line_no: usize, chips: &mut Vec<Chip>) -> Result<()> {
+fn parse_chip_line(
+    head: &str,
+    value: &str,
+    line_no: usize,
+    chips: &mut Vec<Chip>,
+    empty_hits: &mut Vec<EmptyHitEvent>,
+) -> Result<()> {
     if head.len() != 5 {
         // Other commands like `#WAV01:`, `#VOLUME02:`, `#PAN03:` are not chip lines.
         // Silently skip.
@@ -179,22 +208,23 @@ fn parse_chip_line(head: &str, value: &str, line_no: usize, chips: &mut Vec<Chip
         let _ = value;
         return Ok(());
     };
+
+    // NoChip templates (0xB1–0xBE): empty-hit sound definitions.
+    if is_bad_note_byte(channel_byte) {
+        let Some(lane) = nosound_byte_to_lane(channel_byte) else {
+            return Ok(());
+        };
+        push_empty_hit_events(measure, lane, value, empty_hits);
+        return Ok(());
+    }
+
     let Some(channel) = EChannel::from_byte(channel_byte) else {
         // Unknown channel: skip silently. DTX files have many extension channels
         // we don't care about yet (e.g. SE06+, BGA layers).
         return Ok(());
     };
 
-    // For BGM channel, value is a WAV filename (no per-chip encoding yet).
-    if channel == EChannel::BGM {
-        // Future: store BGM chip with filename as value. For M0, just emit a
-        // marker chip so callers know the file references a BGM.
-        chips.push(Chip::new(measure, channel, 0.0));
-        return Ok(());
-    }
-
     // For BarLength / BPM / BPMEx: value is a number (BarLength) or base64 (BPM).
-    // We don't decode base64 in v1; store the raw value as f32 (best-effort).
     if matches!(
         channel,
         EChannel::BarLength | EChannel::BPM | EChannel::BPMEx
@@ -225,28 +255,121 @@ fn parse_chip_line(head: &str, value: &str, line_no: usize, chips: &mut Vec<Chip
         return Ok(());
     }
 
-    // Chip data: each char represents a position in the measure.
-    //   '0' = nothing
-    //   '1' = chip (hit window)
-    //   '2' = chip + strong (doublescore)
-    //   'W' = chip + weak (half score, autoplay indicator)
-    //   'X' = chip + extra (counts as bad note if hit)
-    //   '5' (and other non-zero) = chip variant (DTX extensions)
-    //
-    // Real-world DTX files use many non-standard chars (e.g. '5' for strong,
-    // 'A'-'F' for variants). We treat any non-'0' char as a chip; variant
-    // info isn't preserved yet.
-    let total = value.chars().count();
-    if total == 0 {
+    // Chip data: pairs of hex digits (standard) or one char per slot (legacy).
+    let data = strip_dtx_param(value).replace(' ', "");
+    if data.is_empty() {
         return Ok(());
     }
-    for (i, ch) in value.chars().enumerate() {
-        if ch != '0' {
-            let fraction = i as f32 / total as f32;
-            chips.push(Chip::new(measure, channel, fraction));
+
+    if is_binary_only(&data) {
+        push_single_char_chips(measure, channel, &data, chips);
+        return Ok(());
+    }
+
+    if data.len() % 2 == 0 {
+        let mut hex_chips = Vec::new();
+        let num_slots = data.len() / 2;
+        for i in 0..num_slots {
+            let pair = &data[i * 2..i * 2 + 2];
+            if pair == "00" {
+                continue;
+            }
+            if let Some(wav_id) = base36::parse_2digit(&data, i * 2) {
+                if wav_id == 0 {
+                    continue;
+                }
+                let fraction = i as f32 / num_slots as f32;
+                hex_chips.push(Chip::with_wav(measure, channel, fraction, wav_id));
+            }
+        }
+        if !hex_chips.is_empty() {
+            chips.extend(hex_chips);
+            return Ok(());
         }
     }
+
+    push_single_char_chips(measure, channel, &data, chips);
     Ok(())
+}
+
+fn push_empty_hit_events(measure: u32, lane: u8, value: &str, empty_hits: &mut Vec<EmptyHitEvent>) {
+    let data = strip_dtx_param(value).replace(' ', "");
+    if data.is_empty() {
+        return;
+    }
+
+    if data.len() % 2 == 0 && !is_binary_only(&data) {
+        let num_slots = data.len() / 2;
+        for i in 0..num_slots {
+            let pair = &data[i * 2..i * 2 + 2];
+            if pair == "00" {
+                continue;
+            }
+            if let Some(wav_id) = base36::parse_2digit(&data, i * 2) {
+                if wav_id == 0 {
+                    continue;
+                }
+                let fraction = i as f32 / num_slots as f32;
+                empty_hits.push(EmptyHitEvent {
+                    lane,
+                    measure,
+                    value: fraction,
+                    wav_slot: wav_id,
+                });
+            }
+        }
+        return;
+    }
+
+    let total = data.chars().count();
+    if total == 0 {
+        return;
+    }
+    for (i, ch) in data.chars().enumerate() {
+        if ch == '0' {
+            continue;
+        }
+        let fraction = i as f32 / total as f32;
+        let wav_slot = char_to_wav_slot(ch);
+        if wav_slot == 0 {
+            continue;
+        }
+        empty_hits.push(EmptyHitEvent {
+            lane,
+            measure,
+            value: fraction,
+            wav_slot,
+        });
+    }
+}
+
+fn push_single_char_chips(measure: u32, channel: EChannel, data: &str, chips: &mut Vec<Chip>) {
+    let total = data.chars().count();
+    if total == 0 {
+        return;
+    }
+    for (i, ch) in data.chars().enumerate() {
+        if ch == '0' {
+            continue;
+        }
+        let fraction = i as f32 / total as f32;
+        let wav_slot = char_to_wav_slot(ch);
+        chips.push(Chip::with_wav(measure, channel, fraction, wav_slot));
+    }
+}
+
+fn char_to_wav_slot(ch: char) -> u32 {
+    match ch {
+        '1'..='9' => (ch as u32) - ('0' as u32),
+        'A'..='F' | 'a'..='f' => u32::from_str_radix(&ch.to_string(), 16).unwrap_or(0),
+        _ => 0,
+    }
+}
+
+/// Returns true if the data string only contains '0' and '1' characters,
+/// indicating a binary-format chip line rather than hex-pair format.
+fn is_binary_only(data: &str) -> bool {
+    data.chars().all(|c| c == '0' || c == '1')
 }
 
 #[cfg(test)]
@@ -308,8 +431,19 @@ mod tests {
     }
 
     #[test]
+    fn parses_nochip_empty_hit_events() {
+        let input = "#000B1: 01\n#000B2: 0200\n";
+        let chart = parse(Cursor::new(input)).unwrap();
+        assert_eq!(chart.chips.len(), 0);
+        assert_eq!(chart.empty_hit_events.len(), 2);
+        assert_eq!(chart.empty_hit_events[0].lane, 0);
+        assert_eq!(chart.empty_hit_events[0].wav_slot, 1);
+        assert_eq!(chart.empty_hit_events[1].lane, 1);
+        assert_eq!(chart.empty_hit_events[1].wav_slot, 2);
+    }
+
+    #[test]
     fn skips_wav_volume_pan_definitions() {
-        // These look like chip lines but aren't — they're sound/image defs.
         let input = "\
 #WAV01: kick.ogg
 #VOLUME01: 80
@@ -319,19 +453,32 @@ mod tests {
 #00011: 1
 ";
         let chart = parse(Cursor::new(input)).unwrap();
-        // Only the #00011 chip should be parsed; the rest are defs.
         assert_eq!(chart.chips.len(), 1);
         assert_eq!(chart.chips[0].channel, crate::channel::EChannel::HiHatClose);
+        assert_eq!(chart.assets.wav.get(1), Some("kick.ogg"));
+        assert_eq!(chart.assets.wav.volume(1), 80);
+        assert_eq!(chart.assets.wav.pan(1), -10);
+        assert_eq!(chart.assets.bmp.get(1), Some("bg.bmp"));
     }
 
     #[test]
-    fn parses_chip_data_with_non_binary_chars() {
-        // '1' normal, '2' strong, '5' strong (DTX ext), 'W' weak, 'X' extra,
-        // 'A' variant. All non-zero chars produce a chip; only '0' is empty.
-        let input = "#00011: 125WXA\n";
+    fn parses_hex_pair_chip_data() {
+        // Hex pair format: "01000200" → WAV #01 at pos 0/4, WAV #02 at pos 2/4.
+        let input = "#00011: 01000200\n";
         let chart = parse(Cursor::new(input)).unwrap();
-        // 6 non-zero chars → 6 chips, one per position.
-        assert_eq!(chart.chips.len(), 6);
+        assert_eq!(chart.chips.len(), 2);
+        assert_eq!(chart.chips[0].wav_slot, 0x01);
+        assert!((chart.chips[0].value - 0.0).abs() < 0.01);
+        assert_eq!(chart.chips[1].wav_slot, 0x02);
+        assert!((chart.chips[1].value - 0.5).abs() < 0.01);
+    }
+
+    #[test]
+    fn parses_binary_chip_data() {
+        // Binary format: only '0' and '1' chars, treated as single-char mode.
+        let input = "#00011: 10110000\n";
+        let chart = parse(Cursor::new(input)).unwrap();
+        assert_eq!(chart.chips.len(), 3);
         for chip in &chart.chips {
             assert_eq!(chip.channel, crate::channel::EChannel::HiHatClose);
         }
@@ -343,6 +490,21 @@ mod tests {
         let input = "#00011: 0100010\n";
         let chart = parse(Cursor::new(input)).unwrap();
         assert_eq!(chart.chips.len(), 2);
+    }
+
+    #[test]
+    fn parses_bgmwav_directive() {
+        let input = "#BGMWAV: 0X\n#WAV0X: bgm_d.ogg\n";
+        let chart = parse(Cursor::new(input)).unwrap();
+        assert_eq!(chart.metadata.bgm_wav_slots, vec![33]);
+        assert_eq!(chart.assets.wav.get(33), Some("bgm_d.ogg"));
+    }
+
+    #[test]
+    fn single_char_extended_chip_data() {
+        let input = "#00061: 0W0W0W0W\n";
+        let chart = parse(Cursor::new(input)).unwrap();
+        assert_eq!(chart.chips.len(), 4);
     }
 
     #[test]

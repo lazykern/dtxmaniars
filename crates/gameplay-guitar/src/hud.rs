@@ -7,7 +7,7 @@
 #![allow(missing_docs)]
 
 use bevy::prelude::*;
-use game_shell::AppState;
+use game_shell::{AppState, EGameMode};
 
 use crate::resources::{Combo, JudgmentCounts, Score};
 
@@ -70,7 +70,10 @@ fn lane_label(lane: u8) -> &'static str {
     }
 }
 
-fn spawn_hud(mut commands: Commands) {
+fn spawn_hud(mut commands: Commands, mode: Res<EGameMode>) {
+    if *mode != EGameMode::Guitar {
+        return;
+    }
     commands
         .spawn((
             HudRoot,

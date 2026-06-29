@@ -12,6 +12,8 @@
 
 use std::collections::HashMap;
 
+use crate::base36;
+
 /// WAV asset registry (BocuD `listWAV`).
 ///
 /// Maps WAV #id (1..256, encoded as hex 0x01..0xFF in chip channels) →
@@ -22,6 +24,10 @@ pub struct WavRegistry {
     pub by_id: HashMap<u32, String>,
     /// Insertion order (BocuD preserves order in `listWAV`).
     pub order: Vec<u32>,
+    /// Per-WAV volume 0..100 (default 100). From `#VOLUME` / `#WAVVOL`.
+    pub volumes: HashMap<u32, i32>,
+    /// Per-WAV pan -100..100 (default 0). From `#PAN` / `#WAVPAN`.
+    pub pans: HashMap<u32, i32>,
 }
 
 impl WavRegistry {
@@ -41,6 +47,16 @@ impl WavRegistry {
     /// Get filename by id.
     pub fn get(&self, id: u32) -> Option<&str> {
         self.by_id.get(&id).map(String::as_str)
+    }
+
+    /// Volume for a WAV id (0..100). Default 100.
+    pub fn volume(&self, id: u32) -> i32 {
+        self.volumes.get(&id).copied().unwrap_or(100)
+    }
+
+    /// Pan for a WAV id (-100..100). Default 0.
+    pub fn pan(&self, id: u32) -> i32 {
+        self.pans.get(&id).copied().unwrap_or(0)
     }
 
     /// Total registered WAVs.
@@ -171,6 +187,39 @@ impl BgaRegistry {
     }
 }
 
+/// Parse `#VOLUME01:` / `#WAVVOL01:` line. Returns (id, volume 0..100) or None.
+pub fn parse_volume_directive(line: &str) -> Option<(u32, i32)> {
+    parse_wav_id_directive(line, &["VOLUME", "WAVVOL"]).and_then(|(id, value)| {
+        let v: i32 = value.parse().ok()?;
+        Some((id, v.clamp(0, 100)))
+    })
+}
+
+/// Parse `#PAN01:` / `#WAVPAN01:` line. Returns (id, pan -100..100) or None.
+pub fn parse_pan_directive(line: &str) -> Option<(u32, i32)> {
+    parse_wav_id_directive(line, &["PAN", "WAVPAN"]).and_then(|(id, value)| {
+        let v: i32 = value.trim().parse().ok()?;
+        Some((id, v.clamp(-100, 100)))
+    })
+}
+
+fn parse_wav_id_directive(line: &str, prefixes: &[&str]) -> Option<(u32, String)> {
+    let body = line.trim().strip_prefix('#')?;
+    let (head, value) = body.split_once(':')?;
+    let head = head.trim();
+    let upper = head.to_ascii_uppercase();
+    for prefix in prefixes {
+        if let Some(suffix) = upper.strip_prefix(prefix) {
+            if suffix.is_empty() || suffix.len() > 2 {
+                continue;
+            }
+            let id = base36::parse_id_suffix(suffix)?;
+            return Some((id, value.trim().to_string()));
+        }
+    }
+    None
+}
+
 /// Parse `#WAVxx: <filename>` line. Returns (id, filename) or None.
 pub fn parse_wav_directive(line: &str) -> Option<(u32, String)> {
     let body = line.trim().strip_prefix('#')?;
@@ -181,8 +230,13 @@ pub fn parse_wav_directive(line: &str) -> Option<(u32, String)> {
     if suffix.is_empty() || suffix.len() > 2 {
         return None;
     }
-    let id = u32::from_str_radix(suffix, 16).ok()?;
-    Some((id, value.trim().to_string()))
+    let id = base36::parse_id_suffix(suffix)?;
+    let filename = strip_dtx_param(value);
+    Some((id, filename.to_string()))
+}
+
+fn strip_dtx_param(s: &str) -> &str {
+    s.split([';', '\t']).next().unwrap_or(s).trim()
 }
 
 /// Parse `#BMPxx: <filename>` line. Returns (id, filename) or None.
@@ -195,7 +249,7 @@ pub fn parse_bmp_directive(line: &str) -> Option<(u32, String)> {
     if suffix.is_empty() || suffix.len() > 2 {
         return None;
     }
-    let id = u32::from_str_radix(suffix, 16).ok()?;
+    let id = base36::parse_id_suffix(suffix)?;
     Some((id, value.trim().to_string()))
 }
 
@@ -209,7 +263,7 @@ pub fn parse_avi_directive(line: &str) -> Option<(u32, String)> {
     if suffix.is_empty() || suffix.len() > 2 {
         return None;
     }
-    let id = u32::from_str_radix(suffix, 16).ok()?;
+    let id = base36::parse_id_suffix(suffix)?;
     Some((id, value.trim().to_string()))
 }
 
@@ -220,13 +274,13 @@ pub fn parse_bga_directive(line: &str) -> Option<(u32, String)> {
     let head = head.trim();
     let upper = head.to_ascii_uppercase();
     if let Some(suffix) = upper.strip_prefix("BGAPAN") {
-        let id = u32::from_str_radix(suffix, 16).ok()?;
+        let id = base36::parse_id_suffix(suffix)?;
         Some((id, value.trim().to_string()))
     } else if let Some(suffix) = upper.strip_prefix("BGA") {
         if suffix.is_empty() || suffix.len() > 2 {
             return None;
         }
-        let id = u32::from_str_radix(suffix, 16).ok()?;
+        let id = base36::parse_id_suffix(suffix)?;
         Some((id, value.trim().to_string()))
     } else {
         None
@@ -243,7 +297,7 @@ pub fn parse_bpm_directive(line: &str) -> Option<(u32, f32)> {
     if suffix.is_empty() || suffix.len() > 2 {
         return None;
     }
-    let id = u32::from_str_radix(suffix, 16).ok()?;
+    let id = base36::parse_id_suffix(suffix)?;
     let v: f32 = value.trim().parse().ok()?;
     Some((id, v))
 }
@@ -272,6 +326,14 @@ impl DtxAssets {
     pub fn process_line(&mut self, line: &str) -> bool {
         if let Some((id, filename)) = parse_wav_directive(line) {
             self.wav.insert(id, filename);
+            return true;
+        }
+        if let Some((id, vol)) = parse_volume_directive(line) {
+            self.wav.volumes.insert(id, vol);
+            return true;
+        }
+        if let Some((id, pan)) = parse_pan_directive(line) {
+            self.wav.pans.insert(id, pan);
             return true;
         }
         if let Some((id, filename)) = parse_bmp_directive(line) {
@@ -306,6 +368,61 @@ impl DtxAssets {
     }
 }
 
+/// Resolve the BGM audio file for a chart.
+///
+/// Priority (BocuD / real-world DTX conventions):
+/// 1. `#BGMWAV:` slot → `#WAVxx:` filename in the same folder
+/// 2. Common drum filenames (`drums.ogg`, `bgm_d.ogg`, …)
+/// 3. `#PREVIEW:` file
+/// 4. `<dtx_stem>.ogg` / `1.ogg` legacy heuristic
+pub fn resolve_bgm_path(
+    dtx_path: &std::path::Path,
+    chart: &crate::chart::Chart,
+) -> Option<std::path::PathBuf> {
+    let parent = dtx_path.parent()?;
+
+    for &slot in &chart.metadata.bgm_wav_slots {
+        if let Some(name) = chart.assets.wav.get(slot) {
+            let p = parent.join(name);
+            if p.is_file() {
+                return Some(p);
+            }
+        }
+    }
+
+    for name in [
+        "drums.ogg",
+        "bgm_d.ogg",
+        "bgm.ogg",
+        "1.ogg",
+        "drums.wav",
+        "bgm.wav",
+        "1.wav",
+    ] {
+        let p = parent.join(name);
+        if p.is_file() {
+            return Some(p);
+        }
+    }
+
+    if let Some(preview) = chart.metadata.preview_filename.as_deref() {
+        let p = parent.join(preview);
+        if p.is_file() {
+            return Some(p);
+        }
+    }
+
+    let stem = dtx_path.file_stem()?.to_str()?;
+    for ext in &["ogg", "wav"] {
+        let p = parent.join(format!("{stem}.{ext}"));
+        if p.is_file() {
+            return Some(p);
+        }
+    }
+
+    None
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -322,14 +439,14 @@ mod tests {
     #[test]
     fn parse_wav_lowercase() {
         let (id, name) = parse_wav_directive("#wav0a: bar.ogg").unwrap();
-        assert_eq!(id, 0x0a);
+        assert_eq!(id, 10);
         assert_eq!(name, "bar.ogg");
     }
 
     #[test]
     fn parse_wav_with_whitespace() {
         let (id, name) = parse_wav_directive("  #WAVFF:   baz.wav  ").unwrap();
-        assert_eq!(id, 0xff);
+        assert_eq!(id, 555); // base36 "FF" = 15*36+15
         assert_eq!(name, "baz.wav");
     }
 

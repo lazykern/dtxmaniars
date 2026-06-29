@@ -191,6 +191,7 @@ mod tests {
             measure,
             channel,
             value: 1.0,
+            wav_slot: 0,
         }
     }
 

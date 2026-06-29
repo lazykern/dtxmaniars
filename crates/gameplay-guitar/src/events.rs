@@ -58,6 +58,8 @@ pub struct JudgmentEvent {
     pub kind: dtx_scoring::JudgmentKind,
     /// Signed delta from target (ms). 0 = perfect.
     pub delta_ms: i32,
+    /// Index into `ActiveChart.chart.chips` for the chip that was judged.
+    pub chip_idx: usize,
 }
 
 /// Emitted by the miss detector when a chip is past the judgment window.

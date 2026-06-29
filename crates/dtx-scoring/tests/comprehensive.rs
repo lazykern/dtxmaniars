@@ -10,34 +10,45 @@ fn classify_zero_is_perfect() {
 #[test]
 fn classify_small_positive_is_perfect() {
     assert_eq!(classify(10), JudgmentKind::Perfect);
-    assert_eq!(classify(16), JudgmentKind::Perfect);
+    assert_eq!(classify(34), JudgmentKind::Perfect);
 }
 
 #[test]
 fn classify_at_perfect_boundary_is_great() {
-    assert_eq!(classify(17), JudgmentKind::Great);
+    assert_eq!(classify(35), JudgmentKind::Great);
 }
 
 #[test]
 fn classify_at_great_boundary_is_good() {
-    assert_eq!(classify(33), JudgmentKind::Good);
+    assert_eq!(classify(68), JudgmentKind::Good);
 }
 
 #[test]
 fn classify_at_good_boundary_is_ok() {
-    assert_eq!(classify(65), JudgmentKind::Ok);
+    assert_eq!(classify(85), JudgmentKind::Poor);
 }
 
 #[test]
 fn classify_at_ok_boundary_is_miss() {
-    assert_eq!(classify(129), JudgmentKind::Miss);
-    assert_eq!(classify(200), JudgmentKind::Miss);
+    assert_eq!(classify(118), JudgmentKind::Miss);
 }
 
 #[test]
 fn classify_negative_is_miss() {
     assert_eq!(classify(-1000), JudgmentKind::Miss);
-    assert_eq!(classify(-100), JudgmentKind::Ok);
+    assert_eq!(classify(-117), JudgmentKind::Poor);
+}
+
+#[test]
+fn classify_matches_bocud_default_hit_ranges() {
+    assert_eq!(classify(34), JudgmentKind::Perfect);
+    assert_eq!(classify(35), JudgmentKind::Great);
+    assert_eq!(classify(67), JudgmentKind::Great);
+    assert_eq!(classify(68), JudgmentKind::Good);
+    assert_eq!(classify(84), JudgmentKind::Good);
+    assert_eq!(classify(85), JudgmentKind::Poor);
+    assert_eq!(classify(117), JudgmentKind::Poor);
+    assert_eq!(classify(118), JudgmentKind::Miss);
 }
 
 #[test]
@@ -70,5 +81,5 @@ fn rank_equality_and_ordering() {
 #[test]
 fn classify_symmetric_around_zero() {
     assert_eq!(classify(-1000), JudgmentKind::Miss);
-    assert_eq!(classify(17), JudgmentKind::Great);
+    assert_eq!(classify(35), JudgmentKind::Great);
 }

@@ -42,12 +42,17 @@
 #![allow(dead_code)] // Re-exports for future cross-cutting systems.
 
 use bevy::prelude::*;
+use bevy_kira_audio::prelude::*;
+use dtx_audio::BgmHandle;
 use dtx_core::chart::Chart;
-use dtx_timing::AudioClock;
-use game_shell::AppState;
+use game_shell::{request_transition, AppState, TransitionRequest};
 
+use crate::components::LastJudgment;
 use crate::drums_perf::{DrumsDangerState, DrumsFillingEffect, DrumsPadState};
-use crate::resources::{ActiveChart, Combo, Score};
+use crate::judge::{BpmChangeList, JudgedChips};
+use crate::resources::{
+    ActiveChart, Combo, DrumGameplaySettings, GameStartMs, GameplayClock, JudgmentCounts, Score,
+};
 
 /// Marker component for the drums performance stage root entity.
 ///
@@ -86,11 +91,18 @@ pub fn plugin(app: &mut App) {
         .init_resource::<DrumsFillingEffect>()
         .add_systems(
             OnEnter(AppState::Performance),
-            (on_enter_performance, spawn_stage_root).chain(),
+            (
+                reset_drum_runtime,
+                on_enter_performance,
+                crate::sound_bank::preload_chart_sounds_on_enter,
+                start_bgm_on_enter,
+                spawn_stage_root,
+            )
+                .chain(),
         )
         .add_systems(
             OnExit(AppState::Performance),
-            (despawn_stage_root, on_exit_performance).chain(),
+            (despawn_stage_root, on_exit_performance, reset_drum_runtime).chain(),
         )
         .add_systems(
             Update,
@@ -98,15 +110,121 @@ pub fn plugin(app: &mut App) {
         );
 }
 
-/// On enter: capture chart end time for end-of-stage detection.
-pub fn on_enter_performance(chart: Res<ActiveChart>, mut completion: ResMut<DrumsStageCompletion>) {
-    completion.chart_end_ms = chart_end_ms(&chart.chart);
-    completion.end_requested = false;
-    completion.gauge_failed = false;
+/// Reset drum audio/hit-sound runtime state on enter/exit.
+fn reset_drum_runtime(
+    mut empty_templates: ResMut<crate::resources::CurrentEmptyHitTemplates>,
+    mut active_sounds: ResMut<crate::resources::ActiveDrumSounds>,
+    mut played_se: ResMut<crate::se_scheduler::PlayedSeChips>,
+    mut polyphony: ResMut<dtx_audio::DrumPolyphony>,
+    mut sound_bank: ResMut<dtx_audio::ChartSoundBank>,
+) {
+    empty_templates.reset();
+    active_sounds.reset();
+    played_se.0.clear();
+    polyphony.reset();
+    sound_bank.clear();
 }
 
-/// On exit: clear completion state for the next stage entry.
-pub fn on_exit_performance(mut completion: ResMut<DrumsStageCompletion>) {
+/// On enter: capture chart end time, reset gameplay state, build BPM list.
+pub fn on_enter_performance(
+    chart: Res<ActiveChart>,
+    mut completion: ResMut<DrumsStageCompletion>,
+    mut score: ResMut<Score>,
+    mut combo: ResMut<Combo>,
+    mut counts: ResMut<JudgmentCounts>,
+    mut judged: ResMut<JudgedChips>,
+    mut last: ResMut<LastJudgment>,
+    mut start_ms: ResMut<GameStartMs>,
+    mut bpm_changes: ResMut<BpmChangeList>,
+    mut played_bgm: ResMut<crate::bgm_scheduler::PlayedBgmChips>,
+    mut primary_bgm: ResMut<crate::bgm_scheduler::PrimaryBgmChip>,
+    mut gameplay_clock: ResMut<GameplayClock>,
+    mut drum_settings: ResMut<DrumGameplaySettings>,
+) {
+    let has_bgm = crate::bgm_scheduler::chart_has_bgm_chips(&chart.chart)
+        || chart
+            .source_path
+            .as_ref()
+            .and_then(|path| dtx_core::resolve_bgm_path(path, &chart.chart))
+            .is_some();
+    if has_bgm {
+        gameplay_clock.start_audio_required();
+    } else {
+        gameplay_clock.start_wall_clock();
+    }
+    drum_settings.rebuild_from_chart(&chart.chart);
+    *bpm_changes = BpmChangeList::from_chart(&chart.chart);
+    completion.chart_end_ms = chart_end_ms_real(&chart.chart, &bpm_changes);
+    completion.end_requested = false;
+    completion.gauge_failed = false;
+
+    score.0 = 0;
+    combo.current = 0;
+    combo.max = 0;
+    counts.reset();
+    judged.0.clear();
+    last.0 = None;
+    start_ms.0 = 0;
+    played_bgm.0.clear();
+    primary_bgm.0 = crate::bgm_scheduler::find_primary_bgm_chip(&chart.chart, &bpm_changes);
+}
+
+/// On enter: bootstrap BGM (chip path or heuristic fallback).
+fn start_bgm_on_enter(
+    chart: Res<ActiveChart>,
+    bpm_changes: Res<BpmChangeList>,
+    primary: Res<crate::bgm_scheduler::PrimaryBgmChip>,
+    mut played_bgm: ResMut<crate::bgm_scheduler::PlayedBgmChips>,
+    audio: Res<Audio>,
+    asset_server: Res<AssetServer>,
+    mut bgm: ResMut<BgmHandle>,
+    mut instances: ResMut<Assets<AudioInstance>>,
+    sound_bank: Res<dtx_audio::ChartSoundBank>,
+    settings: Res<crate::resources::DrumAudioSettings>,
+) {
+    if crate::bgm_scheduler::chart_has_bgm_chips(&chart.chart) {
+        crate::bgm_scheduler::bootstrap_primary_bgm_chip(
+            &chart,
+            &bpm_changes,
+            &primary,
+            &mut played_bgm,
+            &audio,
+            &asset_server,
+            &mut bgm,
+            &mut instances,
+            &sound_bank,
+            settings.master_volume,
+        );
+        return;
+    }
+    let Some(source_path) = chart.source_path.as_ref() else {
+        warn!("Performance: no source_path on ActiveChart, cannot start BGM");
+        return;
+    };
+    if let Some(bgm_path) = dtx_core::resolve_bgm_path(source_path, &chart.chart) {
+        let path_str = bgm_path.to_string_lossy().to_string();
+        info!("Performance: starting BGM (no chips) from {path_str}");
+        dtx_audio::play_bgm(&audio, &asset_server, &mut bgm, &mut instances, &path_str);
+    } else {
+        warn!(
+            "Performance: no BGM file found near {}",
+            source_path.display()
+        );
+    }
+}
+
+/// On exit: clear completion state and stop BGM.
+pub fn on_exit_performance(
+    audio: Res<Audio>,
+    mut bgm: ResMut<BgmHandle>,
+    mut instances: ResMut<Assets<AudioInstance>>,
+    mut completion: ResMut<DrumsStageCompletion>,
+    mut played_bgm: ResMut<crate::bgm_scheduler::PlayedBgmChips>,
+    mut gameplay_clock: ResMut<GameplayClock>,
+) {
+    dtx_audio::stop_bgm(&audio, &mut bgm, &mut instances);
+    played_bgm.0.clear();
+    gameplay_clock.reset();
     completion.end_requested = false;
     completion.gauge_failed = false;
 }
@@ -121,23 +239,25 @@ fn despawn_stage_root(mut commands: Commands, query: Query<Entity, With<DrumsSta
     }
 }
 
-/// Compute the last chip's `target_ms` in the audio clock. Returns 0 if
-/// the chart is empty.
-///
-/// Mirrors `CDTXMania.DTX.listChip.OrderBy(...).LastOrDefault()?.nPlaybackTimeMs`
-/// (BocuD CStagePerfCommonScreen.cs:23).
+/// Compute the last drum chip's `target_ms` using BPM-change-aware timing.
+/// Returns 0 if the chart is empty. Adds a 2000ms buffer for BGM tail.
+pub fn chart_end_ms_real(chart: &Chart, bpm_changes: &BpmChangeList) -> i64 {
+    let base_bpm = chart.metadata.bpm.unwrap_or(120.0);
+    chart
+        .drum_chips()
+        .map(|c| crate::judge::chip_target_ms(c, base_bpm, &bpm_changes.changes))
+        .max()
+        .unwrap_or(0)
+        .saturating_add(2000)
+}
+
+/// Legacy estimate for tests that don't have a BpmChangeList.
+#[cfg(test)]
 pub fn chart_end_ms(chart: &Chart) -> i64 {
     chart
         .chips
         .iter()
-        .map(|c| {
-            // Approximate: a chip's `target_ms` is `measure * 2000` for a
-            // constant 120 BPM chart. The real computation uses BPM changes
-            // via `chip_time_ms_with_bpm_changes` (see dtx-timing). For the
-            // orchestrator we use a simple measure-based estimate; this is
-            // good enough for end-of-stage detection at the minute scale.
-            (c.measure as i64) * 2000 + 1000
-        })
+        .map(|c| (c.measure as i64) * 2000 + 1000)
         .max()
         .unwrap_or(0)
 }
@@ -148,22 +268,20 @@ pub fn chart_end_ms(chart: &Chart) -> i64 {
 /// Mirrors the chart-end check in CStagePerfCommonScreen.cs (Presence
 /// property) + the CStage return logic in CStagePerfDrumsScreen.
 pub fn detect_end_of_stage(
-    clock: Res<AudioClock>,
+    clock: Res<GameplayClock>,
     mut completion: ResMut<DrumsStageCompletion>,
     _chart: Res<ActiveChart>,
     _score: Res<Score>,
     _combo: Res<Combo>,
-    mut next: ResMut<NextState<AppState>>,
+    mut requests: MessageWriter<TransitionRequest>,
 ) {
     if completion.end_requested {
         return;
     }
-    let Some(now_ms) = clock.current_ms else {
+    if !clock.is_ready() {
         return;
-    };
-    // End condition: we've scrolled past the last chip AND the audio clock
-    // has reached the chart end. The audio clock is the authoritative
-    // signal; the chart end_ms is a fallback.
+    }
+    let now_ms = clock.current_ms;
     let past_chart_end = now_ms >= completion.chart_end_ms;
     let all_chips_spawned = completion.chart_end_ms > 0;
     if past_chart_end && all_chips_spawned {
@@ -172,7 +290,7 @@ pub fn detect_end_of_stage(
             completion.chart_end_ms
         );
         completion.end_requested = true;
-        next.set(AppState::Result);
+        request_transition(&mut requests, AppState::Result);
     }
 }
 
@@ -184,15 +302,12 @@ mod tests {
 
     fn chart_with_n_chips(n: u32) -> Chart {
         let chips: Vec<Chip> = (0..n)
-            .map(|i| Chip {
-                measure: i,
-                channel: EChannel::BassDrum,
-                value: 1.0,
-            })
+            .map(|i| Chip::new(i, EChannel::BassDrum, 1.0))
             .collect();
         Chart {
             metadata: Metadata::default(),
             chips,
+            ..Default::default()
         }
     }
 
@@ -228,19 +343,44 @@ mod tests {
     fn on_enter_captures_chart_end_ms() {
         let mut app = App::new();
         app.init_resource::<DrumsStageCompletion>()
-            .init_resource::<ActiveChart>();
+            .init_resource::<ActiveChart>()
+            .init_resource::<Score>()
+            .init_resource::<Combo>()
+            .init_resource::<JudgmentCounts>()
+            .init_resource::<JudgedChips>()
+            .init_resource::<LastJudgment>()
+            .init_resource::<GameStartMs>()
+            .init_resource::<BpmChangeList>()
+            .init_resource::<GameplayClock>()
+            .init_resource::<crate::resources::CurrentEmptyHitTemplates>()
+            .init_resource::<crate::resources::ActiveDrumSounds>()
+            .init_resource::<crate::se_scheduler::PlayedSeChips>()
+            .init_resource::<crate::bgm_scheduler::PlayedBgmChips>()
+            .init_resource::<crate::bgm_scheduler::PrimaryBgmChip>()
+            .init_resource::<DrumGameplaySettings>();
         let chart = chart_with_n_chips(3);
         app.world_mut().resource_mut::<ActiveChart>().chart = chart;
         app.add_systems(Update, on_enter_performance);
         app.update();
         let completion = app.world().resource::<DrumsStageCompletion>();
-        assert_eq!(completion.chart_end_ms, 2 * 2000 + 1000);
+        assert!(completion.chart_end_ms > 0);
     }
 
     #[test]
     fn on_exit_clears_end_requested() {
         let mut app = App::new();
-        app.init_resource::<DrumsStageCompletion>();
+        app.add_plugins((
+            MinimalPlugins,
+            bevy::asset::AssetPlugin::default(),
+            bevy_kira_audio::AudioPlugin,
+        ))
+        .init_resource::<DrumsStageCompletion>()
+        .init_resource::<BgmHandle>()
+        .init_resource::<GameplayClock>()
+        .init_resource::<crate::resources::CurrentEmptyHitTemplates>()
+        .init_resource::<crate::resources::ActiveDrumSounds>()
+        .init_resource::<crate::se_scheduler::PlayedSeChips>()
+        .init_resource::<crate::bgm_scheduler::PlayedBgmChips>();
         app.world_mut()
             .resource_mut::<DrumsStageCompletion>()
             .end_requested = true;

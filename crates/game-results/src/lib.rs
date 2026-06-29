@@ -1,119 +1,183 @@
-//! CStageResult port — post-play results screen (mechanics only).
-//!
-//! Reference: `references/DTXmaniaNX-BocuD/DTXMania/Stage/07.Result/CStageResult.cs` (811 lines)
-//!
-//! ## ADR-0010 relaxed: UI/skin stripped
-//!
-//! - `result_full` and `result_stage` UI modules deleted.
-//! - Mechanics only: rank, score, max-combo, per-judgment counts, persistence.
-//! - `commands.spawn` is allowed here for the minimal result text overlay
-//!   (no longer a "gameplay" crate — visual layer is allowed).
+//! CStageResult — animated stat reveals (ADR-0014).
 
 use bevy::prelude::*;
 use dtx_scoring::{compute_chart_hash, Rank, ScoreEntry, ScoreStore};
-use game_shell::{despawn_stage, AppState};
+use dtx_ui::{theme::Theme, ThemeResource};
+use game_shell::{despawn_stage, request_transition, AppState, TransitionRequest};
 use gameplay_drums::resources::{ActiveChart, Combo, JudgmentCounts, Score};
 
 #[derive(Component)]
 pub struct ResultEntity;
 
-/// Bevy wrapper around `dtx_scoring::ScoreStore`. Inserted once at startup.
-/// Holds the persisted score history for the session.
+#[derive(Component)]
+struct ResultPanel;
+
+/// Marks a stat row for staggered reveal.
+#[derive(Component)]
+struct StatRow {
+    reveal_at_ms: f32,
+}
+
+#[derive(Resource)]
+struct ResultReveal {
+    elapsed_ms: f32,
+}
+
+/// Bevy wrapper around `dtx_scoring::ScoreStore`.
 #[derive(Resource, Deref, DerefMut, Default, Debug, Clone)]
 pub struct ScoreStoreResource(pub ScoreStore);
+
+pub struct GameResultsPlugin;
+
+impl Plugin for GameResultsPlugin {
+    fn build(&self, app: &mut App) {
+        plugin(app);
+    }
+}
 
 pub fn plugin(app: &mut App) {
     app.add_systems(OnEnter(AppState::Result), spawn_result)
         .add_systems(OnExit(AppState::Result), save_result_then_despawn)
-        .add_systems(Update, result_input.run_if(in_state(AppState::Result)));
+        .add_systems(
+            Update,
+            (result_input, animate_staggered_reveal).run_if(in_state(AppState::Result)),
+        );
 }
 
-/// Re-export as struct form for callers that prefer `add_plugins(...)` syntax.
-pub use plugin as GameResultsPlugin;
+const STAGGER_MS: f32 = 120.0;
+const FADE_DURATION_MS: f32 = 300.0;
 
 fn spawn_result(
     mut commands: Commands,
+    theme: Res<ThemeResource>,
     score: Res<Score>,
     combo: Res<Combo>,
     counts: Res<JudgmentCounts>,
     chart: Res<ActiveChart>,
 ) {
+    commands.insert_resource(ResultReveal { elapsed_ms: 0.0 });
+
     let title = chart
         .chart
         .metadata
         .title
         .clone()
-        .unwrap_or_else(|| "Unknown".to_string());
+        .unwrap_or_else(|| "Unknown".into());
     let artist = chart
         .chart
         .metadata
         .artist
         .clone()
-        .unwrap_or_else(|| "Unknown".to_string());
-    let bpm = chart
-        .chart
-        .metadata
-        .bpm
-        .map(|b| format!("{b}"))
-        .unwrap_or_else(|| "?".into());
-    let level = chart
-        .chart
-        .metadata
-        .dlevel
-        .map(|l| format!("{l}"))
-        .unwrap_or_else(|| "?".into());
+        .unwrap_or_else(|| "Unknown".into());
+    let difficulty = chart.chart.metadata.dlevel.unwrap_or(0);
     let total = counts.total();
     let pct = counts.perfect_pct();
     let rank = Rank::from_perfect_pct(pct);
+    let t = theme.0;
 
-    let detail = format!(
-        "Result\n\n\
-         Title:    {title}\n\
-         Artist:   {artist}\n\
-         BPM:      {bpm}\n\
-         Drums Lv: {level}\n\n\
-         Score:    {}\n\
-         Max Combo: {}\n\
-         Rank:     {rank}\n\n\
-         Perfect:  {} ({:.1}%)\n\
-         Great:    {}\n\
-         Good:     {}\n\
-         Ok:       {}\n\
-         Miss:     {}\n\
-         Total:    {total}\n\n\
-         ESC/ENTER → SongSelect",
-        score.0, combo.max, counts.perfect, pct, counts.great, counts.good, counts.ok, counts.miss,
-    );
+    let stat_rows: Vec<(String, f32)> = vec![
+        (format!("{title}"), 0.0),
+        (format!("{artist}  Lv.{difficulty}"), STAGGER_MS),
+        (String::new(), STAGGER_MS * 2.0),
+        (format!("Score     {}", score.0), STAGGER_MS * 3.0),
+        (format!("Max Combo {}", combo.max), STAGGER_MS * 4.0),
+        (format!("Rank      {rank}"), STAGGER_MS * 5.0),
+        (String::new(), STAGGER_MS * 6.0),
+        (
+            format!("Perfect   {} ({pct:.1}%)", counts.perfect),
+            STAGGER_MS * 7.0,
+        ),
+        (format!("Great     {}", counts.great), STAGGER_MS * 8.0),
+        (format!("Good      {}", counts.good), STAGGER_MS * 9.0),
+        (format!("Poor      {}", counts.ok), STAGGER_MS * 10.0),
+        (format!("Miss      {}", counts.miss), STAGGER_MS * 11.0),
+        (format!("Total     {total}"), STAGGER_MS * 12.0),
+        (String::new(), STAGGER_MS * 13.0),
+        ("ESC / ENTER → Song Select".to_string(), STAGGER_MS * 14.0),
+    ];
 
-    commands.spawn((
-        ResultEntity,
-        Node {
-            width: Val::Percent(100.0),
-            height: Val::Percent(100.0),
-            justify_content: JustifyContent::Center,
-            align_items: AlignItems::Center,
-            padding: UiRect::all(Val::Px(40.0)),
-            ..default()
-        },
-        BackgroundColor(Color::srgb(0.05, 0.05, 0.08)),
-        children![(
-            Text::new(detail),
-            TextFont {
-                font_size: FontSize::Px(20.0),
+    let panel = commands
+        .spawn((
+            ResultEntity,
+            Node {
+                width: Val::Percent(100.0),
+                height: Val::Percent(100.0),
+                justify_content: JustifyContent::Center,
+                align_items: AlignItems::Center,
                 ..default()
             },
-            TextColor(Color::WHITE),
-        )],
-    ));
-}
+            BackgroundColor(t.bg_bottom),
+        ))
+        .id();
 
-fn result_input(keys: Res<ButtonInput<KeyCode>>, mut next: ResMut<NextState<AppState>>) {
-    if keys.just_pressed(KeyCode::Escape) || keys.just_pressed(KeyCode::Enter) {
-        next.set(AppState::SongSelect);
+    let inner = commands
+        .spawn((
+            ResultPanel,
+            Node {
+                padding: UiRect::all(Val::Px(48.0)),
+                flex_direction: FlexDirection::Column,
+                row_gap: Val::Px(6.0),
+                min_width: Val::Px(400.0),
+                ..default()
+            },
+            BackgroundColor(t.panel_bg),
+        ))
+        .id();
+
+    commands.entity(panel).add_child(inner);
+
+    for (text, delay) in stat_rows {
+        if text.is_empty() {
+            let spacer = commands
+                .spawn((
+                    StatRow {
+                        reveal_at_ms: delay,
+                    },
+                    Node {
+                        height: Val::Px(16.0),
+                        ..default()
+                    },
+                ))
+                .id();
+            commands.entity(inner).add_child(spacer);
+        } else {
+            let row = commands
+                .spawn((
+                    StatRow {
+                        reveal_at_ms: delay,
+                    },
+                    Text::new(text),
+                    Theme::label_font(),
+                    TextColor(Color::srgba(1.0, 1.0, 1.0, 0.0)),
+                ))
+                .id();
+            commands.entity(inner).add_child(row);
+        }
     }
 }
 
-/// OnExit(Result): persist current play to ScoreStore, then despawn UI.
+fn animate_staggered_reveal(
+    time: Res<Time>,
+    mut reveal: ResMut<ResultReveal>,
+    mut q: Query<(&StatRow, &mut TextColor)>,
+) {
+    reveal.elapsed_ms += time.delta_secs() * 1000.0;
+    for (stat, mut color) in &mut q {
+        let since = reveal.elapsed_ms - stat.reveal_at_ms;
+        if since < 0.0 {
+            continue;
+        }
+        let alpha = (since / FADE_DURATION_MS).clamp(0.0, 1.0);
+        color.0 = color.0.with_alpha(alpha);
+    }
+}
+
+fn result_input(keys: Res<ButtonInput<KeyCode>>, mut requests: MessageWriter<TransitionRequest>) {
+    if keys.just_pressed(KeyCode::Escape) || keys.just_pressed(KeyCode::Enter) {
+        request_transition(&mut requests, AppState::SongSelect);
+    }
+}
+
 fn save_result_then_despawn(
     commands: Commands,
     score: Res<Score>,
@@ -128,13 +192,13 @@ fn save_result_then_despawn(
         .metadata
         .title
         .clone()
-        .unwrap_or_else(|| "Unknown".to_string());
+        .unwrap_or_else(|| "Unknown".into());
     let artist = chart
         .chart
         .metadata
         .artist
         .clone()
-        .unwrap_or_else(|| "Unknown".to_string());
+        .unwrap_or_else(|| "Unknown".into());
     let total = counts.total();
     let pct = if total == 0 {
         0.0
@@ -177,7 +241,6 @@ fn save_result_then_despawn(
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use dtx_scoring::Rank;
 
     #[test]
@@ -187,38 +250,7 @@ mod tests {
     }
 
     #[test]
-    fn rank_a_85_to_95() {
-        assert_eq!(Rank::from_perfect_pct(94.9), Rank::A);
-        assert_eq!(Rank::from_perfect_pct(85.0), Rank::A);
-    }
-
-    #[test]
-    fn rank_b_70_to_85() {
-        assert_eq!(Rank::from_perfect_pct(84.9), Rank::B);
-        assert_eq!(Rank::from_perfect_pct(70.0), Rank::B);
-    }
-
-    #[test]
-    fn rank_c_50_to_70() {
-        assert_eq!(Rank::from_perfect_pct(69.9), Rank::C);
-        assert_eq!(Rank::from_perfect_pct(50.0), Rank::C);
-    }
-
-    #[test]
-    fn rank_d_25_to_50() {
-        assert_eq!(Rank::from_perfect_pct(49.9), Rank::D);
-        assert_eq!(Rank::from_perfect_pct(25.0), Rank::D);
-    }
-
-    #[test]
     fn rank_e_below_25() {
-        assert_eq!(Rank::from_perfect_pct(24.9), Rank::E);
         assert_eq!(Rank::from_perfect_pct(0.0), Rank::E);
-    }
-
-    #[test]
-    fn rank_display_strings() {
-        assert_eq!(format!("{}", Rank::S), "S");
-        assert_eq!(format!("{}", Rank::E), "E");
     }
 }

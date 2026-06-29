@@ -42,8 +42,12 @@ bevy_kira_audio = { version = "0.26", default-features = false, features = ["ogg
 thiserror = "1"
 # bevy_framepace  = "..."    # M2
 # kira            = "..."    # M1 (kira already pulled by bevy_kira_audio)
-# bevy_tween      = "..."    # M5+
+# bevy_tweening   = ...      # M5+ (pinned below; see BEVY_UX_UI.md §6)
 # ron             = "0.10"   # M1 (config)
+
+[workspace.dependencies.bevy_tweening]
+git = "https://github.com/djeedai/bevy_tweening"
+rev = "5e3d0c9"  # PR #170 merged 2026-06-28: bevy 0.18 -> 0.19. Swap to crates.io 0.16 when published.
 
 [profile.dev]
 opt-level = 1   # faster runtime while keeping fast compile

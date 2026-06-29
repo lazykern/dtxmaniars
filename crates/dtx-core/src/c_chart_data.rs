@@ -165,6 +165,7 @@ mod tests {
                 Chip::new(0, EChannel::BPM, 180.0),
                 Chip::new(2, EChannel::BassDrum, 0.0),
             ],
+            ..Default::default()
         }
     }
 

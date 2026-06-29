@@ -44,7 +44,7 @@
 use bevy::prelude::*;
 use dtx_core::chart::Chart;
 use dtx_timing::AudioClock;
-use game_shell::AppState;
+use game_shell::{request_transition, AppState, TransitionRequest};
 
 use crate::guitar_perf::{
     GuitarBonus, GuitarDangerState, GuitarGaugeState, GuitarLaneFlush, GuitarRgbState,
@@ -130,7 +130,7 @@ fn detect_end_of_stage(
     _chart: Res<ActiveChart>,
     _score: Res<Score>,
     _combo: Res<Combo>,
-    mut next: ResMut<NextState<AppState>>,
+    mut requests: MessageWriter<TransitionRequest>,
 ) {
     if completion.end_requested {
         return;
@@ -146,7 +146,7 @@ fn detect_end_of_stage(
             completion.chart_end_ms
         );
         completion.end_requested = true;
-        next.set(AppState::Result);
+        request_transition(&mut requests, AppState::Result);
     }
 }
 
@@ -158,15 +158,12 @@ mod tests {
 
     fn chart_with_n_chips(n: u32) -> Chart {
         let chips: Vec<Chip> = (0..n)
-            .map(|i| Chip {
-                measure: i,
-                channel: EChannel::GuitarRxxBxx,
-                value: 1.0,
-            })
+            .map(|i| Chip::new(i, EChannel::GuitarRxxBxx, 1.0))
             .collect();
         Chart {
             metadata: Metadata::default(),
             chips,
+            ..Default::default()
         }
     }
 

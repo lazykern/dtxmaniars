@@ -1,3 +1,4 @@
+use crate::assets::DtxAssets;
 use crate::channel::EChannel;
 
 /// Metadata parsed from DTX header commands.
@@ -14,12 +15,14 @@ pub struct Metadata {
     pub dlevel: Option<u32>,
     pub glevel: Option<u32>,
     pub blevel: Option<u32>,
+    /// WAV slot ids from `#BGMWAV:` directives (BocuD `listBGMWAV番号`).
+    pub bgm_wav_slots: Vec<u32>,
 }
 
 /// One chip in the chart (note, BPM change, bar-length change, etc.).
 ///
 /// `measure` (0-indexed) + `channel` identify it; `value` is the parsed payload:
-/// - For most chip channels: chip volume (0..1) or raw byte
+/// - For most chip channels: fractional position within the measure (0.0..1.0)
 /// - For BPM/BPMEx: BPM value
 /// - For BarLength: fraction of a whole note
 #[derive(Debug, Clone, PartialEq)]
@@ -27,6 +30,9 @@ pub struct Chip {
     pub measure: u32,
     pub channel: EChannel,
     pub value: f32,
+    /// WAV slot reference (hex id from `#WAVxx`). 0 = none.
+    /// Used by BGM chips and SE chips to reference which sound to play.
+    pub wav_slot: u32,
 }
 
 impl Chip {
@@ -35,6 +41,16 @@ impl Chip {
             measure,
             channel,
             value,
+            wav_slot: 0,
+        }
+    }
+
+    pub fn with_wav(measure: u32, channel: EChannel, value: f32, wav_slot: u32) -> Self {
+        Self {
+            measure,
+            channel,
+            value,
+            wav_slot,
         }
     }
 }
@@ -44,6 +60,22 @@ impl Chip {
 pub struct Chart {
     pub metadata: Metadata,
     pub chips: Vec<Chip>,
+    /// NoChip templates (`#B1`–`#BE`) for empty-hit sounds.
+    pub empty_hit_events: Vec<EmptyHitEvent>,
+    /// Asset registries (#WAV, #BMP, #AVI, #BGA definitions).
+    pub assets: DtxAssets,
+}
+
+/// NoChip chart event — stores the latest empty-hit WAV template per lane.
+///
+/// Reference: BocuD `CStagePerfDrumsScreen.cs:tUpdateAndDraw_Chip_NoSound_Drums`
+/// (channels 0xB1–0xBE).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct EmptyHitEvent {
+    pub lane: u8,
+    pub measure: u32,
+    pub value: f32,
+    pub wav_slot: u32,
 }
 
 impl Chart {
@@ -71,6 +103,7 @@ mod tests {
                 Chip::new(0, EChannel::BGM, 1.0),
                 Chip::new(1, EChannel::Snare, 1.0),
             ],
+            ..Default::default()
         };
         let drums: Vec<_> = chart.drum_chips().collect();
         assert_eq!(drums.len(), 2);
@@ -152,10 +185,12 @@ mod tests {
         let c1 = Chart {
             metadata: Metadata::default(),
             chips: vec![Chip::new(0, EChannel::BassDrum, 1.0)],
+            ..Default::default()
         };
         let c2 = Chart {
             metadata: Metadata::default(),
             chips: vec![Chip::new(0, EChannel::BassDrum, 1.0)],
+            ..Default::default()
         };
         assert_eq!(c1, c2);
     }
@@ -170,6 +205,7 @@ mod tests {
                 Chip::new(2, EChannel::BassDrum, 1.0),
                 Chip::new(3, EChannel::BGM, 1.0),
             ],
+            ..Default::default()
         };
         let bd: Vec<_> = chart.chips_in(EChannel::BassDrum).collect();
         assert_eq!(bd.len(), 2);
@@ -181,6 +217,7 @@ mod tests {
         let chart = Chart {
             metadata: Metadata::default(),
             chips: vec![Chip::new(0, EChannel::Snare, 1.0)],
+            ..Default::default()
         };
         let bd: Vec<_> = chart.chips_in(EChannel::BassDrum).collect();
         assert_eq!(bd.len(), 0);
@@ -196,6 +233,7 @@ mod tests {
                 Chip::new(0, EChannel::Movie, 1.0),
                 Chip::new(0, EChannel::Snare, 1.0),
             ],
+            ..Default::default()
         };
         let drums: Vec<_> = chart.drum_chips().collect();
         assert_eq!(drums.len(), 2);
@@ -206,6 +244,7 @@ mod tests {
         let c1 = Chart {
             metadata: Metadata::default(),
             chips: vec![Chip::new(0, EChannel::Snare, 1.0)],
+            ..Default::default()
         };
         let c2 = c1.clone();
         assert_eq!(c1.chips.len(), c2.chips.len());

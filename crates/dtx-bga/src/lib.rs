@@ -130,7 +130,7 @@ fn tick_bga_player(
 fn activate_event(ev: &BgaEvent, player: &mut BgaPlayer, commands: &mut Commands) {
     if ev.layer.is_movie() {
         player.movies_skipped += 1;
-        info!(
+        debug!(
             "BGA: movie chip skipped (M7.1 will decode) — layer={}, bmp_index={}",
             ev.layer.label(),
             ev.bmp_index
@@ -273,6 +273,7 @@ mod tests {
                 dtx_core::chart::Chip::new(2, dtx_core::channel::EChannel::Movie, 1.0),
                 dtx_core::chart::Chip::new(4, dtx_core::channel::EChannel::BGALayer3, 2.0),
             ],
+            ..Default::default()
         };
         let events = bga_events(&chart);
         let res = ActiveChartRes { bpm: 120.0, events };

@@ -120,10 +120,10 @@ pub const fn classify(ch: EChannel) -> ChipClass {
         | EChannel::Cymbal
         | EChannel::FloorTom
         | EChannel::HiHatOpen
-        | EChannel::RideCymbal => ChipClass::Drum,
-
-        // Open hi-hat family
-        EChannel::LeftCymbal | EChannel::LeftPedal | EChannel::LeftBassDrum => ChipClass::OpenNote,
+        | EChannel::RideCymbal
+        | EChannel::LeftCymbal
+        | EChannel::LeftPedal
+        | EChannel::LeftBassDrum => ChipClass::Drum,
 
         // Drums fill-in (visual only)
         EChannel::DrumsFillin => ChipClass::DrumsFillin,
@@ -193,6 +193,26 @@ pub const fn is_open_note_byte(b: u8) -> bool {
 /// never sees.
 pub const fn is_bad_note_byte(b: u8) -> bool {
     matches!(b, 0xB1..=0xBE)
+}
+
+/// Map a NoChip channel byte to a 12-lane visual lane index.
+///
+/// Reference: BocuD `EChannel.cs` NoChip family + dtxpt `lanes.rs:dtx_nosound_channel_to_lane`.
+pub const fn nosound_byte_to_lane(b: u8) -> Option<u8> {
+    match b {
+        0xB1 | 0xB8 => Some(0), // HH / HHO → HH lane for empty-hit lookup
+        0xB2 => Some(1),        // SD
+        0xB3 => Some(2),        // BD
+        0xB4 => Some(3),        // HT
+        0xB5 => Some(4),        // LT
+        0xB6 => Some(6),        // CY
+        0xB7 => Some(5),        // FT
+        0xB9 => Some(8),        // RD
+        0xBC => Some(9),        // LC — EChannel.LeftCymbal_NoChip
+        0xBD => Some(10),       // LP
+        0xBE => Some(11),       // LBD
+        _ => None,
+    }
 }
 
 /// XG value multiplier (BocuD-style high-nibble convention).
@@ -300,6 +320,13 @@ mod tests {
         assert!(!is_open_note_byte(0x11));
         assert!(!is_open_note_byte(0x19));
         assert!(!is_open_note_byte(0xB1));
+    }
+
+    #[test]
+    fn nosound_byte_maps_to_lane() {
+        assert_eq!(nosound_byte_to_lane(0xB1), Some(0));
+        assert_eq!(nosound_byte_to_lane(0xB3), Some(2));
+        assert_eq!(nosound_byte_to_lane(0xBC), Some(9));
     }
 
     #[test]

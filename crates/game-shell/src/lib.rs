@@ -1,28 +1,26 @@
-//! game-shell — AppState machine + Performance state wiring.
+//! game-shell — AppState machine + Performance state wiring + transitions.
 //!
-//! ADR-0010 relaxed: UI/skin files stripped. StageManager's C# form
-//! boilerplate is replaced by Bevy State and StageEntity cleanup.
-//!
-//! ## Reference
-//! - `references/DTXmaniaNX-BocuD/DTXMania/Core/StageManager.cs` (full, 699 lines)
-//! - `references/DTXmaniaNX-BocuD/DTXMania/Stage/CStage.cs` (EStage enum)
-//! - `references/DTXmaniaNX-BocuD/DTXMania/Stage/06.Performance/DrumsScreen/CStagePerfDrumsScreen.cs` (194KB)
+//! ADR-0014: 300ms OutQuint screen fades via `TransitionRequest`.
 
 use bevy::prelude::*;
 
 pub mod states;
 
 mod performance;
+mod transition;
 
 pub use states::{AppState, EGameMode, StageEntity, despawn_stage};
+pub use transition::{TransitionRequest, request_transition};
 
-/// Root plugin. Registers AppState + Performance state wiring.
-/// Game-menu registers the other states' plugins separately.
+/// Root plugin. Registers AppState + transitions + Performance wiring.
 pub struct GameShellPlugin;
 
 impl Plugin for GameShellPlugin {
     fn build(&self, app: &mut App) {
-        app.init_state::<AppState>()
-            .add_plugins(performance::plugin);
+        app.init_state::<AppState>().add_plugins((
+            dtx_ui::plugin,
+            transition::plugin,
+            performance::plugin,
+        ));
     }
 }

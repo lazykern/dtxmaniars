@@ -20,9 +20,9 @@
 
 use bevy::prelude::*;
 use dtx_assets::DtxCache;
-use dtx_bga::{ActiveChartRes, BgaPlayer};
-// fade UI removed (ADR-0010 relaxed)
-use game_shell::{AppState, despawn_stage};
+use dtx_bga::{ActiveChartRes, BgaLayerOverlay, BgaPlayer};
+use dtx_ui::{Theme, ThemeResource};
+use game_shell::{AppState, TransitionRequest, despawn_stage, request_transition};
 use gameplay_drums::resources::ActiveChart as DrumsActiveChart;
 use gameplay_guitar::resources::ActiveChart as GuitarActiveChart;
 
@@ -44,21 +44,40 @@ enum LoadPhase {
     Failed,
 }
 
+#[derive(Resource, Default)]
+struct LoadingAdvanceGate(bool);
+
 pub fn plugin(app: &mut App) {
     app.init_resource::<LoadingProgress>()
         .init_resource::<LoadPhase>()
+        .init_resource::<LoadingAdvanceGate>()
         .add_systems(
             OnEnter(AppState::SongLoading),
-            (start_load, spawn_loading).chain(),
+            (reset_advance_gate, start_load, spawn_loading).chain(),
         )
         .add_systems(
             OnExit(AppState::SongLoading),
             despawn_stage::<LoadingEntity>,
         )
+        .add_systems(OnExit(AppState::Performance), cleanup_bga_overlays)
         .add_systems(
             Update,
             (tick_loading_progress, advance_when_loaded).run_if(in_state(AppState::SongLoading)),
         );
+}
+
+/// On leaving Performance: despawn any BGA image-layer placeholder overlays and
+/// reset the player so state does not bleed into Result/SongSelect. Movie decode
+/// remains deferred to M7.1.
+fn cleanup_bga_overlays(
+    mut commands: Commands,
+    overlays: Query<Entity, With<BgaLayerOverlay>>,
+    mut bga_player: ResMut<BgaPlayer>,
+) {
+    for entity in &overlays {
+        commands.entity(entity).despawn();
+    }
+    bga_player.reset();
 }
 
 fn start_load(
@@ -107,8 +126,17 @@ fn start_load(
     }
 }
 
-fn spawn_loading(mut commands: Commands, mut progress: ResMut<LoadingProgress>) {
+fn reset_advance_gate(mut gate: ResMut<LoadingAdvanceGate>) {
+    gate.0 = false;
+}
+
+fn spawn_loading(
+    mut commands: Commands,
+    mut progress: ResMut<LoadingProgress>,
+    theme: Res<ThemeResource>,
+) {
     progress.0 = 0.0;
+    let t = theme.0;
     commands.spawn((
         LoadingEntity,
         Node {
@@ -120,23 +148,17 @@ fn spawn_loading(mut commands: Commands, mut progress: ResMut<LoadingProgress>) 
             row_gap: Val::Px(20.0),
             ..default()
         },
-        BackgroundColor(Color::srgb(0.05, 0.05, 0.1)),
+        BackgroundColor(t.bg_bottom),
         children![
             (
-                Text::new("Loading..."),
-                TextFont {
-                    font_size: FontSize::Px(32.0),
-                    ..default()
-                },
-                TextColor(Color::WHITE),
+                Text::new("Loading"),
+                Theme::title_font(),
+                TextColor(t.text_primary),
             ),
             (
                 Text::new(""),
-                TextFont {
-                    font_size: FontSize::Px(14.0),
-                    ..default()
-                },
-                TextColor(Color::srgb(0.6, 0.6, 0.6)),
+                Theme::body_font(),
+                TextColor(t.text_secondary),
                 LoadingStatusText,
             ),
         ],
@@ -172,9 +194,23 @@ fn tick_loading_progress(
     }
 }
 
-fn advance_when_loaded(progress: Res<LoadingProgress>, mut next: ResMut<NextState<AppState>>) {
+fn advance_when_loaded(
+    progress: Res<LoadingProgress>,
+    phase: Res<LoadPhase>,
+    mut requests: MessageWriter<TransitionRequest>,
+    mut gate: ResMut<LoadingAdvanceGate>,
+) {
+    if gate.0 {
+        return;
+    }
     if progress.0 >= 1.0 {
-        next.set(AppState::Performance);
+        if *phase == LoadPhase::Failed {
+            warn!("SongLoading: load failed, returning to SongSelect");
+            request_transition(&mut requests, AppState::SongSelect);
+        } else {
+            request_transition(&mut requests, AppState::Performance);
+        }
+        gate.0 = true;
     }
 }
 

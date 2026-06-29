@@ -18,7 +18,7 @@ Vertical slice: load a DTX chart → scroll notes → judge keyboard hits → sh
 | `judge.rs` | `judge::plugin` | `LaneHit` + chart → `JudgmentEvent` |
 | `score.rs` | `score::plugin` | `JudgmentEvent` → `Score`, `Combo`, `LastJudgment` |
 | `miss.rs` | (no-op) | Stub; miss detection lives in `scroll` |
-| `hud.rs` | `hud::plugin` | Text rendering of Score / Combo / Last judgment |
+| `hud.rs` | `hud::plugin` | osu-style HUD widgets + playfield layout |
 
 ## Test
 
@@ -34,17 +34,16 @@ cargo test -p gameplay-drums
 
 ## v1 scope (M2)
 
-- 9 lanes (HH, SD, BD, HT, LT, FT, CY, HHO, RD); LC + LP deferred to M5
-- Keys `1-9` default; users rebind via dtx-config (M3+)
-- DTXmaniaNX-standard scoring (Perfect=2, Great/Good=1, Ok/Miss=0)
-- Text-only HUD (no skin, no animations)
-- BPM-change chips: NOT handled (assume constant BPM)
+- 12 lanes (HH, SD, BD, HT, LT, FT, CY, HHO, RD, LC, LP, LBD)
+- Keys `1-9`, `0`, `-`, `=` default; users rebind via dtx-config (M3+)
+- DTXmaniaNX/BocuD timing windows (Perfect/Great/Good/Poor = 34/67/84/117ms)
+  and current score points (Perfect=2, Great/Good=1, Poor/Miss=0)
+- osu-style HUD with `PlayfieldLayout`, gauge, keyboard viz (ADR-0014)
+- BPM-change chips handled by `BpmChangeList`
 - Long notes: NOT handled (M6+)
 
 ## Deferred
 
-- bevy_kira_audio hit-sound manager (M2 polish)
-- Note visuals (colored rectangles) — added in M2 polish if time
 - Skin-aware lane rendering (M5+)
 - Audio latency compensation
 

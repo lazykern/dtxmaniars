@@ -13,6 +13,7 @@
 use bevy::prelude::*;
 
 use crate::states::{AppState, EGameMode};
+use crate::transition::{TransitionRequest, request_transition};
 
 pub fn plugin(app: &mut App) {
     app.add_systems(OnEnter(AppState::Performance), log_mode)
@@ -27,8 +28,11 @@ fn log_mode(mode: Res<EGameMode>) {
     info!("Performance: EGameMode = {:?}", *mode);
 }
 
-fn performance_input(keys: Res<ButtonInput<KeyCode>>, mut next: ResMut<NextState<AppState>>) {
+fn performance_input(
+    keys: Res<ButtonInput<KeyCode>>,
+    mut requests: MessageWriter<TransitionRequest>,
+) {
     if keys.just_pressed(KeyCode::Escape) {
-        next.set(AppState::Result);
+        request_transition(&mut requests, AppState::Result);
     }
 }

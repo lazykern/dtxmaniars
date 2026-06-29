@@ -13,8 +13,7 @@ use bevy::prelude::*;
 use crate::events::LaneHit;
 use crate::judge::{chip_target_ms, BpmChangeList, JudgedChips};
 use crate::lane_map::{lane_of, LaneId};
-use crate::resources::ActiveChart;
-use dtx_timing::AudioClock;
+use crate::resources::{ActiveChart, GameplayClock};
 
 /// Resource flag — when true, the autoplay system emits LaneHit for each
 /// chip at its target ms. Toggleable from config (M5+).
@@ -23,28 +22,32 @@ pub struct AutoplayEnabled(pub bool);
 
 /// Plugin. Adds the `AutoplayEnabled` resource + system.
 pub(super) fn plugin(app: &mut App) {
-    app.init_resource::<AutoplayEnabled>()
-        .add_systems(Update, autoplay_system.run_if(autoplay_active));
+    app.init_resource::<AutoplayEnabled>().add_systems(
+        FixedUpdate,
+        autoplay_system
+            .in_set(super::DrumsSets::Input)
+            .run_if(autoplay_active)
+            .run_if(in_state(game_shell::AppState::Performance)),
+    );
 }
 
 fn autoplay_active(flag: Res<AutoplayEnabled>) -> bool {
     flag.0
 }
 
-/// System: for each un-judged chip whose target_ms <= AudioClock.current_ms,
+/// System: for each un-judged chip whose target_ms <= GameplayClock.current_ms,
 /// emit a LaneHit event with audio_ms = target_ms (delta = 0 → Perfect).
-///
-/// Runs at the chart's intrinsic time. If BGM is paused, the bot waits.
 pub fn autoplay_system(
-    clock: Res<AudioClock>,
+    clock: Res<GameplayClock>,
     chart: Res<ActiveChart>,
     bpm_changes: Res<BpmChangeList>,
     mut judged: ResMut<JudgedChips>,
     mut lane_hits: MessageWriter<LaneHit>,
 ) {
-    let Some(current_ms) = clock.current_ms else {
+    if !clock.is_ready() {
         return;
-    };
+    }
+    let current_ms = clock.current_ms;
 
     let base_bpm = chart.chart.metadata.bpm.unwrap_or(120.0);
 
@@ -64,7 +67,6 @@ pub fn autoplay_system(
                 lane: lane as LaneId,
                 audio_ms: target_ms,
             });
-            judged.0.insert(idx);
         }
     }
 }
@@ -86,7 +88,7 @@ mod tests {
         let mut app = App::new();
         app.add_plugins(bevy::state::app::StatesPlugin)
             .init_resource::<ActiveChart>()
-            .init_resource::<AudioClock>()
+            .init_resource::<GameplayClock>()
             .init_resource::<JudgedChips>()
             .init_resource::<BpmChangeList>()
             .init_resource::<AutoplayEnabled>()
@@ -95,15 +97,55 @@ mod tests {
         app
     }
 
+    fn build_pipeline_app() -> App {
+        let mut app = App::new();
+        app.add_plugins(bevy::state::app::StatesPlugin)
+            .init_resource::<ActiveChart>()
+            .init_resource::<GameplayClock>()
+            .init_resource::<JudgedChips>()
+            .init_resource::<BpmChangeList>()
+            .init_resource::<AutoplayEnabled>()
+            .init_resource::<crate::resources::DrumGameplaySettings>()
+            .init_resource::<crate::resources::Score>()
+            .init_resource::<crate::resources::Combo>()
+            .init_resource::<crate::resources::JudgmentCounts>()
+            .init_resource::<crate::components::LastJudgment>()
+            .add_message::<LaneHit>()
+            .add_message::<crate::events::JudgmentEvent>()
+            .add_message::<crate::events::EmptyHit>()
+            .add_systems(
+                Update,
+                (
+                    autoplay_system.run_if(autoplay_active),
+                    crate::judge::judge_lane_hit_system,
+                    crate::score::update_score_system,
+                )
+                    .chain(),
+            );
+        app
+    }
+
+    fn set_clock(app: &mut App, ms: i64) {
+        let mut clock = app.world_mut().resource_mut::<GameplayClock>();
+        clock.start();
+        clock.sync(Some(ms));
+    }
+
+    fn lane_hit_count(app: &App) -> usize {
+        app.world()
+            .resource::<Messages<LaneHit>>()
+            .iter_current_update_messages()
+            .count()
+    }
+
     #[test]
     fn autoplay_disabled_emits_nothing() {
         let mut app = build_app();
         let chart = make_chart_with_chips(vec![dtx_core::Chip::new(0, EChannel::BassDrum, 0.0)]);
         app.world_mut().resource_mut::<ActiveChart>().chart = chart;
         app.world_mut().resource_mut::<AutoplayEnabled>().0 = false;
-        app.world_mut().resource_mut::<AudioClock>().current_ms = Some(2000);
+        set_clock(&mut app, 2000);
 
-        // No lane_hits should be emitted when disabled.
         app.update();
         let judged = app.world().resource::<JudgedChips>();
         assert!(
@@ -115,29 +157,28 @@ mod tests {
     #[test]
     fn autoplay_emits_when_audio_passes_target() {
         let mut app = build_app();
-        // One chip at measure 0, fraction 0.0 → target_ms = 0
         let chart = make_chart_with_chips(vec![dtx_core::Chip::new(0, EChannel::BassDrum, 0.0)]);
         app.world_mut().resource_mut::<ActiveChart>().chart = chart;
         app.world_mut().resource_mut::<AutoplayEnabled>().0 = true;
-        // Audio at 100ms — past the chip target (0).
-        app.world_mut().resource_mut::<AudioClock>().current_ms = Some(100);
+        set_clock(&mut app, 100);
 
         app.update();
 
-        // The chip should be marked as judged.
         let judged = app.world().resource::<JudgedChips>();
-        assert!(judged.0.contains(&0), "chip 0 should be marked judged");
+        assert!(
+            !judged.0.contains(&0),
+            "autoplay must not pre-mark playable chips judged"
+        );
+        assert_eq!(lane_hit_count(&app), 1);
     }
 
     #[test]
     fn autoplay_no_emit_when_audio_before_target() {
         let mut app = build_app();
-        // Chip at measure 1, fraction 0.0 → target_ms = 2000 (at 120 BPM)
         let chart = make_chart_with_chips(vec![dtx_core::Chip::new(1, EChannel::BassDrum, 0.0)]);
         app.world_mut().resource_mut::<ActiveChart>().chart = chart;
         app.world_mut().resource_mut::<AutoplayEnabled>().0 = true;
-        // Audio at 500ms — before target (2000).
-        app.world_mut().resource_mut::<AudioClock>().current_ms = Some(500);
+        set_clock(&mut app, 500);
 
         app.update();
 
@@ -149,34 +190,65 @@ mod tests {
     }
 
     #[test]
+    fn autoplay_no_emit_while_audio_required_clock_waits() {
+        let mut app = build_app();
+        let chart = make_chart_with_chips(vec![dtx_core::Chip::new(0, EChannel::BassDrum, 0.0)]);
+        app.world_mut().resource_mut::<ActiveChart>().chart = chart;
+        app.world_mut().resource_mut::<AutoplayEnabled>().0 = true;
+        app.world_mut()
+            .resource_mut::<GameplayClock>()
+            .start_audio_required();
+
+        app.update();
+
+        let judged = app.world().resource::<JudgedChips>();
+        assert!(
+            !judged.0.contains(&0),
+            "waiting BGM clock must not autoplay notes at stale 0ms"
+        );
+    }
+
+    #[test]
     fn autoplay_emits_multiple_chips_in_sequence() {
         let mut app = build_app();
-        // 5 chips at measures 0, 1, 2, 3, 4 → targets 0, 2000, 4000, 6000, 8000
         let chips: Vec<dtx_core::Chip> = (0..5)
             .map(|m| dtx_core::Chip::new(m, EChannel::BassDrum, 0.0))
             .collect();
         let chart = make_chart_with_chips(chips);
         app.world_mut().resource_mut::<ActiveChart>().chart = chart;
         app.world_mut().resource_mut::<AutoplayEnabled>().0 = true;
-        // Audio at 10000ms — past all 5 chips.
-        app.world_mut().resource_mut::<AudioClock>().current_ms = Some(10000);
+        set_clock(&mut app, 10000);
 
         app.update();
 
         let judged = app.world().resource::<JudgedChips>();
-        for i in 0..5 {
-            assert!(judged.0.contains(&i), "chip {i} should be judged");
-        }
+        assert!(judged.0.is_empty());
+        assert_eq!(lane_hit_count(&app), 5);
+    }
+
+    #[test]
+    fn autoplay_flows_through_judge_and_score_pipeline() {
+        let mut app = build_pipeline_app();
+        let chart = make_chart_with_chips(vec![dtx_core::Chip::new(0, EChannel::BassDrum, 0.0)]);
+        app.world_mut().resource_mut::<ActiveChart>().chart = chart;
+        app.world_mut().resource_mut::<AutoplayEnabled>().0 = true;
+        set_clock(&mut app, 100);
+
+        app.update();
+
+        let judged = app.world().resource::<JudgedChips>();
+        assert!(judged.0.contains(&0));
+        assert_eq!(app.world().resource::<crate::resources::Score>().0, 2);
+        assert_eq!(app.world().resource::<crate::resources::Combo>().current, 1);
     }
 
     #[test]
     fn autoplay_skips_non_playable_chips() {
         let mut app = build_app();
-        // BGA chip — not playable but should be marked judged.
         let chart = make_chart_with_chips(vec![dtx_core::Chip::new(0, EChannel::BGALayer1, 0.0)]);
         app.world_mut().resource_mut::<ActiveChart>().chart = chart;
         app.world_mut().resource_mut::<AutoplayEnabled>().0 = true;
-        app.world_mut().resource_mut::<AudioClock>().current_ms = Some(1000);
+        set_clock(&mut app, 1000);
 
         app.update();
 
@@ -185,12 +257,12 @@ mod tests {
     }
 
     #[test]
-    fn autoplay_no_emit_when_audio_clock_none() {
+    fn autoplay_no_emit_when_clock_not_started() {
         let mut app = build_app();
         let chart = make_chart_with_chips(vec![dtx_core::Chip::new(0, EChannel::BassDrum, 0.0)]);
         app.world_mut().resource_mut::<ActiveChart>().chart = chart;
         app.world_mut().resource_mut::<AutoplayEnabled>().0 = true;
-        // AudioClock.current_ms = None
+        // GameplayClock not started
         app.update();
 
         let judged = app.world().resource::<JudgedChips>();

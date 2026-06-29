@@ -16,26 +16,17 @@ Drums-first MVP. DTXmaniaNX semantics + osu-lazer fluidity. Bevy 0.19.
 | **M9** | Full Performance HUD (Drums) | All 10 CActPerfDrums* sub-acts + CStagePerfDrumsScreen ported; render in Performance stage | **Done** |
 | **M10** | Full SongSelect UX | DensityGraph + SortMenu + SongSearchMenu + StatusPanel + StatusPane + CommandHistory verbatim per reference | **Done** |
 | **M11** | Full Result UX | Rank icon (S/A/B/C/D/E) + song bar + ghost bar + score + max combo + 5 judgment counts | **Done** |
-| **M12** | Full Config + ChangeSkin | 5 tabs (system/game/play/keyassign/skin) + CStageChangeSkin thumbnail grid | **Done** |
-| **M13** | Integration + full-flow verify | All 8 stages boot clean, ≥200 tests green, clippy clean, fmt clean | **Done** |
+| **M12** | Full Config + ChangeSkin | 5 tabs (system/game/play/keyassign/skin) + minimal CStageChangeSkin placeholder | **Done for M13** (full skin browser deferred per ADR-0014/M14) |
+| **M13** | Integration + full-flow verify | All 9 states boot clean, BocuD timing windows, audio preload/voice pools, focused tests green | **In progress** (final workspace verify pending) |
 | M14+ | Skin system, CubeTest, Updater, online | TBD | Future |
 
 ## Current focus
 
-**M8** — audit pass. Survey all 267 ref files (excluding DTXCreator, Libraries), produce docs/notes/PORT_GAP.md, refresh ROADMAP.
+**ADR-0014 UX redesign** — osu-inspired fluidity. Mechanics stay BocuD-ported; all visuals redesigned.
 
-**M9** — full Performance HUD (Drums). Port all 10 CActPerfDrums* sub-acts from `Stage/06.Performance/DrumsScreen/`:
-- CActPerfDrumsScore (perf score counter)
-- CActPerfDrumsComboDGB (combo + PG/GR counters)
-- CActPerfDrumsGauge (lives + difficulty bar)
-- CActPerfDrumsJudgementString (PG/GR/GO/MISS text)
-- CActPerfDrumsLaneFlushD (hit-flash per lane, 457 lines)
-- CActPerfDrumsFillingEffect (fillin-roll visual, 42 lines)
-- CActPerfDrumsPad (lane pad bottom, 499 lines)
-- CActPerfDrumsStatusPanel (BPM/lives/title/level, 212 lines)
-- CActPerfDrumsDanger (low-life red overlay, 78 lines)
-- CActPerfPerfChipFireD (chip-strike particles, 1081 lines)
-- CStagePerfDrumsScreen (orchestrator, 3672 lines)
+Completed: 300ms OutQuint transitions, dark theme, osu-style HUD widgets (rolling score, bounce combo, tweened gauge, judgment popup, lane flush), 3-column song select, themed screens (Startup/Title/SongSelect/Config/SongLoading/Result/ChangeSkin/End), BocuD 34/67/84/117 timing windows, chart sound-bank preload, real drum voice reuse, BRP debug, `.mcp.json`, `system_font_discovery` for CJK text.
+
+Remaining: data-driven density bars (M10.1), real BGA decode (M7.1), bevy_framepace, full skin browser/system (M14+).
 
 ## Port coverage summary
 

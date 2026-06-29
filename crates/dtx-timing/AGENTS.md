@@ -32,6 +32,8 @@ fn judge_lane(clock: Res<AudioClock>, lane_hit: EventReader<LaneHit>) {
 ## Design decisions
 
 - `AudioClock.current_ms: Option<i64>` — None means "no BGM / not playing".
+- `gameplay-drums::GameplayClock` only falls back to wall-clock for explicit
+  no-BGM charts; BGM-backed charts wait for audio position.
 - Update system runs every Update; cost = 2 Res reads + match. No allocations.
 - Time-math helpers (`chip_time_ms`, `delta_ms`) are pure, no bevy dep.
 

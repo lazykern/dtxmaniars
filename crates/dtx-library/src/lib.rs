@@ -68,7 +68,7 @@ impl SongInfo {
             artist,
             bpm: chart.metadata.bpm,
             dlevel: chart.metadata.dlevel,
-            bgm_path: find_bgm(dtx_path),
+            bgm_path: dtx_core::resolve_bgm_path(dtx_path, chart),
         }
     }
 
@@ -84,26 +84,6 @@ impl SongInfo {
         };
         chart.chips.iter().filter(|c| c.channel.is_drum()).count() as u32
     }
-}
-
-/// Find a BGM audio file near the given .dtx file. Returns the first match.
-fn find_bgm(dtx_path: &Path) -> Option<PathBuf> {
-    let parent = dtx_path.parent()?;
-    let stem = dtx_path.file_stem()?.to_str()?;
-
-    for ext in &["ogg", "wav"] {
-        // <dtx_stem>.<ext>
-        let p = parent.join(format!("{stem}.{ext}"));
-        if p.exists() {
-            return Some(p);
-        }
-        // 1.<ext>  (DTXmania convention for #BGM: 1)
-        let p = parent.join(format!("1.{ext}"));
-        if p.exists() {
-            return Some(p);
-        }
-    }
-    None
 }
 
 #[derive(Debug, Error)]
@@ -348,6 +328,7 @@ mod tests {
                 ..default()
             },
             chips: vec![],
+            ..Default::default()
         };
         let path = PathBuf::from("/songs/mysong.dtx");
         let info = SongInfo::from_chart(&path, &chart);

@@ -27,7 +27,7 @@
 | `dtx-scoring` | Pure | M0+ | Timing windows, judgment types (Perfect/Good/Miss), score rules |
 | `dtx-config` | Pure | M0+ | Settings schema (RON), load/save |
 | `dtx-timing` | Engine | M1 | Audio-clock authoritative; never judge on `Time::delta()` alone |
-| `dtx-audio` | Engine | M1 | `bevy_kira_audio` wrapper; hit-sound manager; BGM stream |
+| `dtx-audio` | Engine | M1/M13 | `bevy_kira_audio` wrapper; BGM stream; chart sound-bank handles |
 | `dtx-input` | Engine | M3 | Keyboard / MIDI / pad mapping → `LaneHit` events |
 | `dtx-assets` | Engine | M3 | Skin manifest loader; handle collections |
 | `dtx-library` | Engine | M4 | Async chart scan, metadata DB, presound preview |

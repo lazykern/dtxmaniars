@@ -84,11 +84,7 @@ fn guitar_chart_with_5_chips_judges_all_perfect() {
     let mut chart = Chart::default();
     chart.metadata.bpm = Some(120.0);
     for m in 0..5 {
-        chart.chips.push(Chip {
-            measure: m,
-            channel: EChannel::GuitarRxxxx,
-            value: 0.0,
-        });
+        chart.chips.push(Chip::new(m, EChannel::GuitarRxxxx, 0.0));
     }
     app.world_mut().resource_mut::<ActiveChart>().chart = chart;
 
@@ -222,11 +218,7 @@ fn guitar_chart_with_guitar_channels_judges_correctly() {
     set_guitar_mode(&mut app);
     let mut chart = Chart::default();
     chart.metadata.bpm = Some(120.0);
-    chart.chips.push(Chip {
-        measure: 0,
-        channel: EChannel::GuitarRxxxx,
-        value: 0.0,
-    });
+    chart.chips.push(Chip::new(0, EChannel::GuitarRxxxx, 0.0));
     app.world_mut().resource_mut::<ActiveChart>().chart = chart;
 
     let lane = lane_of(EChannel::GuitarRxxxx).unwrap();
@@ -408,21 +400,9 @@ fn guitar_gauge_state_tick() {
 fn guitar_bpm_change_list_from_chart_extracts_bpm_chips() {
     use dtx_core::channel::EChannel;
     let mut chart = Chart::default();
-    chart.chips.push(Chip {
-        measure: 4,
-        channel: EChannel::BPM,
-        value: 180.0,
-    });
-    chart.chips.push(Chip {
-        measure: 8,
-        channel: EChannel::BPMEx,
-        value: 200.0,
-    });
-    chart.chips.push(Chip {
-        measure: 12,
-        channel: EChannel::BassDrum,
-        value: 1.0,
-    });
+    chart.chips.push(Chip::new(4, EChannel::BPM, 180.0));
+    chart.chips.push(Chip::new(8, EChannel::BPMEx, 200.0));
+    chart.chips.push(Chip::new(12, EChannel::BassDrum, 1.0));
     let list = BpmChangeList::from_chart(&chart);
     assert_eq!(list.changes.len(), 2);
     assert_eq!(list.changes[0].measure, 4);

@@ -3,8 +3,8 @@
 //! Reference: `references/DTXmaniaNX-BocuD/DTXMania/Core/STHitRanges.cs` (200 LOC)
 //!
 //! Each difficulty tier defines the timing windows (in ms) for the 5
-//! judgment kinds (Perfect / Great / Good / Ok / Miss). The default
-//! (BocuD "Normal") is 16/32/64/100/200ms; tighter tiers (Expert/Master)
+//! judgment kinds (Perfect / Great / Good / Poor / Miss). The default
+//! BocuD range is 34/67/84/117ms; tighter tiers (Expert/Master)
 //! shrink the windows, looser tiers (Easy) expand them.
 //!
 //! Stage entry reads `difficulty` from chart metadata and applies the
@@ -17,7 +17,7 @@ use crate::JudgmentKind;
 pub enum Difficulty {
     /// Easiest — wider timing windows, fewer miss penalties.
     Easy,
-    /// Standard — default 16/32/64/100/200ms windows.
+    /// Standard — default 34/67/84/117ms windows.
     Normal,
     /// Slightly tighter than Normal.
     Hard,
@@ -80,15 +80,15 @@ impl Difficulty {
 /// threshold beyond which the judgment is Miss.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct HitRanges {
-    /// Perfect window (default 16ms).
+    /// Perfect window (default 34ms).
     pub perfect: i32,
-    /// Great window (default 32ms).
+    /// Great window (default 67ms).
     pub great: i32,
-    /// Good window (default 64ms).
+    /// Good window (default 84ms).
     pub good: i32,
-    /// Ok window (default 100ms).
-    pub ok: i32,
-    /// Miss threshold (default 200ms). Beyond this, judgment is Miss.
+    /// Poor window (default 117ms).
+    pub poor: i32,
+    /// First miss threshold (default 118ms). At or beyond this, judgment is Miss.
     pub miss: i32,
 }
 
@@ -102,55 +102,55 @@ impl HitRanges {
     /// Normal (default) timing windows.
     pub const fn normal() -> Self {
         Self {
-            perfect: 16,
-            great: 32,
-            good: 64,
-            ok: 100,
-            miss: 200,
+            perfect: 34,
+            great: 67,
+            good: 84,
+            poor: 117,
+            miss: 118,
         }
     }
 
     /// Easy timing windows (~1.5x Normal).
     pub const fn easy() -> Self {
         Self {
-            perfect: 24,
-            great: 48,
-            good: 96,
-            ok: 150,
-            miss: 300,
+            perfect: 51,
+            great: 101,
+            good: 126,
+            poor: 176,
+            miss: 177,
         }
     }
 
     /// Hard timing windows (~0.7x Normal).
     pub const fn hard() -> Self {
         Self {
-            perfect: 11,
-            great: 22,
-            good: 44,
-            ok: 70,
-            miss: 140,
+            perfect: 24,
+            great: 47,
+            good: 59,
+            poor: 82,
+            miss: 83,
         }
     }
 
     /// Expert timing windows (~0.5x Normal).
     pub const fn expert() -> Self {
         Self {
-            perfect: 8,
-            great: 16,
-            good: 32,
-            ok: 50,
-            miss: 100,
+            perfect: 17,
+            great: 34,
+            good: 42,
+            poor: 59,
+            miss: 60,
         }
     }
 
     /// Master timing windows (~0.3x Normal).
     pub const fn master() -> Self {
         Self {
-            perfect: 5,
-            great: 10,
-            good: 20,
-            ok: 30,
-            miss: 60,
+            perfect: 10,
+            great: 20,
+            good: 25,
+            poor: 35,
+            miss: 36,
         }
     }
 
@@ -166,12 +166,12 @@ impl HitRanges {
     }
 
     /// Build HitRanges from explicit values. Useful for tests + custom configs.
-    pub const fn new(perfect: i32, great: i32, good: i32, ok: i32, miss: i32) -> Self {
+    pub const fn new(perfect: i32, great: i32, good: i32, poor: i32, miss: i32) -> Self {
         Self {
             perfect,
             great,
             good,
-            ok,
+            poor,
             miss,
         }
     }
@@ -182,7 +182,7 @@ impl HitRanges {
             JudgmentKind::Perfect => self.perfect,
             JudgmentKind::Great => self.great,
             JudgmentKind::Good => self.good,
-            JudgmentKind::Ok => self.ok,
+            JudgmentKind::Poor => self.poor,
             JudgmentKind::Miss => self.miss,
         }
     }
@@ -197,8 +197,8 @@ pub fn classify_with_ranges(delta_ms: i32, ranges: HitRanges) -> JudgmentKind {
         JudgmentKind::Great
     } else if abs <= ranges.good as u32 {
         JudgmentKind::Good
-    } else if abs <= ranges.ok as u32 {
-        JudgmentKind::Ok
+    } else if abs <= ranges.poor as u32 {
+        JudgmentKind::Poor
     } else {
         JudgmentKind::Miss
     }
@@ -214,13 +214,12 @@ mod tests {
     use super::*;
 
     #[test]
-    fn normal_matches_default() {
+    fn normal_matches_bocud_default() {
         let n = HitRanges::normal();
-        assert_eq!(n.perfect, 16);
-        assert_eq!(n.great, 32);
-        assert_eq!(n.good, 64);
-        assert_eq!(n.ok, 100);
-        assert_eq!(n.miss, 200);
+        assert_eq!(n.perfect, 34);
+        assert_eq!(n.great, 67);
+        assert_eq!(n.good, 84);
+        assert_eq!(n.poor, 117);
     }
 
     #[test]
@@ -230,7 +229,7 @@ mod tests {
         assert!(e.perfect > n.perfect);
         assert!(e.great > n.great);
         assert!(e.good > n.good);
-        assert!(e.ok > n.ok);
+        assert!(e.poor > n.poor);
         assert!(e.miss > n.miss);
     }
 
@@ -241,7 +240,7 @@ mod tests {
         assert!(m.perfect < n.perfect);
         assert!(m.great < n.great);
         assert!(m.good < n.good);
-        assert!(m.ok < n.ok);
+        assert!(m.poor < n.poor);
         assert!(m.miss < n.miss);
     }
 
@@ -275,51 +274,52 @@ mod tests {
     fn classify_with_normal_ranges() {
         let r = HitRanges::normal();
         assert_eq!(classify_with_ranges(0, r), JudgmentKind::Perfect);
-        assert_eq!(classify_with_ranges(16, r), JudgmentKind::Perfect);
-        assert_eq!(classify_with_ranges(17, r), JudgmentKind::Great);
-        assert_eq!(classify_with_ranges(32, r), JudgmentKind::Great);
-        assert_eq!(classify_with_ranges(33, r), JudgmentKind::Good);
-        assert_eq!(classify_with_ranges(100, r), JudgmentKind::Ok);
-        assert_eq!(classify_with_ranges(101, r), JudgmentKind::Miss);
-        assert_eq!(classify_with_ranges(201, r), JudgmentKind::Miss);
+        assert_eq!(classify_with_ranges(34, r), JudgmentKind::Perfect);
+        assert_eq!(classify_with_ranges(35, r), JudgmentKind::Great);
+        assert_eq!(classify_with_ranges(67, r), JudgmentKind::Great);
+        assert_eq!(classify_with_ranges(68, r), JudgmentKind::Good);
+        assert_eq!(classify_with_ranges(84, r), JudgmentKind::Good);
+        assert_eq!(classify_with_ranges(85, r), JudgmentKind::Poor);
+        assert_eq!(classify_with_ranges(117, r), JudgmentKind::Poor);
+        assert_eq!(classify_with_ranges(118, r), JudgmentKind::Miss);
     }
 
     #[test]
     fn classify_with_easy_ranges_wider() {
-        // Easy: Perfect window is 24ms, so 20ms is Perfect under Easy,
+        // Easy: Perfect window is 51ms, so 40ms is Perfect under Easy,
         // Great under Normal.
         let r_easy = HitRanges::easy();
         let r_norm = HitRanges::normal();
-        assert_eq!(classify_with_ranges(20, r_easy), JudgmentKind::Perfect);
-        assert_eq!(classify_with_ranges(20, r_norm), JudgmentKind::Great);
+        assert_eq!(classify_with_ranges(40, r_easy), JudgmentKind::Perfect);
+        assert_eq!(classify_with_ranges(40, r_norm), JudgmentKind::Great);
     }
 
     #[test]
     fn classify_with_master_ranges_tighter() {
-        // Master: Perfect window is 5ms, so 8ms is Great under Master,
+        // Master: Perfect window is 10ms, so 12ms is Great under Master,
         // Perfect under Normal.
         let r_mast = HitRanges::master();
         let r_norm = HitRanges::normal();
-        assert_eq!(classify_with_ranges(8, r_mast), JudgmentKind::Great);
-        assert_eq!(classify_with_ranges(8, r_norm), JudgmentKind::Perfect);
+        assert_eq!(classify_with_ranges(12, r_mast), JudgmentKind::Great);
+        assert_eq!(classify_with_ranges(12, r_norm), JudgmentKind::Perfect);
     }
 
     #[test]
     fn classify_handles_negative_deltas() {
         let r = HitRanges::normal();
-        assert_eq!(classify_with_ranges(-16, r), JudgmentKind::Perfect);
-        assert_eq!(classify_with_ranges(-17, r), JudgmentKind::Great);
-        assert_eq!(classify_with_ranges(-201, r), JudgmentKind::Miss);
+        assert_eq!(classify_with_ranges(-34, r), JudgmentKind::Perfect);
+        assert_eq!(classify_with_ranges(-35, r), JudgmentKind::Great);
+        assert_eq!(classify_with_ranges(-118, r), JudgmentKind::Miss);
     }
 
     #[test]
     fn classify_with_difficulty_helper() {
         assert_eq!(
-            classify_with_difficulty(8, Difficulty::Master),
+            classify_with_difficulty(12, Difficulty::Master),
             JudgmentKind::Great
         );
         assert_eq!(
-            classify_with_difficulty(8, Difficulty::Normal),
+            classify_with_difficulty(12, Difficulty::Normal),
             JudgmentKind::Perfect
         );
     }
@@ -327,11 +327,11 @@ mod tests {
     #[test]
     fn window_for_kind() {
         let r = HitRanges::normal();
-        assert_eq!(r.window(JudgmentKind::Perfect), 16);
-        assert_eq!(r.window(JudgmentKind::Great), 32);
-        assert_eq!(r.window(JudgmentKind::Good), 64);
-        assert_eq!(r.window(JudgmentKind::Ok), 100);
-        assert_eq!(r.window(JudgmentKind::Miss), 200);
+        assert_eq!(r.window(JudgmentKind::Perfect), 34);
+        assert_eq!(r.window(JudgmentKind::Great), 67);
+        assert_eq!(r.window(JudgmentKind::Good), 84);
+        assert_eq!(r.window(JudgmentKind::Poor), 117);
+        assert_eq!(r.window(JudgmentKind::Miss), 118);
     }
 
     #[test]

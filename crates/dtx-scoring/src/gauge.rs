@@ -75,7 +75,7 @@ pub fn gauge_delta(kind: JudgmentKind) -> f32 {
         JudgmentKind::Perfect => 0.5,
         JudgmentKind::Great => 0.3,
         JudgmentKind::Good => 0.1,
-        JudgmentKind::Ok => -1.0,
+        JudgmentKind::Poor => -1.0,
         JudgmentKind::Miss => -3.0,
     }
 }
@@ -91,7 +91,7 @@ pub struct ComboState {
     pub perfect_count: u32,
     /// Total judgment count (all kinds).
     pub total_count: u32,
-    /// Bad / miss / ok count (any non-Perfect/Great/Good).
+    /// Bad / miss / poor count (any non-Perfect/Great/Good).
     pub imperfect_count: u32,
 }
 
@@ -110,7 +110,7 @@ impl ComboState {
         } else if matches!(kind, JudgmentKind::Great | JudgmentKind::Good) {
             self.current += 1;
         } else {
-            // Ok or Miss — break combo, mark imperfect.
+            // Poor or Miss — break combo, mark imperfect.
             self.imperfect_count += 1;
             self.current = 0;
         }
@@ -124,12 +124,12 @@ impl ComboState {
         *self = Self::default();
     }
 
-    /// True if no misses or ok (all Perfect/Great/Good) and total_count > 0.
+    /// True if no misses or poor hits (all Perfect/Great/Good) and total_count > 0.
     pub fn is_full_combo(&self) -> bool {
         self.total_count > 0 && self.imperfect_count == 0
     }
 
-    /// True if all Perfect (no Great/Good/Ok/Miss).
+    /// True if all Perfect (no Great/Good/Poor/Miss).
     pub fn is_all_perfect(&self) -> bool {
         self.total_count > 0 && self.perfect_count == self.total_count
     }
@@ -247,7 +247,7 @@ mod tests {
         assert!(gauge_delta(JudgmentKind::Perfect) > 0.0);
         assert!(gauge_delta(JudgmentKind::Great) > 0.0);
         assert!(gauge_delta(JudgmentKind::Good) > 0.0);
-        assert!(gauge_delta(JudgmentKind::Ok) < 0.0);
+        assert!(gauge_delta(JudgmentKind::Poor) < 0.0);
         assert!(gauge_delta(JudgmentKind::Miss) < 0.0);
     }
 
@@ -288,10 +288,10 @@ mod tests {
     }
 
     #[test]
-    fn combo_ok_breaks_combo() {
+    fn combo_poor_breaks_combo() {
         let mut c = ComboState::new();
         c.apply(JudgmentKind::Perfect);
-        c.apply(JudgmentKind::Ok);
+        c.apply(JudgmentKind::Poor);
         assert_eq!(c.current, 0);
         assert_eq!(c.imperfect_count, 1);
     }
@@ -302,7 +302,7 @@ mod tests {
         c.apply(JudgmentKind::Perfect);
         c.apply(JudgmentKind::Great);
         c.apply(JudgmentKind::Good);
-        assert!(c.is_full_combo(), "no miss/ok should be FC");
+        assert!(c.is_full_combo(), "no miss/poor should be FC");
     }
 
     #[test]

@@ -9,8 +9,9 @@
 //! Audio / Graphics / Gameplay / Menu / Velocity). Each is a CActConfigList.
 
 use bevy::prelude::*;
-// fade UI removed (ADR-0010 relaxed)
-use game_shell::{AppState, despawn_stage};
+use dtx_ui::ThemeResource;
+use dtx_ui::theme::Theme;
+use game_shell::{AppState, TransitionRequest, despawn_stage, request_transition};
 
 // === Layout positions (verbatim from CStageConfig.cs:45-85) ===
 
@@ -118,9 +119,12 @@ pub fn plugin(app: &mut App) {
         .add_systems(Startup, spawn_config_layout)
         .add_systems(
             OnEnter(AppState::Config),
-            (populate_default_tab, spawn_config),
+            (show_config_chrome, populate_default_tab, spawn_config).chain(),
         )
-        .add_systems(OnExit(AppState::Config), despawn_stage::<ConfigEntity>)
+        .add_systems(
+            OnExit(AppState::Config),
+            (hide_config_chrome, despawn_stage::<ConfigEntity>).chain(),
+        )
         .add_systems(
             Update,
             (config_navigation, render_config_selection).run_if(in_state(AppState::Config)),
@@ -129,8 +133,8 @@ pub fn plugin(app: &mut App) {
 
 /// Persistent layout spawned once at app start (CStageConfig.cs:45-85).
 /// Stays visible across OnEnter/OnExit so the screen has stable chrome.
-fn spawn_config_layout(mut commands: Commands) {
-    // Background.
+fn spawn_config_layout(mut commands: Commands, theme: Res<ThemeResource>) {
+    let t = theme.0;
     commands.spawn((
         ConfigLeftMenu,
         Node {
@@ -141,10 +145,10 @@ fn spawn_config_layout(mut commands: Commands) {
             height: Val::Px(720.0),
             ..default()
         },
-        BackgroundColor(Color::srgb(0.05, 0.05, 0.08)),
+        BackgroundColor(t.bg_bottom),
+        Visibility::Hidden,
     ));
 
-    // Item bar (CStageConfig.cs:133-135).
     commands.spawn((
         ConfigLeftMenu,
         Node {
@@ -155,10 +159,10 @@ fn spawn_config_layout(mut commands: Commands) {
             height: Val::Px(720.0),
             ..default()
         },
-        BackgroundColor(Color::srgba(0.05, 0.05, 0.1, 0.7)),
+        BackgroundColor(t.panel_bg),
+        Visibility::Hidden,
     ));
 
-    // Description panel placeholder (CStageConfig.cs:113-117).
     commands.spawn((
         ConfigDescriptionPanel,
         Node {
@@ -170,14 +174,36 @@ fn spawn_config_layout(mut commands: Commands) {
             padding: UiRect::all(Val::Px(8.0)),
             ..default()
         },
-        BackgroundColor(Color::srgba(0.0, 0.0, 0.0, 0.0)),
+        BackgroundColor(t.panel_bg),
         Text::new("(no selection)"),
-        TextFont {
-            font_size: FontSize::Px(17.0),
-            ..default()
-        },
-        TextColor(Color::srgb(0.7, 0.7, 0.7)),
+        Theme::font(17.0),
+        TextColor(t.text_secondary),
+        Visibility::Hidden,
     ));
+}
+
+fn show_config_chrome(
+    mut menus: Query<&mut Visibility, With<ConfigLeftMenu>>,
+    mut panels: Query<&mut Visibility, With<ConfigDescriptionPanel>>,
+) {
+    for mut vis in &mut menus {
+        *vis = Visibility::Inherited;
+    }
+    for mut vis in &mut panels {
+        *vis = Visibility::Inherited;
+    }
+}
+
+fn hide_config_chrome(
+    mut menus: Query<&mut Visibility, With<ConfigLeftMenu>>,
+    mut panels: Query<&mut Visibility, With<ConfigDescriptionPanel>>,
+) {
+    for mut vis in &mut menus {
+        *vis = Visibility::Hidden;
+    }
+    for mut vis in &mut panels {
+        *vis = Visibility::Hidden;
+    }
 }
 
 fn populate_default_tab(mut active: ResMut<ActiveConfigTab>) {
@@ -188,7 +214,8 @@ fn populate_default_tab(mut active: ResMut<ActiveConfigTab>) {
 
 /// Per-state content (M4 stub: hardcoded list of top-level groups).
 /// OnExit despawns; persistent layout in `spawn_config_layout` survives.
-fn spawn_config(mut commands: Commands) {
+fn spawn_config(mut commands: Commands, theme: Res<ThemeResource>) {
+    let t = theme.0;
     commands
         .spawn((
             ConfigEntity,
@@ -203,21 +230,11 @@ fn spawn_config(mut commands: Commands) {
             BackgroundColor(Color::NONE),
         ))
         .with_children(|parent| {
-            parent.spawn((
-                Text::new("Config"),
-                TextFont {
-                    font_size: FontSize::Px(36.0),
-                    ..default()
-                },
-                TextColor(Color::WHITE),
-            ));
+            parent.spawn((Text::new("Config"), Theme::font(36.0), TextColor(t.accent)));
             parent.spawn((
                 Text::new("↑↓: Navigate  ENTER: Drill in (stub)  ESC: Back"),
-                TextFont {
-                    font_size: FontSize::Px(14.0),
-                    ..default()
-                },
-                TextColor(Color::srgb(0.5, 0.5, 0.5)),
+                Theme::font(14.0),
+                TextColor(t.text_secondary),
             ));
 
             for (i, (name, _desc)) in MENU_GROUPS.iter().enumerate() {
@@ -232,19 +249,16 @@ fn spawn_config(mut commands: Commands) {
                             ..default()
                         },
                         BackgroundColor(if i == 0 {
-                            Color::srgb(0.3, 0.5, 0.8)
+                            t.accent.with_alpha(0.35)
                         } else {
-                            Color::srgb(0.15, 0.15, 0.2)
+                            t.panel_bg
                         }),
                     ))
                     .with_children(|row| {
                         row.spawn((
                             Text::new(*name),
-                            TextFont {
-                                font_size: FontSize::Px(16.0),
-                                ..default()
-                            },
-                            TextColor(Color::WHITE),
+                            Theme::font(16.0),
+                            TextColor(t.text_primary),
                         ));
                     });
             }
@@ -254,7 +268,7 @@ fn spawn_config(mut commands: Commands) {
 fn config_navigation(
     keys: Res<ButtonInput<KeyCode>>,
     mut selection: ResMut<ConfigSelection>,
-    mut next: ResMut<NextState<AppState>>,
+    mut requests: MessageWriter<TransitionRequest>,
 ) {
     let max = MENU_GROUPS.len().saturating_sub(1);
     if keys.just_pressed(KeyCode::ArrowDown) {
@@ -264,19 +278,21 @@ fn config_navigation(
     } else if keys.just_pressed(KeyCode::Enter) {
         info!("Config: drill into '{}' (stub)", MENU_GROUPS[selection.0].0);
     } else if keys.just_pressed(KeyCode::Escape) {
-        next.set(AppState::Title);
+        request_transition(&mut requests, AppState::Title);
     }
 }
 
 fn render_config_selection(
+    theme: Res<ThemeResource>,
     selection: Res<ConfigSelection>,
     mut rows: Query<(&ConfigItemEntity, &mut BackgroundColor)>,
 ) {
+    let t = theme.0;
     for (row_entity, mut bg) in &mut rows {
         bg.0 = if row_entity.0 == selection.0 {
-            Color::srgb(0.3, 0.5, 0.8)
+            t.accent.with_alpha(0.35)
         } else {
-            Color::srgb(0.15, 0.15, 0.2)
+            t.panel_bg
         };
     }
 }

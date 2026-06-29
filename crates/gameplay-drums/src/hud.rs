@@ -1,36 +1,56 @@
-//! Drums performance HUD — minimal Bevy UI.
-//!
-//! ADR-0010 relaxed: free redesign. DTXManiaNX had 11 sub-acts for the
-//! performance HUD (CActPerfDrumsScore, CActPerfDrumsComboDGB,
-//! CActPerfDrumsGauge, CActPerfDrumsStatusPanel, etc). We collapse them
-//! to a single minimal overlay: lane strip, hit line, score, combo,
-//! gauge bar, judgment counts.
-//!
-//! Reference: `references/DTXmaniaNX-BocuD/DTXMania/Stage/06.Performance/DrumsScreen/*`
+//! Drums performance HUD — osu-style widgets over BocuD mechanics (ADR-0014).
 
 use bevy::prelude::*;
-use game_shell::AppState;
+use dtx_scoring::JudgmentKind;
+use dtx_ui::{
+    theme::Theme,
+    widget::{
+        combo_display::ComboDisplay,
+        gauge_bar::{sync_gauge_bar, GaugeBarWidget, GaugeFill},
+        judgment_popup::{spawn_judgment_popup, JudgmentPopup},
+        lane_flush::{spawn_lane_flush_strip, tick_lane_flushes, LaneFlushWidget},
+        rolling_counter::RollingCounter,
+    },
+    ThemeResource,
+};
+use game_shell::{AppState, EGameMode};
 
-use crate::lane_map::LANE_ORDER;
+use crate::components::LastJudgment;
+use crate::events::JudgmentEvent;
+use crate::gauge::{gauge_fill_color, StageGauge};
+use crate::hud_cache::{set_text_if_changed, HudDisplayCache};
+use crate::keyboard_viz;
+use crate::lane_map::{LaneMap, LANE_ORDER};
+
+pub use crate::lane_map::LANE_COUNT;
+use crate::layout::PlayfieldLayout;
+use crate::playfield_viz;
 use crate::resources::{Combo, JudgmentCounts, Score};
 
 #[derive(Component)]
 pub struct HudRoot;
 
 #[derive(Component)]
-struct ScoreText;
-
-#[derive(Component)]
-struct ComboText;
-
-#[derive(Component)]
-struct GaugeBar;
-
-#[derive(Component)]
-struct GaugeFill;
-
-#[derive(Component)]
 struct JudgmentCountsText;
+
+#[derive(Component)]
+struct ScoreLabel;
+
+#[derive(Component)]
+struct LaneColumn {
+    lane: usize,
+}
+
+#[derive(Component)]
+struct PlayfieldBackboard;
+
+#[derive(Component)]
+struct HitLine;
+
+#[derive(Component)]
+struct LaneLabel {
+    lane: usize,
+}
 
 pub fn plugin(app: &mut App) {
     app.add_systems(OnEnter(AppState::Performance), spawn_hud)
@@ -38,26 +58,41 @@ pub fn plugin(app: &mut App) {
         .add_systems(
             Update,
             (
-                refresh_score_text,
-                refresh_combo_text,
-                refresh_gauge_bar,
+                (
+                    apply_backboard_layout,
+                    apply_lane_column_layout,
+                    apply_hit_line_layout,
+                    apply_lane_label_layout,
+                    apply_lane_flush_layout,
+                )
+                    .chain()
+                    .run_if(resource_changed::<PlayfieldLayout>),
+                sync_hud_score_target,
+                tick_hud_score,
+                sync_hud_combo,
+                sync_hud_gauge,
+                sync_hud_judgment,
+                flush_lanes_on_hit,
+                tick_lane_flushes_system,
                 refresh_judgment_counts,
+                keyboard_viz::decay_key_cap_flashes,
             )
                 .run_if(in_state(AppState::Performance)),
         );
 }
 
-/// 9 lanes for drums (matches `LANE_ORDER` in lane_map.rs).
-pub const LANE_COUNT: usize = 9;
-pub const LANE_WIDTH_PX: f32 = 80.0;
-pub const HIT_LINE_Y: f32 = 60.0;
-pub const LANE_STRIP_TOP_Y: f32 = 500.0;
-pub const LANE_STRIP_BOTTOM_Y: f32 = 60.0;
-pub const LANE_STRIP_LEFT_X: f32 = 80.0;
-
-fn spawn_hud(mut commands: Commands) {
-    // Root: full-screen Node.
-    commands
+fn spawn_hud(
+    mut commands: Commands,
+    mode: Res<EGameMode>,
+    theme: Res<ThemeResource>,
+    layout: Res<PlayfieldLayout>,
+    lane_map: Res<LaneMap>,
+) {
+    if *mode != EGameMode::Drums {
+        return;
+    }
+    let t = theme.0;
+    let root = commands
         .spawn((
             HudRoot,
             Node {
@@ -67,134 +102,200 @@ fn spawn_hud(mut commands: Commands) {
             },
             BackgroundColor(Color::srgba(0.0, 0.0, 0.0, 0.0)),
         ))
-        .with_children(|root| {
-            // Lane strip — 9 columns.
-            for i in 0..LANE_COUNT {
-                root.spawn((
-                    Node {
-                        position_type: PositionType::Absolute,
-                        left: Val::Px(LANE_STRIP_LEFT_X + (i as f32) * LANE_WIDTH_PX),
-                        top: Val::Px(LANE_STRIP_TOP_Y),
-                        width: Val::Px(LANE_WIDTH_PX - 4.0),
-                        height: Val::Px(LANE_STRIP_BOTTOM_Y - LANE_STRIP_TOP_Y),
-                        ..default()
-                    },
-                    BackgroundColor(Color::srgba(0.15, 0.15, 0.2, 0.4)),
-                ));
-            }
+        .id();
 
-            // Hit line (horizontal).
+    commands.entity(root).with_children(|root| {
+        root.spawn((
+            PlayfieldBackboard,
+            Node {
+                position_type: PositionType::Absolute,
+                left: Val::Px(layout.backboard_left()),
+                top: Val::Px(layout.backboard_top()),
+                width: Val::Px(layout.backboard_width()),
+                height: Val::Px(layout.backboard_height()),
+                ..default()
+            },
+            BackgroundColor(Color::srgba(0.06, 0.08, 0.14, 0.92)),
+        ));
+
+        for lane in 0..LANE_COUNT {
             root.spawn((
+                LaneColumn { lane },
                 Node {
                     position_type: PositionType::Absolute,
-                    left: Val::Px(LANE_STRIP_LEFT_X),
-                    top: Val::Px(HIT_LINE_Y),
-                    width: Val::Px(LANE_COUNT as f32 * LANE_WIDTH_PX),
-                    height: Val::Px(4.0),
+                    left: Val::Px(layout.lane_left(lane)),
+                    top: Val::Px(layout.lane_top()),
+                    width: Val::Px(layout.lane_width() - 4.0),
+                    height: Val::Px(layout.lane_height()),
                     ..default()
                 },
-                BackgroundColor(Color::srgb(0.9, 0.9, 0.9)),
+                BackgroundColor(t.panel_bg),
             ));
+        }
 
-            // Score (top-left).
+        root.spawn((
+            HitLine,
+            Node {
+                position_type: PositionType::Absolute,
+                left: Val::Px(layout.lane_strip_left()),
+                top: Val::Px(layout.judge_y()),
+                width: Val::Px(layout.lane_strip_width()),
+                height: Val::Px(3.0 * layout.scale),
+                ..default()
+            },
+            BackgroundColor(t.accent),
+        ));
+
+        for (lane, ch) in LANE_ORDER.iter().enumerate() {
             root.spawn((
-                ScoreText,
+                LaneLabel { lane },
                 Node {
                     position_type: PositionType::Absolute,
-                    left: Val::Px(20.0),
-                    top: Val::Px(20.0),
+                    left: Val::Px(layout.lane_left(lane) + 4.0),
+                    top: Val::Px(layout.label_top()),
                     ..default()
                 },
-                Text::new("Score: 0"),
-                TextFont {
-                    font_size: FontSize::Px(28.0),
-                    ..default()
-                },
-                TextColor(Color::WHITE),
+                Text::new(lane_label(*ch)),
+                Theme::label_font(),
+                TextColor(t.text_secondary),
             ));
+        }
 
-            // Combo (top-right).
-            root.spawn((
-                ComboText,
-                Node {
-                    position_type: PositionType::Absolute,
-                    right: Val::Px(20.0),
-                    top: Val::Px(20.0),
-                    ..default()
-                },
-                Text::new("Combo: 0"),
-                TextFont {
-                    font_size: FontSize::Px(28.0),
-                    ..default()
-                },
-                TextColor(Color::srgb(0.9, 0.8, 0.3)),
-            ));
+        root.spawn((
+            RollingCounter::default(),
+            ScoreLabel,
+            Node {
+                position_type: PositionType::Absolute,
+                left: Val::Px(24.0),
+                top: Val::Px(24.0),
+                ..default()
+            },
+            Text::new("0"),
+            Theme::hud_font(),
+            TextColor(t.text_primary),
+        ));
 
-            // Gauge bar (bottom-left, 0-100%).
-            root.spawn((
-                GaugeBar,
-                Node {
-                    position_type: PositionType::Absolute,
-                    left: Val::Px(20.0),
-                    bottom: Val::Px(20.0),
-                    width: Val::Px(300.0),
-                    height: Val::Px(24.0),
-                    border: UiRect::all(Val::Px(2.0)),
-                    ..default()
-                },
-                BackgroundColor(Color::srgba(0.0, 0.0, 0.0, 0.7)),
-            ));
-            // Gauge fill (child of bar).
-            // Re-parented below.
-            root.spawn((
+        root.spawn((
+            ComboDisplay::default(),
+            Node {
+                position_type: PositionType::Absolute,
+                right: Val::Px(24.0),
+                top: Val::Px(24.0),
+                ..default()
+            },
+            Text::new("0x"),
+            Theme::hud_font(),
+            TextColor(t.accent),
+        ));
+
+        root.spawn((
+            GaugeBarWidget::default(),
+            Node {
+                position_type: PositionType::Absolute,
+                left: Val::Px(24.0),
+                bottom: Val::Px(24.0),
+                width: Val::Px(280.0),
+                height: Val::Px(20.0),
+                ..default()
+            },
+            BackgroundColor(t.gauge_track),
+            children![(
                 GaugeFill,
                 Node {
-                    position_type: PositionType::Absolute,
-                    left: Val::Px(20.0),
-                    bottom: Val::Px(20.0),
-                    width: Val::Px(60.0), // initial 20%
-                    height: Val::Px(24.0),
+                    width: Val::Px(224.0),
+                    height: Val::Percent(100.0),
                     ..default()
                 },
-                BackgroundColor(Color::srgb(0.4, 0.8, 0.4)),
-            ));
+                BackgroundColor(t.gauge_fill),
+            )],
+        ));
 
-            // Judgment counts (bottom-right).
-            root.spawn((
-                JudgmentCountsText,
-                Node {
-                    position_type: PositionType::Absolute,
-                    right: Val::Px(20.0),
-                    bottom: Val::Px(20.0),
-                    ..default()
-                },
-                Text::new("Perfect: 0  Great: 0  Good: 0  Ok: 0  Miss: 0"),
-                TextFont {
-                    font_size: FontSize::Px(14.0),
-                    ..default()
-                },
-                TextColor(Color::srgb(0.7, 0.7, 0.7)),
-            ));
+        root.spawn((
+            JudgmentCountsText,
+            Node {
+                position_type: PositionType::Absolute,
+                right: Val::Px(24.0),
+                bottom: Val::Px(56.0),
+                ..default()
+            },
+            Text::new(""),
+            Theme::label_font(),
+            TextColor(t.text_secondary),
+        ));
+    });
 
-            // Lane labels (at the bottom of each lane).
-            for (i, ch) in LANE_ORDER.iter().enumerate() {
-                root.spawn((
-                    Node {
-                        position_type: PositionType::Absolute,
-                        left: Val::Px(LANE_STRIP_LEFT_X + (i as f32) * LANE_WIDTH_PX + 4.0),
-                        bottom: Val::Px(40.0),
-                        width: Val::Px(LANE_WIDTH_PX - 12.0),
-                        ..default()
-                    },
-                    Text::new(lane_label(*ch)),
-                    TextFont {
-                        font_size: FontSize::Px(11.0),
-                        ..default()
-                    },
-                    TextColor(Color::srgb(0.6, 0.6, 0.6)),
-                ));
-            }
-        });
+    let _flushes = spawn_lane_flush_strip(
+        &mut commands,
+        root,
+        LANE_COUNT,
+        layout.lane_width(),
+        layout.lane_strip_left(),
+        layout.lane_top(),
+        layout.lane_height(),
+        &t,
+    );
+
+    playfield_viz::spawn_lane_receptors(&mut commands, root, &layout, &t);
+    keyboard_viz::spawn_key_caps(&mut commands, root, &layout, &lane_map, &t);
+    spawn_judgment_popup(&mut commands, root, &t);
+}
+
+fn apply_backboard_layout(
+    layout: Res<PlayfieldLayout>,
+    mut backboards: Query<&mut Node, With<PlayfieldBackboard>>,
+) {
+    for mut node in &mut backboards {
+        node.left = Val::Px(layout.backboard_left());
+        node.top = Val::Px(layout.backboard_top());
+        node.width = Val::Px(layout.backboard_width());
+        node.height = Val::Px(layout.backboard_height());
+    }
+}
+
+fn apply_lane_column_layout(
+    layout: Res<PlayfieldLayout>,
+    mut lanes: Query<(&LaneColumn, &mut Node)>,
+) {
+    for (col, mut node) in &mut lanes {
+        node.left = Val::Px(layout.lane_left(col.lane));
+        node.top = Val::Px(layout.lane_top());
+        node.width = Val::Px(layout.lane_width() - 4.0);
+        node.height = Val::Px(layout.lane_height());
+    }
+}
+
+fn apply_hit_line_layout(
+    layout: Res<PlayfieldLayout>,
+    mut hit_line: Query<&mut Node, With<HitLine>>,
+) {
+    for mut node in &mut hit_line {
+        node.left = Val::Px(layout.lane_strip_left());
+        node.top = Val::Px(layout.judge_y());
+        node.width = Val::Px(layout.lane_strip_width());
+        node.height = Val::Px(3.0 * layout.scale);
+    }
+}
+
+fn apply_lane_label_layout(
+    layout: Res<PlayfieldLayout>,
+    mut labels: Query<(&LaneLabel, &mut Node)>,
+) {
+    for (label, mut node) in &mut labels {
+        node.left = Val::Px(layout.lane_left(label.lane) + 4.0);
+        node.top = Val::Px(layout.label_top());
+    }
+}
+
+fn apply_lane_flush_layout(
+    layout: Res<PlayfieldLayout>,
+    mut flushes: Query<(&LaneFlushWidget, &mut Node)>,
+) {
+    for (i, (_, mut node)) in flushes.iter_mut().enumerate() {
+        node.left = Val::Px(layout.lane_left(i));
+        node.top = Val::Px(layout.lane_top());
+        node.width = Val::Px(layout.lane_width() - 4.0);
+        node.height = Val::Px(layout.lane_height());
+    }
 }
 
 fn lane_label(channel: dtx_core::EChannel) -> &'static str {
@@ -219,60 +320,164 @@ fn despawn_hud(mut commands: Commands, query: Query<Entity, With<HudRoot>>) {
     }
 }
 
-fn refresh_score_text(score: Res<Score>, mut q: Query<&mut Text, With<ScoreText>>) {
+fn sync_hud_score_target(score: Res<Score>, mut q: Query<&mut RollingCounter>) {
     if !score.is_changed() {
         return;
     }
-    for mut t in &mut q {
-        *t = Text::new(format!("Score: {}", score.0));
+    for mut counter in &mut q {
+        counter.set_target(score.0);
     }
 }
 
-fn refresh_combo_text(combo: Res<Combo>, mut q: Query<&mut Text, With<ComboText>>) {
-    if !combo.is_changed() {
-        return;
-    }
-    for mut t in &mut q {
-        *t = Text::new(format!("Combo: {}", combo.current));
+fn tick_hud_score(
+    time: Res<Time>,
+    mut cache: ResMut<HudDisplayCache>,
+    mut q: Query<(&mut RollingCounter, &mut Text), With<ScoreLabel>>,
+) {
+    let delta = time.delta_secs() * 1000.0;
+    for (mut counter, mut text) in &mut q {
+        counter.tick(delta);
+        set_text_if_changed(
+            &mut text,
+            &mut cache.score_text,
+            format!("Score: {}", counter.displayed),
+        );
     }
 }
 
-fn refresh_gauge_bar(counts: Res<JudgmentCounts>, mut q: Query<&mut Node, With<GaugeFill>>) {
-    if !counts.is_changed() {
-        return;
+fn sync_hud_combo(
+    combo: Res<Combo>,
+    time: Res<Time>,
+    mut cache: ResMut<HudDisplayCache>,
+    mut q: Query<(&mut ComboDisplay, &mut Text)>,
+) {
+    let delta = time.delta_secs() * 1000.0;
+    for (mut display, mut text) in &mut q {
+        display.set_combo(combo.current);
+        display.tick(delta);
+        set_text_if_changed(
+            &mut text,
+            &mut cache.combo_text,
+            format!("Combo: {}x / Max {}", display.last_combo, combo.max),
+        );
     }
-    // Rough gauge: starts 20%, +0.5 per Perfect/Great/Good, -3 per Miss.
-    // Approximation; real gauge logic in dtx-scoring::gauge.
-    let _total = counts.total();
-    let good = (counts.perfect + counts.great + counts.good) as f32;
-    let bad = (counts.miss + counts.ok) as f32;
-    let mut pct: f32 = 20.0 + good * 0.5 - bad * 3.0;
-    pct = pct.clamp(0.0, 100.0);
-    let width_px = 300.0 * (pct / 100.0);
-    for mut n in &mut q {
-        n.width = Val::Px(width_px);
+}
+
+fn sync_hud_gauge(
+    gauge: Res<StageGauge>,
+    time: Res<Time>,
+    bars: Query<&mut GaugeBarWidget>,
+    fills: Query<&mut Node, With<GaugeFill>>,
+    mut fill_colors: Query<&mut BackgroundColor, With<GaugeFill>>,
+) {
+    if gauge.is_changed() {
+        sync_gauge_bar(gauge.pct(), time, bars, fills);
+        for mut color in &mut fill_colors {
+            color.0 = gauge_fill_color(gauge.value, gauge.failed);
+        }
     }
+}
+
+fn sync_hud_judgment(
+    last: Res<LastJudgment>,
+    theme: Res<ThemeResource>,
+    time: Res<Time>,
+    mut prev: Local<Option<(JudgmentKind, i64)>>,
+    mut q: Query<(
+        &mut JudgmentPopup,
+        &mut Text,
+        &mut TextColor,
+        &mut Visibility,
+    )>,
+) {
+    if let Some(ev) = last.0 {
+        let key = (ev.kind, ev.delta_ms);
+        if prev.as_ref() != Some(&key) {
+            *prev = Some(key);
+            let label = kind_label(ev.kind);
+            for (mut popup, mut text, mut color, mut vis) in &mut q {
+                let c = popup.trigger(label, &theme.0);
+                *text = Text::new(if ev.delta_ms != 0 {
+                    format!("{label} {:+}ms", ev.delta_ms)
+                } else {
+                    label.into()
+                });
+                color.0 = c;
+                *vis = Visibility::Visible;
+            }
+        }
+    }
+    let delta = time.delta_secs() * 1000.0;
+    for (mut popup, _, mut color, mut vis) in &mut q {
+        let (alpha, _scale) = popup.tick(delta);
+        color.0 = color.0.with_alpha(alpha);
+        if !popup.is_active() && alpha <= 0.01 {
+            *vis = Visibility::Hidden;
+        }
+    }
+}
+
+fn kind_label(kind: JudgmentKind) -> &'static str {
+    match kind {
+        JudgmentKind::Perfect => "PERFECT",
+        JudgmentKind::Great => "GREAT",
+        JudgmentKind::Good => "GOOD",
+        JudgmentKind::Poor => "POOR",
+        JudgmentKind::Miss => "MISS",
+    }
+}
+
+fn flush_lanes_on_hit(
+    mut events: MessageReader<JudgmentEvent>,
+    mut flushes: Query<&mut LaneFlushWidget>,
+) {
+    for ev in events.read() {
+        if let Some(mut flush) = flushes.iter_mut().nth(ev.lane as usize) {
+            flush.trigger();
+        }
+    }
+}
+
+fn tick_lane_flushes_system(
+    theme: Res<ThemeResource>,
+    flushes: Query<(&mut LaneFlushWidget, &mut BackgroundColor, &mut Visibility)>,
+) {
+    tick_lane_flushes(&theme.0, flushes);
 }
 
 fn refresh_judgment_counts(
     counts: Res<JudgmentCounts>,
+    mut cache: ResMut<HudDisplayCache>,
     mut q: Query<&mut Text, With<JudgmentCountsText>>,
 ) {
     if !counts.is_changed() {
         return;
     }
+    let acc = accuracy_pct(&counts);
+    let text = format!(
+        "Acc: {acc:.1}%  P:{} G:{} GO:{} OK:{} M:{}",
+        counts.perfect, counts.great, counts.good, counts.ok, counts.miss
+    );
     for mut t in &mut q {
-        *t = Text::new(format!(
-            "Perfect: {}  Great: {}  Good: {}  Ok: {}  Miss: {}",
-            counts.perfect, counts.great, counts.good, counts.ok, counts.miss
-        ));
+        set_text_if_changed(&mut t, &mut cache.counters_text, text.clone());
     }
+}
+
+fn accuracy_pct(counts: &JudgmentCounts) -> f32 {
+    let total = counts.total();
+    if total == 0 {
+        return 100.0;
+    }
+    let weighted = counts.perfect as f32 * 100.0
+        + counts.great as f32 * 80.0
+        + counts.good as f32 * 60.0
+        + counts.ok as f32 * 40.0;
+    weighted / total as f32
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use dtx_core::EChannel;
 
     #[test]
     fn lane_count_matches_order() {
@@ -280,35 +485,12 @@ mod tests {
     }
 
     #[test]
-    fn lane_label_all_drum_lanes() {
-        let lanes = [
-            EChannel::HiHatClose,
-            EChannel::Snare,
-            EChannel::BassDrum,
-            EChannel::HighTom,
-            EChannel::LowTom,
-            EChannel::FloorTom,
-            EChannel::Cymbal,
-            EChannel::HiHatOpen,
-            EChannel::RideCymbal,
-        ];
-        let labels: Vec<&'static str> = lanes.iter().map(|c| lane_label(*c)).collect();
-        assert_eq!(
-            labels,
-            vec!["HH", "SD", "BD", "HT", "LT", "FT", "CY", "HHO", "RD"]
-        );
+    fn accuracy_default_full() {
+        assert!((accuracy_pct(&JudgmentCounts::default()) - 100.0).abs() < 0.01);
     }
 
     #[test]
-    fn lane_label_fallback_for_unknown() {
-        // Pick a non-drum channel → "?".
-        assert_eq!(lane_label(EChannel::BGM), "?");
-    }
-
-    #[test]
-    fn lane_width_x_count_matches_lane_count() {
-        // Sanity: HUD geometry width = LANE_COUNT * LANE_WIDTH_PX.
-        let total = LANE_COUNT as f32 * LANE_WIDTH_PX;
-        assert_eq!(total as usize, 9 * 80);
+    fn kind_label_perfect() {
+        assert_eq!(kind_label(JudgmentKind::Perfect), "PERFECT");
     }
 }

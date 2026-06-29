@@ -28,7 +28,7 @@ fn update_score_system(
             JudgmentKind::Perfect => counts.perfect += 1,
             JudgmentKind::Great => counts.great += 1,
             JudgmentKind::Good => counts.good += 1,
-            JudgmentKind::Ok => counts.ok += 1,
+            JudgmentKind::Poor => counts.ok += 1,
             JudgmentKind::Miss => counts.miss += 1,
         }
         if ev.kind == JudgmentKind::Miss {
@@ -58,7 +58,7 @@ fn points_for(kind: JudgmentKind) -> u64 {
         JudgmentKind::Perfect => 1000,
         JudgmentKind::Great => 500,
         JudgmentKind::Good => 200,
-        JudgmentKind::Ok => 100,
+        JudgmentKind::Poor => 100,
         JudgmentKind::Miss => 0,
     }
 }

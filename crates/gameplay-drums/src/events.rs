@@ -20,11 +20,20 @@ pub struct JudgmentEvent {
     pub lane: LaneId,
     pub kind: JudgmentKind,
     pub delta_ms: i64,
+    /// Index into `ActiveChart.chart.chips` for the chip that was judged.
+    pub chip_idx: usize,
 }
 
 /// A chip that scrolled past the judgment line without being hit.
 #[derive(Message, Debug, Clone, Copy)]
 pub struct NoteMissed {
+    pub lane: LaneId,
+    pub audio_ms: i64,
+}
+
+/// Pad press with no chip in the judgment window (empty hit / whiff).
+#[derive(Message, Debug, Clone, Copy)]
+pub struct EmptyHit {
     pub lane: LaneId,
     pub audio_ms: i64,
 }
@@ -49,6 +58,7 @@ mod tests {
             lane: 2,
             kind: JudgmentKind::Perfect,
             delta_ms: 5,
+            chip_idx: 0,
         };
         assert_eq!(j.kind, JudgmentKind::Perfect);
     }

@@ -157,6 +157,7 @@ mod tests {
             measure: 0,
             channel,
             value,
+            wav_slot: 0,
         }
     }
 

@@ -140,6 +140,9 @@ impl EChannel {
                 | Self::FloorTom
                 | Self::HiHatOpen
                 | Self::RideCymbal
+                | Self::LeftCymbal
+                | Self::LeftPedal
+                | Self::LeftBassDrum
                 | Self::DrumsFillin
         )
     }

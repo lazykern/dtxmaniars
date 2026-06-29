@@ -260,7 +260,7 @@ fn gauge_delta_great_smaller_than_perfect() {
 
 #[test]
 fn gauge_delta_miss_largest_loss() {
-    assert!(gauge_delta(JudgmentKind::Miss) < gauge_delta(JudgmentKind::Ok));
+    assert!(gauge_delta(JudgmentKind::Miss) < gauge_delta(JudgmentKind::Poor));
 }
 
 #[test]
@@ -289,15 +289,15 @@ fn combo_state_ap_breaks_on_great() {
     c.apply(JudgmentKind::Perfect);
     c.apply(JudgmentKind::Great); // not perfect
     assert!(!c.is_all_perfect());
-    assert!(c.is_full_combo()); // still FC since no miss/ok
+    assert!(c.is_full_combo()); // still FC since no miss/poor
 }
 
 #[test]
-fn combo_state_ok_breaks_combo_but_keeps_max() {
+fn combo_state_poor_breaks_combo_but_keeps_max() {
     let mut c = ComboState::new();
     c.apply(JudgmentKind::Perfect);
     c.apply(JudgmentKind::Perfect);
-    c.apply(JudgmentKind::Ok);
+    c.apply(JudgmentKind::Poor);
     assert_eq!(c.current, 0);
     assert_eq!(c.max, 2);
     assert_eq!(c.imperfect_count, 1);
@@ -307,49 +307,50 @@ fn combo_state_ok_breaks_combo_but_keeps_max() {
 fn hit_ranges_normal_classify_extremes() {
     let r = HitRanges::normal();
     assert_eq!(classify_with_ranges(0, r), JudgmentKind::Perfect);
-    assert_eq!(classify_with_ranges(-200, r), JudgmentKind::Miss);
-    assert_eq!(classify_with_ranges(200, r), JudgmentKind::Miss);
+    assert_eq!(classify_with_ranges(-118, r), JudgmentKind::Miss);
+    assert_eq!(classify_with_ranges(118, r), JudgmentKind::Miss);
 }
 
 #[test]
 fn hit_ranges_master_strict() {
     let r = HitRanges::master();
-    // Master: 5/10/20/30/60
-    assert_eq!(classify_with_ranges(5, r), JudgmentKind::Perfect);
-    assert_eq!(classify_with_ranges(6, r), JudgmentKind::Great);
-    assert_eq!(classify_with_ranges(60, r), JudgmentKind::Miss);
+    // Master: 10/20/25/35/36
+    assert_eq!(classify_with_ranges(10, r), JudgmentKind::Perfect);
+    assert_eq!(classify_with_ranges(11, r), JudgmentKind::Great);
+    assert_eq!(classify_with_ranges(36, r), JudgmentKind::Miss);
 }
 
 #[test]
 fn hit_ranges_easy_loose() {
     let r = HitRanges::easy();
-    // Easy: 24/48/96/150/300
-    assert_eq!(classify_with_ranges(24, r), JudgmentKind::Perfect);
-    assert_eq!(classify_with_ranges(25, r), JudgmentKind::Great);
-    assert_eq!(classify_with_ranges(300, r), JudgmentKind::Miss);
-    assert_eq!(classify_with_ranges(301, r), JudgmentKind::Miss);
+    // Easy: 51/101/126/176/177
+    assert_eq!(classify_with_ranges(51, r), JudgmentKind::Perfect);
+    assert_eq!(classify_with_ranges(52, r), JudgmentKind::Great);
+    assert_eq!(classify_with_ranges(177, r), JudgmentKind::Miss);
+    assert_eq!(classify_with_ranges(178, r), JudgmentKind::Miss);
 }
 
 #[test]
 fn hit_ranges_window_helper() {
     let r = HitRanges::expert();
-    assert_eq!(r.window(JudgmentKind::Perfect), 8);
-    assert_eq!(r.window(JudgmentKind::Miss), 100);
+    assert_eq!(r.window(JudgmentKind::Perfect), 17);
+    assert_eq!(r.window(JudgmentKind::Miss), 60);
 }
 
 #[test]
 fn hit_ranges_new_constructor() {
     let r = HitRanges::new(20, 40, 80, 120, 250);
     assert_eq!(r.perfect, 20);
+    assert_eq!(r.poor, 120);
     assert_eq!(r.miss, 250);
 }
 
 #[test]
 fn classify_with_difficulty_uses_correct_ranges() {
-    // 50ms delta: Normal=Good (50<=64), Master=Miss (50>30), Easy=Great (50<=96)
+    // 50ms delta: Normal=Great (50<=67), Master=Miss (50>35), Easy=Perfect (50<=51)
     assert_eq!(
         classify_with_difficulty(50, Difficulty::Normal),
-        JudgmentKind::Good
+        JudgmentKind::Great
     );
     assert_eq!(
         classify_with_difficulty(50, Difficulty::Master),
@@ -357,7 +358,7 @@ fn classify_with_difficulty_uses_correct_ranges() {
     );
     assert_eq!(
         classify_with_difficulty(50, Difficulty::Easy),
-        JudgmentKind::Good
+        JudgmentKind::Perfect
     );
 }
 

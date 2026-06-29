@@ -7,8 +7,10 @@
 
 use bevy::prelude::*;
 
+pub mod change_skin;
 pub mod config;
 pub mod config_key_assign;
+pub mod end;
 pub mod song_loading;
 pub mod song_select;
 pub mod startup;
@@ -22,12 +24,15 @@ pub struct GameMenuPlugin;
 impl Plugin for GameMenuPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<SelectedSong>().add_plugins((
+            dtx_bga::plugin,
             startup::plugin,
             title::plugin,
             song_select::plugin,
             config::plugin,
             config_key_assign::plugin,
+            change_skin::plugin,
             song_loading::plugin,
+            end::plugin,
         ));
     }
 }

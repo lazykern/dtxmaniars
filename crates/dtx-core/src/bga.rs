@@ -214,6 +214,7 @@ mod tests {
                 Chip::new(1, EChannel::BGALayer3, 1.0),
                 Chip::new(2, EChannel::BGM, 1.0),
             ],
+            ..Default::default()
         };
         let events = bga_events(&chart);
         assert_eq!(events.len(), 3);
@@ -233,6 +234,7 @@ mod tests {
                 Chip::new(0, EChannel::BGALayer3, 1.0),
                 Chip::new(2, EChannel::Movie, 1.0),
             ],
+            ..Default::default()
         };
         let events = bga_events(&chart);
         assert_eq!(events[0].measure, 0);

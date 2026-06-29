@@ -8,7 +8,9 @@
 - `bevy` with `default-features = false` in plugins; enable features explicitly
 - `bevy_kira_audio` (M1+) — never raw `kira` directly
 - `bevy_framepace` (M2+) — smooth input latency
-- `bevy_tween` (M5+) — UI animations, cubic-bezier easing
+- `bevy_tweening` (djeedai) — M5+ UI animations, easing lenses (`TweeningPlugin`)
+  - Pinned to git rev `5e3d0c9` (PR #170, merged 2026-06-28; bevy 0.19). No crates.io 0.16 yet — swap rev → version when 0.16 ships.
+  - Note: ADR-0007 still names `bevy_tween` (multirious); that crate is Bevy 0.18 only and **not used**. Standard: `bevy_tweening` (djeedai). See `docs/BEVY_UX_UI.md` §6 for crate matrix.
 
 ## Plugin organization
 
@@ -76,9 +78,28 @@ Preload in `OnEnter(Loading)`. Block screen exit until handles ready.
 
 ## Animation
 
-`bevy_tween` for tweening entities/components. Easing via `CubicSegment::new_bezier_easing((0.25, 0.1), (0.25, 1.0))` (ease-in-out).
+Use **`bevy_tweening`** (djeedai). Pinned to git rev `5e3d0c9` in
+`[workspace.dependencies]`, pulled by `dtx-ui`; swap to crates.io 0.16 when
+published. Add `TweeningPlugin` in `dtx-ui/src/lib.rs` when first tween lands.
+
+```rust
+// bevy_tweening — M5+
+use bevy_tweening::{Tween, EaseFunction, lens::TextColorLens};
+Tween::new(
+    TextColorLens { start: Color::WHITE, end: Color::NONE },
+    Duration::from_millis(300),
+    EaseFunction::QuadraticOut,
+)
+```
+
+Easing: `EaseFunction` enum or custom via `EaseMethod::CustomFunction`.
+
+**Hand-rolled tween:** `dtx-ui::tween::ScalarTween` for v1 fade/gauge/lane-flush
+(see `BEVY_UX_UI.md` §6.2). Will be replaced by `bevy_tweening` lenses as they
+land.
 
 **JSON keyframe loader = NOT in v1.** Hardcode animations in Rust. See ADR-0007.
+BocuD `AnimationClip` JSON port deferred to M5+ skin system.
 
 ## Audio clock
 

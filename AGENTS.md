@@ -23,22 +23,19 @@ Bevy 0.19 requires Rust 1.95+. CI on `stable`.
 3. Cite `references/<path>:L<line>` in your commit for any non-trivial behavior ported.
 4. **If unsure, port from the reference** rather than guessing from memory.
 
-## Port-first rule (ADR-0010) — applies to ALL UX/UI work
+## Port-first rule (ADR-0010) — applies to **game mechanics only**
 
-**This is a port of DTXManiaNX, not a new game.** v1 of every screen, lane,
-fade, judgment window, HUD layout, transition must match `references/DTXmaniaNX-BocuD/`
-verbatim. Improvements (osu-lazer fluidity, custom skins) are M6+ work.
+**Mechanics port from DTXManiaNX-BocuD.** Judgment windows, scoring, lane order,
+EChannel mapping, chart parsing, scroll logic, default input bindings must match
+`references/DTXmaniaNX-BocuD/` verbatim. Cite reference file:line in commits.
 
-- Source of truth: `references/DTXmaniaNX-BocuD/`. NOT osu-lazer. NOT your instinct.
-- Match the reference verbatim for: lane order/positions, timing windows,
-  fade durations, HUD position/size, hit line position, scroll direction,
-  combo/score animations, transition style, default input bindings.
-- Cite the reference file:line in the commit (same as ADR-0008).
-- Improvements during port = scope creep. Reject or defer to M6+.
-- Exception: correctness fixes for crashes/data corruption are always OK.
+**UX/UI is redesigned** per ADR-0014 (osu-inspired fluidity). Do NOT copy BocuD
+pixel layouts, GitaDora transitions, or static HUD when ADR-0014 specifies otherwise.
 
-**Existing contradictions already fixed:** `SCREEN_FADE_MS = 300 → 1500`,
-M3 ROADMAP `osu-style → DTXManiaNX fades`. Do not regress.
+- Mechanics source of truth: `references/DTXmaniaNX-BocuD/`
+- UX/UI source of truth: `docs/UX_UI_DESIGN.md` + ADR-0014
+- Screen transitions: 300ms OutQuint fades (not GitaDora, not 1500ms snapshot)
+- Exception: correctness fixes for crashes/data corruption are always OK
 
 Tool order:
 - Bevy API → `npx ctx7@latest docs /websites/rs_bevy "<exact question>"`
@@ -76,7 +73,7 @@ A Pure crate **must not** depend on any Engine or Game crate. Engine crates may 
 - Events for cross-plugin communication; explicit ordering via `SystemSet`
 - Update systems bounded by `.run_if(in_state(...))` + `SystemSet`
 - Asset preload via `Resource` with `#[dependency]` (bevy_asset_loader pattern)
-- Animation: `bevy_tween` + cubic-bezier easing via `CubicSegment`
+- Animation: `bevy_tweening` (djeedai) — `TweeningPlugin` + lenses. Pinned to git rev 5e3d0c9 until 0.16 ships.
 - Audio: `bevy_kira_audio` (not raw kira) — gives proper bevy Resource/Events
 - Frame pacing: `bevy_framepace` (per project rules)
 

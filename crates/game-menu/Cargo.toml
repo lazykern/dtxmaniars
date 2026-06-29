@@ -16,6 +16,7 @@ dtx-assets = { path = "../dtx-assets" }
 dtx-audio = { path = "../dtx-audio" }
 dtx-bga = { path = "../dtx-bga" }
 dtx-library = { path = "../dtx-library" }
+dtx-ui = { workspace = true }
 gameplay-drums = { path = "../gameplay-drums" }
 gameplay-guitar = { path = "../gameplay-guitar" }
 game-shell = { path = "../game-shell" }

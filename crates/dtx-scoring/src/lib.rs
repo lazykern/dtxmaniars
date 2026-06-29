@@ -24,14 +24,14 @@ use thiserror::Error;
 /// Judgment kind for a single hit. Maps to DTXmaniaNX timing windows.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum JudgmentKind {
-    /// Tightest window (default ±16ms).
+    /// Tightest window (default ±34ms).
     Perfect,
-    /// Second tier (default ±32ms).
+    /// Second tier (default ±67ms).
     Great,
-    /// Third tier (default ±64ms).
+    /// Third tier (default ±84ms).
     Good,
-    /// Fourth tier (default ±100ms).
-    Ok,
+    /// Fourth tier (default ±117ms).
+    Poor,
     /// Out of window or no input.
     Miss,
 }
@@ -39,11 +39,10 @@ pub enum JudgmentKind {
 /// Default DTXmaniaNX timing windows in milliseconds.
 #[allow(missing_docs)]
 pub const DEFAULT_WINDOWS_MS: &[(JudgmentKind, i32)] = &[
-    (JudgmentKind::Perfect, 16),
-    (JudgmentKind::Great, 32),
-    (JudgmentKind::Good, 64),
-    (JudgmentKind::Ok, 100),
-    (JudgmentKind::Miss, 200),
+    (JudgmentKind::Perfect, 34),
+    (JudgmentKind::Great, 67),
+    (JudgmentKind::Good, 84),
+    (JudgmentKind::Poor, 117),
 ];
 
 /// Classify a delta (ms) into a judgment.

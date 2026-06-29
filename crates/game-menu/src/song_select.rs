@@ -28,8 +28,9 @@ use bevy::prelude::*;
 use bevy_kira_audio::prelude::*;
 use dtx_audio::{BgmHandle, play_bgm, stop_bgm_system};
 use dtx_library::{SongDb, SongInfo, SortMode};
-use game_shell::AppState;
-// fade UI removed (ADR-0010 relaxed)
+use dtx_ui::ThemeResource;
+use dtx_ui::theme::Theme;
+use game_shell::{AppState, TransitionRequest, request_transition};
 
 // ===== Layout positions (verbatim from reference files) =====
 
@@ -205,6 +206,10 @@ pub struct SongSearchMenuComp;
 #[derive(Component, Debug, Clone, Copy)]
 pub struct DensityGraphComp;
 
+/// Overlay chrome hidden until SongSelect (ADR-0014).
+#[derive(Component, Debug, Clone, Copy)]
+struct SongSelectOverlay;
+
 /// Mark the entity holding the status panel UI.
 #[derive(Component, Debug, Clone, Copy)]
 pub struct StatusPanelComp;
@@ -224,15 +229,24 @@ pub fn plugin(app: &mut App) {
         .init_resource::<SongSelectSelection>()
         .init_resource::<CommandHistory>()
         .init_resource::<SelectionIndex>()
-        .add_plugins(dtx_audio::plugin)
         .add_systems(Startup, spawn_song_select_overlay)
         .add_systems(
             OnEnter(AppState::SongSelect),
-            (ensure_song_db_loaded, spawn_song_select).chain(),
+            (
+                ensure_song_db_loaded,
+                spawn_song_select,
+                show_song_select_overlay,
+            )
+                .chain(),
         )
         .add_systems(
             OnExit(AppState::SongSelect),
-            (stop_bgm_system, despawn_song_select).chain(),
+            (
+                hide_song_select_overlay,
+                stop_bgm_system,
+                despawn_song_select,
+            )
+                .chain(),
         )
         .add_systems(
             Update,
@@ -267,7 +281,8 @@ fn ensure_song_db_loaded(mut db: ResMut<SongDb>) {
     }
 }
 
-fn spawn_song_select(mut commands: Commands, db: Res<SongDb>) {
+fn spawn_song_select(mut commands: Commands, db: Res<SongDb>, theme: Res<ThemeResource>) {
+    let t = theme.0;
     commands
         .spawn((
             SongSelectEntity,
@@ -275,82 +290,173 @@ fn spawn_song_select(mut commands: Commands, db: Res<SongDb>) {
                 width: Val::Percent(100.0),
                 height: Val::Percent(100.0),
                 flex_direction: FlexDirection::Column,
-                padding: UiRect::all(Val::Px(40.0)),
-                row_gap: Val::Px(20.0),
                 ..default()
             },
-            BackgroundColor(Color::srgba(0.08, 0.08, 0.12, 0.0)),
+            BackgroundColor(t.bg_bottom),
         ))
-        .with_children(|parent| {
-            parent.spawn((
-                Text::new("Song Select"),
-                TextFont {
-                    font_size: FontSize::Px(36.0),
+        .with_children(|root| {
+            root.spawn((
+                Node {
+                    position_type: PositionType::Absolute,
+                    left: Val::Px(-48.0),
+                    top: Val::Px(64.0),
+                    width: Val::Px(560.0),
+                    height: Val::Px(420.0),
                     ..default()
                 },
-                TextColor(Color::WHITE),
-            ));
-            parent.spawn((
-                Text::new(
-                    "↑↓: Navigate  ENTER: Play  TAB: Sort  F5: Refresh  F1: Config  ESC: Title",
-                ),
-                TextFont {
-                    font_size: FontSize::Px(14.0),
-                    ..default()
-                },
-                TextColor(Color::srgb(0.5, 0.5, 0.5)),
-            ));
-            parent.spawn((
-                Text::new(format!("Sort: {:?}", db.sort_mode)),
-                TextFont {
-                    font_size: FontSize::Px(12.0),
-                    ..default()
-                },
-                TextColor(Color::srgb(0.4, 0.4, 0.4)),
-                SortModeText,
+                BackgroundColor(t.bg_top.with_alpha(0.28)),
             ));
 
-            for (i, song) in db.songs.iter().enumerate() {
-                parent
-                    .spawn((
-                        SongRowEntity { index: i },
+            root.spawn((Node {
+                width: Val::Percent(100.0),
+                padding: UiRect::all(Val::Px(24.0)),
+                flex_direction: FlexDirection::Column,
+                row_gap: Val::Px(8.0),
+                ..default()
+            },))
+                .with_children(|hdr| {
+                    hdr.spawn((
+                        Text::new("Song Select"),
+                        Theme::font(36.0),
+                        TextColor(t.accent),
+                    ));
+                    hdr.spawn((
+                    Text::new(
+                        "↑↓: Navigate  ENTER: Play  TAB: Sort  F5: Refresh  F1: Config  ESC: Title",
+                    ),
+                    Theme::font(14.0),
+                    TextColor(t.text_secondary),
+                ));
+                    hdr.spawn((
+                        Text::new(format!("Sort: {:?}", db.sort_mode)),
+                        Theme::font(12.0),
+                        TextColor(t.text_secondary),
+                        SortModeText,
+                    ));
+                });
+
+            root.spawn((Node {
+                width: Val::Percent(100.0),
+                flex_grow: 1.0,
+                flex_direction: FlexDirection::Row,
+                column_gap: Val::Px(16.0),
+                padding: UiRect {
+                    left: Val::Px(24.0),
+                    right: Val::Px(24.0),
+                    bottom: Val::Px(24.0),
+                    top: Val::Px(0.0),
+                },
+                ..default()
+            },))
+                .with_children(|body| {
+                    body.spawn((
                         Node {
-                            width: Val::Px(500.0),
-                            height: Val::Px(30.0),
-                            margin: UiRect::all(Val::Px(4.0)),
+                            width: Val::Px(96.0),
+                            height: Val::Px(520.0),
+                            flex_direction: FlexDirection::Row,
+                            align_items: AlignItems::End,
+                            justify_content: JustifyContent::SpaceEvenly,
                             padding: UiRect::all(Val::Px(8.0)),
                             ..default()
                         },
-                        BackgroundColor(if i == 0 {
-                            Color::srgb(0.3, 0.5, 0.8)
-                        } else {
-                            Color::srgb(0.15, 0.15, 0.2)
-                        }),
+                        BackgroundColor(t.panel_bg),
                     ))
-                    .with_children(|row| {
-                        row.spawn((
-                            Text::new(format!("{}  -  {}", song.title, song.artist)),
-                            TextFont {
-                                font_size: FontSize::Px(18.0),
-                                ..default()
-                            },
-                            TextColor(Color::WHITE),
+                    .with_children(|density| {
+                        for i in 0..DENSITY_GRAPH_BAR_COUNT {
+                            let frac = 0.25 + (i as f32 * 0.09).min(0.55);
+                            density.spawn((
+                                Node {
+                                    width: Val::Px(DENSITY_GRAPH_BAR_W + 4.0),
+                                    height: Val::Px(DENSITY_GRAPH_BAR_H * frac),
+                                    ..default()
+                                },
+                                BackgroundColor(t.accent.with_alpha(0.65)),
+                            ));
+                        }
+                    });
+
+                    body.spawn((
+                        Node {
+                            flex_grow: 1.0,
+                            flex_direction: FlexDirection::Column,
+                            row_gap: Val::Px(4.0),
+                            max_height: Val::Px(520.0),
+                            overflow: Overflow::scroll_y(),
+                            padding: UiRect::all(Val::Px(8.0)),
+                            ..default()
+                        },
+                        BackgroundColor(t.panel_bg),
+                    ))
+                    .with_children(|list| {
+                        for (i, song) in db.songs.iter().enumerate() {
+                            list.spawn((
+                                SongRowEntity { index: i },
+                                Node {
+                                    width: Val::Percent(100.0),
+                                    min_height: Val::Px(36.0),
+                                    margin: UiRect::vertical(Val::Px(2.0)),
+                                    padding: UiRect::all(Val::Px(8.0)),
+                                    ..default()
+                                },
+                                BackgroundColor(if i == 0 {
+                                    t.selection_highlight
+                                } else {
+                                    Color::NONE
+                                }),
+                            ))
+                            .with_children(|row| {
+                                row.spawn((
+                                    Text::new(format!("{}  —  {}", song.title, song.artist)),
+                                    Theme::font(18.0),
+                                    TextColor(t.text_primary),
+                                ));
+                            });
+                        }
+                    });
+
+                    body.spawn((
+                        Node {
+                            width: Val::Px(280.0),
+                            height: Val::Px(520.0),
+                            flex_direction: FlexDirection::Column,
+                            padding: UiRect::all(Val::Px(16.0)),
+                            row_gap: Val::Px(12.0),
+                            ..default()
+                        },
+                        BackgroundColor(t.panel_bg),
+                    ))
+                    .with_children(|info| {
+                        info.spawn((
+                            Text::new("Chart info"),
+                            Theme::font(20.0),
+                            TextColor(t.accent),
+                        ));
+                        let detail = db
+                            .songs
+                            .first()
+                            .map(format_song_detail)
+                            .unwrap_or_else(|| "No songs in library.\nF5 to rescan.".into());
+                        info.spawn((
+                            SelectedSongInfo,
+                            Text::new(detail),
+                            Theme::font(14.0),
+                            TextColor(t.text_primary),
                         ));
                     });
-            }
-
-            if let Some(song) = db.songs.first() {
-                parent.spawn((
-                    SelectedSongInfo,
-                    Text::new(format_song_detail(song)),
-                    TextFont {
-                        font_size: FontSize::Px(14.0),
-                        ..default()
-                    },
-                    TextColor(Color::srgb(0.7, 0.7, 0.7)),
-                ));
-            }
+                });
         });
+}
+
+fn show_song_select_overlay(mut q: Query<&mut Visibility, With<SongSelectOverlay>>) {
+    for mut vis in &mut q {
+        *vis = Visibility::Visible;
+    }
+}
+
+fn hide_song_select_overlay(mut q: Query<&mut Visibility, With<SongSelectOverlay>>) {
+    for mut vis in &mut q {
+        *vis = Visibility::Hidden;
+    }
 }
 
 fn format_song_detail(song: &dtx_library::SongInfo) -> String {
@@ -393,7 +499,8 @@ fn song_select_navigation(
     mut db: ResMut<SongDb>,
     mut selection: ResMut<SelectionIndex>,
     mut selection_state: ResMut<SongSelectSelection>,
-    mut next: ResMut<NextState<AppState>>,
+    mut selected_song: ResMut<SelectedSong>,
+    mut requests: MessageWriter<TransitionRequest>,
 ) {
     if db.songs.is_empty() {
         return;
@@ -408,15 +515,14 @@ fn song_select_navigation(
     } else if keys.just_pressed(KeyCode::Enter) {
         if let Some(song) = db.songs.get(selection.0) {
             info!("SongSelect: selected {}", song.title);
-            // M5: trigger transition to SongLoading.
-            next.set(AppState::SongLoading);
+            selected_song.0 = Some(song.path.clone());
+            request_transition(&mut requests, AppState::SongLoading);
         }
     } else if keys.just_pressed(KeyCode::Escape) {
-        next.set(AppState::Title);
+        request_transition(&mut requests, AppState::Title);
     } else if keys.just_pressed(KeyCode::F1) {
-        next.set(AppState::Config);
+        request_transition(&mut requests, AppState::Config);
     } else if keys.just_pressed(KeyCode::F5) {
-        // M5: refresh = re-scan the default dir.
         if let Err(e) = db.rescan(&default_song_dir()) {
             warn!("SongSelect: refresh failed: {}", e);
         }
@@ -426,12 +532,14 @@ fn song_select_navigation(
 fn render_selected_song(
     selection: Res<SelectionIndex>,
     db: Res<SongDb>,
+    theme: Res<ThemeResource>,
     mut query: Query<&mut Text, With<SelectedSongInfo>>,
     mut rows: Query<(&SongRowEntity, &mut BackgroundColor)>,
 ) {
     if !selection.is_changed() {
         return;
     }
+    let t = theme.0;
     if let Some(song) = db.songs.get(selection.0) {
         let detail = format_song_detail(song);
         for mut text in &mut query {
@@ -440,9 +548,9 @@ fn render_selected_song(
     }
     for (row_entity, mut bg) in &mut rows {
         bg.0 = if row_entity.index == selection.0 {
-            Color::srgb(0.3, 0.5, 0.8)
+            t.selection_highlight
         } else {
-            Color::srgb(0.15, 0.15, 0.2)
+            t.panel_bg
         };
     }
 }
@@ -453,22 +561,25 @@ fn bgm_preview_on_change(
     audio: Res<Audio>,
     asset_server: Res<AssetServer>,
     mut bgm: ResMut<BgmHandle>,
+    mut instances: ResMut<Assets<AudioInstance>>,
 ) {
     if !selection.is_changed() {
         return;
     }
+    dtx_audio::stop_bgm(&audio, &mut bgm, &mut instances);
     if let Some(song) = db.songs.get(selection.0)
         && let Some(bgm_path) = &song.bgm_path
     {
         let path_str = bgm_path.to_string_lossy().to_string();
-        play_bgm(&audio, &asset_server, &mut bgm, &path_str);
+        play_bgm(&audio, &asset_server, &mut bgm, &mut instances, &path_str);
     }
 }
 
 // ===== Strict-port overlay: status panel / density / sort / search (Startup) =====
 
-fn spawn_song_select_overlay(mut commands: Commands) {
-    // StatusPanel: 3 panes (StatusPanel.cs:9-13).
+fn spawn_song_select_overlay(mut commands: Commands, theme: Res<ThemeResource>) {
+    let t = theme.0;
+
     for kind in [
         StatusPaneKind::Drums,
         StatusPaneKind::Guitar,
@@ -480,6 +591,8 @@ fn spawn_song_select_overlay(mut commands: Commands) {
             StatusPaneKind::Bass => (STATUS_PANEL_DRUMS_X, STATUS_PANEL_DRUMS_Y),
         };
         commands.spawn((
+            SongSelectOverlay,
+            Visibility::Hidden,
             StatusPanelComp,
             kind,
             Node {
@@ -491,17 +604,16 @@ fn spawn_song_select_overlay(mut commands: Commands) {
                 flex_direction: FlexDirection::Column,
                 ..default()
             },
-            BackgroundColor(Color::srgba(0.0, 0.0, 0.0, 0.65)),
+            BackgroundColor(t.panel_bg),
             Text::new("(no song)"),
-            TextFont {
-                font_size: 14.0.into(),
-                ..default()
-            },
+            Theme::font(14.0),
+            TextColor(t.text_secondary),
         ));
     }
 
-    // DensityGraph: 8 bars (DensityGraph.cs:39-46).
     commands.spawn((
+        SongSelectOverlay,
+        Visibility::Hidden,
         DensityGraphComp,
         Node {
             position_type: PositionType::Absolute,
@@ -514,6 +626,8 @@ fn spawn_song_select_overlay(mut commands: Commands) {
     ));
     for i in 0..DENSITY_GRAPH_BAR_COUNT {
         commands.spawn((
+            SongSelectOverlay,
+            Visibility::Hidden,
             Node {
                 position_type: PositionType::Absolute,
                 left: Val::Px(DENSITY_GRAPH_BAR_BASE_X + (i as f32) * DENSITY_GRAPH_BAR_DX),
@@ -522,13 +636,14 @@ fn spawn_song_select_overlay(mut commands: Commands) {
                 height: Val::Px(DENSITY_GRAPH_BAR_H * 0.5),
                 ..default()
             },
-            BackgroundColor(Color::srgba(0.3, 0.7, 1.0, 0.8)),
+            BackgroundColor(t.accent.with_alpha(0.75)),
         ));
     }
 
-    // SortMenu: 3-element ring (Default/Title/Artist).
     let sorters = [SortMode::Default, SortMode::ByTitle, SortMode::ByArtist];
     commands.spawn((
+        SongSelectOverlay,
+        Visibility::Hidden,
         SortMenuContainerComp,
         Node {
             position_type: PositionType::Absolute,
@@ -539,11 +654,13 @@ fn spawn_song_select_overlay(mut commands: Commands) {
             flex_direction: FlexDirection::Row,
             ..default()
         },
-        BackgroundColor(Color::srgba(0.0, 0.0, 0.0, 0.5)),
+        BackgroundColor(t.panel_bg),
     ));
     for (i, mode) in sorters.iter().enumerate() {
         let offset = i as i8 - 2;
         commands.spawn((
+            SongSelectOverlay,
+            Visibility::Hidden,
             SortMenuElement {
                 mode: *mode,
                 offset,
@@ -556,19 +673,17 @@ fn spawn_song_select_overlay(mut commands: Commands) {
                 height: Val::Px(40.0),
                 ..default()
             },
-            BackgroundColor(Color::srgba(0.2, 0.2, 0.4, 0.7)),
+            BackgroundColor(t.selection_highlight),
             Text::new(mode_label(*mode)),
-            TextFont {
-                font_size: 18.0.into(),
-                ..default()
-            },
+            Theme::font(18.0),
+            TextColor(t.text_primary),
         ));
     }
 
-    // SongSearchMenu (SongSearchMenu.cs:13-22).
     commands.spawn((
-        SongSearchMenuComp,
+        SongSelectOverlay,
         Visibility::Hidden,
+        SongSearchMenuComp,
         Node {
             position_type: PositionType::Absolute,
             left: Val::Px(380.0),
@@ -578,12 +693,10 @@ fn spawn_song_select_overlay(mut commands: Commands) {
             flex_direction: FlexDirection::Column,
             ..default()
         },
-        BackgroundColor(Color::srgba(0.0, 0.0, 0.0, 0.9)),
+        BackgroundColor(t.panel_bg),
         Text::new("Search\n\n(description)\n\nStatus: (typing...)"),
-        TextFont {
-            font_size: 16.0.into(),
-            ..default()
-        },
+        Theme::font(16.0),
+        TextColor(t.text_secondary),
     ));
 }
 

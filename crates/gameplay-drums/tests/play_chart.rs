@@ -26,7 +26,7 @@ fn build_app() -> App {
     let mut app = App::new();
     app.add_plugins(bevy::state::app::StatesPlugin)
         .init_resource::<ActiveChart>()
-        .init_resource::<dtx_timing::AudioClock>()
+        .init_resource::<gameplay_drums::resources::GameplayClock>()
         .init_resource::<gameplay_drums::judge::JudgedChips>()
         .init_resource::<BpmChangeList>()
         .init_resource::<AutoplayEnabled>()
@@ -44,7 +44,7 @@ fn play_chart_loads_minimal() {
 }
 
 #[test]
-fn play_chart_autoplay_completes_with_perfect_score() {
+fn play_chart_autoplay_emits_due_lane_hits() {
     let chart = load_minimal();
     let expected_chip_count = chart.chips.len();
 
@@ -58,20 +58,24 @@ fn play_chart_autoplay_completes_with_perfect_score() {
     let mut app = build_app();
     app.world_mut().resource_mut::<ActiveChart>().chart = chart;
     app.world_mut().resource_mut::<AutoplayEnabled>().0 = true;
-    // Advance the clock past the last chip.
-    app.world_mut()
-        .resource_mut::<dtx_timing::AudioClock>()
-        .current_ms = Some(last_target_ms + 1000);
+    {
+        let mut clock = app
+            .world_mut()
+            .resource_mut::<gameplay_drums::resources::GameplayClock>();
+        clock.start();
+        clock.sync(Some(last_target_ms + 1000));
+    }
     app.update();
 
-    // All chips should be marked judged.
+    // Autoplay emits lane hits; the judge system owns JudgedChips.
     let judged = app.world().resource::<gameplay_drums::judge::JudgedChips>();
-    for i in 0..expected_chip_count {
-        assert!(
-            judged.0.contains(&i),
-            "chip {i} should be marked judged by autoplay"
-        );
-    }
+    assert!(judged.0.is_empty());
+    let hits = app
+        .world()
+        .resource::<Messages<LaneHit>>()
+        .iter_current_update_messages()
+        .count();
+    assert_eq!(hits, expected_chip_count);
 }
 
 #[test]
@@ -96,11 +100,7 @@ fn play_chart_full_pipeline_perfect_combo() {
 fn play_chart_bpm_change_target_ms_advances() {
     // Verify chip_time_ms_with_bpm_changes is consistent with the
     // autoplay bot's expectation.
-    let chip = dtx_core::Chip {
-        measure: 4,
-        channel: dtx_core::EChannel::BassDrum,
-        value: 0.0,
-    };
+    let chip = dtx_core::Chip::new(4, dtx_core::EChannel::BassDrum, 0.0);
     let t_no_change = chip_time_ms_with_bpm_changes(chip.measure, chip.value, 120.0, &[]);
     let t_with_double = chip_time_ms_with_bpm_changes(
         chip.measure,

@@ -185,45 +185,28 @@ mod tests {
 
     #[test]
     fn chip_to_ms_at_120bpm() {
-        let chip = Chip {
-            measure: 4,
-            channel: EChannel::BassDrum,
-            value: 0.0,
-        };
+        let chip = Chip::new(4, EChannel::BassDrum, 0.0);
         let t = chip_to_ms(&chip, 120.0, &[], 0);
-        // 4 measures at 120 BPM = 8000ms
         assert_eq!(t, 8000);
     }
 
     #[test]
     fn chip_to_ms_with_lag() {
-        let chip = Chip {
-            measure: 4,
-            channel: EChannel::BassDrum,
-            value: 0.0,
-        };
+        let chip = Chip::new(4, EChannel::BassDrum, 0.0);
         let t = chip_to_ms(&chip, 120.0, &[], -50);
         assert_eq!(t, 7950);
     }
 
     #[test]
     fn chip_to_ms_with_lag_positive() {
-        let chip = Chip {
-            measure: 4,
-            channel: EChannel::BassDrum,
-            value: 0.0,
-        };
+        let chip = Chip::new(4, EChannel::BassDrum, 0.0);
         let t = chip_to_ms(&chip, 120.0, &[], 25);
         assert_eq!(t, 8025);
     }
 
     #[test]
     fn chip_to_ms_with_bpm_change() {
-        let chip = Chip {
-            measure: 6,
-            channel: EChannel::BassDrum,
-            value: 0.0,
-        };
+        let chip = Chip::new(6, EChannel::BassDrum, 0.0);
         // 120 BPM for [0,2), 240 BPM for [2,6)
         let changes = vec![BpmChange {
             measure: 2,

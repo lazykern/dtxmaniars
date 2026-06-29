@@ -36,21 +36,23 @@ fn tick(audio: Res<Audio>, bgm: Res<BgmHandle>) {
 
 - One BGM stream at a time. Multi-track layering deferred (M6+ if needed).
 - `BgmHandle` is `Option<Handle<AudioInstance>>` — None means "no BGM".
-- Hit-sound manager (per-lane SEs) lives in M2's `gameplay-drums` crate.
+- `ChartSoundBank` caches chart WAV handles by slot; chart-specific slot
+  collection lives in `gameplay-drums`.
+- Hit-sound resolution (per-lane SEs, choke rules) lives in `gameplay-drums`.
 
 ## v1 scope (M1)
 
 - `AudioPlugin` registration
 - `BgmHandle` resource
 - `play_bgm`, `stop_bgm`, `position_ms` helpers
+- handle-based BGM/SFX/drum-hit helpers for preloaded chart WAVs
+- `ChartSoundBank` + case-insensitive chart audio path resolution
 - Looping BGM by default
 
 ## Deferred
 
-- Hit-sound cache (M2)
-- Volume control per-stream (M2)
 - BGM fade-in/out (M3 with shell transitions)
-- One-shot SFX (M2)
+- Async/background decode pool (M14+ polish)
 
 ## Rules
 

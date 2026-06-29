@@ -1,92 +1,66 @@
-# 0010: Port-first — preserve DTXManiaNX UX/UI as baseline; improvements later
+# 0010: Port-first — preserve DTXManiaNX game mechanics; UX/UI redesigned
 
-Status: accepted
+Status: accepted (amended 2026-06-28)
 Date: 2026-06-23
 
 ## Context
 
-We are **porting** DTXManiaNX-BocuD (C# / DX9) to Rust/Bevy. We are NOT
-building a new rhythm game. The two must not be confused:
+We are **porting** DTXManiaNX-BocuD (C# / DX9) to Rust/Bevy. The port has two
+distinct layers:
 
-- The **port's job** is to make a working Rust equivalent whose UX/UI
-  matches DTXManiaNX closely enough that an existing DTXMania player feels
-  at home.
-- **Improvements** (osu-lazer-grade fluidity, custom skins, new modes) are
-  separate, opt-in work that ships AFTER the port baseline is stable.
+1. **Game mechanics** — judgment windows, scoring, lane order, EChannel mapping,
+   chart parsing, scroll logic, input bindings. These must match BocuD verbatim.
+2. **UX/UI** — screen layout, transitions, HUD animation, song-select visuals.
+   These are **redesigned** for osu-lazer-grade fluidity per ADR-0014.
 
-This rule matters because porting tempts you to "improve while you're here."
-Every visible UX element — fade durations, lane positions, judgment timing
-windows, HUD layout, transition choreography — has a specific value in the
-DTXManiaNX reference. Inventing your own value, even if "better," is scope
-creep and breaks the goal.
+Prior wording applied "port-first" to all UX/UI. That blocked the redesign goal.
+This ADR rescopes port-first to **mechanics only**.
 
 ## Decision
 
-**Strict port baseline.** For every UX/UI element in v1:
+**Strict port baseline for game mechanics.** For every mechanical element:
 
-1. **Source of truth** is `references/DTXmaniaNX-BocuD/`. Not osu-lazer.
-   Not your own design instinct. Not what's "modern."
-2. **Match the reference verbatim** for: lane visual order + X coordinates,
-   judgment timing windows, fade durations, HUD position/size, hit line
-   position, scroll direction, combo/score animations, transition style
-   (snapshot vs live), input bindings (default), judgment text style/colors,
-   song-select sort modes, everything else.
-3. **Cite the reference file:line** in the commit for any non-trivial UX
-   element ported (same rule as ADR-0008 for general code).
-4. **Improvements are blocked** until the port baseline ships (M6+). Exception:
-   correctness fixes for outright bugs (data corruption, crashes).
-5. **BocuD is the baseline, not upstream DTXManiaNX.** BocuD's UX fixes
-   (new renderer, animation framework, sorted settings, song select improvements)
-   are part of "DTXManiaNX UX" for our purposes. Upstream DTXManiaNX is a
-   fallback reference for systems BocuD hasn't touched.
+1. **Source of truth** is `references/DTXmaniaNX-BocuD/` for timing, scoring,
+   lanes, channels, chart semantics.
+2. **Match the reference verbatim** for: lane order, judgment timing windows,
+   scroll direction, default input bindings, score/combo math, gauge drain rules.
+3. **Cite the reference file:line** in the commit for any non-trivial mechanical
+   behavior ported (same rule as ADR-0008).
+4. **UX/UI is NOT port-first.** Visual design follows ADR-0014 (osu-inspired
+   redesign). Do not copy BocuD pixel positions, GitaDora transitions, or
+   static HUD layout when ADR-0014 specifies otherwise.
 
-## Concrete examples of what this means
+## Concrete examples
 
-| Element | My instinct | Strict port says |
+| Element | Port-first (mechanics) | Redesign (UX/UI, ADR-0014) |
 |---|---|---|
-| Stage fade duration | 300ms OutQuint (osu-lazer) | **1500ms linear** (StageManager.cs:29) |
-| Lane order | whatever feels right | LC, HH, SD, BD, HT, LT, FT, CY, LP, RD, HHO (CActPerfDrumsLaneFlushD.cs) |
-| Judgment windows | ±15/±30/±60/±90/±150ms | match DTXmaniaNX `ConfigIni.e判定タイミング` defaults |
-| Song select sort | nice categories | match BocuD's GITADORA-style sort (SongSelectionContainer.cs) |
-| Combo counter | top-left small text | match DTXmania's CActPerfDrumsComboDGB.cs position/font |
+| Judgment windows | ±values from `ConfigIni` defaults | Judgment popup animation style |
+| Lane order | LC, HH, SD, BD, HT, LT, FT, CY, LP, RD, HHO | HUD widget placement/animation |
+| Score math | BocuD scoring rules | Rolling counter display |
+| Screen transitions | N/A (not mechanical) | 300ms OutQuint fades (not GitaDora) |
+| Song select data | Same metadata fields | Modern list layout + smooth scroll |
 
 ## Consequences
 
-- Port will feel "old" / less fluid than osu-lazer. **That's the point.**
-- Tests, screenshots, and community feedback will compare against DTXManiaNX,
-  not osu-lazer, until M6+ improvements land.
-- **Existing contradictions must be fixed:**
-  - `crates/dtx-ui/src/lib.rs` `SCREEN_FADE_MS = 300` → **1500** (DTXmaniaNX value)
-  - `docs/BEVY_PATTERNS.md` `SCREEN_FADE_MS: u32 = 300` → **1500**
-  - `docs/ROADMAP.md` M3 "osu-style fades (300ms OutQuint, 1800ms load hold)"
-    → "DTXmaniaNX fades (1500ms snapshot)"
-  - `crates/dtx-scoring/src/lib.rs` `DEFAULT_WINDOWS_MS` — verify against
-    DTXmaniaNX `ConfigIni` defaults, not invented values.
-- AI agents must NOT propose "improvements" during port work. If a suggestion
-  would change visible UX, defer to M6+ or reject.
-- The "osu-lazer fluidity" target from the project brief is still valid —
-  it's the M6+ destination. Not a v1 requirement.
-
-## Alternatives considered
-
-- **Mix port + improvements opportunistically:** bad — produces inconsistent
-  UX (some screens old, some new), hard to test, hard to attribute bugs.
-- **Use osu-lazer UX as the v1 baseline:** scope explosion (rewrite from
-  scratch), defeats the "port" goal.
-- **Re-design UX while porting:** never ships, breaks DTXMania compatibility.
+- Mechanics tests compare against DTXManiaNX reference values.
+- UX/UI tests compare against design targets (300ms fades, 60fps, readability).
+- ADR-0011/0012/0013 (temporary BocuD visual simplifications) are superseded.
+- `AGENTS.md` port-first section applies to mechanics only.
 
 ## Verification
 
-Before merging any UX-touching PR:
+Before merging any mechanics-touching PR:
 
-- [ ] Element exists in `references/DTXmaniaNX-BocuD/` and is cited
-- [ ] Value/size/position matches the reference (or has a documented reason
-      to differ, with an ADR superseding this one)
-- [ ] No new visual elements that don't exist in DTXManiaNX
+- [ ] Behavior exists in `references/DTXmaniaNX-BocuD/` and is cited
+- [ ] Timing/scoring/lane values match reference
+
+Before merging any UX/UI PR:
+
+- [ ] Follows ADR-0014 design decisions
+- [ ] Transitions use unified 300ms OutQuint system (not GitaDora)
 
 ## Reference files
 
-- `references/DTXmaniaNX-BocuD/DTXMania/Core/StageManager.cs:29` — fade = 1500ms
-- `references/DTXmaniaNX-BocuD/DTXMania/Stage/06.Performance/DrumsScreen/*` — drum UI
-- `references/DTXmaniaNX-BocuD/DTXMania/Stage/04.SongSelectionNew/*` — song select
-- `references/DTXmaniaNX-BocuD/DTXMania/Stage/07.Result/*` — results screen
+- `references/DTXmaniaNX-BocuD/DTXMania/Stage/06.Performance/DrumsScreen/*` — drum mechanics
+- `references/DTXmaniaNX-BocuD/DTXMania/Core/StageManager.cs` — stage flow (logic only)
+- ADR-0014 — osu-inspired UX redesign

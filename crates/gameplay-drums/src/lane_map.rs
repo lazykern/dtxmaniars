@@ -15,8 +15,10 @@ use dtx_core::EChannel;
 /// Lane index in the visual order (0..9).
 pub type LaneId = u8;
 
-/// Channel → visual lane index. Index 0 is leftmost.
-pub const LANE_ORDER: [EChannel; 9] = [
+pub const LANE_COUNT: usize = 12;
+
+/// Channel → visual lane index. Index 0 is leftmost (HH … RD, LC, LP, LBD).
+pub const LANE_ORDER: [EChannel; LANE_COUNT] = [
     EChannel::HiHatClose,
     EChannel::Snare,
     EChannel::BassDrum,
@@ -26,6 +28,9 @@ pub const LANE_ORDER: [EChannel; 9] = [
     EChannel::Cymbal,
     EChannel::HiHatOpen,
     EChannel::RideCymbal,
+    EChannel::LeftCymbal,
+    EChannel::LeftPedal,
+    EChannel::LeftBassDrum,
 ];
 
 /// Map a channel to its lane id (None if not a drum lane).
@@ -45,7 +50,7 @@ pub fn lane_channel(lane: LaneId) -> Option<EChannel> {
 #[derive(Resource, Debug, Clone)]
 pub struct LaneMap {
     /// LaneId → display name (for HUD + config UI).
-    pub labels: [&'static str; 9],
+    pub labels: [&'static str; LANE_COUNT],
     /// KeyCode → LaneId. May have duplicates for two-key assignments.
     pub keys: HashMap<KeyCode, LaneId>,
 }
@@ -75,13 +80,18 @@ impl LaneMap {
             (KeyCode::Digit7, 6),   // CY
             (KeyCode::Digit8, 7),   // HHO
             (KeyCode::Digit9, 8),   // RD
+            (KeyCode::Digit0, 9),   // LC
+            (KeyCode::Minus, 10),   // LP
+            (KeyCode::Equal, 11),   // LBD
         ]
         .into_iter()
         .map(|(k, v)| (k, v as LaneId))
         .collect();
 
         Self {
-            labels: ["HH", "SD", "BD", "HT", "LT", "FT", "CY", "HHO", "RD"],
+            labels: [
+                "HH", "SD", "BD", "HT", "LT", "FT", "CY", "HHO", "RD", "LC", "LP", "LBD",
+            ],
             keys,
         }
     }
@@ -101,7 +111,8 @@ mod tests {
         let m = LaneMap::default_drums();
         assert_eq!(m.lane_for_key(KeyCode::Digit1), Some(0));
         assert_eq!(m.lane_for_key(KeyCode::Digit9), Some(8));
-        assert_eq!(m.lane_for_key(KeyCode::Digit0), None);
+        assert_eq!(m.lane_for_key(KeyCode::Digit0), Some(9));
+        assert_eq!(m.lane_for_key(KeyCode::Minus), Some(10));
         assert_eq!(m.lane_for_key(KeyCode::KeyA), None);
     }
 
@@ -148,7 +159,7 @@ mod tests {
     }
 
     #[test]
-    fn lane_count_is_nine() {
-        assert_eq!(LANE_ORDER.len(), 9);
+    fn lane_count_is_twelve() {
+        assert_eq!(LANE_ORDER.len(), 12);
     }
 }

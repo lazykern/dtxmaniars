@@ -4,6 +4,7 @@
 //! See `docs/decisions/0005-flat-workspace-layout.md` for layering rules.
 
 pub mod assets;
+pub mod base36;
 pub mod bga;
 pub mod c_avi;
 pub mod c_box_set_def;
@@ -26,8 +27,9 @@ pub mod random_mode;
 pub mod score_song;
 pub mod trigger_pipeline;
 
+pub use assets::resolve_bgm_path;
 pub use channel::EChannel;
-pub use chart::{Chart, Chip, Metadata};
+pub use chart::{Chart, Chip, EmptyHitEvent, Metadata};
 pub use error::DtxError;
 pub use parser::parse;
 

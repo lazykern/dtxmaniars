@@ -117,7 +117,7 @@ pub fn judge_lane_hit(
             JudgmentKind::Perfect => 1000,
             JudgmentKind::Great => 500,
             JudgmentKind::Good => 200,
-            JudgmentKind::Ok => 100,
+            JudgmentKind::Poor => 100,
             JudgmentKind::Miss => 0,
         };
         score.0 += pts;
@@ -125,7 +125,7 @@ pub fn judge_lane_hit(
             JudgmentKind::Perfect => counts.perfect += 1,
             JudgmentKind::Great => counts.great += 1,
             JudgmentKind::Good => counts.good += 1,
-            JudgmentKind::Ok => counts.ok += 1,
+            JudgmentKind::Poor => counts.ok += 1,
             JudgmentKind::Miss => counts.miss += 1,
         }
         if kind == JudgmentKind::Miss {
@@ -140,6 +140,7 @@ pub fn judge_lane_hit(
             lane: ev.lane,
             kind,
             delta_ms: delta as i32,
+            chip_idx: idx,
         });
     }
 }

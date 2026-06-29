@@ -1,12 +1,8 @@
-//! Title screen — minimal Bevy UI.
-//!
-//! ADR-0010 relaxed: free redesign. DTXManiaNX had a logo + flashing
-//! "Press ENTER" sprite. We render centered text + bottom prompt.
-//!
-//! Reference: `references/DTXmaniaNX-BocuD/DTXMania/Stage/02.Title/CStageTitle.cs`
+//! Title screen — osu-style themed menu (ADR-0014).
 
 use bevy::prelude::*;
-use game_shell::{AppState, despawn_stage};
+use dtx_ui::{Theme, ThemeResource};
+use game_shell::{AppState, TransitionRequest, despawn_stage, request_transition};
 
 #[derive(Component)]
 pub struct TitleEntity;
@@ -17,7 +13,8 @@ pub fn plugin(app: &mut App) {
         .add_systems(Update, title_input.run_if(in_state(AppState::Title)));
 }
 
-fn spawn_title(mut commands: Commands) {
+fn spawn_title(mut commands: Commands, theme: Res<ThemeResource>) {
+    let t = theme.0;
     commands
         .spawn((
             TitleEntity,
@@ -27,44 +24,35 @@ fn spawn_title(mut commands: Commands) {
                 flex_direction: FlexDirection::Column,
                 justify_content: JustifyContent::Center,
                 align_items: AlignItems::Center,
-                row_gap: Val::Px(40.0),
+                row_gap: Val::Px(32.0),
                 ..default()
             },
-            BackgroundColor(Color::srgb(0.05, 0.05, 0.08)),
+            BackgroundColor(t.bg_bottom),
         ))
         .with_children(|root| {
             root.spawn((
                 Text::new("DTXManiaRS"),
-                TextFont {
-                    font_size: FontSize::Px(72.0),
-                    ..default()
-                },
-                TextColor(Color::srgb(0.9, 0.8, 0.3)),
+                Theme::title_font(),
+                TextColor(t.accent),
             ));
             root.spawn((
-                Text::new("A DTX drummania simulator"),
-                TextFont {
-                    font_size: FontSize::Px(18.0),
-                    ..default()
-                },
-                TextColor(Color::srgb(0.6, 0.6, 0.6)),
+                Text::new("DTX drummania — osu-smooth UX"),
+                Theme::body_font(),
+                TextColor(t.text_secondary),
             ));
             root.spawn((
-                Text::new("ENTER: Song Select  ·  ESC: Quit"),
-                TextFont {
-                    font_size: FontSize::Px(16.0),
-                    ..default()
-                },
-                TextColor(Color::srgb(0.7, 0.7, 0.7)),
+                Text::new("ENTER · Song Select    ESC · Quit"),
+                Theme::label_font(),
+                TextColor(t.text_primary),
             ));
         });
 }
 
-fn title_input(keys: Res<ButtonInput<KeyCode>>, mut next: ResMut<NextState<AppState>>) {
+fn title_input(keys: Res<ButtonInput<KeyCode>>, mut requests: MessageWriter<TransitionRequest>) {
     if keys.just_pressed(KeyCode::Enter) {
-        next.set(AppState::SongSelect);
+        request_transition(&mut requests, AppState::SongSelect);
     } else if keys.just_pressed(KeyCode::Escape) {
-        std::process::exit(0);
+        request_transition(&mut requests, AppState::End);
     }
 }
 
@@ -74,16 +62,6 @@ mod tests {
 
     #[test]
     fn title_entity_marker_exists() {
-        // Smoke test: the marker component type is constructible.
         let _ = TitleEntity;
-    }
-
-    #[test]
-    fn input_keys_recognized() {
-        // ENTER → SongSelect, ESC → quit.
-        // Verifies the input handling exists (compile-time check).
-        let _ = KeyCode::Enter;
-        let _ = KeyCode::Escape;
-        let _ = AppState::SongSelect;
     }
 }

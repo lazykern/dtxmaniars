@@ -18,8 +18,10 @@ use std::path::{Path, PathBuf};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
+pub mod drums;
 pub mod key_assign;
 
+pub use drums::{BdGroup, CyGroup, DrumsConfig, FtGroup, HhGroup, HitSoundPriority};
 pub use key_assign::{KeyAssignPad, KeyAssignPart, KeyAssignTable, STKeyAssign};
 
 /// Top-level persisted configuration. Each BocuD section becomes a sub-struct.
@@ -37,6 +39,9 @@ pub struct Config {
     /// Skin subfolder name (relative to `Graphics/Default`).
     #[serde(default)]
     pub skin: String,
+    /// Drums grouping / cymbal-free / hit-sound priority.
+    #[serde(default)]
+    pub drums: DrumsConfig,
 }
 
 impl Default for Config {
@@ -46,6 +51,7 @@ impl Default for Config {
             gameplay: GameplayConfig::default(),
             audio: AudioConfig::default(),
             skin: "Default".to_string(),
+            drums: DrumsConfig::default(),
         }
     }
 }

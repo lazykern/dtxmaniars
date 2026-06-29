@@ -1,9 +1,9 @@
 //! Score + combo update from `JudgmentEvent`s.
 //!
 //! v1 scoring (DTXmaniaNX standard):
-//!   Perfect = +2, Great = +1, Good = +1, Ok = 0, Miss = 0, combo break.
+//!   Perfect = +2, Great = +1, Good = +1, Poor = 0, Miss = 0, combo break.
 //!
-//! Combo: increments on Perfect/Great/Good/Ok, resets on Miss.
+//! Combo: increments on Perfect/Great/Good, resets on Poor/Miss.
 
 use bevy::prelude::*;
 
@@ -13,18 +13,30 @@ use crate::resources::{Combo, Score};
 use dtx_scoring::JudgmentKind;
 
 pub(super) fn plugin(app: &mut App) {
-    app.init_resource::<LastJudgment>()
-        .add_systems(Update, (update_score_system, update_miss_system));
+    app.init_resource::<LastJudgment>().add_systems(
+        FixedUpdate,
+        (update_score_system, update_miss_system)
+            .in_set(super::DrumsSets::Score)
+            .run_if(in_state(game_shell::AppState::Performance)),
+    );
 }
 
-fn update_score_system(
+pub(crate) fn update_score_system(
     mut events: MessageReader<JudgmentEvent>,
     mut score: ResMut<Score>,
     mut combo: ResMut<Combo>,
+    mut counts: ResMut<crate::resources::JudgmentCounts>,
     mut last: ResMut<LastJudgment>,
 ) {
     for ev in events.read() {
         score.0 += points_for(ev.kind);
+        match ev.kind {
+            JudgmentKind::Perfect => counts.perfect += 1,
+            JudgmentKind::Great => counts.great += 1,
+            JudgmentKind::Good => counts.good += 1,
+            JudgmentKind::Poor => counts.ok += 1,
+            JudgmentKind::Miss => counts.miss += 1,
+        }
         if ev.kind == JudgmentKind::Miss {
             combo.current = 0;
         } else {
@@ -40,14 +52,17 @@ fn update_score_system(
 fn update_miss_system(
     mut missed: MessageReader<NoteMissed>,
     mut combo: ResMut<Combo>,
+    mut counts: ResMut<crate::resources::JudgmentCounts>,
     mut last: ResMut<LastJudgment>,
 ) {
     for ev in missed.read() {
+        counts.miss += 1;
         combo.current = 0;
         last.0 = Some(JudgmentEvent {
             lane: ev.lane,
             kind: JudgmentKind::Miss,
             delta_ms: 0,
+            chip_idx: 0,
         });
     }
 }
@@ -56,7 +71,7 @@ const fn points_for(kind: JudgmentKind) -> u64 {
     match kind {
         JudgmentKind::Perfect => 2,
         JudgmentKind::Great | JudgmentKind::Good => 1,
-        JudgmentKind::Ok | JudgmentKind::Miss => 0,
+        JudgmentKind::Poor | JudgmentKind::Miss => 0,
     }
 }
 
@@ -75,6 +90,7 @@ mod tests {
             lane: 0,
             kind: JudgmentKind::Perfect,
             delta_ms: 0,
+            chip_idx: 0,
         };
         score.0 += points_for(ev.kind);
         combo.current += 1;
@@ -95,16 +111,19 @@ mod tests {
                 lane: 0,
                 kind: JudgmentKind::Perfect,
                 delta_ms: 0,
+                chip_idx: 0,
             },
             JudgmentEvent {
                 lane: 0,
                 kind: JudgmentKind::Perfect,
                 delta_ms: 0,
+                chip_idx: 1,
             },
             JudgmentEvent {
                 lane: 0,
                 kind: JudgmentKind::Miss,
                 delta_ms: 100,
+                chip_idx: 2,
             },
         ];
         for ev in events {
@@ -171,7 +190,7 @@ mod tests {
                 dtx_scoring::JudgmentKind::Perfect => 2,
                 dtx_scoring::JudgmentKind::Great => 1,
                 dtx_scoring::JudgmentKind::Good => 1,
-                dtx_scoring::JudgmentKind::Ok => 0,
+                dtx_scoring::JudgmentKind::Poor => 0,
                 dtx_scoring::JudgmentKind::Miss => 0,
             }
         }

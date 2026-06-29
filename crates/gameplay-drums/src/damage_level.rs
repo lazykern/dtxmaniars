@@ -41,21 +41,21 @@ pub fn hp_delta_for_judgment(level: DamageLevel, kind: JudgmentKind) -> i8 {
             JudgmentKind::Perfect => 1,
             JudgmentKind::Great => 0,
             JudgmentKind::Good => 0,
-            JudgmentKind::Ok => -1,
+            JudgmentKind::Poor => -1,
             JudgmentKind::Miss => -2,
         },
         DamageLevel::Normal => match kind {
             JudgmentKind::Perfect => 1,
             JudgmentKind::Great => 0,
             JudgmentKind::Good => -1,
-            JudgmentKind::Ok => -2,
+            JudgmentKind::Poor => -2,
             JudgmentKind::Miss => -3,
         },
         DamageLevel::High => match kind {
             JudgmentKind::Perfect => 0,
             JudgmentKind::Great => 0,
             JudgmentKind::Good => -1,
-            JudgmentKind::Ok => -3,
+            JudgmentKind::Poor => -3,
             JudgmentKind::Miss => -5,
         },
     }
@@ -161,7 +161,7 @@ mod tests {
             JudgmentKind::Perfect,
             JudgmentKind::Great,
             JudgmentKind::Good,
-            JudgmentKind::Ok,
+            JudgmentKind::Poor,
             JudgmentKind::Miss,
         ] {
             assert_eq!(hp_delta_for_judgment(DamageLevel::None, kind), 0);
@@ -176,7 +176,7 @@ mod tests {
             JudgmentKind::Perfect,
             JudgmentKind::Great,
             JudgmentKind::Good,
-            JudgmentKind::Ok,
+            JudgmentKind::Poor,
             JudgmentKind::Miss,
         ] {
             hp.apply_judgment(DamageLevel::None, kind);
