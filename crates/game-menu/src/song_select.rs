@@ -81,23 +81,62 @@ pub const COMMAND_HISTORY_BUF: usize = 16;
 #[derive(Resource, Default, Debug, Clone)]
 pub struct SelectedSong(pub Option<PathBuf>);
 
-/// Currently selected song + chart metadata for the status panel.
+/// One folder's worth of DTX charts, deduplicated from `db.songs`.
+/// One `SongFolderView` per row in the song-select list.
+///
+/// Corresponds to BocuD's per-song entry in `CActSelectSongList`
+/// (folder containing `bsc.dtx`, `adv.dtx`, `ext.dtx`, `mas.dtx`,
+/// `edit.dtx`). Cycling difficulty per row picks which chart inside
+/// the folder plays.
+#[derive(Debug, Clone)]
+pub struct SongFolderView {
+    /// Folder path (parent directory of the DTX files).
+    pub folder: PathBuf,
+    /// Song title (taken from the first chart's metadata).
+    pub title: String,
+    /// Song artist (taken from the first chart's metadata).
+    pub artist: String,
+    /// Indices into `db.songs`, sorted by `dlevel` ascending so
+    /// 0 = easiest, then Adv/Ext/Mas/Edit. Stable within ties.
+    pub chart_indices: Vec<usize>,
+}
+
+impl SongFolderView {
+    pub fn difficulty_count(&self) -> usize {
+        self.chart_indices.len()
+    }
+
+    pub fn difficulty_label(difficulty: u8) -> &'static str {
+        match difficulty {
+            0 => "BASIC",
+            1 => "ADV",
+            2 => "EXT",
+            3 => "MAS",
+            4 => "EDIT",
+            _ => "?",
+        }
+    }
+}
+
+/// Currently selected folder + chart, search/sort state, and the
+/// deduplicated visible list.
 #[derive(Resource, Default, Debug, Clone)]
 pub struct SongSelectSelection {
-    /// Selected song.
+    /// Selected chart (`db.songs[idx]`), updated by `render_selected_song`.
     pub song: Option<SongInfo>,
-    /// Current difficulty level (0..4: Basic/Advanced/Extreme/Master/Edit).
+    /// Difficulty within the current folder (mirrors `Selection.difficulty`).
     pub difficulty: u8,
     /// Active sort mode.
     pub sort_mode: SortMode,
     /// Search query (empty = no filter).
     pub search_query: String,
-    /// Visible songs after sort + filter.
-    pub visible: Vec<SongInfo>,
+    /// Visible folders after sort + filter (one row per folder).
+    pub visible: Vec<SongFolderView>,
+    /// Set by callers (Tab, F5) to trigger `recompute`.
+    pub dirty: bool,
 }
 
 impl SongSelectSelection {
-    /// Returns true if `song` matches the current search query.
     pub fn matches_search(&self, song: &SongInfo) -> bool {
         if self.search_query.is_empty() {
             return true;
@@ -106,17 +145,44 @@ impl SongSelectSelection {
         song.title.to_lowercase().contains(&q) || song.artist.to_lowercase().contains(&q)
     }
 
-    /// Recompute `visible` from a full song list using current sort + filter.
+    /// Group charts by parent folder, sort within folder by `dlevel`
+    /// ascending. Top-level sort mode applies to the folder list.
     pub fn recompute(&mut self, all: &[SongInfo]) {
-        let mut v: Vec<SongInfo> = all
-            .iter()
-            .filter(|s| self.matches_search(s))
-            .cloned()
+        use std::collections::BTreeMap;
+        let mut by_folder: BTreeMap<PathBuf, Vec<usize>> = BTreeMap::new();
+        for (idx, song) in all.iter().enumerate() {
+            if !self.matches_search(song) {
+                continue;
+            }
+            let folder = song
+                .path
+                .parent()
+                .map(|p| p.to_path_buf())
+                .unwrap_or_else(|| PathBuf::from("."));
+            by_folder.entry(folder).or_default().push(idx);
+        }
+        let mut v: Vec<SongFolderView> = by_folder
+            .into_iter()
+            .map(|(folder, mut indices)| {
+                indices.sort_by(|&a, &b| {
+                    let la = all[a].dlevel.unwrap_or(u32::MAX);
+                    let lb = all[b].dlevel.unwrap_or(u32::MAX);
+                    la.cmp(&lb).then_with(|| a.cmp(&b))
+                });
+                let title = all[indices[0]].title.clone();
+                let artist = all[indices[0]].artist.clone();
+                SongFolderView {
+                    folder,
+                    title,
+                    artist,
+                    chart_indices: indices,
+                }
+            })
             .collect();
         match self.sort_mode {
             SortMode::Default => {}
             SortMode::ByTitle => v.sort_by(|a, b| a.title.cmp(&b.title)),
-            SortMode::ByArtist => v.sort_by(|a, b| a.artist.cmp(&b.artist)),
+            SortMode::ByArtist => v.sort_by(|a, b| a.artist.cmp(&b.title)),
         }
         self.visible = v;
     }
@@ -193,8 +259,46 @@ struct SortModeText;
 #[derive(Component)]
 struct SelectedSongInfo;
 
+/// Cursor into the song-select list. Two-level: which song folder,
+/// which chart inside it (the latter is the difficulty index).
 #[derive(Resource, Debug, Default, Clone, Copy)]
-struct SelectionIndex(usize);
+pub struct Selection {
+    /// Index into `SongSelectSelection.visible` (one per folder).
+    pub folder: usize,
+    /// Index into the folder's `chart_indices` (0 = easiest).
+    pub difficulty: u8,
+}
+
+impl Selection {
+    /// Resolve the cursor to a concrete `db.songs` chart index, or
+    /// `None` if the visible list is empty / out of bounds.
+    pub fn chart_index(&self, sel: &SongSelectSelection) -> Option<usize> {
+        sel.visible
+            .get(self.folder)
+            .and_then(|f| f.chart_indices.get(self.difficulty as usize))
+            .copied()
+    }
+
+    /// Clamp folder + difficulty to whatever is currently visible.
+    /// Called after `recompute` so a Tab/sort/rescan that shrinks the
+    /// visible list can't leave the cursor dangling.
+    pub fn clamp_to_visible(&mut self, sel: &SongSelectSelection) {
+        if sel.visible.is_empty() {
+            self.folder = 0;
+            self.difficulty = 0;
+            return;
+        }
+        if self.folder >= sel.visible.len() {
+            self.folder = sel.visible.len() - 1;
+        }
+        let count = sel.visible[self.folder].difficulty_count();
+        if count == 0 {
+            self.difficulty = 0;
+        } else if (self.difficulty as usize) >= count {
+            self.difficulty = (count - 1) as u8;
+        }
+    }
+}
 
 /// Sort menu element (one slot in the ring buffer).
 #[derive(Component, Debug, Clone, Copy, PartialEq, Eq)]
@@ -242,12 +346,13 @@ pub fn plugin(app: &mut App) {
     app.init_resource::<SelectedSong>()
         .init_resource::<SongSelectSelection>()
         .init_resource::<CommandHistory>()
-        .init_resource::<SelectionIndex>()
+        .init_resource::<Selection>()
         .add_systems(Startup, spawn_song_select_overlay)
         .add_systems(
             OnEnter(AppState::SongSelect),
             (
                 ensure_song_db_loaded,
+                recompute_visible,
                 spawn_song_select,
                 show_song_select_overlay,
             )
@@ -266,6 +371,7 @@ pub fn plugin(app: &mut App) {
         .add_systems(
             Update,
             (
+                maybe_recompute_visible,
                 song_select_navigation,
                 render_selected_song,
                 bgm_preview_on_change,
@@ -297,7 +403,13 @@ fn ensure_song_db_loaded(mut db: ResMut<SongDb>) {
     }
 }
 
-fn spawn_song_select(mut commands: Commands, db: Res<SongDb>, theme: Res<ThemeResource>) {
+fn spawn_song_select(
+    mut commands: Commands,
+    db: Res<SongDb>,
+    selection: Res<Selection>,
+    selection_state: Res<SongSelectSelection>,
+    theme: Res<ThemeResource>,
+) {
     let t = theme.0;
     commands
         .spawn((
@@ -404,7 +516,13 @@ fn spawn_song_select(mut commands: Commands, db: Res<SongDb>, theme: Res<ThemeRe
                         BackgroundColor(t.panel_bg),
                     ))
                     .with_children(|list| {
-                        for (i, song) in db.songs.iter().enumerate() {
+                        for (i, folder) in selection_state.visible.iter().enumerate() {
+                            let label = format!(
+                                "{} \u{2014} {} [{}]",
+                                folder.title,
+                                folder.artist,
+                                SongFolderView::difficulty_label(selection.difficulty)
+                            );
                             list.spawn((
                                 SongRowEntity { index: i },
                                 Node {
@@ -412,9 +530,12 @@ fn spawn_song_select(mut commands: Commands, db: Res<SongDb>, theme: Res<ThemeRe
                                     min_height: Val::Px(36.0),
                                     margin: UiRect::vertical(Val::Px(2.0)),
                                     padding: UiRect::all(Val::Px(8.0)),
+                                    flex_direction: FlexDirection::Row,
+                                    justify_content: JustifyContent::SpaceBetween,
+                                    align_items: AlignItems::Center,
                                     ..default()
                                 },
-                                BackgroundColor(if i == 0 {
+                                BackgroundColor(if i == selection.folder {
                                     t.selection_highlight
                                 } else {
                                     Color::NONE
@@ -422,7 +543,7 @@ fn spawn_song_select(mut commands: Commands, db: Res<SongDb>, theme: Res<ThemeRe
                             ))
                             .with_children(|row| {
                                 row.spawn((
-                                    Text::new(format!("{}  —  {}", song.title, song.artist)),
+                                    Text::new(label.clone()),
                                     Theme::font(18.0),
                                     TextColor(t.text_primary),
                                 ));
@@ -467,9 +588,9 @@ fn spawn_song_select(mut commands: Commands, db: Res<SongDb>, theme: Res<ThemeRe
                             Theme::font(20.0),
                             TextColor(t.accent),
                         ));
-                        let detail = db
-                            .songs
-                            .first()
+                        let detail = selection
+                            .chart_index(&selection_state)
+                            .and_then(|i| db.songs.get(i))
                             .map(format_song_detail)
                             .unwrap_or_else(|| "No songs in library.\nF5 to rescan.".into());
                         info.spawn((
@@ -542,24 +663,51 @@ fn despawn_recursive(commands: &mut Commands, entity: Entity, children: &Query<&
 fn song_select_navigation(
     keys: Res<ButtonInput<KeyCode>>,
     mut db: ResMut<SongDb>,
-    mut selection: ResMut<SelectionIndex>,
+    mut selection: ResMut<Selection>,
     mut selection_state: ResMut<SongSelectSelection>,
     mut selected_song: ResMut<SelectedSong>,
     mut requests: MessageWriter<TransitionRequest>,
 ) {
-    if db.songs.is_empty() {
+    if selection_state.visible.is_empty() {
+        if keys.just_pressed(KeyCode::F5) {
+            if let Err(e) = db.rescan(&default_song_dir()) {
+                warn!("SongSelect: refresh failed: {}", e);
+            }
+        }
         return;
     }
-    let max = db.songs.len() - 1;
     if keys.just_pressed(KeyCode::ArrowDown) {
-        selection.0 = (selection.0 + 1).min(max);
+        let max = selection_state.visible.len() - 1;
+        selection.folder = (selection.folder + 1).min(max);
     } else if keys.just_pressed(KeyCode::ArrowUp) {
-        selection.0 = selection.0.saturating_sub(1);
+        selection.folder = selection.folder.saturating_sub(1);
+    } else if keys.just_pressed(KeyCode::ArrowRight) {
+        if let Some(folder) = selection_state.visible.get(selection.folder) {
+            let count = folder.difficulty_count();
+            if count > 0 {
+                selection.difficulty = ((selection.difficulty as usize + 1) % count) as u8;
+            }
+        }
+    } else if keys.just_pressed(KeyCode::ArrowLeft) {
+        if let Some(folder) = selection_state.visible.get(selection.folder) {
+            let count = folder.difficulty_count();
+            if count > 0 {
+                selection.difficulty =
+                    ((selection.difficulty as usize + count - 1) % count) as u8;
+            }
+        }
     } else if keys.just_pressed(KeyCode::Tab) {
         selection_state.sort_mode = selection_state.sort_mode.next();
+        selection_state.dirty = true;
     } else if keys.just_pressed(KeyCode::Enter) {
-        if let Some(song) = db.songs.get(selection.0) {
-            info!("SongSelect: selected {}", song.title);
+        if let Some(chart_idx) = selection.chart_index(&selection_state)
+            && let Some(song) = db.songs.get(chart_idx)
+        {
+            info!(
+                "SongSelect: selected {} ({})",
+                song.title,
+                SongFolderView::difficulty_label(selection.difficulty)
+            );
             selected_song.0 = Some(song.path.clone());
             request_transition(&mut requests, AppState::SongLoading);
         }
@@ -575,7 +723,8 @@ fn song_select_navigation(
 }
 
 fn render_selected_song(
-    selection: Res<SelectionIndex>,
+    selection: Res<Selection>,
+    selection_state: Res<SongSelectSelection>,
     db: Res<SongDb>,
     theme: Res<ThemeResource>,
     mut query: Query<&mut Text, With<SelectedSongInfo>>,
@@ -585,14 +734,16 @@ fn render_selected_song(
         return;
     }
     let t = theme.0;
-    if let Some(song) = db.songs.get(selection.0) {
+    if let Some(chart_idx) = selection.chart_index(&selection_state)
+        && let Some(song) = db.songs.get(chart_idx)
+    {
         let detail = format_song_detail(song);
         for mut text in &mut query {
             *text = Text::new(detail.clone());
         }
     }
     for (row_entity, mut bg) in &mut rows {
-        bg.0 = if row_entity.index == selection.0 {
+        bg.0 = if row_entity.index == selection.folder {
             t.selection_highlight
         } else {
             t.panel_bg
@@ -601,7 +752,8 @@ fn render_selected_song(
 }
 
 fn update_album_art_image(
-    selection: Res<SelectionIndex>,
+    selection: Res<Selection>,
+    selection_state: Res<SongSelectSelection>,
     db: Res<SongDb>,
     asset_server: Res<AssetServer>,
     mut query: Query<(&AlbumArtEntity, &mut ImageNode, &mut BackgroundColor)>,
@@ -609,7 +761,10 @@ fn update_album_art_image(
     if !selection.is_changed() {
         return;
     }
-    let Some(song) = db.songs.get(selection.0) else {
+    let Some(chart_idx) = selection.chart_index(&selection_state) else {
+        return;
+    };
+    let Some(song) = db.songs.get(chart_idx) else {
         return;
     };
     for (_, mut image, mut bg) in &mut query {
@@ -639,7 +794,8 @@ fn stop_preview_system(
 }
 
 fn bgm_preview_on_change(
-    selection: Res<SelectionIndex>,
+    selection: Res<Selection>,
+    selection_state: Res<SongSelectSelection>,
     db: Res<SongDb>,
     audio: Res<Audio>,
     asset_server: Res<AssetServer>,
@@ -652,8 +808,10 @@ fn bgm_preview_on_change(
     if !selection.is_changed() {
         return;
     }
-    let new_index = selection.0;
-    let Some(song) = db.songs.get(new_index) else {
+    let Some(chart_idx) = selection.chart_index(&selection_state) else {
+        return;
+    };
+    let Some(song) = db.songs.get(chart_idx) else {
         return;
     };
     let Some(preview_path) = song.preview_path.clone() else {
@@ -669,11 +827,12 @@ fn bgm_preview_on_change(
     // clip), fallback to full BGM plays through. (ADR-0015 Q1.)
     player.set_looping(song.preview_is_loopable);
 
-    // Compute direction from the last accepted index.
+    // Direction uses the folder index, not the absolute chart index,
+    // so cycling difficulty within the same folder reads as "None".
     let direction = match player.previous_index {
         None => PreviewSwapDirection::None,
-        Some(prev) if new_index > prev => PreviewSwapDirection::Next,
-        Some(prev) if new_index < prev => PreviewSwapDirection::Prev,
+        Some(prev) if selection.folder > prev => PreviewSwapDirection::Next,
+        Some(prev) if selection.folder < prev => PreviewSwapDirection::Prev,
         Some(_) => PreviewSwapDirection::None,
     };
     let source = get_or_load_audio_handle(&mut cache, &asset_server, &preview_path);
@@ -686,7 +845,7 @@ fn bgm_preview_on_change(
         &mut instances,
     );
     if accepted {
-        player.previous_index = Some(new_index);
+        player.previous_index = Some(selection.folder);
         // Clear BgmHandle so dtx-timing's clock doesn't read the
         // preview position during gameplay-inactive song select.
         dtx_audio::stop_bgm(&audio, &mut bgm, &mut instances);
@@ -889,13 +1048,44 @@ fn update_search_filter(mut sel: ResMut<SongSelectSelection>) {
     }
 }
 
+/// On SongSelect entry: dedupe the chart list into folders and clamp
+/// the cursor to whatever's actually visible. Runs after
+/// `ensure_song_db_loaded` (which may have just scanned the dir) and
+/// before `spawn_song_select` reads `selection_state.visible`.
+fn recompute_visible(
+    mut sel: ResMut<SongSelectSelection>,
+    db: Res<SongDb>,
+    mut selection: ResMut<Selection>,
+) {
+    sel.recompute(&db.songs);
+    selection.clamp_to_visible(&sel);
+}
+
+/// On Update: re-run recompute when the dirty flag is set (Tab cycles
+/// sort mode, future search-input wiring) or `db.songs` was mutated
+/// (F5 rescan).
+fn maybe_recompute_visible(
+    mut sel: ResMut<SongSelectSelection>,
+    db: Res<SongDb>,
+    mut selection: ResMut<Selection>,
+) {
+    if sel.dirty || db.is_changed() {
+        sel.recompute(&db.songs);
+        sel.dirty = false;
+        selection.clamp_to_visible(&sel);
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
     fn make_song(title: &str, artist: &str) -> SongInfo {
         SongInfo {
-            path: std::path::PathBuf::from(format!("/{}.dtx", title)),
+            // Per-title folder so each test song ends up in a distinct
+            // group after `recompute`. Otherwise all `/X.dtx` paths
+            // share parent `/` and dedupe to one row.
+            path: std::path::PathBuf::from(format!("/{title}/{title}.dtx")),
             title: title.into(),
             artist: artist.into(),
             bpm: Some(120.0),
@@ -1005,9 +1195,45 @@ mod tests {
             make_song("Bravo", "Z"),
         ];
         sel.recompute(&all);
+        // Each test song has a per-title folder → 3 distinct rows.
+        assert_eq!(sel.visible.len(), 3);
         assert_eq!(sel.visible[0].title, "Alpha");
         assert_eq!(sel.visible[1].title, "Bravo");
         assert_eq!(sel.visible[2].title, "Charlie");
+    }
+
+    #[test]
+    fn recompute_dedupes_same_folder_into_one_row() {
+        let mut sel = SongSelectSelection::default();
+        let chart = |file: &str, level: u32| SongInfo {
+            path: std::path::PathBuf::from(format!("/songs/Alpha/{file}")),
+            title: "Alpha".into(),
+            artist: "X".into(),
+            bpm: Some(120.0),
+            dlevel: Some(level),
+            bgm_path: None,
+            preview_path: None,
+            preview_is_loopable: false,
+            preimage_path: None,
+        };
+        let all = vec![chart("bsc.dtx", 50), chart("adv.dtx", 70), chart("mas.dtx", 95)];
+        sel.recompute(&all);
+        assert_eq!(sel.visible.len(), 1);
+        let folder = &sel.visible[0];
+        assert_eq!(folder.title, "Alpha");
+        assert_eq!(folder.difficulty_count(), 3);
+        // Within folder: easiest (lowest dlevel) first.
+        assert_eq!(all[folder.chart_indices[0]].dlevel, Some(50));
+        assert_eq!(all[folder.chart_indices[2]].dlevel, Some(95));
+    }
+
+    #[test]
+    fn difficulty_label_helpers() {
+        assert_eq!(SongFolderView::difficulty_label(0), "BASIC");
+        assert_eq!(SongFolderView::difficulty_label(1), "ADV");
+        assert_eq!(SongFolderView::difficulty_label(2), "EXT");
+        assert_eq!(SongFolderView::difficulty_label(3), "MAS");
+        assert_eq!(SongFolderView::difficulty_label(4), "EDIT");
     }
 
     #[test]
@@ -1041,22 +1267,89 @@ mod tests {
     }
 
     #[test]
-    fn selection_index_starts_at_zero() {
-        assert_eq!(SelectionIndex::default().0, 0);
+    fn selection_default_is_zero() {
+        let s = Selection::default();
+        assert_eq!(s.folder, 0);
+        assert_eq!(s.difficulty, 0);
     }
 
     #[test]
-    fn arrow_up_saturates_at_zero() {
-        let mut sel = SelectionIndex(0);
-        sel.0 = sel.0.saturating_sub(1);
-        assert_eq!(sel.0, 0);
+    fn selection_chart_index_resolves_folder_and_difficulty() {
+        let songs = vec![
+            SongInfo {
+                path: std::path::PathBuf::from("/songs/A/bsc.dtx"),
+                title: "A".into(),
+                artist: "X".into(),
+                bpm: Some(120.0),
+                dlevel: Some(50),
+                bgm_path: None,
+                preview_path: None,
+                preview_is_loopable: false,
+                preimage_path: None,
+            },
+            SongInfo {
+                path: std::path::PathBuf::from("/songs/A/mas.dtx"),
+                title: "A".into(),
+                artist: "X".into(),
+                bpm: Some(120.0),
+                dlevel: Some(95),
+                bgm_path: None,
+                preview_path: None,
+                preview_is_loopable: false,
+                preimage_path: None,
+            },
+        ];
+        let mut sel_state = SongSelectSelection::default();
+        sel_state.recompute(&songs);
+        assert_eq!(
+            Selection { folder: 0, difficulty: 0 }.chart_index(&sel_state),
+            Some(0)
+        );
+        assert_eq!(
+            Selection { folder: 0, difficulty: 1 }.chart_index(&sel_state),
+            Some(1)
+        );
+        assert_eq!(
+            Selection { folder: 1, difficulty: 0 }.chart_index(&sel_state),
+            None
+        );
     }
 
     #[test]
-    fn arrow_down_within_bounds() {
-        let mut sel = SelectionIndex(0);
-        sel.0 = (sel.0 + 1).min(2);
-        assert_eq!(sel.0, 1);
+    fn selection_clamp_to_visible_clamps_difficulty() {
+        let mut sel_state = SongSelectSelection::default();
+        sel_state.visible.push(SongFolderView {
+            folder: std::path::PathBuf::from("/songs/A"),
+            title: "A".into(),
+            artist: "X".into(),
+            chart_indices: vec![0, 1],
+        });
+        let mut cursor = Selection { folder: 0, difficulty: 5 };
+        cursor.clamp_to_visible(&sel_state);
+        assert_eq!(cursor.difficulty, 1);
+    }
+
+    #[test]
+    fn selection_clamp_to_visible_clamps_folder() {
+        let mut sel_state = SongSelectSelection::default();
+        sel_state.visible.push(SongFolderView {
+            folder: std::path::PathBuf::from("/songs/A"),
+            title: "A".into(),
+            artist: "X".into(),
+            chart_indices: vec![0],
+        });
+        let mut cursor = Selection { folder: 5, difficulty: 0 };
+        cursor.clamp_to_visible(&sel_state);
+        assert_eq!(cursor.folder, 0);
+    }
+
+    #[test]
+    fn selection_clamp_to_empty_resets_to_zero() {
+        let sel_state = SongSelectSelection::default();
+        let mut cursor = Selection { folder: 3, difficulty: 2 };
+        cursor.clamp_to_visible(&sel_state);
+        assert_eq!(cursor.folder, 0);
+        assert_eq!(cursor.difficulty, 0);
     }
 
     #[test]
