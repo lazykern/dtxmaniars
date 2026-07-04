@@ -170,7 +170,7 @@ pub fn enter_choreo_system(
     mut commands: Commands,
     mut q: Query<(Entity, &mut EnterChoreo, &mut UiTransform)>,
 ) {
-    let dt_ms = time.delta_secs() * 1000.0;
+    let dt_ms = (time.delta_secs() * 1000.0).min(50.0);
     for (entity, mut choreo, mut tf) in &mut q {
         choreo.tick(dt_ms);
         let off = choreo.current_offset();
@@ -317,10 +317,24 @@ mod tests {
                 UiTransform::default(),
             ))
             .id();
-        app.update();
-        app.update();
+        app.update(); // dt = 0: system applies the full start offset
         let tf = app.world().get::<UiTransform>(e).unwrap();
-        // after two ticks the node moved off its start offset
-        assert_ne!(tf.translation, Val2::px(-40.0, 0.0));
+        assert_eq!(tf.translation, Val2::px(-40.0, 0.0));
+        // Run enough frames to finish (dt clamped to 50ms/frame).
+        for _ in 0..20 {
+            std::thread::sleep(std::time::Duration::from_millis(2));
+            app.update();
+        }
+        // May need more wall time on fast machines: keep updating until done.
+        for _ in 0..200 {
+            if app.world().get::<EnterChoreo>(e).is_none() {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(5));
+            app.update();
+        }
+        let tf = app.world().get::<UiTransform>(e).unwrap();
+        assert_eq!(tf.translation, Val2::ZERO);
+        assert!(app.world().get::<EnterChoreo>(e).is_none());
     }
 }
