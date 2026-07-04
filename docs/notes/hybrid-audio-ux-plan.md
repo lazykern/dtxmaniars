@@ -240,6 +240,9 @@ pub const PREVIEW_FADE_DELAY_MS: u32 = 30;  // osu DELAY_BEFORE_FADE:30
 
 // crates/dtx-audio/src/preview.rs
 pub const SCROLL_DEBOUNCE_MS: u32 = 120;    // BocaD ctWaitForPlayback default
+
+// Per Q1: AudioHandleCache key is the resolved BGM path (per-chart).
+// Per Q3: AlbumArtTween::is_flying() guard hard-cuts on rapid scroll.
 ```
 
 Named constants; not buried in a system. They show up in tests too.
@@ -379,29 +382,36 @@ the player to NOT loop).
 - **Mod system** (deferred to M14+)
 - **Pre-decode pool** (deferred to M14+ per dtx-audio AGENTS.md)
 
-## 7. Open questions for the user
+## 7. Resolved design questions
 
-1. **Multi-difficulty preview file convention.** Today `resolve_bgm_path`
-   returns a single `bgm_path` per chart. With multi-diff in M6+, do
-   difficulties under one song entry all share one preview file, or
-   have per-diff `PREVIEW:` lines? BocaD's `CChartData.Presound` is
-   per-chart, not per-song — so per-diff preview IS supported. Out of
-   scope for this plan, but the cache design accommodates it (one
-   cache key per resolved path, multiple diffs hit the same key).
+> All 4 open questions settled with the recommended option. Recorded here
+> so the implementation never re-derives them.
 
-2. **Master volume coordination.** When the user changes master volume
-   in Config while a preview is playing, the new volume applies via
-   kira's global mixer. Crossfade just adjusts instance volume. They
-   multiply. Confirm this matches expectations (it does in osu).
+1. **Multi-difficulty preview convention:** per-chart, BocaD-compatible.
+   Each `.dtx` declares its own `#PREVIEW:` or falls back to its resolved
+   BGM. Cache key = resolved file path → multiple difficulties pointing
+   to the same `#PREVIEW:` file naturally share one cache entry. Mirrors
+   BocaD's `CChartData.Presound` (per-chart). `SongInfo` already carries
+   `bgm_path: Option<PathBuf>` from `resolve_bgm_path`; no schema change.
 
-3. **Should the album-art crossfade be a hard-cut on rapid scroll?**
-   Current plan: always animate. Alternative: skip the tween if the
-   previous fade-in hasn't completed. Recommend the latter to avoid
-   partial-opacity ghosts — but it's a 3-line guard.
+2. **Master × instance volume:** multiply (osu-style). Master volume from
+   kira's `Audio` mixer (channel-level) multiplies with the per-instance
+   volume that the crossfade adjusts. Both systems already do their own
+   thing independently; the multiplication is a property of the audio
+   graph, not extra code. Changing master during a fade takes effect on
+   the next kira mixer update; the crossfade tween keeps adjusting the
+   instance volume and the audible level is the product.
 
-4. **Should we ship the M14+ decode pool work in parallel with phase 1?**
-   Different files, different crates. Ponytail says no — finish one,
-   start the other. User preference?
+3. **Rapid-scroll album art:** guard against in-flight tween. The album-art
+   crossfade checks `PreviewState::is_busy()` (or a widget-local
+   `AlbumArtTween::is_flying()`); if a previous fade-in hasn't completed,
+   hard-cut to the new image. Prevents partial-opacity ghosts. 3-line
+   guard, lives in `crates/dtx-ui/src/widget/album_art.rs`.
+
+4. **M14+ decode pool parallelism:** no, finish phase 1 first. Both touch
+   `dtx-audio` Resources — merge conflicts and reasoning overhead. Decode
+   pool is a self-contained sub-feature that lands after phase 4 with no
+   overlap.
 
 ## 8. References cited
 
@@ -440,8 +450,10 @@ the player to NOT loop).
 
 ## 9. One-line summary
 
-> Cache the preview audio handle by path, crossfade 150→220ms on selection
-> change, gate on scroll velocity, fire a direction event for parallax,
-> loop per-screen, and align exit-fade with the screen-fade duration. All
-> in `dtx-audio` + thin slices in `dtx-ui` and `game-menu`. No new
-> dependencies. No mechanics changes. No skin system.
+> Cache the preview audio handle by path (per-chart, BocaD-compatible),
+> crossfade 150→220ms on selection change, gate on scroll velocity, fire
+> a direction event for parallax, loop per-screen, and align exit-fade
+> with the screen-fade duration. Master volume multiplies; album art
+> hard-cuts on rapid scroll. All in `dtx-audio` + thin slices in
+> `dtx-ui` and `game-menu`. No new dependencies. No mechanics changes.
+> No skin system. No decode-pool work in parallel.
