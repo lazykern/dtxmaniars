@@ -12,3 +12,4 @@ pub mod pad_chips;
 pub mod phrase_meter;
 pub mod rolling_counter;
 pub mod score_detailed;
+pub mod stage_background;

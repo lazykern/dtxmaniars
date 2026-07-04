@@ -107,7 +107,11 @@ pub fn plugin(app: &mut App) {
         )
         .add_systems(
             Update,
-            (motion::enter_choreo_system, motion::beat_pulse_system),
+            (
+                motion::enter_choreo_system,
+                motion::beat_pulse_system,
+                widget::stage_background::ambient_art_apply_system,
+            ),
         );
 }
 
