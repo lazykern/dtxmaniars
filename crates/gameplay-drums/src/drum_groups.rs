@@ -569,18 +569,94 @@ fn resolve_lc_pad(
     bpm_changes: &[BpmChange],
     groups: &EffectiveGroups,
 ) -> Vec<Candidate> {
-    if groups.cymbal_free {
-        resolve_cy_pad(audio_ms, chart, judged, base_bpm, bpm_changes, groups)
-    } else {
-        resolve_hh_pad(
-            DrumPad::Hh,
+    // Reference: `CStagePerfDrumsScreen.cs:1698-1786` (EPad.LC).
+    let hc = closest_candidate(
+        EChannel::HiHatClose,
+        audio_ms,
+        chart,
+        judged,
+        base_bpm,
+        bpm_changes,
+    );
+    let ho = closest_candidate(
+        EChannel::HiHatOpen,
+        audio_ms,
+        chart,
+        judged,
+        base_bpm,
+        bpm_changes,
+    );
+    let lc = closest_candidate(
+        EChannel::LeftCymbal,
+        audio_ms,
+        chart,
+        judged,
+        base_bpm,
+        bpm_changes,
+    );
+    let cy = if groups.cymbal_free {
+        closest_candidate(
+            EChannel::Cymbal,
             audio_ms,
             chart,
             judged,
             base_bpm,
             bpm_changes,
-            groups.hh,
         )
+    } else {
+        None
+    };
+    let rd = if groups.cymbal_free {
+        closest_candidate(
+            EChannel::RideCymbal,
+            audio_ms,
+            chart,
+            judged,
+            base_bpm,
+            bpm_changes,
+        )
+    } else {
+        None
+    };
+
+    if !groups.cymbal_free {
+        return match groups.hh {
+            HhGroup::SeparateAll | HhGroup::HhAndHo => lc.into_iter().collect(),
+            HhGroup::HhAndLc | HhGroup::CommonAll => pick_earliest(candidates_for_channels(
+                &[
+                    EChannel::LeftCymbal,
+                    EChannel::HiHatClose,
+                    EChannel::HiHatOpen,
+                ],
+                audio_ms,
+                chart,
+                judged,
+                base_bpm,
+                bpm_changes,
+            )),
+        };
+    }
+
+    let mut pool = vec![];
+    for c in [hc, ho, lc, cy, rd].into_iter().flatten() {
+        pool.push(c);
+    }
+    pool.sort_by_key(|c| c.target_ms);
+
+    match groups.hh {
+        HhGroup::SeparateAll | HhGroup::HhAndHo => pool
+            .into_iter()
+            .find(|c| {
+                matches!(c.channel, EChannel::LeftCymbal | EChannel::Cymbal)
+                    || (c.channel == EChannel::RideCymbal && groups.cy == CyGroup::Common)
+            })
+            .into_iter()
+            .collect(),
+        HhGroup::HhAndLc | HhGroup::CommonAll => pool
+            .into_iter()
+            .find(|c| c.channel != EChannel::RideCymbal || groups.cy == CyGroup::Common)
+            .into_iter()
+            .collect(),
     }
 }
 
@@ -1012,5 +1088,75 @@ mod tests {
         assert_eq!(LANE_COUNT, 12);
         assert_eq!(LANE_ORDER[9], EChannel::LeftCymbal);
         assert_eq!(LANE_ORDER[11], EChannel::LeftBassDrum);
+    }
+
+    #[test]
+    fn lc_separate_all_hits_lc_only() {
+        let chart = chart_with(vec![
+            at(0, EChannel::LeftCymbal, 0.5),
+            at(0, EChannel::HiHatClose, 0.5),
+        ]);
+        let groups = EffectiveGroups {
+            hh: HhGroup::SeparateAll,
+            ..EffectiveGroups::from_config(&DrumsConfig::default(), &ChartChipPresence::default())
+        };
+        let hits = resolve_judgments(
+            DrumPad::Lc,
+            1000,
+            &chart,
+            &HashSet::new(),
+            120.0,
+            &[],
+            &groups,
+        );
+        assert_eq!(hits.len(), 1);
+        assert_eq!(hits[0].0, 0);
+    }
+
+    #[test]
+    fn lc_common_all_without_cymbal_free_picks_earliest() {
+        let chart = chart_with(vec![
+            at(0, EChannel::HiHatClose, 0.49),
+            at(0, EChannel::LeftCymbal, 0.51),
+        ]);
+        let groups = EffectiveGroups {
+            hh: HhGroup::CommonAll,
+            ..EffectiveGroups::from_config(&DrumsConfig::default(), &ChartChipPresence::default())
+        };
+        let hits = resolve_judgments(
+            DrumPad::Lc,
+            1000,
+            &chart,
+            &HashSet::new(),
+            120.0,
+            &[],
+            &groups,
+        );
+        assert_eq!(hits.len(), 1);
+        assert_eq!(hits[0].0, 0);
+    }
+
+    #[test]
+    fn lc_cymbal_free_separate_hits_lc_not_hh() {
+        let chart = chart_with(vec![
+            at(0, EChannel::LeftCymbal, 0.5),
+            at(0, EChannel::HiHatClose, 0.5),
+        ]);
+        let groups = EffectiveGroups {
+            hh: HhGroup::SeparateAll,
+            cymbal_free: true,
+            ..EffectiveGroups::from_config(&DrumsConfig::default(), &ChartChipPresence::default())
+        };
+        let hits = resolve_judgments(
+            DrumPad::Lc,
+            1000,
+            &chart,
+            &HashSet::new(),
+            120.0,
+            &[],
+            &groups,
+        );
+        assert_eq!(hits.len(), 1);
+        assert_eq!(hits[0].0, 0);
     }
 }

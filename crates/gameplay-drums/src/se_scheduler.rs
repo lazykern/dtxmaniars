@@ -7,9 +7,10 @@ use bevy::prelude::*;
 use bevy_kira_audio::prelude::*;
 use std::collections::HashSet;
 
-use crate::judge::{chip_target_ms, BpmChangeList};
-use crate::resources::{ActiveChart, ActiveDrumSounds, DrumAudioSettings, GameplayClock};
+use crate::judge::{auto_chip_target_ms, BpmChangeList};
+use crate::resources::{ActiveChart, ActiveDrumSounds, BgmAdjustState, DrumAudioSettings, GameplayClock};
 use dtx_core::EChannel;
+use game_shell::{AppState, PauseState};
 
 #[derive(Resource, Default, Debug)]
 pub struct PlayedSeChips(pub HashSet<usize>);
@@ -19,7 +20,8 @@ pub(super) fn plugin(app: &mut App) {
         FixedUpdate,
         schedule_se_chips
             .in_set(super::DrumsSets::NoteSpawn)
-            .run_if(in_state(game_shell::AppState::Performance)),
+            .run_if(in_state(AppState::Performance))
+            .run_if(in_state(PauseState::Running)),
     );
 }
 
@@ -31,6 +33,7 @@ fn schedule_se_chips(
     clock: Res<GameplayClock>,
     chart: Res<ActiveChart>,
     bpm_changes: Res<BpmChangeList>,
+    bgm_adjust: Res<BgmAdjustState>,
     settings: Res<DrumAudioSettings>,
     audio: Res<Audio>,
     asset_server: Res<AssetServer>,
@@ -48,6 +51,7 @@ fn schedule_se_chips(
     }
     let now = clock.current_ms;
     let base_bpm = chart.chart.metadata.bpm.unwrap_or(120.0);
+    let bgm_shift = bgm_adjust.total_ms();
     let source_dir = chart.source_path.as_ref().and_then(|p| p.parent());
 
     for (idx, chip) in chart.chart.chips.iter().enumerate() {
@@ -61,7 +65,7 @@ fn schedule_se_chips(
             played.0.insert(idx);
             continue;
         }
-        let target_ms = chip_target_ms(chip, base_bpm, &bpm_changes.changes);
+        let target_ms = auto_chip_target_ms(chip, base_bpm, &bpm_changes.changes, bgm_shift);
         if now < target_ms {
             continue;
         }

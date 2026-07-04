@@ -18,7 +18,30 @@ Drums-first MVP. DTXmaniaNX semantics + osu-lazer fluidity. Bevy 0.19.
 | **M11** | Full Result UX | Rank icon (S/A/B/C/D/E) + song bar + ghost bar + score + max combo + 5 judgment counts | **Done** |
 | **M12** | Full Config + ChangeSkin | 5 tabs (system/game/play/keyassign/skin) + minimal CStageChangeSkin placeholder | **Done for M13** (full skin browser deferred per ADR-0014/M14) |
 | **M13** | Integration + full-flow verify | All 9 states boot clean, BocuD timing windows, audio preload/voice pools, focused tests green | **In progress** (final workspace verify pending) |
+| **M13.5** | Playable + osu-smooth drums | Split clock + sub-frame interpolation + framepace; NX scroll/scoring/gauge/combo; pause + StageClear/StageFailed; real loading (bg parse + wait-on-handles); Config edits persist; tiered WAV preload; BocuD `.score.ini` best-score read in song select | **Done** |
 | M14+ | Skin system, CubeTest, Updater, online | TBD | Future |
+
+## M13.5 — Playable smooth drums (this goal)
+
+Two sources kept distinct (see `docs/decisions/`): **mechanics** ported verbatim
+from DTXManiaNX-BocuD, **smoothness/UX** patterns from the dtxpt POC.
+
+- **Timing/smoothness (dtxpt engine plumbing):** split clock
+  (`audio`/`visual`/`prev` + drift correction) in `GameplayClock`; `RenderClock`
+  sub-frame interpolation drives scroll; PreUpdate wall-clock input capture;
+  `bevy_framepace` in the desktop binary.
+- **Mechanics (BocuD-verbatim):** NX scroll `(scrollIdx+1)·0.17875` px/ms;
+  XG scoring (base + combo ramp + FC/EXC bonuses); Poor resets combo; gauge
+  start 2/3, fail −0.1, XG deltas + damage-level miss scaling; nearest-unhit
+  chip judgment with lane groups; input offset applied to the judgement clock.
+- **Playable UX:** Esc pause overlay (resume/retry/quit, freezes BGM+clock);
+  StageClear / StageFailed banners between Performance and Result; real song
+  loading (background parse + wait-on-asset-handles, no fake timer); Config
+  screen edits + persists scroll speed / input offset / master volume / damage
+  level, re-applied on each Performance entry; tiered WAV preload (immediate
+  note WAVs waited on, deferred BGM/SE decode in background).
+- **Persistence:** BocuD-compatible `<chart>.score.ini` written on Result and
+  read into the song-select detail panel (best score + rank + max combo).
 
 ## Current focus
 
@@ -26,7 +49,7 @@ Drums-first MVP. DTXmaniaNX semantics + osu-lazer fluidity. Bevy 0.19.
 
 Completed: 300ms OutQuint transitions, dark theme, osu-style HUD widgets (rolling score, bounce combo, tweened gauge, judgment popup, lane flush), 3-column song select, themed screens (Startup/Title/SongSelect/Config/SongLoading/Result/ChangeSkin/End), BocuD 34/67/84/117 timing windows, chart sound-bank preload, real drum voice reuse, BRP debug, `.mcp.json`, `system_font_discovery` for CJK text.
 
-Remaining: data-driven density bars (M10.1), real BGA decode (M7.1), bevy_framepace, full skin browser/system (M14+).
+Remaining: data-driven density bars (M10.1), real BGA decode (M7.1), full skin browser/system (M14+).
 
 ## Port coverage summary
 

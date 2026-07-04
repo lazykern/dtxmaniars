@@ -25,7 +25,7 @@ pub mod scroll;
 
 pub use events::{JudgmentEvent, LaneHit, NoteMissed};
 pub use lane_map::{lane_channel, lane_of, LaneId, LaneMap, GUITAR_LANES};
-pub use resources::{ActiveChart, Combo, GameStartMs, JudgmentCounts, Score};
+pub use resources::{ActiveChart, BgmAdjustState, Combo, GameStartMs, JudgmentCounts, Score};
 
 /// Plugin assembly. Mirrors `gameplay_drums::plugin` shape.
 pub fn plugin(app: &mut App) {
@@ -33,6 +33,7 @@ pub fn plugin(app: &mut App) {
         .init_resource::<resources::Score>()
         .init_resource::<resources::Combo>()
         .init_resource::<resources::GameStartMs>()
+        .init_resource::<resources::BgmAdjustState>()
         .init_resource::<resources::JudgmentCounts>()
         .init_resource::<lane_map::LaneMap>()
         .add_message::<events::LaneHit>()

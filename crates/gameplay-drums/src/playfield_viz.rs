@@ -5,7 +5,7 @@ use dtx_scoring::JudgmentKind;
 use dtx_ui::ThemeResource;
 use game_shell::AppState;
 
-use crate::events::JudgmentEvent;
+use crate::events::{JudgmentEvent, LaneHit};
 use crate::hud::HudRoot;
 use crate::layout::PlayfieldLayout;
 use crate::scroll::lane_color;
@@ -71,6 +71,7 @@ pub fn spawn_lane_receptors(
 }
 
 fn flash_receptors_on_hit(
+    mut lane_hits: MessageReader<LaneHit>,
     mut events: MessageReader<JudgmentEvent>,
     layout: Res<PlayfieldLayout>,
     hud_root: Query<Entity, With<HudRoot>>,
@@ -80,6 +81,15 @@ fn flash_receptors_on_hit(
     let Ok(hud) = hud_root.single() else {
         return;
     };
+    for hit in lane_hits.read() {
+        for (receptor, mut flash) in &mut receptors {
+            if receptor.lane == hit.lane {
+                flash.timer = Timer::from_seconds(RECEPTOR_FLASH_SECS, TimerMode::Once);
+                flash.strength = 0.7;
+            }
+        }
+        spawn_hit_burst(&mut commands, hud, &layout, hit.lane, 0.7);
+    }
     for ev in events.read() {
         let strength = match ev.kind {
             JudgmentKind::Perfect => 1.0,

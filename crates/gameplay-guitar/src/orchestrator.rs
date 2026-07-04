@@ -50,7 +50,7 @@ use crate::guitar_perf::{
     GuitarBonus, GuitarDangerState, GuitarGaugeState, GuitarLaneFlush, GuitarRgbState,
     GuitarWailingBonus,
 };
-use crate::resources::{ActiveChart, Combo, Score};
+use crate::resources::{ActiveChart, BgmAdjustState, Combo, Score};
 
 /// Marker component for the guitar/bass performance stage root entity.
 #[derive(Component, Debug, Clone, Copy)]
@@ -90,7 +90,27 @@ pub fn plugin(app: &mut App) {
         );
 }
 
-fn on_enter_performance(chart: Res<ActiveChart>, mut completion: ResMut<GuitarStageCompletion>) {
+fn on_enter_performance(
+    chart: Res<ActiveChart>,
+    mut bgm_adjust: ResMut<BgmAdjustState>,
+    mut completion: ResMut<GuitarStageCompletion>,
+) {
+    use dtx_config::{default_path, load};
+    let cfg = load(&default_path());
+    bgm_adjust.common_ms = cfg.gameplay.bgm_adjust_ms;
+    bgm_adjust.song_ms = chart
+        .source_path
+        .as_ref()
+        .map(|p| {
+            dtx_scoring::score_ini::read_bgm_adjust(dtx_scoring::score_ini::score_ini_path(p))
+        })
+        .unwrap_or(0);
+    info!(
+        "Guitar stage enter: bgm_adjust total = {}ms (common={}, song={})",
+        bgm_adjust.total_ms(),
+        bgm_adjust.common_ms,
+        bgm_adjust.song_ms
+    );
     completion.chart_end_ms = chart_end_ms(&chart.chart);
     completion.end_requested = false;
     completion.gauge_failed = false;
@@ -197,7 +217,8 @@ mod tests {
     fn on_enter_captures_chart_end_ms() {
         let mut app = App::new();
         app.init_resource::<GuitarStageCompletion>()
-            .init_resource::<ActiveChart>();
+            .init_resource::<ActiveChart>()
+            .init_resource::<BgmAdjustState>();
         app.world_mut().resource_mut::<ActiveChart>().chart = chart_with_n_chips(2);
         app.add_systems(Update, on_enter_performance);
         app.update();

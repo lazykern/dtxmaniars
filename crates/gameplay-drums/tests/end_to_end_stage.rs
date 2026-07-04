@@ -45,6 +45,7 @@ fn build_app() -> App {
     .init_resource::<GameplayClock>()
     .init_resource::<ActiveChart>()
     .init_resource::<Score>()
+    .init_resource::<gameplay_drums::resources::DrumScoring>()
     .init_resource::<Combo>()
     .init_resource::<JudgmentCounts>()
     .init_resource::<gameplay_drums::resources::DrumGameplaySettings>()

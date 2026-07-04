@@ -12,10 +12,11 @@ use dtx_core::chart::Chart;
 use std::collections::HashSet;
 use std::path::Path;
 
-use crate::judge::BpmChangeList;
-use crate::resources::{ActiveChart, DrumAudioSettings};
+use crate::judge::{auto_chip_target_ms, BpmChangeList};
+use crate::resources::{ActiveChart, ActiveDrumSounds, BgmAdjustState, DrumAudioSettings};
 use dtx_core::EChannel;
 use dtx_timing::math::chip_time_ms_with_bpm_changes;
+use game_shell::{AppState, PauseState};
 
 #[derive(Resource, Default, Debug)]
 pub struct PlayedBgmChips(pub HashSet<usize>);
@@ -74,7 +75,8 @@ pub(super) fn plugin(app: &mut App) {
             FixedUpdate,
             schedule_bgm_chips
                 .in_set(super::DrumsSets::NoteSpawn)
-                .run_if(in_state(game_shell::AppState::Performance)),
+                .run_if(in_state(AppState::Performance))
+                .run_if(in_state(PauseState::Running)),
         );
 }
 
@@ -121,6 +123,7 @@ fn schedule_bgm_chips(
     gameplay_clock: Res<crate::resources::GameplayClock>,
     chart: Res<ActiveChart>,
     bpm_changes: Res<BpmChangeList>,
+    bgm_adjust: Res<BgmAdjustState>,
     primary: Res<PrimaryBgmChip>,
     audio: Res<Audio>,
     asset_server: Res<AssetServer>,
@@ -129,6 +132,7 @@ fn schedule_bgm_chips(
     mut instances: ResMut<Assets<AudioInstance>>,
     sound_bank: Res<dtx_audio::ChartSoundBank>,
     mut played: ResMut<PlayedBgmChips>,
+    mut active: ResMut<ActiveDrumSounds>,
 ) {
     if !gameplay_clock.is_started() {
         return;
@@ -139,6 +143,7 @@ fn schedule_bgm_chips(
         return;
     }
     let base_bpm = chart.chart.metadata.bpm.unwrap_or(120.0);
+    let bgm_shift = bgm_adjust.total_ms();
     let source_dir = chart.source_path.as_ref().and_then(|p| p.parent());
 
     for (idx, chip) in chart.chart.chips.iter().enumerate() {
@@ -152,8 +157,7 @@ fn schedule_bgm_chips(
             played.0.insert(idx);
             continue;
         }
-        let target_ms =
-            chip_time_ms_with_bpm_changes(chip.measure, chip.value, base_bpm, &bpm_changes.changes);
+        let target_ms = auto_chip_target_ms(chip, base_bpm, &bpm_changes.changes, bgm_shift);
         if now < target_ms {
             continue;
         }
@@ -185,7 +189,9 @@ fn schedule_bgm_chips(
                 dtx_audio::play_bgm(&audio, &asset_server, &mut bgm, &mut instances, &path);
             }
         } else {
-            if let Some(sound) = sound_bank.get(chip.wav_slot) {
+            let vol = chart.chart.assets.wav.volume(chip.wav_slot);
+            let pan = chart.chart.assets.wav.pan(chip.wav_slot);
+            let handle = if let Some(sound) = sound_bank.get(chip.wav_slot) {
                 dtx_audio::play_sfx_handle(
                     &audio,
                     sound.handle.clone(),
@@ -193,10 +199,19 @@ fn schedule_bgm_chips(
                     sound.pan,
                     settings.master_volume,
                     1.0,
-                );
+                )
             } else {
-                dtx_audio::play_sfx(&audio, &asset_server, &path);
-            }
+                dtx_audio::play_sfx_path(
+                    &audio,
+                    &asset_server,
+                    &path,
+                    vol,
+                    pan,
+                    settings.master_volume,
+                    1.0,
+                )
+            };
+            active.track_layer_bgm(handle);
         }
         if bgm_chip_is_confirmed_played(primary.0 == Some(idx), clock_ready, true) {
             played.0.insert(idx);

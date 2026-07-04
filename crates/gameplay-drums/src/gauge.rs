@@ -1,49 +1,120 @@
-//! Stage gauge — BocuD-style 0..1 gauge (dtxpt `gauge.rs` deltas).
+//! Stage life gauge — DTXManiaNX `CActPerfCommonGauge` port.
+//!
+//! Reference:
+//! `references/DTXmaniaNX-BocuD/DTXMania/Stage/06.Performance/Common/CActPerfCommonGauge.cs:37-154`.
+//!
+//! - Range `[GAUGE_MIN, GAUGE_MAX]` = `[-0.1, 1.0]`; starts at `2/3`.
+//! - Fails when the value falls to `GAUGE_MIN` (`-0.1`), NOT at zero.
+//! - Per-judgment deltas differ by skill mode (Classic vs XG). Miss damage is
+//!   scaled by the configured damage level.
 
 use bevy::prelude::*;
+use dtx_core::constants::DamageLevel;
 use dtx_scoring::JudgmentKind;
 use game_shell::AppState;
 
 use crate::events::JudgmentEvent;
 
-pub const GAUGE_START: f32 = 0.80;
-pub const GAUGE_CLEAR: f32 = 0.80;
+/// Full gauge.
+pub const GAUGE_MAX: f32 = 1.0;
+/// Starting gauge value (`2/3`). `CActPerfCommonGauge.cs:60`.
+pub const GAUGE_INITIAL: f32 = 2.0 / 3.0;
+/// Fail threshold (`-0.1`). `CActPerfCommonGauge.cs:39,146`.
+pub const GAUGE_MIN: f32 = -0.1;
+/// Danger threshold used by the HUD (`0.3`).
+pub const GAUGE_DANGER: f32 = 0.3;
 
-pub fn gauge_delta(kind: JudgmentKind) -> f32 {
+/// XG-mode (`nSkillMode == 1`) drum gauge deltas. `CActPerfCommonGauge.cs` XG branch.
+pub fn gauge_delta_xg(kind: JudgmentKind) -> f32 {
     match kind {
         JudgmentKind::Perfect => 0.005,
-        JudgmentKind::Great => 0.002,
+        JudgmentKind::Great => 0.001,
         JudgmentKind::Good => 0.0,
-        JudgmentKind::Poor => -0.03,
-        JudgmentKind::Miss => -0.06,
+        JudgmentKind::Poor => 0.0,
+        JudgmentKind::Miss => -0.017,
     }
 }
 
-#[derive(Resource, Debug, Clone, Copy, Default)]
+/// Classic-mode drum gauge deltas. `CActPerfCommonGauge.cs` classic branch.
+pub fn gauge_delta_classic(kind: JudgmentKind) -> f32 {
+    match kind {
+        JudgmentKind::Perfect => 0.004,
+        JudgmentKind::Great => 0.002,
+        JudgmentKind::Good => 0.0,
+        JudgmentKind::Poor => 0.0,
+        JudgmentKind::Miss => -0.020,
+    }
+}
+
+/// Damage-level scaling applied to the Miss drain. `CActPerfCommonGauge.cs:97-120`.
+pub fn miss_damage_factor(level: DamageLevel) -> f32 {
+    match level {
+        DamageLevel::None => 0.0,
+        DamageLevel::Small => 0.25,
+        DamageLevel::Normal => 0.5,
+        DamageLevel::High => 0.75,
+    }
+}
+
+#[derive(Resource, Debug, Clone, Copy)]
 pub struct StageGauge {
     pub value: f32,
     pub failed: bool,
+    /// XG scoring mode (DTXManiaNX default). Toggles the delta table.
+    pub xg_mode: bool,
+    /// Damage level controlling Miss drain scaling.
+    pub damage_level: DamageLevel,
+}
+
+impl Default for StageGauge {
+    fn default() -> Self {
+        Self {
+            value: GAUGE_INITIAL,
+            failed: false,
+            xg_mode: true,
+            damage_level: DamageLevel::Normal,
+        }
+    }
 }
 
 impl StageGauge {
     pub fn reset(&mut self) {
-        self.value = GAUGE_START;
+        self.value = GAUGE_INITIAL;
         self.failed = false;
+    }
+
+    /// Per-judgment gauge delta including Miss damage scaling.
+    pub fn delta(&self, kind: JudgmentKind) -> f32 {
+        let base = if self.xg_mode {
+            gauge_delta_xg(kind)
+        } else {
+            gauge_delta_classic(kind)
+        };
+        if kind == JudgmentKind::Miss {
+            base * miss_damage_factor(self.damage_level)
+        } else {
+            base
+        }
     }
 
     pub fn apply_judgment(&mut self, kind: JudgmentKind) {
         if self.failed {
             return;
         }
-        self.value = (self.value + gauge_delta(kind)).clamp(0.0, 1.0);
-        if self.value <= 0.0 {
-            self.value = 0.0;
+        self.value = (self.value + self.delta(kind)).clamp(GAUGE_MIN, GAUGE_MAX);
+        if self.value <= GAUGE_MIN {
             self.failed = true;
         }
     }
 
+    /// Displayed fill percentage (0..100); negative internal values read as 0.
     pub fn pct(&self) -> f32 {
-        self.value * 100.0
+        self.value.clamp(0.0, GAUGE_MAX) * 100.0
+    }
+
+    /// True while the gauge sits in the danger zone.
+    pub fn in_danger(&self) -> bool {
+        self.value < GAUGE_DANGER
     }
 }
 
@@ -51,9 +122,9 @@ pub fn gauge_fill_color(gauge: f32, failed: bool) -> Color {
     if failed {
         return Color::srgb(0.95, 0.2, 0.25);
     }
-    if gauge >= GAUGE_CLEAR {
+    if gauge >= GAUGE_INITIAL {
         Color::srgb(0.25, 0.9, 0.45)
-    } else if gauge >= 0.4 {
+    } else if gauge >= GAUGE_DANGER {
         Color::srgb(0.95, 0.85, 0.2)
     } else {
         Color::srgb(0.95, 0.45, 0.2)
@@ -87,22 +158,54 @@ mod tests {
     use super::*;
 
     #[test]
-    fn perfect_increases_gauge() {
-        let mut g = StageGauge {
-            value: GAUGE_START,
-            failed: false,
-        };
-        g.apply_judgment(JudgmentKind::Perfect);
-        assert!(g.value > GAUGE_START);
+    fn starts_at_two_thirds() {
+        let g = StageGauge::default();
+        assert!((g.value - 2.0 / 3.0).abs() < 1e-6);
     }
 
     #[test]
-    fn miss_can_fail() {
-        let mut g = StageGauge {
-            value: 0.01,
-            failed: false,
-        };
+    fn perfect_increases_gauge() {
+        let mut g = StageGauge::default();
+        let before = g.value;
+        g.apply_judgment(JudgmentKind::Perfect);
+        assert!(g.value > before);
+    }
+
+    #[test]
+    fn poor_does_not_drain_xg() {
+        let mut g = StageGauge::default();
+        let before = g.value;
+        g.apply_judgment(JudgmentKind::Poor);
+        assert!((g.value - before).abs() < 1e-6);
+    }
+
+    #[test]
+    fn miss_scaled_by_damage_level() {
+        let mut normal = StageGauge::default();
+        normal.damage_level = DamageLevel::Normal;
+        let mut high = StageGauge::default();
+        high.damage_level = DamageLevel::High;
+        normal.apply_judgment(JudgmentKind::Miss);
+        high.apply_judgment(JudgmentKind::Miss);
+        // High damage drains more than Normal.
+        assert!(high.value < normal.value);
+    }
+
+    #[test]
+    fn fails_at_minus_point_one() {
+        let mut g = StageGauge::default();
+        g.value = GAUGE_MIN + 0.005;
         g.apply_judgment(JudgmentKind::Miss);
         assert!(g.failed);
+        assert!(g.value <= GAUGE_MIN);
+    }
+
+    #[test]
+    fn none_damage_level_never_drains_on_miss() {
+        let mut g = StageGauge::default();
+        g.damage_level = DamageLevel::None;
+        let before = g.value;
+        g.apply_judgment(JudgmentKind::Miss);
+        assert!((g.value - before).abs() < 1e-6);
     }
 }

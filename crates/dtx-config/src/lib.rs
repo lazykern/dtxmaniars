@@ -75,6 +75,9 @@ pub struct SystemConfig {
     pub log_enabled: bool,
     /// `bShowPerformanceInformation` — CConfigIni.cs:99
     pub show_perf_info: bool,
+    /// `bMetronome` — CConfigIni.cs:501 (`CActConfigList.Gameplay.cs:150`).
+    #[serde(default)]
+    pub metronome: bool,
 }
 
 impl Default for SystemConfig {
@@ -87,7 +90,91 @@ impl Default for SystemConfig {
             movie_enabled: true,
             log_enabled: false,
             show_perf_info: false,
+            metronome: false,
         }
+    }
+}
+
+/// Miss-damage level for the life gauge (BocuD `EDamageLevel`, CConstants.cs:44-48).
+/// Config-local mirror of `dtx_core::constants::DamageLevel` (kept here so the
+/// Pure config crate stays serde-only). Consumers map it as needed.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub enum DamageLevel {
+    /// No damage (HP=0 never fails).
+    None,
+    /// Small drain on miss.
+    #[default]
+    Small,
+    /// Normal drain.
+    Normal,
+    /// High drain.
+    High,
+}
+
+impl DamageLevel {
+    /// All levels in ascending severity, for UI cycling.
+    pub fn all() -> [Self; 4] {
+        [Self::None, Self::Small, Self::Normal, Self::High]
+    }
+
+    /// Short display label.
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::None => "None",
+            Self::Small => "Small",
+            Self::Normal => "Normal",
+            Self::High => "High",
+        }
+    }
+}
+
+fn default_input_offset_ms() -> i32 {
+    0
+}
+
+fn default_bgm_adjust_ms() -> i32 {
+    0
+}
+
+/// Default `nPlaySpeed` in BocuD units (0x14 == 20 == 1.0×).
+fn default_play_speed() -> u8 {
+    0x14
+}
+
+/// `nPlaySpeed` → playback multiplier. BocuD uses `value / 20.0`, clamped
+/// 0.5×..2.0×. We store the raw byte and convert at use sites.
+pub const PLAY_SPEED_MIN: u8 = 0x0A; // 0.5×
+pub const PLAY_SPEED_MAX: u8 = 0x28; // 2.0×
+pub const PLAY_SPEED_DEFAULT: u8 = 0x14; // 1.0×
+
+/// Convert raw `nPlaySpeed` to a multiplier (`value / 20.0`).
+pub fn play_speed_multiplier(raw: u8) -> f32 {
+    let clamped = raw.clamp(PLAY_SPEED_MIN, PLAY_SPEED_MAX);
+    clamped as f32 / 20.0
+}
+
+/// NX in-song / config clamp for `nInputAdjustTimeMs` and `nCommonBGMAdjustMs`.
+pub const INPUT_OFFSET_CLAMP_MS: i32 = 99;
+pub const BGM_ADJUST_CLAMP_MS: i32 = 99;
+
+fn default_damage_level() -> DamageLevel {
+    DamageLevel::default()
+}
+
+/// `nLaneDisp.Drums` — lane/line visibility (CActConfigList.Drums.cs:175-187).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub enum LaneDisplay {
+    #[default]
+    AllOn = 0,
+    Half = 1,
+    LineOff = 2,
+    AllOff = 3,
+}
+
+impl LaneDisplay {
+    /// Bar/beat lines visible when ALL ON or HALF (BocuD `nLaneDisp == 0 || == 1`).
+    pub const fn shows_timing_lines(self) -> bool {
+        matches!(self, Self::AllOn | Self::Half)
     }
 }
 
@@ -108,6 +195,24 @@ pub struct GameplayConfig {
     pub fillin_enabled: bool,
     /// `bSTAGEFAILEDEnabled` — CConfigIni.cs:99.
     pub stage_failed_enabled: bool,
+    /// Global input timing offset in ms applied to the judgement clock
+    /// (`nInputAdjustTimeMs`, CConfigIni.cs). Positive = notes judged later.
+    #[serde(default = "default_input_offset_ms")]
+    pub input_offset_ms: i32,
+    /// Common BGM auto-chip offset (`nCommonBGMAdjustMs`, CActConfigList.Audio.cs).
+    #[serde(default = "default_bgm_adjust_ms")]
+    pub bgm_adjust_ms: i32,
+    /// Playback speed in BocuD units (`nPlaySpeed`). 0x14 = 1.0×, range
+    /// 0x0A..0x28 (0.5×..2.0×). Converted to multiplier via
+    /// [`play_speed_multiplier`].
+    #[serde(default = "default_play_speed")]
+    pub play_speed: u8,
+    /// Miss-damage level for the life gauge.
+    #[serde(default = "default_damage_level")]
+    pub damage_level: DamageLevel,
+    /// Lane background + timing line visibility (`nLaneDisp.Drums`).
+    #[serde(default)]
+    pub lane_display: LaneDisplay,
 }
 
 impl Default for GameplayConfig {
@@ -119,6 +224,11 @@ impl Default for GameplayConfig {
             dark_mode: false,
             fillin_enabled: true,
             stage_failed_enabled: true,
+            input_offset_ms: default_input_offset_ms(),
+            bgm_adjust_ms: default_bgm_adjust_ms(),
+            play_speed: default_play_speed(),
+            damage_level: default_damage_level(),
+            lane_display: LaneDisplay::default(),
         }
     }
 }

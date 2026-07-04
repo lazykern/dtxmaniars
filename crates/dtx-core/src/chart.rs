@@ -11,6 +11,9 @@ pub struct Metadata {
     pub comment: Option<String>,
     pub preview_filename: Option<String>,
     pub preimage_filename: Option<String>,
+    /// `#SOUND_NOWLOADING:` — optional jingle to loop while the chart is
+    /// being loaded into memory (BocuD CStageSongLoading.cs:220-230).
+    pub sound_nowloading: Option<String>,
     pub bpm: Option<f32>,
     pub dlevel: Option<u32>,
     pub glevel: Option<u32>,
@@ -128,6 +131,7 @@ mod tests {
         assert!(m.comment.is_none());
         assert!(m.preview_filename.is_none());
         assert!(m.preimage_filename.is_none());
+        assert!(m.sound_nowloading.is_none());
         assert!(m.bpm.is_none());
         assert!(m.dlevel.is_none());
         assert!(m.glevel.is_none());

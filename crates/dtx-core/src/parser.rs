@@ -34,7 +34,29 @@ pub fn parse<R: Read>(mut reader: R) -> Result<Chart> {
         process_line(line, line_no, &mut chart)?;
     }
 
+    resolve_bpm_ex_chips(&mut chart);
+
     Ok(chart)
+}
+
+/// Resolve BPMEx (channel 0x08) chips: replace the placeholder `value` (which
+/// held the fractional position) with the BPM from the `#BPMxx` definition
+/// referenced by `wav_slot`. Chips whose slot has no definition are dropped so
+/// they cannot corrupt the timeline with a bogus BPM.
+fn resolve_bpm_ex_chips(chart: &mut Chart) {
+    let bpm_defs = chart.assets.bpm.clone();
+    chart.chips.retain_mut(|chip| {
+        if chip.channel != EChannel::BPMEx {
+            return true;
+        }
+        match bpm_defs.get(&chip.wav_slot) {
+            Some(&bpm) if bpm > 0.0 => {
+                chip.value = bpm;
+                true
+            }
+            _ => false,
+        }
+    });
 }
 
 /// Decode DTX text bytes. Tries UTF-8 first (covers ASCII-only and modern
@@ -105,6 +127,7 @@ enum MetadataField {
     Comment,
     Preview,
     Preimage,
+    SoundNowLoading,
     Bpm,
     DLevel,
     GLevel,
@@ -120,6 +143,7 @@ fn parse_metadata_command(head: &str, _value: &str) -> Option<MetadataField> {
         "COMMENT" => MetadataField::Comment,
         "PREVIEW" => MetadataField::Preview,
         "PREIMAGE" => MetadataField::Preimage,
+        "SOUND_NOWLOADING" => MetadataField::SoundNowLoading,
         "BPM" => MetadataField::Bpm,
         "DLEVEL" => MetadataField::DLevel,
         "GLEVEL" => MetadataField::GLevel,
@@ -143,6 +167,7 @@ fn apply_metadata(
         MetadataField::Comment => meta.comment = Some(value.to_string()),
         MetadataField::Preview => meta.preview_filename = Some(value.to_string()),
         MetadataField::Preimage => meta.preimage_filename = Some(value.to_string()),
+        MetadataField::SoundNowLoading => meta.sound_nowloading = Some(value.to_string()),
         MetadataField::Bpm => {
             meta.bpm = Some(value.parse().map_err(|_| DtxError::InvalidLine {
                 line: line_no,
@@ -224,13 +249,55 @@ fn parse_chip_line(
         return Ok(());
     };
 
-    // For BarLength / BPM / BPMEx: value is a number (BarLength) or base64 (BPM).
-    if matches!(
-        channel,
-        EChannel::BarLength | EChannel::BPM | EChannel::BPMEx
-    ) {
+    // BarLength (0x02): value is a single decimal fraction of a whole note.
+    if channel == EChannel::BarLength {
         if let Ok(v) = value.parse::<f32>() {
             chips.push(Chip::new(measure, channel, v));
+        }
+        return Ok(());
+    }
+
+    // BeatLineDisplay (0xC2): 1 = show lines, 2 = hide (BocuD CDTX.cs:3614-3624).
+    if channel == EChannel::BeatLineDisplay {
+        if let Ok(v) = value.parse::<f32>() {
+            chips.push(Chip::new(measure, channel, v));
+        }
+        return Ok(());
+    }
+
+    // BPM (0x03) and BPMEx (0x08): sequences of 2-digit slots across the measure,
+    // exactly like note channels. Each non-"00" slot is a BPM-change event.
+    //   - 0x03: the 2 hex digits ARE the integer BPM (0x00..0xFF).
+    //   - 0x08: the 2 base36 digits reference a `#BPMxx` definition; the real
+    //     BPM is resolved from `chart.assets.bpm` in a post-parse pass.
+    // Reference: `references/DTXmaniaNX-BocuD/DTXMania/Score,Song/CDTX.cs`
+    //   channel 0x03 → direct BPM, channel 0x08 → listBPM lookup.
+    if matches!(channel, EChannel::BPM | EChannel::BPMEx) {
+        let data = strip_dtx_param(value).replace(' ', "");
+        if data.len() % 2 != 0 || data.is_empty() {
+            return Ok(());
+        }
+        let num_slots = data.len() / 2;
+        for i in 0..num_slots {
+            let pair = &data[i * 2..i * 2 + 2];
+            if pair == "00" {
+                continue;
+            }
+            let fraction = i as f32 / num_slots as f32;
+            if channel == EChannel::BPM {
+                // Direct hex BPM. Store the resolved value immediately.
+                if let Ok(bpm) = u32::from_str_radix(pair, 16) {
+                    if bpm > 0 {
+                        chips.push(Chip::new(measure, channel, bpm as f32));
+                    }
+                }
+            } else if let Some(slot) = base36::parse_2digit(&data, i * 2) {
+                // BPMEx reference: keep the slot id in `wav_slot`; the value is
+                // filled in by `resolve_bpm_ex_chips` once all `#BPMxx` defs are read.
+                if slot > 0 {
+                    chips.push(Chip::with_wav(measure, channel, fraction, slot));
+                }
+            }
         }
         return Ok(());
     }
@@ -471,6 +538,57 @@ mod tests {
         assert!((chart.chips[0].value - 0.0).abs() < 0.01);
         assert_eq!(chart.chips[1].wav_slot, 0x02);
         assert!((chart.chips[1].value - 0.5).abs() < 0.01);
+    }
+
+    #[test]
+    fn bpm_ex_chip_resolves_to_definition_not_slot() {
+        // Regression: channel 0x08 references a `#BPMxx` definition. The chip's
+        // value must become the DEFINED bpm (193), never the raw slot ref (5).
+        let input = "\
+#BPM: 193
+#BPM05: 193
+#00008: 05
+#00113: 01
+";
+        let chart = parse(Cursor::new(input)).unwrap();
+        let bpm_chips: Vec<_> = chart
+            .chips
+            .iter()
+            .filter(|c| c.channel == EChannel::BPMEx)
+            .collect();
+        assert_eq!(bpm_chips.len(), 1);
+        assert_eq!(bpm_chips[0].measure, 0);
+        assert!(
+            (bpm_chips[0].value - 193.0).abs() < 0.01,
+            "BPMEx value should resolve to #BPM05 (193), got {}",
+            bpm_chips[0].value
+        );
+    }
+
+    #[test]
+    fn bpm_ex_chip_without_definition_is_dropped() {
+        // A BPMEx reference with no matching #BPMxx def must be discarded rather
+        // than poisoning the timeline with a bogus BPM.
+        let input = "#00008: 05\n";
+        let chart = parse(Cursor::new(input)).unwrap();
+        assert!(chart
+            .chips
+            .iter()
+            .all(|c| c.channel != EChannel::BPMEx));
+    }
+
+    #[test]
+    fn bpm_direct_channel_uses_hex_value() {
+        // Channel 0x03: the 2 hex digits ARE the integer BPM. 0xC0 = 192.
+        let input = "#001 03: C0\n".replace(' ', "");
+        let chart = parse(Cursor::new(&input)).unwrap();
+        let bpm_chips: Vec<_> = chart
+            .chips
+            .iter()
+            .filter(|c| c.channel == EChannel::BPM)
+            .collect();
+        assert_eq!(bpm_chips.len(), 1);
+        assert!((bpm_chips[0].value - 192.0).abs() < 0.01);
     }
 
     #[test]

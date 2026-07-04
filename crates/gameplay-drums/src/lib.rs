@@ -12,6 +12,7 @@
 //! Reference: `references/DTXmaniaNX-BocuD/DTXMania/Stage/06.Performance/DrumsScreen/*`
 //! Lane order: LC, HH, SD, BD, HT, LT, FT, CY, LP, RD, HHO (BocuD CActPerfDrumsLaneFlushD.cs).
 
+pub mod beat_lines;
 pub mod autoplay;
 pub mod bgm_scheduler;
 pub mod components;
@@ -24,12 +25,16 @@ pub mod hit_sound;
 pub mod hud;
 pub mod hud_cache;
 pub mod input;
+pub mod interp;
 pub mod judge;
 pub mod keyboard_viz;
 pub mod lane_map;
 pub mod layout;
 pub mod miss;
 pub mod orchestrator;
+pub mod pause;
+pub mod perf_hotkeys;
+pub mod stage_end;
 pub mod perf_common;
 pub mod playfield_viz;
 pub mod resources;
@@ -67,9 +72,16 @@ pub fn plugin(app: &mut App) {
         1.0 / DRUMS_FIXED_TIMESTEP_HZ,
     )))
     .init_resource::<resources::ActiveChart>()
+    .init_resource::<resources::TimingLineList>()
     .init_resource::<resources::Score>()
+    .init_resource::<resources::DrumScoring>()
     .init_resource::<resources::Combo>()
     .init_resource::<resources::GameStartMs>()
+    .init_resource::<resources::InputOffsetMs>()
+    .init_resource::<resources::BgmAdjustState>()
+    .init_resource::<resources::ShowPerfInfo>()
+    .init_resource::<resources::MetronomeEnabled>()
+    .init_resource::<resources::ShowTimingLines>()
     .init_resource::<resources::JudgmentCounts>()
     .init_resource::<resources::ScrollSettings>()
     .init_resource::<resources::GameplayClock>()
@@ -80,6 +92,10 @@ pub fn plugin(app: &mut App) {
     .init_resource::<hud_cache::HudDisplayCache>()
     .init_resource::<dtx_input::midi::VirtualSource>()
     .add_systems(Startup, (load_scroll_settings, load_drum_audio_settings))
+    .add_systems(
+        OnEnter(game_shell::AppState::Performance),
+        apply_config_on_enter.before(orchestrator::on_enter_performance),
+    )
     .add_message::<events::LaneHit>()
     .add_message::<events::JudgmentEvent>()
     .add_message::<events::NoteMissed>()
@@ -102,7 +118,9 @@ pub fn plugin(app: &mut App) {
             sync_gameplay_clock.in_set(DrumsSets::ClockSync),
         )
             .chain()
-            .run_if(in_state(game_shell::AppState::Performance)),
+            .run_if(in_state(game_shell::AppState::Performance))
+            // Freeze the gameplay clock while paused.
+            .run_if(in_state(game_shell::PauseState::Running)),
     )
     .add_plugins((
         layout::plugin,
@@ -119,14 +137,71 @@ pub fn plugin(app: &mut App) {
         autoplay::plugin,
         hit_sound::plugin,
         bgm_scheduler::plugin,
+        interp::plugin,
     ))
-    .add_plugins((se_scheduler::plugin, midi_consumer::plugin));
+    .add_plugins((
+        beat_lines::plugin,
+        se_scheduler::plugin,
+        midi_consumer::plugin,
+        pause::plugin,
+        perf_hotkeys::plugin,
+        stage_end::plugin,
+    ));
 }
 
 fn load_scroll_settings(mut settings: ResMut<resources::ScrollSettings>) {
     use dtx_config::{default_path, load};
     let cfg = load(&default_path());
     *settings = resources::ScrollSettings::from_scroll_speed(cfg.gameplay.scroll_speed);
+}
+
+/// Map the persisted `dtx_config::DamageLevel` onto the gameplay
+/// `dtx_core::constants::DamageLevel` used by the gauge.
+fn map_damage_level(level: dtx_config::DamageLevel) -> dtx_core::constants::DamageLevel {
+    use dtx_core::constants::DamageLevel as Core;
+    use dtx_config::DamageLevel as Cfg;
+    match level {
+        Cfg::None => Core::None,
+        Cfg::Small => Core::Small,
+        Cfg::Normal => Core::Normal,
+        Cfg::High => Core::High,
+    }
+}
+
+/// Re-read persisted config on entering a performance so edits made in the
+/// Config screen (scroll speed, master volume, damage level) take effect
+/// without an app restart.
+fn apply_config_on_enter(
+    mut scroll: ResMut<resources::ScrollSettings>,
+    mut audio: ResMut<resources::DrumAudioSettings>,
+    mut gauge: ResMut<gauge::StageGauge>,
+    mut input_offset: ResMut<resources::InputOffsetMs>,
+    mut bgm_adjust: ResMut<resources::BgmAdjustState>,
+    mut show_perf_info: ResMut<resources::ShowPerfInfo>,
+    mut metronome_on: ResMut<resources::MetronomeEnabled>,
+    mut show_timing_lines: ResMut<resources::ShowTimingLines>,
+    chart: Res<resources::ActiveChart>,
+) {
+    use dtx_config::{default_path, load, play_speed_multiplier};
+    let cfg = load(&default_path());
+    *scroll = resources::ScrollSettings::from_scroll_speed(cfg.gameplay.scroll_speed);
+    scroll.play_speed = play_speed_multiplier(cfg.gameplay.play_speed);
+    audio.enabled = cfg.audio.drum_sound_enabled;
+    audio.master_volume = cfg.audio.master_volume;
+    audio.drum_volume = cfg.audio.drum_volume;
+    gauge.damage_level = map_damage_level(cfg.gameplay.damage_level);
+    input_offset.0 = cfg.gameplay.input_offset_ms;
+    bgm_adjust.common_ms = cfg.gameplay.bgm_adjust_ms;
+    show_perf_info.0 = cfg.system.show_perf_info;
+    metronome_on.0 = cfg.system.metronome;
+    show_timing_lines.0 = cfg.gameplay.lane_display.shows_timing_lines();
+    bgm_adjust.song_ms = chart
+        .source_path
+        .as_ref()
+        .map(|p| {
+            dtx_scoring::score_ini::read_bgm_adjust(dtx_scoring::score_ini::score_ini_path(p))
+        })
+        .unwrap_or(0);
 }
 
 fn load_drum_audio_settings(
@@ -147,9 +222,16 @@ fn load_drum_audio_settings(
 
 fn sync_gameplay_clock(
     audio_clock: Res<dtx_timing::AudioClock>,
+    start_ms: Res<resources::GameStartMs>,
+    time: Res<Time<Fixed>>,
     mut gameplay_clock: ResMut<resources::GameplayClock>,
 ) {
-    gameplay_clock.sync(audio_clock.current_ms);
+    // BGM position is stream-local; add the primary chip's chart time so the
+    // clock matches drum chip `target_ms` (dtxpt: bgm.start_time + position).
+    let chart_ms = audio_clock
+        .current_ms
+        .map(|pos| start_ms.0.saturating_add(pos));
+    gameplay_clock.tick(time.delta_secs_f64(), chart_ms);
 }
 
 mod midi_consumer {

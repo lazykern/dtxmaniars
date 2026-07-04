@@ -22,6 +22,12 @@ pub enum AppState {
     SongLoading,
     /// CStagePerfDrumsScreen / CStagePerfGuitarScreen — gameplay.
     Performance,
+    /// Stage-clear banner shown briefly after a survived performance.
+    /// Ref `CStagePerfDrumsScreen.cs:270-279` (clear path).
+    StageClear,
+    /// Stage-failed banner shown when the life gauge drains out.
+    /// Ref `CActPerfStageFailure.cs`.
+    StageFailed,
     /// CStageResult — post-play results screen.
     Result,
     /// CStageChangeSkin — skin selection.
@@ -59,6 +65,24 @@ impl EGameMode {
             EGameMode::Drums => EGameMode::Guitar,
             EGameMode::Guitar => EGameMode::Drums,
         }
+    }
+}
+
+/// Pause state, orthogonal to [`AppState`]. Only meaningful during
+/// `AppState::Performance`. Mirrors dtxpt's `PauseState`.
+#[derive(States, Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
+pub enum PauseState {
+    /// Gameplay is running normally.
+    #[default]
+    Running,
+    /// Gameplay is paused (BGM + clock frozen, overlay shown).
+    Paused,
+}
+
+impl PauseState {
+    /// True when paused.
+    pub fn is_paused(self) -> bool {
+        matches!(self, PauseState::Paused)
     }
 }
 

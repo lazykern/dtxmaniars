@@ -313,6 +313,9 @@ pub struct DtxAssets {
     pub avi: AviRegistry,
     /// BGA registry.
     pub bga: BgaRegistry,
+    /// `#BPMxx` definition table (BocuD `listBPM`): slot id → BPM value.
+    /// Referenced by BPMEx (channel 0x08) chips.
+    pub bpm: HashMap<u32, f32>,
 }
 
 impl DtxAssets {
@@ -346,6 +349,10 @@ impl DtxAssets {
         }
         if let Some((id, filename)) = parse_bga_directive(line) {
             self.bga.insert(id, filename);
+            return true;
+        }
+        if let Some((id, bpm)) = parse_bpm_directive(line) {
+            self.bpm.insert(id, bpm);
             return true;
         }
         false

@@ -56,6 +56,8 @@ pub enum EChannel {
     // Bar / Beat lines
     BarLine = 0x50,
     BeatLine = 0x51,
+    BeatLineShift = 0xC1,
+    BeatLineDisplay = 0xC2,
 
     // SE / sfx
     SE01 = 0x61,
@@ -116,6 +118,8 @@ impl EChannel {
             0x60 => Self::BGALayer8,
             0x50 => Self::BarLine,
             0x51 => Self::BeatLine,
+            0xC1 => Self::BeatLineShift,
+            0xC2 => Self::BeatLineDisplay,
             0x54 => Self::Movie,
             0x55 => Self::BGALayer3,
             0x5A => Self::MovieFull,

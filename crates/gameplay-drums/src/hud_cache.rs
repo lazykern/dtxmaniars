@@ -7,6 +7,7 @@ pub struct HudDisplayCache {
     pub score_text: Option<String>,
     pub combo_text: Option<String>,
     pub counters_text: Option<String>,
+    pub perf_info_text: Option<String>,
 }
 
 pub fn set_text_if_changed(text: &mut Text, cache: &mut Option<String>, new_text: String) {

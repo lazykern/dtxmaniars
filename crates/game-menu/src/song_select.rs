@@ -460,7 +460,7 @@ fn hide_song_select_overlay(mut q: Query<&mut Visibility, With<SongSelectOverlay
 }
 
 fn format_song_detail(song: &dtx_library::SongInfo) -> String {
-    format!(
+    let mut detail = format!(
         "Title:  {}\nArtist: {}\nBPM:    {}\nLevel:  {}\nNotes:  {}",
         song.title,
         song.artist,
@@ -471,7 +471,16 @@ fn format_song_detail(song: &dtx_library::SongInfo) -> String {
             .map(|v| v.to_string())
             .unwrap_or_else(|| "?".into()),
         song.notes_total(),
-    )
+    );
+    // BocuD-compatible best score, read from <chart>.score.ini if present.
+    let ini_path = dtx_scoring::score_ini::score_ini_path(&song.path);
+    if let Some(best) = dtx_scoring::score_ini::read_best(&ini_path) {
+        detail.push_str(&format!(
+            "\nBest:   {} ({})  x{}",
+            best.score, best.rank, best.max_combo
+        ));
+    }
+    detail
 }
 
 /// ponytail: bevy 0.19 removed `despawn_recursive`; do it manually.

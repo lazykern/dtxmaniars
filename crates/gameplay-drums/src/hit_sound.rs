@@ -12,12 +12,13 @@ use crate::drum_groups::{
     chip_over_pad, empty_hit_fallback_lanes, nearest_chip_on_channel, sound_pad_channel, DrumPad,
 };
 use crate::events::{EmptyHit, JudgmentEvent};
-use crate::judge::{chip_target_ms, BpmChangeList};
+use crate::judge::{auto_chip_target_ms, chip_target_ms, BpmChangeList};
 use crate::lane_map::lane_channel;
 use crate::resources::{
-    ActiveChart, ActiveDrumSounds, CurrentEmptyHitTemplates, DrumAudioSettings,
+    ActiveChart, ActiveDrumSounds, BgmAdjustState, CurrentEmptyHitTemplates, DrumAudioSettings,
     DrumGameplaySettings, GameplayClock,
 };
+use game_shell::{AppState, PauseState};
 
 pub(super) fn plugin(app: &mut App) {
     app.init_resource::<CurrentEmptyHitTemplates>()
@@ -31,7 +32,8 @@ pub(super) fn plugin(app: &mut App) {
             )
                 .chain()
                 .in_set(super::DrumsSets::Score)
-                .run_if(in_state(game_shell::AppState::Performance)),
+                .run_if(in_state(AppState::Performance))
+                .run_if(in_state(PauseState::Running)),
         );
 }
 
@@ -39,6 +41,7 @@ fn capture_empty_hit_templates(
     clock: Res<GameplayClock>,
     chart: Res<ActiveChart>,
     bpm_changes: Res<BpmChangeList>,
+    bgm_adjust: Res<BgmAdjustState>,
     mut templates: ResMut<CurrentEmptyHitTemplates>,
 ) {
     if !clock.is_ready() || chart.chart.empty_hit_events.is_empty() {
@@ -46,8 +49,9 @@ fn capture_empty_hit_templates(
     }
     let now = clock.current_ms;
     let base_bpm = chart.chart.metadata.bpm.unwrap_or(120.0);
+    let bgm_shift = bgm_adjust.total_ms();
     for event in &chart.chart.empty_hit_events {
-        let target_ms = chip_target_ms(
+        let target_ms = auto_chip_target_ms(
             &dtx_core::Chip::with_wav(
                 event.measure,
                 EChannel::HiHatClose,
@@ -56,6 +60,7 @@ fn capture_empty_hit_templates(
             ),
             base_bpm,
             &bpm_changes.changes,
+            bgm_shift,
         );
         if target_ms <= now {
             templates.set(event.lane, *event);

@@ -20,6 +20,7 @@ brp = ["dep:bevy_brp_extras"]
 
 [dependencies]
 bevy = { workspace = true, features = ["default", "bevy_remote", "system_font_discovery"] }
+bevy_framepace = { workspace = true }
 icu_provider = { version = "2.2", default-features = false, features = ["logging"] }
 bevy_brp_extras = { version = "0.20.1", optional = true }
 dtx-assets = { workspace = true }

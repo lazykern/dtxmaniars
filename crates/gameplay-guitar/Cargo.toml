@@ -12,6 +12,7 @@ workspace = true
 
 [dependencies]
 bevy = { workspace = true, features = ["default"] }
+dtx-config = { workspace = true }
 dtx-core = { workspace = true }
 dtx-input = { workspace = true }
 dtx-scoring = { workspace = true }

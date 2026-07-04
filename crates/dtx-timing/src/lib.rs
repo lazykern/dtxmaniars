@@ -89,6 +89,38 @@ pub mod math {
         (abs * ms_per_measure) as i64
     }
 
+    /// Compute chip playback time scaled by `play_speed` (>1.0 = faster).
+    /// Faster speed → shorter chart time. `play_speed` ≤ 0 falls back to 1.0.
+    #[inline]
+    pub fn chip_time_ms_with_speed(
+        measure: u32,
+        fraction: f32,
+        bpm: f32,
+        play_speed: f32,
+    ) -> i64 {
+        let t = chip_time_ms(measure, fraction, bpm);
+        if play_speed <= 0.0 || (play_speed - 1.0).abs() < f32::EPSILON {
+            return t;
+        }
+        ((t as f64) / (play_speed as f64)) as i64
+    }
+
+    /// Compute chip playback time with BPM changes + play-speed scaling.
+    #[inline]
+    pub fn chip_time_ms_with_bpm_changes_and_speed(
+        measure: u32,
+        fraction: f32,
+        base_bpm: f32,
+        bpm_changes: &[BpmChange],
+        play_speed: f32,
+    ) -> i64 {
+        let t = chip_time_ms_with_bpm_changes(measure, fraction, base_bpm, bpm_changes);
+        if play_speed <= 0.0 || (play_speed - 1.0).abs() < f32::EPSILON {
+            return t;
+        }
+        ((t as f64) / (play_speed as f64)) as i64
+    }
+
     /// A BPM change event at a specific measure.
     ///
     /// Reference: `references/DTXmaniaNX-BocuD/DTXMania/Score,Song/CDTX.cs:1070-1080`

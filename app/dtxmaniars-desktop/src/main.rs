@@ -51,6 +51,7 @@ fn main() {
                 ..default()
             }),
     )
+    .add_plugins(bevy_framepace::FramepacePlugin)
     .add_plugins(dtx_timing_plugin::plugin)
     .add_plugins(dtx_audio::plugin)
     .add_plugins(GameShellPlugin)

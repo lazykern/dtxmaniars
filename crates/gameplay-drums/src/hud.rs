@@ -8,7 +8,6 @@ use dtx_ui::{
         combo_display::ComboDisplay,
         gauge_bar::{sync_gauge_bar, GaugeBarWidget, GaugeFill},
         judgment_popup::{spawn_judgment_popup, JudgmentPopup},
-        lane_flush::{spawn_lane_flush_strip, tick_lane_flushes, LaneFlushWidget},
         rolling_counter::RollingCounter,
     },
     ThemeResource,
@@ -16,7 +15,6 @@ use dtx_ui::{
 use game_shell::{AppState, EGameMode};
 
 use crate::components::LastJudgment;
-use crate::events::JudgmentEvent;
 use crate::gauge::{gauge_fill_color, StageGauge};
 use crate::hud_cache::{set_text_if_changed, HudDisplayCache};
 use crate::keyboard_viz;
@@ -25,13 +23,16 @@ use crate::lane_map::{LaneMap, LANE_ORDER};
 pub use crate::lane_map::LANE_COUNT;
 use crate::layout::PlayfieldLayout;
 use crate::playfield_viz;
-use crate::resources::{Combo, JudgmentCounts, Score};
+use crate::resources::{BgmAdjustState, Combo, InputOffsetMs, JudgmentCounts, Score, ScrollSettings, ShowPerfInfo};
 
 #[derive(Component)]
 pub struct HudRoot;
 
 #[derive(Component)]
 struct JudgmentCountsText;
+
+#[derive(Component)]
+struct PerfInfoText;
 
 #[derive(Component)]
 struct ScoreLabel;
@@ -63,7 +64,6 @@ pub fn plugin(app: &mut App) {
                     apply_lane_column_layout,
                     apply_hit_line_layout,
                     apply_lane_label_layout,
-                    apply_lane_flush_layout,
                 )
                     .chain()
                     .run_if(resource_changed::<PlayfieldLayout>),
@@ -72,9 +72,8 @@ pub fn plugin(app: &mut App) {
                 sync_hud_combo,
                 sync_hud_gauge,
                 sync_hud_judgment,
-                flush_lanes_on_hit,
-                tick_lane_flushes_system,
                 refresh_judgment_counts,
+                refresh_perf_info,
                 keyboard_viz::decay_key_cap_flashes,
             )
                 .run_if(in_state(AppState::Performance)),
@@ -222,18 +221,21 @@ fn spawn_hud(
             Theme::label_font(),
             TextColor(t.text_secondary),
         ));
-    });
 
-    let _flushes = spawn_lane_flush_strip(
-        &mut commands,
-        root,
-        LANE_COUNT,
-        layout.lane_width(),
-        layout.lane_strip_left(),
-        layout.lane_top(),
-        layout.lane_height(),
-        &t,
-    );
+        root.spawn((
+            PerfInfoText,
+            Node {
+                position_type: PositionType::Absolute,
+                left: Val::Px(24.0),
+                bottom: Val::Px(56.0),
+                ..default()
+            },
+            Text::new(""),
+            Theme::label_font(),
+            TextColor(t.text_secondary),
+            Visibility::Hidden,
+        ));
+    });
 
     playfield_viz::spawn_lane_receptors(&mut commands, root, &layout, &t);
     keyboard_viz::spawn_key_caps(&mut commands, root, &layout, &lane_map, &t);
@@ -286,18 +288,6 @@ fn apply_lane_label_layout(
     }
 }
 
-fn apply_lane_flush_layout(
-    layout: Res<PlayfieldLayout>,
-    mut flushes: Query<(&LaneFlushWidget, &mut Node)>,
-) {
-    for (i, (_, mut node)) in flushes.iter_mut().enumerate() {
-        node.left = Val::Px(layout.lane_left(i));
-        node.top = Val::Px(layout.lane_top());
-        node.width = Val::Px(layout.lane_width() - 4.0);
-        node.height = Val::Px(layout.lane_height());
-    }
-}
-
 fn lane_label(channel: dtx_core::EChannel) -> &'static str {
     use dtx_core::EChannel;
     match channel {
@@ -310,6 +300,9 @@ fn lane_label(channel: dtx_core::EChannel) -> &'static str {
         EChannel::Cymbal => "CY",
         EChannel::HiHatOpen => "HHO",
         EChannel::RideCymbal => "RD",
+        EChannel::LeftCymbal => "LC",
+        EChannel::LeftPedal => "LP",
+        EChannel::LeftBassDrum => "LBD",
         _ => "?",
     }
 }
@@ -427,24 +420,6 @@ fn kind_label(kind: JudgmentKind) -> &'static str {
     }
 }
 
-fn flush_lanes_on_hit(
-    mut events: MessageReader<JudgmentEvent>,
-    mut flushes: Query<&mut LaneFlushWidget>,
-) {
-    for ev in events.read() {
-        if let Some(mut flush) = flushes.iter_mut().nth(ev.lane as usize) {
-            flush.trigger();
-        }
-    }
-}
-
-fn tick_lane_flushes_system(
-    theme: Res<ThemeResource>,
-    flushes: Query<(&mut LaneFlushWidget, &mut BackgroundColor, &mut Visibility)>,
-) {
-    tick_lane_flushes(&theme.0, flushes);
-}
-
 fn refresh_judgment_counts(
     counts: Res<JudgmentCounts>,
     mut cache: ResMut<HudDisplayCache>,
@@ -473,6 +448,32 @@ fn accuracy_pct(counts: &JudgmentCounts) -> f32 {
         + counts.good as f32 * 60.0
         + counts.ok as f32 * 40.0;
     weighted / total as f32
+}
+
+fn refresh_perf_info(
+    show: Res<ShowPerfInfo>,
+    scroll: Res<ScrollSettings>,
+    input_offset: Res<InputOffsetMs>,
+    bgm_adjust: Res<BgmAdjustState>,
+    mut cache: ResMut<HudDisplayCache>,
+    mut q: Query<(&mut Text, &mut Visibility), With<PerfInfoText>>,
+) {
+    let mult = scroll.pixels_per_ms / ScrollSettings::NX_BASE_PIXELS_PER_MS;
+    let text = format!(
+        "Scroll {:.1}x  In {:+}ms  BGM {:+}/{:+}ms",
+        mult,
+        input_offset.0,
+        bgm_adjust.common_ms,
+        bgm_adjust.song_ms,
+    );
+    for (mut t, mut vis) in &mut q {
+        if show.0 {
+            *vis = Visibility::Inherited;
+            set_text_if_changed(&mut t, &mut cache.perf_info_text, text.clone());
+        } else {
+            *vis = Visibility::Hidden;
+        }
+    }
 }
 
 #[cfg(test)]

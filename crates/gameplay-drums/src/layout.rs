@@ -71,6 +71,11 @@ impl PlayfieldLayout {
         self.lane_left(0)
     }
 
+    /// NX prints measure# at x≈858 (`CStagePerfDrumsScreen.cs:3588`).
+    pub fn measure_label_left(&self) -> f32 {
+        self.lane_strip_left() + self.lane_strip_width() + 8.0 * self.scale
+    }
+
     pub fn label_top(&self) -> f32 {
         self.judge_y() + REF_LABEL_OFFSET * self.scale
     }

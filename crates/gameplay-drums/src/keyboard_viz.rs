@@ -5,7 +5,7 @@ use dtx_ui::theme::Theme;
 use dtx_ui::ThemeResource;
 use game_shell::AppState;
 
-use crate::events::JudgmentEvent;
+use crate::events::{JudgmentEvent, LaneHit};
 use crate::lane_map::LaneMap;
 use crate::layout::PlayfieldLayout;
 
@@ -93,11 +93,20 @@ fn apply_key_cap_layout(layout: Res<PlayfieldLayout>, mut caps: Query<(&KeyCap, 
 }
 
 fn flash_key_caps_on_hit(
+    mut lane_hits: MessageReader<LaneHit>,
     mut events: MessageReader<JudgmentEvent>,
     theme: Res<ThemeResource>,
     mut caps: Query<(&KeyCap, &mut BackgroundColor)>,
 ) {
     let accent = theme.0.accent;
+    // Immediate feedback on key press (input lane), not chip lane.
+    for hit in lane_hits.read() {
+        for (cap, mut bg) in &mut caps {
+            if cap.lane == hit.lane {
+                bg.0 = accent.with_alpha(0.45);
+            }
+        }
+    }
     for ev in events.read() {
         if ev.kind == dtx_scoring::JudgmentKind::Miss {
             continue;

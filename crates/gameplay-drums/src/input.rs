@@ -21,13 +21,17 @@ pub(super) fn plugin(app: &mut App) {
     app.init_resource::<PendingLaneInputs>()
         .add_systems(
             PreUpdate,
-            capture_key_to_lane_input.run_if(in_state(game_shell::AppState::Performance)),
+            capture_key_to_lane_input
+                .after(bevy::input::InputSystems)
+                .run_if(in_state(game_shell::AppState::Performance))
+                .run_if(in_state(game_shell::PauseState::Running)),
         )
         .add_systems(
             FixedUpdate,
             emit_pending_lane_hits
                 .in_set(super::DrumsSets::Input)
-                .run_if(in_state(game_shell::AppState::Performance)),
+                .run_if(in_state(game_shell::AppState::Performance))
+                .run_if(in_state(game_shell::PauseState::Running)),
         );
 }
 

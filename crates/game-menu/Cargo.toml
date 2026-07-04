@@ -12,6 +12,8 @@ workspace = true
 bevy = { workspace = true, features = ["default"] }
 bevy_kira_audio = { workspace = true }
 dtx-core = { path = "../dtx-core" }
+dtx-config = { path = "../dtx-config" }
+dtx-scoring = { path = "../dtx-scoring" }
 dtx-assets = { path = "../dtx-assets" }
 dtx-audio = { path = "../dtx-audio" }
 dtx-bga = { path = "../dtx-bga" }

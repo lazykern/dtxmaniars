@@ -85,13 +85,15 @@ impl ConfigTab {
 #[derive(Resource, Default, Debug, Clone, Copy)]
 pub struct ActiveConfigTab(pub Option<ConfigTab>);
 
-/// M4 stub: hardcoded list of top-level menu groups.
-/// Real CStageConfig has 11+ groups (System, Skin, Gameplay, Drums, ...).
-const MENU_GROUPS: &[(&str, &str)] = &[
-    ("Drums", "M6+ — drum key bindings, auto-play, velocity"),
-    ("System", "M6+ — fullscreen, audio buffer, log"),
-    ("Skin", "M6+ — skin directory + reload"),
-    ("Gameplay", "M6+ — timing windows, scroll speed"),
+/// Editable settings rows. Each maps to a `dtx_config` field adjusted with
+/// ←/→ and persisted on exit. (Full CStageConfig has many more tabs; this is
+/// the playable subset per the roadmap: scroll, offset, volume, damage.)
+const SETTINGS: [&str; 5] = [
+    "Scroll Speed",
+    "Input Offset (ms)",
+    "BGM Offset (ms)",
+    "Master Volume",
+    "Damage Level",
 ];
 
 // === Bevy components/resources for screen entities ===
@@ -101,6 +103,15 @@ pub struct ConfigEntity;
 
 #[derive(Component)]
 struct ConfigItemEntity(usize);
+
+/// Text node showing the current value of setting row `usize`.
+#[derive(Component)]
+struct ConfigValueText(usize);
+
+/// In-memory editable copy of the persisted config. Loaded on enter, written
+/// back to disk on exit.
+#[derive(Resource, Default)]
+struct ConfigDraft(dtx_config::Config);
 
 #[derive(Component, Debug, Clone, Copy)]
 pub struct ConfigLeftMenu;
@@ -116,19 +127,81 @@ struct ConfigSelection(usize);
 pub fn plugin(app: &mut App) {
     app.init_resource::<ConfigSelection>()
         .init_resource::<ActiveConfigTab>()
+        .init_resource::<ConfigDraft>()
         .add_systems(Startup, spawn_config_layout)
         .add_systems(
             OnEnter(AppState::Config),
-            (show_config_chrome, populate_default_tab, spawn_config).chain(),
+            (load_config_draft, show_config_chrome, populate_default_tab, spawn_config).chain(),
         )
         .add_systems(
             OnExit(AppState::Config),
-            (hide_config_chrome, despawn_stage::<ConfigEntity>).chain(),
+            (save_config_draft, hide_config_chrome, despawn_stage::<ConfigEntity>).chain(),
         )
         .add_systems(
             Update,
             (config_navigation, render_config_selection).run_if(in_state(AppState::Config)),
         );
+}
+
+/// Load the persisted config into the editable draft on entering the screen.
+fn load_config_draft(mut draft: ResMut<ConfigDraft>) {
+    draft.0 = dtx_config::load(&dtx_config::default_path());
+}
+
+/// Persist the edited draft to disk on leaving the screen.
+fn save_config_draft(draft: Res<ConfigDraft>) {
+    let path = dtx_config::default_path();
+    if let Err(e) = dtx_config::save(&path, &draft.0) {
+        error!("Config: failed to save {}: {e}", path.display());
+    } else {
+        info!("Config: saved to {}", path.display());
+    }
+}
+
+/// Human-readable value string for setting row `index`.
+fn setting_value(cfg: &dtx_config::Config, index: usize) -> String {
+    match index {
+        0 => format!("{:.1}x", cfg.gameplay.scroll_speed),
+        1 => format!("{:+} ms", cfg.gameplay.input_offset_ms),
+        2 => format!("{:+} ms", cfg.gameplay.bgm_adjust_ms),
+        3 => format!("{}%", (cfg.audio.master_volume * 100.0).round() as i32),
+        4 => cfg.gameplay.damage_level.label().to_string(),
+        _ => String::new(),
+    }
+}
+
+/// Adjust setting row `index` by one step. `dir` is +1 (→) or -1 (←).
+fn adjust_setting(cfg: &mut dtx_config::Config, index: usize, dir: i32) {
+    use dtx_config::{BGM_ADJUST_CLAMP_MS, INPUT_OFFSET_CLAMP_MS};
+    match index {
+        0 => {
+            let next = cfg.gameplay.scroll_speed + 0.5 * dir as f32;
+            cfg.gameplay.scroll_speed = next.clamp(0.5, 4.0);
+        }
+        1 => {
+            let next = cfg.gameplay.input_offset_ms + 10 * dir;
+            cfg.gameplay.input_offset_ms = next.clamp(-INPUT_OFFSET_CLAMP_MS, INPUT_OFFSET_CLAMP_MS);
+        }
+        2 => {
+            let next = cfg.gameplay.bgm_adjust_ms + 10 * dir;
+            cfg.gameplay.bgm_adjust_ms = next.clamp(-BGM_ADJUST_CLAMP_MS, BGM_ADJUST_CLAMP_MS);
+        }
+        3 => {
+            let next = cfg.audio.master_volume + 0.05 * dir as f32;
+            cfg.audio.master_volume = next.clamp(0.0, 1.0);
+        }
+        4 => {
+            let levels = dtx_config::DamageLevel::all();
+            let cur = levels
+                .iter()
+                .position(|l| *l == cfg.gameplay.damage_level)
+                .unwrap_or(0) as i32;
+            let len = levels.len() as i32;
+            let next = (cur + dir).rem_euclid(len) as usize;
+            cfg.gameplay.damage_level = levels[next];
+        }
+        _ => {}
+    }
 }
 
 /// Persistent layout spawned once at app start (CStageConfig.cs:45-85).
@@ -212,9 +285,9 @@ fn populate_default_tab(mut active: ResMut<ActiveConfigTab>) {
     }
 }
 
-/// Per-state content (M4 stub: hardcoded list of top-level groups).
+/// Per-state content: one editable row per setting, showing its current value.
 /// OnExit despawns; persistent layout in `spawn_config_layout` survives.
-fn spawn_config(mut commands: Commands, theme: Res<ThemeResource>) {
+fn spawn_config(mut commands: Commands, theme: Res<ThemeResource>, draft: Res<ConfigDraft>) {
     let t = theme.0;
     commands
         .spawn((
@@ -232,20 +305,23 @@ fn spawn_config(mut commands: Commands, theme: Res<ThemeResource>) {
         .with_children(|parent| {
             parent.spawn((Text::new("Config"), Theme::font(36.0), TextColor(t.accent)));
             parent.spawn((
-                Text::new("↑↓: Navigate  ENTER: Drill in (stub)  ESC: Back"),
+                Text::new("↑↓: Select   ←→: Adjust   ESC: Save & Back"),
                 Theme::font(14.0),
                 TextColor(t.text_secondary),
             ));
 
-            for (i, (name, _desc)) in MENU_GROUPS.iter().enumerate() {
+            for (i, name) in SETTINGS.iter().enumerate() {
                 parent
                     .spawn((
                         ConfigItemEntity(i),
                         Node {
-                            width: Val::Px(400.0),
-                            height: Val::Px(28.0),
+                            width: Val::Px(520.0),
+                            height: Val::Px(32.0),
                             margin: UiRect::all(Val::Px(2.0)),
-                            padding: UiRect::all(Val::Px(8.0)),
+                            padding: UiRect::horizontal(Val::Px(12.0)),
+                            flex_direction: FlexDirection::Row,
+                            justify_content: JustifyContent::SpaceBetween,
+                            align_items: AlignItems::Center,
                             ..default()
                         },
                         BackgroundColor(if i == 0 {
@@ -255,10 +331,12 @@ fn spawn_config(mut commands: Commands, theme: Res<ThemeResource>) {
                         }),
                     ))
                     .with_children(|row| {
+                        row.spawn((Text::new(*name), Theme::font(16.0), TextColor(t.text_primary)));
                         row.spawn((
-                            Text::new(*name),
+                            ConfigValueText(i),
+                            Text::new(setting_value(&draft.0, i)),
                             Theme::font(16.0),
-                            TextColor(t.text_primary),
+                            TextColor(t.accent),
                         ));
                     });
             }
@@ -268,15 +346,18 @@ fn spawn_config(mut commands: Commands, theme: Res<ThemeResource>) {
 fn config_navigation(
     keys: Res<ButtonInput<KeyCode>>,
     mut selection: ResMut<ConfigSelection>,
+    mut draft: ResMut<ConfigDraft>,
     mut requests: MessageWriter<TransitionRequest>,
 ) {
-    let max = MENU_GROUPS.len().saturating_sub(1);
+    let max = SETTINGS.len().saturating_sub(1);
     if keys.just_pressed(KeyCode::ArrowDown) {
         selection.0 = (selection.0 + 1).min(max);
     } else if keys.just_pressed(KeyCode::ArrowUp) {
         selection.0 = selection.0.saturating_sub(1);
-    } else if keys.just_pressed(KeyCode::Enter) {
-        info!("Config: drill into '{}' (stub)", MENU_GROUPS[selection.0].0);
+    } else if keys.just_pressed(KeyCode::ArrowRight) {
+        adjust_setting(&mut draft.0, selection.0, 1);
+    } else if keys.just_pressed(KeyCode::ArrowLeft) {
+        adjust_setting(&mut draft.0, selection.0, -1);
     } else if keys.just_pressed(KeyCode::Escape) {
         request_transition(&mut requests, AppState::Title);
     }
@@ -285,7 +366,9 @@ fn config_navigation(
 fn render_config_selection(
     theme: Res<ThemeResource>,
     selection: Res<ConfigSelection>,
+    draft: Res<ConfigDraft>,
     mut rows: Query<(&ConfigItemEntity, &mut BackgroundColor)>,
+    mut values: Query<(&ConfigValueText, &mut Text)>,
 ) {
     let t = theme.0;
     for (row_entity, mut bg) in &mut rows {
@@ -295,6 +378,9 @@ fn render_config_selection(
             t.panel_bg
         };
     }
+    for (value, mut text) in &mut values {
+        *text = Text::new(setting_value(&draft.0, value.0));
+    }
 }
 
 #[cfg(test)]
@@ -303,11 +389,30 @@ mod tests {
 
     // From old config.rs
     #[test]
-    fn menu_groups_not_empty() {
+    fn settings_not_empty() {
         assert!(
-            !MENU_GROUPS.is_empty(),
-            "Config must have at least one menu group"
+            !SETTINGS.is_empty(),
+            "Config must have at least one editable setting"
         );
+    }
+
+    #[test]
+    fn adjust_scroll_speed_clamps() {
+        let mut cfg = dtx_config::Config::default();
+        cfg.gameplay.scroll_speed = 4.0;
+        adjust_setting(&mut cfg, 0, 1);
+        assert!((cfg.gameplay.scroll_speed - 4.0).abs() < f32::EPSILON);
+        cfg.gameplay.scroll_speed = 0.5;
+        adjust_setting(&mut cfg, 0, -1);
+        assert!((cfg.gameplay.scroll_speed - 0.5).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn adjust_damage_level_cycles() {
+        let mut cfg = dtx_config::Config::default();
+        cfg.gameplay.damage_level = dtx_config::DamageLevel::None;
+        adjust_setting(&mut cfg, 4, -1);
+        assert_eq!(cfg.gameplay.damage_level, dtx_config::DamageLevel::High);
     }
 
     #[test]
@@ -325,7 +430,7 @@ mod tests {
     #[test]
     fn arrow_down_within_bounds() {
         let mut sel = ConfigSelection(0);
-        let max = MENU_GROUPS.len() - 1;
+        let max = SETTINGS.len() - 1;
         sel.0 = (sel.0 + 1).min(max);
         assert_eq!(sel.0, 1.min(max));
     }

@@ -236,6 +236,38 @@ fn save_result_then_despawn(
         warn!("game-results: save failed: {e}");
     }
 
+    // Also write a BocuD-compatible <chart>.score.ini next to the chart so
+    // song select (and DTXManiaNX itself) can read the best score.
+    if let Some(chart_path) = chart.source_path.as_ref() {
+        let played_at = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs())
+            .unwrap_or(0);
+        let ini_path = dtx_scoring::score_ini::score_ini_path(chart_path);
+        let bgm_adjust = dtx_scoring::score_ini::read_bgm_adjust(&ini_path);
+        let record = dtx_scoring::score_ini::DrumScoreIni {
+            score: score.0 as u32,
+            perfect: counts.perfect,
+            great: counts.great,
+            good: counts.good,
+            poor: counts.ok,
+            miss: counts.miss,
+            max_combo: combo.max,
+            total_chips: total,
+            rank: rank.to_string(),
+            play_count: 1,
+            clear_count: 0,
+            bgm_adjust,
+            date_time: dtx_scoring::score_ini::format_datetime(played_at),
+        };
+        // Cleared when the player reached the end with any judged chips and
+        // did not fail — approximated here as "produced a rank with chips".
+        let cleared = total > 0;
+        if let Err(e) = dtx_scoring::score_ini::write_result(&ini_path, &record, cleared) {
+            warn!("game-results: score.ini write failed: {e}");
+        }
+    }
+
     despawn_stage::<ResultEntity>(commands, query);
 }
 

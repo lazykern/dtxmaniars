@@ -9,18 +9,16 @@ pub mod states;
 mod performance;
 mod transition;
 
-pub use states::{AppState, EGameMode, StageEntity, despawn_stage};
-pub use transition::{TransitionRequest, request_transition};
+pub use states::{despawn_stage, AppState, EGameMode, PauseState, StageEntity};
+pub use transition::{request_transition, TransitionRequest};
 
 /// Root plugin. Registers AppState + transitions + Performance wiring.
 pub struct GameShellPlugin;
 
 impl Plugin for GameShellPlugin {
     fn build(&self, app: &mut App) {
-        app.init_state::<AppState>().add_plugins((
-            dtx_ui::plugin,
-            transition::plugin,
-            performance::plugin,
-        ));
+        app.init_state::<AppState>()
+            .init_state::<PauseState>()
+            .add_plugins((dtx_ui::plugin, transition::plugin, performance::plugin));
     }
 }

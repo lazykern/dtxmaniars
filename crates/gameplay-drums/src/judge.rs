@@ -57,6 +57,7 @@ pub(crate) fn judge_lane_hit_system(
     chart: Res<ActiveChart>,
     bpm_changes: Res<BpmChangeList>,
     drum_settings: Res<DrumGameplaySettings>,
+    input_offset: Res<crate::resources::InputOffsetMs>,
     mut judged: ResMut<JudgedChips>,
     mut events: MessageWriter<JudgmentEvent>,
     mut empty_hits: MessageWriter<EmptyHit>,
@@ -71,9 +72,12 @@ pub(crate) fn judge_lane_hit_system(
             continue;
         };
 
+        // Shift the measured hit time by the configured input offset before
+        // matching chips (DTXManiaNX nInputAdjustTimeMs).
+        let adjusted_hit_ms = hit.audio_ms - input_offset.0 as i64;
         let results = resolve_judgments(
             pad,
-            hit.audio_ms,
+            adjusted_hit_ms,
             &chart.chart,
             &judged.0,
             base_bpm,
@@ -103,6 +107,32 @@ pub(crate) fn judge_lane_hit_system(
 
 pub fn chip_target_ms(chip: &dtx_core::Chip, base_bpm: f32, bpm_changes: &[BpmChange]) -> i64 {
     chip_time_ms_with_bpm_changes(chip.measure, chip.value, base_bpm, bpm_changes)
+}
+
+/// Chip target with optional play-speed scaling (`nPlaySpeed / 20.0`).
+/// Speed = 1.0 is a no-op; >1.0 makes the chart finish earlier.
+pub fn chip_target_ms_with_speed(
+    chip: &dtx_core::Chip,
+    base_bpm: f32,
+    bpm_changes: &[BpmChange],
+    play_speed: f32,
+) -> i64 {
+    if play_speed <= 0.0 || (play_speed - 1.0).abs() < f32::EPSILON {
+        return chip_target_ms(chip, base_bpm, bpm_changes);
+    }
+    ((chip_target_ms(chip, base_bpm, bpm_changes) as f64) / (play_speed as f64)) as i64
+}
+
+/// Chart time for auto-play chips (BGM/SE) including BGM adjust offset.
+/// `play_speed` is applied to the chip time before adding the BGM offset,
+/// matching BocuD semantics (chip time scales, BGMAdjust stays absolute).
+pub fn auto_chip_target_ms(
+    chip: &dtx_core::Chip,
+    base_bpm: f32,
+    bpm_changes: &[BpmChange],
+    bgm_adjust_ms: i32,
+) -> i64 {
+    chip_target_ms(chip, base_bpm, bpm_changes) + i64::from(bgm_adjust_ms)
 }
 
 #[cfg(test)]

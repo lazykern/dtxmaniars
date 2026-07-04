@@ -1,15 +1,21 @@
 //! Score + combo update from `JudgmentEvent`s.
 //!
-//! v1 scoring (DTXmaniaNX standard):
-//!   Perfect = +2, Great = +1, Good = +1, Poor = 0, Miss = 0, combo break.
+//! DTXManiaNX XG scoring (`nSkillMode == 1`), ported verbatim in
+//! [`dtx_scoring::xg_score`]:
+//!   base = (1e6 - 500*bonus) / (1275 + 50*(maxCombo - 50));
+//!   Perfect=base, Great=base*0.5, Good=base*0.2, Poor/Miss=0;
+//!   × combo (ramp 1..50, then flat ×50); end bonus FC +15k / EXC +30k.
+//!   Ref `CStagePerfCommonScreen.cs:1606-1658`.
 //!
-//! Combo: increments on Perfect/Great/Good, resets on Poor/Miss.
+//! Combo: increments on Perfect/Great/Good, resets on **Poor**/Miss
+//!   (`CStagePerfCommonScreen.cs:1521-1522`).
 
 use bevy::prelude::*;
 
 use crate::components::LastJudgment;
 use crate::events::{JudgmentEvent, NoteMissed};
-use crate::resources::{Combo, Score};
+use crate::resources::{Combo, DrumScoring, JudgmentCounts, Score};
+use dtx_scoring::xg_score::xg_drum_score_delta;
 use dtx_scoring::JudgmentKind;
 
 pub(super) fn plugin(app: &mut App) {
@@ -24,12 +30,12 @@ pub(super) fn plugin(app: &mut App) {
 pub(crate) fn update_score_system(
     mut events: MessageReader<JudgmentEvent>,
     mut score: ResMut<Score>,
+    mut scoring: ResMut<DrumScoring>,
     mut combo: ResMut<Combo>,
-    mut counts: ResMut<crate::resources::JudgmentCounts>,
+    mut counts: ResMut<JudgmentCounts>,
     mut last: ResMut<LastJudgment>,
 ) {
     for ev in events.read() {
-        score.0 += points_for(ev.kind);
         match ev.kind {
             JudgmentKind::Perfect => counts.perfect += 1,
             JudgmentKind::Great => counts.great += 1,
@@ -37,14 +43,27 @@ pub(crate) fn update_score_system(
             JudgmentKind::Poor => counts.ok += 1,
             JudgmentKind::Miss => counts.miss += 1,
         }
-        if ev.kind == JudgmentKind::Miss {
-            combo.current = 0;
-        } else {
+        // Combo: P/G/Good keep, Poor and Miss break (NX).
+        if keeps_combo(ev.kind) {
             combo.current += 1;
             if combo.current > combo.max {
                 combo.max = combo.current;
             }
+        } else {
+            combo.current = 0;
         }
+
+        let delta = xg_drum_score_delta(
+            ev.kind,
+            combo.current,
+            counts.perfect,
+            scoring.total_notes,
+            scoring.bonus_chips,
+            scoring.accum,
+        );
+        scoring.accum += delta;
+        score.0 = scoring.accum.round().max(0.0) as u64;
+
         last.0 = Some(*ev);
     }
 }
@@ -52,7 +71,7 @@ pub(crate) fn update_score_system(
 fn update_miss_system(
     mut missed: MessageReader<NoteMissed>,
     mut combo: ResMut<Combo>,
-    mut counts: ResMut<crate::resources::JudgmentCounts>,
+    mut counts: ResMut<JudgmentCounts>,
     mut last: ResMut<LastJudgment>,
 ) {
     for ev in missed.read() {
@@ -67,12 +86,13 @@ fn update_miss_system(
     }
 }
 
-const fn points_for(kind: JudgmentKind) -> u64 {
-    match kind {
-        JudgmentKind::Perfect => 2,
-        JudgmentKind::Great | JudgmentKind::Good => 1,
-        JudgmentKind::Poor | JudgmentKind::Miss => 0,
-    }
+/// True if the judgment keeps the combo (Perfect/Great/Good). Poor and Miss
+/// break it (`CStagePerfCommonScreen.cs:1521-1522`).
+fn keeps_combo(kind: JudgmentKind) -> bool {
+    matches!(
+        kind,
+        JudgmentKind::Perfect | JudgmentKind::Great | JudgmentKind::Good
+    )
 }
 
 #[cfg(test)]
@@ -82,63 +102,31 @@ mod tests {
     use crate::lane_map::{lane_of, LaneId, LANE_ORDER};
 
     #[test]
-    fn perfect_increments_score_and_combo() {
-        let mut score = Score::default();
-        let mut combo = Combo::default();
-        let mut last = LastJudgment::default();
-        let ev = JudgmentEvent {
-            lane: 0,
-            kind: JudgmentKind::Perfect,
-            delta_ms: 0,
-            chip_idx: 0,
-        };
-        score.0 += points_for(ev.kind);
-        combo.current += 1;
-        combo.max = combo.max.max(combo.current);
-        last.0 = Some(ev);
-        assert_eq!(score.0, 2);
-        assert_eq!(combo.current, 1);
-        assert_eq!(combo.max, 1);
+    fn poor_breaks_combo() {
+        // Regression: DTXManiaNX resets combo on Poor (was incrementing before).
+        assert!(keeps_combo(JudgmentKind::Perfect));
+        assert!(keeps_combo(JudgmentKind::Great));
+        assert!(keeps_combo(JudgmentKind::Good));
+        assert!(!keeps_combo(JudgmentKind::Poor));
+        assert!(!keeps_combo(JudgmentKind::Miss));
     }
 
     #[test]
-    fn miss_resets_combo_but_not_max() {
+    fn xg_score_accumulates_and_rounds() {
+        // 100-note chart, three Perfects at combos 1,2,3.
+        let mut scoring = DrumScoring::default();
+        scoring.reset(100);
         let mut score = Score::default();
-        let mut combo = Combo::default(); // start fresh
-        let mut last = LastJudgment::default();
-        let events = [
-            JudgmentEvent {
-                lane: 0,
-                kind: JudgmentKind::Perfect,
-                delta_ms: 0,
-                chip_idx: 0,
-            },
-            JudgmentEvent {
-                lane: 0,
-                kind: JudgmentKind::Perfect,
-                delta_ms: 0,
-                chip_idx: 1,
-            },
-            JudgmentEvent {
-                lane: 0,
-                kind: JudgmentKind::Miss,
-                delta_ms: 100,
-                chip_idx: 2,
-            },
-        ];
-        for ev in events {
-            score.0 += points_for(ev.kind);
-            if ev.kind == JudgmentKind::Miss {
-                combo.current = 0;
-            } else {
-                combo.current += 1;
-                combo.max = combo.max.max(combo.current);
-            }
-            last.0 = Some(ev);
+        let mut acc = 0.0f64;
+        for i in 1..=3u32 {
+            let d = xg_drum_score_delta(JudgmentKind::Perfect, i, i, 100, 0, acc);
+            acc += d;
         }
-        assert_eq!(combo.current, 0);
-        assert_eq!(combo.max, 2);
-        assert_eq!(score.0, 4);
+        scoring.accum = acc;
+        score.0 = scoring.accum.round() as u64;
+        // base ≈ 264.9; combos 1+2+3 = 6 units → ~1589.
+        assert!(score.0 > 0);
+        assert_eq!(score.0, acc.round() as u64);
     }
 
     #[test]
@@ -178,26 +166,6 @@ mod tests {
         let c = crate::resources::JudgmentCounts::default();
         assert_eq!(c.total(), 0);
         assert_eq!(c.perfect_pct(), 0.0);
-    }
-
-    #[test]
-    fn score_accumulates_across_judgments() {
-        // P=2, G=1, G=1 -> score = 4.
-        // Logic duplicated from system: not invoking the system here, just verifying
-        // the points_for helper behavior.
-        fn points_for(k: dtx_scoring::JudgmentKind) -> u64 {
-            match k {
-                dtx_scoring::JudgmentKind::Perfect => 2,
-                dtx_scoring::JudgmentKind::Great => 1,
-                dtx_scoring::JudgmentKind::Good => 1,
-                dtx_scoring::JudgmentKind::Poor => 0,
-                dtx_scoring::JudgmentKind::Miss => 0,
-            }
-        }
-        let total = points_for(dtx_scoring::JudgmentKind::Perfect)
-            + points_for(dtx_scoring::JudgmentKind::Great)
-            + points_for(dtx_scoring::JudgmentKind::Great);
-        assert_eq!(total, 4);
     }
 
     #[test]

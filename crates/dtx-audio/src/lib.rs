@@ -75,6 +75,11 @@ impl ChartSoundBank {
         self.by_wav_slot.len()
     }
 
+    /// Iterate over every cached audio handle (for load-state polling).
+    pub fn handles(&self) -> impl Iterator<Item = &Handle<KiraAudioSource>> {
+        self.by_wav_slot.values().map(|sound| &sound.handle)
+    }
+
     /// True when no slots are loaded.
     pub fn is_empty(&self) -> bool {
         self.by_wav_slot.is_empty()
@@ -190,6 +195,11 @@ impl DrumPolyphony {
         self.active.get(&(wav_slot, voice)).cloned()
     }
 
+    /// Iterate all active drum voice instances (for pause/resume).
+    pub fn active_handles(&self) -> impl Iterator<Item = &Handle<AudioInstance>> {
+        self.active.values()
+    }
+
     /// Store a handle in a WAV/voice slot, returning the replaced handle.
     pub fn replace_voice_handle(
         &mut self,
@@ -279,11 +289,52 @@ pub fn stop_bgm_system(
 
 /// Play a one-shot sound effect (no loop). Fire-and-forget.
 pub fn play_sfx(audio: &Audio, asset_server: &AssetServer, path: &str) {
+    let _ = play_sfx_path(audio, asset_server, path, 100, 0, 1.0, 1.0);
+}
+
+/// Play a one-shot SFX from a chart path with DTX volume/pan; returns the instance handle.
+pub fn play_sfx_path(
+    audio: &Audio,
+    asset_server: &AssetServer,
+    path: &str,
+    dtx_volume: i32,
+    dtx_pan: i32,
+    master: f32,
+    channel: f32,
+) -> Handle<AudioInstance> {
     let source = asset_server
         .load_builder()
         .override_unapproved()
         .load(path.to_owned());
-    audio.play(source);
+    play_sfx_handle(audio, source, dtx_volume, dtx_pan, master, channel)
+}
+
+/// Pause a single audio instance, if it exists.
+pub fn pause_audio_instance(instances: &mut Assets<AudioInstance>, handle: &Handle<AudioInstance>) {
+    if let Some(mut inst) = instances.get_mut(handle) {
+        inst.pause(AudioTween::default());
+    }
+}
+
+/// Resume a single audio instance, if it exists.
+pub fn resume_audio_instance(instances: &mut Assets<AudioInstance>, handle: &Handle<AudioInstance>) {
+    if let Some(mut inst) = instances.get_mut(handle) {
+        inst.resume(AudioTween::default());
+    }
+}
+
+/// Pause every active drum polyphony voice.
+pub fn pause_polyphony(instances: &mut Assets<AudioInstance>, polyphony: &DrumPolyphony) {
+    for handle in polyphony.active_handles() {
+        pause_audio_instance(instances, handle);
+    }
+}
+
+/// Resume every active drum polyphony voice.
+pub fn resume_polyphony(instances: &mut Assets<AudioInstance>, polyphony: &DrumPolyphony) {
+    for handle in polyphony.active_handles() {
+        resume_audio_instance(instances, handle);
+    }
 }
 
 /// Play a preloaded one-shot sound effect with DTX volume/pan.

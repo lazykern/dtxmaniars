@@ -164,6 +164,8 @@ pub const fn classify(ch: EChannel) -> ChipClass {
         // Bar / beat
         EChannel::BarLine => ChipClass::BarLine,
         EChannel::BeatLine => ChipClass::BarLine,
+        EChannel::BeatLineShift => ChipClass::BeatLineShift,
+        EChannel::BeatLineDisplay => ChipClass::BeatLineDisplay,
         EChannel::BarLength => ChipClass::BarLength,
 
         // BPM

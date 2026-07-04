@@ -10,22 +10,36 @@ use bevy::prelude::*;
 use crate::components::{Note, NoteVisual};
 use crate::events::NoteMissed;
 use crate::hud::HudRoot;
+use crate::interp::RenderClock;
 use crate::judge::{BpmChangeList, JudgedChips};
 use crate::lane_map::lane_of;
 use crate::lane_map::LANE_COUNT;
 use crate::layout::PlayfieldLayout;
 use crate::resources::{ActiveChart, GameplayClock, ScrollSettings};
-use game_shell::EGameMode;
+use game_shell::{AppState, EGameMode, PauseState};
 
-const LOOKAHEAD_MS: i64 = 2000;
 const BACKFILL_MS: i64 = 500;
+
+/// Ms from lane top to hit line at current scroll speed (osu-style `TimeRange`).
+///
+/// When `target_ms - now == lookahead_ms`, [`top_for_note`] places the note at
+/// [`PlayfieldLayout::lane_top`].
+pub(crate) fn lookahead_ms(layout: &PlayfieldLayout, scroll: &ScrollSettings) -> i64 {
+    let px_per_ms = scroll.pixels_per_ms * layout.scale;
+    if px_per_ms <= f32::EPSILON {
+        return i64::MAX;
+    }
+    let scroll_length = layout.judge_y() - layout.lane_top();
+    (scroll_length / px_per_ms).ceil() as i64
+}
 
 pub(super) fn plugin(app: &mut App) {
     app.add_systems(
         Update,
         (spawn_notes_system, scroll_notes_system)
             .chain()
-            .run_if(in_state(game_shell::AppState::Performance)),
+            .run_if(in_state(AppState::Performance))
+            .run_if(in_state(PauseState::Running)),
     )
     .add_systems(
         FixedUpdate,
@@ -36,7 +50,12 @@ pub(super) fn plugin(app: &mut App) {
 }
 
 fn top_for_note(target_ms: i64, now_ms: i64, judge_y: f32, pixels_per_ms: f32) -> f32 {
-    let delta_ms = (target_ms - now_ms) as f32;
+    top_for_note_f(target_ms, now_ms as f64, judge_y, pixels_per_ms)
+}
+
+/// Same as [`top_for_note`] but with a fractional `now_ms` for sub-frame motion.
+pub(crate) fn top_for_note_f(target_ms: i64, now_ms: f64, judge_y: f32, pixels_per_ms: f32) -> f32 {
+    let delta_ms = (target_ms as f64 - now_ms) as f32;
     judge_y - delta_ms * pixels_per_ms
 }
 
@@ -76,6 +95,7 @@ fn spawn_notes_system(
     bpm_changes: Res<BpmChangeList>,
     layout: Res<PlayfieldLayout>,
     scroll: Res<ScrollSettings>,
+    judged: Res<JudgedChips>,
     existing: Query<&Note>,
     hud_root: Query<Entity, With<HudRoot>>,
 ) {
@@ -87,6 +107,7 @@ fn spawn_notes_system(
     }
     let now = clock.current_ms;
     let Ok(hud) = hud_root.single() else {
+        bevy::log::warn_once!("spawn_notes: no HudRoot entity found");
         return;
     };
 
@@ -95,17 +116,24 @@ fn spawn_notes_system(
 
     let base_bpm = chart.chart.metadata.bpm.unwrap_or(120.0);
     let judge_y = layout.judge_y();
-    let px_per_ms = scroll.pixels_per_ms;
+    // Ref-space NX velocity scaled into the live (redesigned) playfield.
+    let px_per_ms = scroll.pixels_per_ms * layout.scale;
+    let spawn_window_ms = lookahead_ms(&layout, &scroll);
 
     for (idx, chip) in chart.chart.chips.iter().enumerate() {
-        if existing_ids.contains(&idx) {
+        if existing_ids.contains(&idx) || judged.0.contains(&idx) {
             continue;
         }
         let Some(lane) = lane_of(chip.channel) else {
             continue;
         };
-        let target_ms = crate::judge::chip_target_ms(chip, base_bpm, &bpm_changes.changes);
-        if target_ms < now - BACKFILL_MS || target_ms > now + LOOKAHEAD_MS {
+        let target_ms = crate::judge::chip_target_ms_with_speed(
+            chip,
+            base_bpm,
+            &bpm_changes.changes,
+            scroll.play_speed,
+        );
+        if target_ms < now - BACKFILL_MS || target_ms > now + spawn_window_ms {
             continue;
         }
         let top = top_for_note(target_ms, now, judge_y, px_per_ms);
@@ -136,6 +164,7 @@ fn spawn_notes_system(
 
 fn scroll_notes_system(
     clock: Res<GameplayClock>,
+    render: Res<RenderClock>,
     mode: Res<EGameMode>,
     layout: Res<PlayfieldLayout>,
     scroll: Res<ScrollSettings>,
@@ -147,18 +176,19 @@ fn scroll_notes_system(
     if !clock.is_ready() {
         return;
     }
-    let now = clock.current_ms;
+    // Sub-frame interpolated visual clock — smooth note motion at any FPS.
+    let now = render.now_ms();
     let judge_y = layout.judge_y();
-    let px_per_ms = scroll.pixels_per_ms;
+    let px_per_ms = scroll.pixels_per_ms * layout.scale;
     for (note, mut node) in &mut notes {
-        node.top = Val::Px(top_for_note(note.target_ms, now, judge_y, px_per_ms));
+        node.top = Val::Px(top_for_note_f(note.target_ms, now, judge_y, px_per_ms));
     }
 }
 
 fn despawn_missed_notes_system(
     clock: Res<GameplayClock>,
     mode: Res<EGameMode>,
-    judged: Res<JudgedChips>,
+    mut judged: ResMut<JudgedChips>,
     notes: Query<(Entity, &Note), With<NoteVisual>>,
     mut missed: MessageWriter<NoteMissed>,
     mut commands: Commands,
@@ -173,6 +203,7 @@ fn despawn_missed_notes_system(
     let mut hit_lanes: Vec<bool> = vec![false; LANE_COUNT];
     for (entity, note) in &notes {
         if should_emit_miss_for_note(note.chip_id, now, note.target_ms, &judged.0) {
+            judged.0.insert(note.chip_id);
             if !hit_lanes[note.lane as usize] {
                 missed.write(NoteMissed {
                     lane: note.lane,
@@ -227,5 +258,33 @@ mod tests {
 
         assert!(!should_emit_miss_for_note(7, 1117, 1000, &judged));
         assert!(should_emit_miss_for_note(7, 1118, 1000, &judged));
+    }
+
+    #[test]
+    fn lookahead_fills_lane_at_default_scroll() {
+        use crate::layout::PlayfieldLayout;
+        use crate::resources::ScrollSettings;
+
+        let layout = PlayfieldLayout::default();
+        let scroll = ScrollSettings::from_scroll_speed(1.0);
+        let window = lookahead_ms(&layout, &scroll);
+        let px = scroll.pixels_per_ms * layout.scale;
+        let top = top_for_note(window, 0, layout.judge_y(), px);
+        assert!(
+            (top - layout.lane_top()).abs() < 1.0,
+            "note at lookahead boundary should sit at lane top (got {top}, expected {})",
+            layout.lane_top()
+        );
+    }
+
+    #[test]
+    fn faster_scroll_shortens_lookahead() {
+        use crate::layout::PlayfieldLayout;
+        use crate::resources::ScrollSettings;
+
+        let layout = PlayfieldLayout::default();
+        let slow = lookahead_ms(&layout, &ScrollSettings::from_scroll_speed(1.0));
+        let fast = lookahead_ms(&layout, &ScrollSettings::from_scroll_speed(2.0));
+        assert!(fast < slow);
     }
 }
