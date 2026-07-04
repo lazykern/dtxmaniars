@@ -2745,6 +2745,7 @@ version = "0.0.0"
 dependencies = [
  "bevy",
  "bevy_tweening",
+ "dtx-audio",
 ]
 
 [[package]]
@@ -3097,6 +3098,7 @@ name = "game-shell"
 version = "0.1.0"
 dependencies = [
  "bevy",
+ "dtx-audio",
  "dtx-ui",
 ]
 

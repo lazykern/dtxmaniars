@@ -1,8 +1,11 @@
 //! Screen transition director — gates AppState changes behind fade overlay.
 //!
 //! ADR-0014: 300ms OutQuint fade on all screen changes.
+//! ADR-0015 deferred item (c): publishes `ScreenFadeTransition` events
+//! so `dtx-audio` can align preview-audio fade with the visual fade.
 
 use bevy::prelude::*;
+use dtx_audio::ScreenFadeTransition;
 use dtx_ui::{FadePhase, ScreenFade};
 
 use crate::AppState;
@@ -20,6 +23,7 @@ pub struct PendingTransition {
 pub fn plugin(app: &mut App) {
     app.init_resource::<PendingTransition>()
         .add_message::<TransitionRequest>()
+        .add_message::<ScreenFadeTransition>()
         .add_systems(
             Update,
             (
@@ -42,6 +46,7 @@ fn drive_transition_fade(
     mut fade: ResMut<ScreenFade>,
     mut pending: ResMut<PendingTransition>,
     mut next: ResMut<NextState<AppState>>,
+    mut fade_events: MessageWriter<ScreenFadeTransition>,
     time: Res<Time>,
 ) {
     let delta_ms = time.delta_secs() * 1000.0;
@@ -50,6 +55,7 @@ fn drive_transition_fade(
         FadePhase::Idle => {
             if pending.target.is_some() && !fade.is_busy() {
                 fade.start_fade_out();
+                fade_events.write(ScreenFadeTransition::Out);
             }
         }
         FadePhase::FadeOut => {
@@ -58,11 +64,13 @@ fn drive_transition_fade(
                     next.set(target);
                 }
                 fade.start_fade_in();
+                fade_events.write(ScreenFadeTransition::In);
             }
         }
         FadePhase::FadeIn => {
             if fade.tick(delta_ms) {
                 fade.finish();
+                fade_events.write(ScreenFadeTransition::Done);
             }
         }
     }

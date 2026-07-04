@@ -17,8 +17,9 @@ pub mod crossfade;
 pub mod preview;
 
 pub use preview::{
-    get_or_load as get_or_load_audio_handle, preview_tick_system, AudioHandleCache, PreviewPlayer,
-    PreviewState, PreviewSwapDirection, PreviewSwapEvent,
+    get_or_load as get_or_load_audio_handle, preview_tick_system, screen_fade_responder_system,
+    AudioHandleCache, PreviewPlayer, PreviewState, PreviewSwapDirection, PreviewSwapEvent,
+    ScreenFadeTransition,
 };
 
 /// The currently-playing BGM instance, if any.
@@ -63,7 +64,9 @@ pub fn plugin(app: &mut App) {
         .init_resource::<AudioHandleCache>()
         .init_resource::<PreviewPlayer>()
         .add_message::<PreviewSwapEvent>()
-        .add_systems(Update, preview_tick_system);
+        .add_message::<ScreenFadeTransition>()
+        .add_systems(Update, preview_tick_system)
+        .add_systems(Update, screen_fade_responder_system);
 }
 
 impl ChartSoundBank {

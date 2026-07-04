@@ -11,3 +11,6 @@ workspace = true
 [dependencies]
 bevy = { workspace = true, features = ["default"] }
 dtx-ui = { path = "../dtx-ui" }
+# ADR-0015 deferred item (c): game-shell publishes ScreenFadeTransition
+# events that dtx-audio consumes. Game→Engine is allowed.
+dtx-audio = { path = "../dtx-audio" }

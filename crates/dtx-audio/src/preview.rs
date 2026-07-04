@@ -112,6 +112,22 @@ pub struct PreviewSwapEvent {
     pub direction: PreviewSwapDirection,
 }
 
+/// Screen-fade phase transition. Published by `game-shell` when
+/// `ScreenFade` enters a new phase. Consumed by `dtx-audio` to
+/// align preview-audio fade with the visual fade.
+///
+/// ADR-0015 deferred item (c).
+#[derive(Message, Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ScreenFadeTransition {
+    /// Fade-out just started (transition initiated).
+    Out,
+    /// Fade-in just started (after fade-out completed, new screen
+    /// is being revealed).
+    In,
+    /// Fade-in completed, back to Idle.
+    Done,
+}
+
 /// The crossfade state machine.
 ///
 /// - `Idle` — no preview playing.
@@ -163,6 +179,35 @@ impl PreviewState {
             Self::Idle => None,
             Self::Playing { current } => Some(current),
             Self::Crossfading { new, .. } => Some(new),
+        }
+    }
+}
+
+/// System: respond to `ScreenFadeTransition` events. Aligns the
+/// preview audio with the visual screen fade.
+///
+/// - `Out`: fade current preview to silence over the same duration
+///   as the visual fade (300ms, matches `dtx_ui::SCREEN_TRANSITION_MS`).
+/// - `In`: no-op (the new screen's BGM, if any, takes over).
+/// - `Done`: reset `PreviewPlayer` so the next `play()` starts fresh.
+pub fn screen_fade_responder_system(
+    mut events: MessageReader<ScreenFadeTransition>,
+    mut player: ResMut<PreviewPlayer>,
+    mut instances: ResMut<Assets<AudioInstance>>,
+) {
+    for event in events.read() {
+        match event {
+            ScreenFadeTransition::Out => {
+                // Visual fade-out is 300ms (dtx-ui::SCREEN_TRANSITION_MS).
+                player.fade_to_silent(&mut instances, 300);
+            }
+            ScreenFadeTransition::In => {
+                // The audio is already fading out; the new screen's
+                // BGM (gameplay) will play via song_loading / orchestrator.
+            }
+            ScreenFadeTransition::Done => {
+                player.reset();
+            }
         }
     }
 }
@@ -222,6 +267,37 @@ impl PreviewPlayer {
     /// preview — call `stop()` first or wait for the next swap.
     pub fn set_looping(&mut self, looping: bool) {
         self.looping = looping;
+    }
+
+    /// Fade the currently-playing preview to silence over `ms`
+    /// milliseconds. No-op if idle. Used to align with
+    /// `ScreenFade`'s fade-out.
+    ///
+    /// After this call, the state remains in `Playing` or
+    /// `Crossfading` — the caller is expected to follow up with
+    /// `reset()` (e.g. on `ScreenFadeTransition::Done`) to clear
+    /// the handle.
+    pub fn fade_to_silent(
+        &mut self,
+        instances: &mut Assets<AudioInstance>,
+        ms: u32,
+    ) {
+        let handle = match &self.state {
+            PreviewState::Playing { current } => Some(current.clone()),
+            PreviewState::Crossfading { new, .. } => Some(new.clone()),
+            PreviewState::Idle => None,
+        };
+        if let Some(handle) = handle {
+            start_fade_out(instances, &handle, ms);
+        }
+    }
+
+    /// Reset state to Idle and clear the previous-index tracking.
+    /// Called on `ScreenFadeTransition::Done` so the next time
+    /// `play()` is called, it starts fresh (no crossfade in).
+    pub fn reset(&mut self) {
+        self.state = PreviewState::Idle;
+        self.previous_index = None;
     }
     /// Start playing a new preview. If another preview is currently
     /// playing or crossfading, the request is rejected and the original
@@ -405,5 +481,13 @@ mod tests {
     #[test]
     fn preview_swap_direction_default_is_none() {
         assert_eq!(PreviewSwapDirection::default(), PreviewSwapDirection::None);
+    }
+
+    #[test]
+    fn screen_fade_transition_variants() {
+        // Just verify the enum exists and Debug is derived.
+        let _ = ScreenFadeTransition::Out;
+        let _ = ScreenFadeTransition::In;
+        let _ = ScreenFadeTransition::Done;
     }
 }
