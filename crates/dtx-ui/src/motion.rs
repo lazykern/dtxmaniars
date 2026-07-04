@@ -60,7 +60,7 @@ impl SpringValue {
 pub struct RollingNumber {
     pub shown: f32,
     pub target: f32,
-    /// Fraction of remaining distance closed per second (~10 = fast).
+    /// Exponential rate (1/s); remaining distance shrinks by e^-rate each second.
     pub rate: f32,
 }
 
@@ -78,12 +78,13 @@ impl RollingNumber {
     }
 
     pub fn tick(&mut self, dt_s: f32) {
+        let dt = dt_s.max(0.0);
         let diff = self.target - self.shown;
         if diff.abs() < 0.005 {
             self.shown = self.target;
             return;
         }
-        self.shown += diff * (self.rate * dt_s).min(1.0);
+        self.shown += diff * (1.0 - (-self.rate * dt).exp());
     }
 }
 
@@ -107,8 +108,8 @@ impl BeatPulse {
     }
 
     pub fn tick(&mut self, dt_s: f32) {
-        let beats_per_s = self.bpm / 60.0;
-        self.phase = (self.phase + dt_s * beats_per_s).rem_euclid(1.0);
+        let beats_per_s = self.bpm.max(1.0) / 60.0;
+        self.phase = (self.phase + dt_s.max(0.0) * beats_per_s).rem_euclid(1.0);
     }
 
     /// 1.0+amplitude at phase 0, easing back to ~1.0 by phase 1.
@@ -200,9 +201,12 @@ mod tests {
     }
 
     #[test]
-    fn beat_pulse_bpm_change_keeps_phase_bounded() {
+    fn beat_pulse_phase_stays_bounded() {
         let mut p = BeatPulse::new(157.0, 0.05);
-        for _ in 0..1000 {
+        for i in 0..1000 {
+            if i == 500 {
+                p.bpm = 0.0;
+            }
             p.tick(0.016);
         }
         assert!(p.phase >= 0.0 && p.phase < 1.0);
