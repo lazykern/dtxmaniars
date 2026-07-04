@@ -204,7 +204,8 @@ impl PreviewState {
 /// - `Out`: fade current preview to silence over the same duration
 ///   as the visual fade (300ms, matches `dtx_ui::SCREEN_TRANSITION_MS`).
 /// - `In`: no-op (the new screen's BGM, if any, takes over).
-/// - `Done`: reset `PreviewPlayer` so the next `play()` starts fresh.
+/// - `Done`: no-op. `Out`/OnExit already stops previews; resetting here
+///   can desync state from still-playing song-select audio.
 pub fn screen_fade_responder_system(
     mut events: MessageReader<ScreenFadeTransition>,
     mut player: ResMut<PreviewPlayer>,
@@ -221,7 +222,7 @@ pub fn screen_fade_responder_system(
                 // BGM (gameplay) will play via song_loading / orchestrator.
             }
             ScreenFadeTransition::Done => {
-                player.reset();
+                info!("Preview: screen fade done; keeping preview state");
             }
         }
     }
@@ -329,10 +330,12 @@ impl PreviewPlayer {
     pub fn reset(&mut self) {
         self.state = PreviewState::Idle;
         self.previous_index = None;
+        self.current_path = None;
+        self.pending_path = None;
     }
-    /// Start playing a new preview. If another preview is currently
-    /// playing or crossfading, the request is rejected and the original
-    /// continues (busy-gate). Returns `true` if the swap was accepted.
+    /// Start playing a new preview. Same path is ignored so difficulty
+    /// changes sharing preview audio do not restart. A different path
+    /// stops any in-flight preview before starting the new one.
     ///
     /// Always enters `Crossfading` state (with `old = None` for the
     /// initial play). This guarantees a 30ms pre-roll + 220ms fade-in
@@ -354,8 +357,22 @@ impl PreviewPlayer {
         direction: PreviewSwapDirection,
         instances: &mut Assets<AudioInstance>,
     ) -> bool {
+        if self.current_path.as_deref() == Some(path.as_path()) {
+            info!("Preview: unchanged {}; skip", path.display());
+            return true;
+        }
+        let old_path_for_event = self.current_path.clone();
+        if let Some(old) = &old_path_for_event {
+            info!(
+                "Preview: path changed {} -> {}; stopping main track",
+                old.display(),
+                path.display()
+            );
+            audio.stop();
+        }
         if self.state.is_busy() {
-            return false;
+            info!("Preview: force-stopping in-flight preview before {}", path.display());
+            self.stop(instances, 0);
         }
 
         let new_handle = if self.looping {
@@ -381,10 +398,17 @@ impl PreviewPlayer {
         }
 
         let old_path_for_event = if old_handle.is_some() {
-            Some(path.clone())
+            old_path_for_event
         } else {
             None
         };
+        self.current_path = Some(path.clone());
+        info!(
+            "Preview: started {} old_handle={} looping={}",
+            path.display(),
+            old_handle.is_some(),
+            self.looping
+        );
         self.state = PreviewState::Crossfading {
             old: old_handle,
             new: new_handle,
@@ -420,6 +444,7 @@ impl PreviewPlayer {
                 h
             }
             PreviewState::Idle => {
+                info!("Preview: stop requested; already idle");
                 self.pending_path = None;
                 return;
             }
@@ -429,6 +454,7 @@ impl PreviewPlayer {
         } else {
             fade_out_ms
         };
+        info!("Preview: stopping {} handle(s), fade={}ms", handles.len(), ms);
         for h in &handles {
             stop_with_fade(instances, h, ms);
         }
@@ -438,16 +464,9 @@ impl PreviewPlayer {
     }
 }
 
-/// Drain the latest path submitted while the state machine was busy
-/// back into `play()` the moment `state == Playing`. System runs every
-/// Update, after `preview_tick_system`.
-///
-/// Without this, mashing arrows faster than the 250 ms crossfade
-/// silently drops every intervening request and the *first* song the
-/// user selected keeps playing audibly while their *latest* intent
-/// never reaches the audio engine. The pending slot holds at most one
-/// path — repeated mashes just overwrite it, always converging on
-/// the user's most recent target.
+/// Drain a queued preview request. Usually idle because `play()` now
+/// stops in-flight previews immediately on path changes, but kept for
+/// older callers that may still fill `pending_path`.
 pub fn drain_pending_preview(
     mut player: ResMut<PreviewPlayer>,
     audio: Res<Audio>,
@@ -462,6 +481,7 @@ pub fn drain_pending_preview(
     let Some(path) = player.pending_path.take() else {
         return;
     };
+    info!("Preview: draining pending {}", path.display());
     // Same-path short-circuit lives inside play(); we still need to
     // resolve the source from the cache so play() can be called. This
     // also re-uses the cached decoded handle, so no extra decode.
@@ -479,7 +499,7 @@ pub fn drain_pending_preview(
     // above). Ignore the result; the path is gone either way.
 }
 
-#[cfg(test)]  
+#[cfg(test)]
 mod tests {
     use super::*;
     use bevy::asset::Handle;
@@ -600,5 +620,17 @@ mod tests {
         let _ = ScreenFadeTransition::Out;
         let _ = ScreenFadeTransition::In;
         let _ = ScreenFadeTransition::Done;
+    }
+
+    #[test]
+    fn reset_clears_preview_paths() {
+        let mut player = PreviewPlayer {
+            current_path: Some(PathBuf::from("/songs/a/preview.ogg")),
+            pending_path: Some(PathBuf::from("/songs/b/preview.ogg")),
+            ..Default::default()
+        };
+        player.reset();
+        assert!(player.current_path.is_none());
+        assert!(player.pending_path.is_none());
     }
 }

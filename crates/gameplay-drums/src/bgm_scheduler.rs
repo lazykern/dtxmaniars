@@ -25,6 +25,16 @@ pub struct PlayedBgmChips(pub HashSet<usize>);
 #[derive(Resource, Default, Debug, Clone, Copy)]
 pub struct PrimaryBgmChip(pub Option<usize>);
 
+#[derive(Resource, Default, Debug)]
+pub struct BgmRecoveryState {
+    attempts: u8,
+    last_restart_ms: i64,
+    gave_up: bool,
+}
+
+const BGM_RECOVERY_COOLDOWN_MS: i64 = 1000;
+const BGM_RECOVERY_MAX_ATTEMPTS: u8 = 3;
+
 pub fn bootstrap_primary_bgm_chip(
     chart: &ActiveChart,
     _bpm_changes: &BpmChangeList,
@@ -71,17 +81,23 @@ pub fn bootstrap_primary_bgm_chip(
 pub(super) fn plugin(app: &mut App) {
     app.init_resource::<PlayedBgmChips>()
         .init_resource::<PrimaryBgmChip>()
+        .init_resource::<BgmRecoveryState>()
         .add_systems(
             FixedUpdate,
-            schedule_bgm_chips
+            (schedule_bgm_chips, recover_primary_bgm)
+                .chain()
                 .in_set(super::DrumsSets::NoteSpawn)
                 .run_if(in_state(AppState::Performance))
                 .run_if(in_state(PauseState::Running)),
         );
 }
 
-pub fn reset_played_bgm(mut played: ResMut<PlayedBgmChips>) {
+pub fn reset_played_bgm(
+    mut played: ResMut<PlayedBgmChips>,
+    mut recovery: ResMut<BgmRecoveryState>,
+) {
     played.0.clear();
+    *recovery = BgmRecoveryState::default();
 }
 
 /// True when the chart schedules at least one BGM chip with a WAV reference.
@@ -217,6 +233,82 @@ fn schedule_bgm_chips(
             played.0.insert(idx);
         }
     }
+}
+
+fn recover_primary_bgm(
+    gameplay_clock: Res<crate::resources::GameplayClock>,
+    start_ms: Res<crate::resources::GameStartMs>,
+    chart: Res<ActiveChart>,
+    primary: Res<PrimaryBgmChip>,
+    completion: Res<crate::orchestrator::DrumsStageCompletion>,
+    audio: Res<Audio>,
+    asset_server: Res<AssetServer>,
+    settings: Res<DrumAudioSettings>,
+    mut bgm: ResMut<dtx_audio::BgmHandle>,
+    mut instances: ResMut<Assets<AudioInstance>>,
+    sound_bank: Res<dtx_audio::ChartSoundBank>,
+    mut recovery: ResMut<BgmRecoveryState>,
+) {
+    if completion.end_requested || !gameplay_clock.is_ready() {
+        return;
+    }
+    let Some(handle) = bgm.instance.as_ref() else {
+        return;
+    };
+    if !matches!(audio.state(handle), PlaybackState::Stopped) {
+        return;
+    }
+    if recovery.gave_up {
+        return;
+    }
+    if gameplay_clock.current_ms - recovery.last_restart_ms < BGM_RECOVERY_COOLDOWN_MS {
+        return;
+    }
+    if recovery.attempts >= BGM_RECOVERY_MAX_ATTEMPTS {
+        recovery.gave_up = true;
+        warn!(
+            "Performance: BGM stopped; recovery gave up after {} attempts",
+            recovery.attempts
+        );
+        return;
+    }
+
+    let Some(idx) = primary.0 else {
+        return;
+    };
+    let source_dir = chart.source_path.as_ref().and_then(|p| p.parent());
+    let Some(path) = chip_wav_path(&chart.chart, idx, source_dir) else {
+        return;
+    };
+    let start_seconds = (gameplay_clock.current_ms - start_ms.0).max(0) as f64 / 1000.0;
+    warn!(
+        "Performance: BGM stopped early; restarting chip {idx} at {:.3}s ({path})",
+        start_seconds
+    );
+    if let Some(sound) = sound_bank.get(chart.chart.chips[idx].wav_slot) {
+        dtx_audio::play_bgm_handle_with_mix_from_seconds(
+            &audio,
+            &mut instances,
+            &mut bgm,
+            sound.handle.clone(),
+            &sound.path.to_string_lossy(),
+            sound.volume,
+            sound.pan,
+            settings.master_volume,
+            start_seconds,
+        );
+    } else {
+        dtx_audio::play_bgm_from_seconds(
+            &audio,
+            &asset_server,
+            &mut bgm,
+            &mut instances,
+            &path,
+            start_seconds,
+        );
+    }
+    recovery.attempts += 1;
+    recovery.last_restart_ms = gameplay_clock.current_ms;
 }
 
 fn bgm_chip_is_confirmed_played(is_primary: bool, clock_ready: bool, play_requested: bool) -> bool {

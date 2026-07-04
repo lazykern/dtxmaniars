@@ -158,6 +158,7 @@ pub fn on_enter_performance(
     mut bpm_changes: ResMut<BpmChangeList>,
     mut played_bgm: ResMut<crate::bgm_scheduler::PlayedBgmChips>,
     mut primary_bgm: ResMut<crate::bgm_scheduler::PrimaryBgmChip>,
+    mut bgm_recovery: ResMut<crate::bgm_scheduler::BgmRecoveryState>,
     mut gameplay_clock: ResMut<GameplayClock>,
     mut drum_settings: ResMut<DrumGameplaySettings>,
     bgm_adjust: Res<BgmAdjustState>,
@@ -188,6 +189,7 @@ pub fn on_enter_performance(
     judged.0.clear();
     last.0 = None;
     played_bgm.0.clear();
+    *bgm_recovery = crate::bgm_scheduler::BgmRecoveryState::default();
     primary_bgm.0 = crate::bgm_scheduler::find_primary_bgm_chip(&chart.chart, &bpm_changes);
     let base_bpm = chart.chart.metadata.bpm.unwrap_or(120.0);
     start_ms.0 = primary_bgm
@@ -418,6 +420,7 @@ mod tests {
             .init_resource::<crate::se_scheduler::PlayedSeChips>()
             .init_resource::<crate::bgm_scheduler::PlayedBgmChips>()
             .init_resource::<crate::bgm_scheduler::PrimaryBgmChip>()
+            .init_resource::<crate::bgm_scheduler::BgmRecoveryState>()
             .init_resource::<DrumGameplaySettings>()
             .init_resource::<BgmAdjustState>();
         let chart = chart_with_n_chips(3);

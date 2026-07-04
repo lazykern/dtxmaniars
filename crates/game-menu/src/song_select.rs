@@ -809,19 +809,41 @@ fn bgm_preview_on_change(
         return;
     }
     let Some(chart_idx) = selection.chart_index(&selection_state) else {
+        info!(
+            "SongSelect preview: no chart for folder={} difficulty={}",
+            selection.folder, selection.difficulty
+        );
         return;
     };
     let Some(song) = db.songs.get(chart_idx) else {
+        info!("SongSelect preview: chart_idx={} missing from SongDb", chart_idx);
         return;
     };
+    info!(
+        "SongSelect preview: selected folder={} difficulty={} chart_idx={} title={}",
+        selection.folder, selection.difficulty, chart_idx, song.title
+    );
     let Some(preview_path) = song.preview_path.clone() else {
         // No preview for this song: stop whatever's currently
         // playing so we don't leak a stale preview from a prior
         // selection. (`stop` releases the kira instance via
         // `stop_with_fade` — see PreviewPlayer docs.)
+        info!("SongSelect preview: no preview path; stopping current preview");
         player.stop(&mut instances, 0);
         return;
     };
+
+    // Clear gameplay BGM before starting preview. If the tracked
+    // handle is stale, `stop_bgm` may fall back to `audio.stop()`;
+    // doing it first avoids killing the newly-started preview.
+    if bgm.instance.is_some() {
+        info!("SongSelect preview: stopping stale BgmHandle before preview");
+        dtx_audio::stop_bgm(&audio, &mut bgm, &mut instances);
+    }
+    info!(
+        "SongSelect preview: request path={} loopable={}",
+        preview_path.display(), song.preview_is_loopable
+    );
 
     // Loop flag follows the source: #PREVIEW: file loops (short
     // clip), fallback to full BGM plays through. (ADR-0015 Q1.)
@@ -844,11 +866,17 @@ fn bgm_preview_on_change(
         direction,
         &mut instances,
     );
+    info!(
+        "SongSelect preview: play accepted={} path={}",
+        accepted,
+        player
+            .current_path
+            .as_ref()
+            .map(|p| p.display().to_string())
+            .unwrap_or_else(|| "<none>".into())
+    );
     if accepted {
         player.previous_index = Some(selection.folder);
-        // Clear BgmHandle so dtx-timing's clock doesn't read the
-        // preview position during gameplay-inactive song select.
-        dtx_audio::stop_bgm(&audio, &mut bgm, &mut instances);
     }
 }
 

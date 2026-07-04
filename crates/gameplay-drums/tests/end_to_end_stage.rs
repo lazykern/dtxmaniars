@@ -18,7 +18,7 @@ use gameplay_drums::orchestrator::{
     detect_end_of_stage, on_enter_performance, on_exit_performance, DrumsStageCompletion,
 };
 use gameplay_drums::resources::{
-    ActiveChart, Combo, GameStartMs, GameplayClock, JudgmentCounts, Score,
+    ActiveChart, BgmAdjustState, Combo, GameStartMs, GameplayClock, JudgmentCounts, Score,
 };
 
 fn chart_with_measures(n: u32) -> Chart {
@@ -53,12 +53,14 @@ fn build_app() -> App {
     .init_resource::<JudgedChips>()
     .init_resource::<LastJudgment>()
     .init_resource::<GameStartMs>()
+    .init_resource::<BgmAdjustState>()
     .init_resource::<BpmChangeList>()
     .init_resource::<BgmHandle>()
     .init_resource::<dtx_audio::ChartSoundBank>()
     .init_resource::<dtx_audio::DrumPolyphony>()
     .init_resource::<gameplay_drums::bgm_scheduler::PlayedBgmChips>()
     .init_resource::<gameplay_drums::bgm_scheduler::PrimaryBgmChip>()
+    .init_resource::<gameplay_drums::bgm_scheduler::BgmRecoveryState>()
     .init_resource::<gameplay_drums::resources::CurrentEmptyHitTemplates>()
     .init_resource::<gameplay_drums::resources::ActiveDrumSounds>()
     .init_resource::<gameplay_drums::se_scheduler::PlayedSeChips>()

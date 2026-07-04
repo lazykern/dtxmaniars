@@ -249,12 +249,26 @@ pub fn play_bgm(
     instances: &mut Assets<AudioInstance>,
     path: &str,
 ) -> Handle<AudioInstance> {
+    play_bgm_from_seconds(audio, asset_server, bgm, instances, path, 0.0)
+}
+
+/// Play a BGM file from a stream-local offset in seconds.
+pub fn play_bgm_from_seconds(
+    audio: &Audio,
+    asset_server: &AssetServer,
+    bgm: &mut BgmHandle,
+    instances: &mut Assets<AudioInstance>,
+    path: &str,
+    start_seconds: f64,
+) -> Handle<AudioInstance> {
     stop_bgm(audio, bgm, instances);
     let source = asset_server
         .load_builder()
         .override_unapproved()
         .load(path.to_owned());
-    let handle = audio.play(source).looped().handle();
+    let mut cmd = audio.play(source);
+    cmd.looped().start_from(start_seconds.max(0.0));
+    let handle = cmd.handle();
     bgm.instance = Some(handle.clone());
     bgm.path = Some(path.to_owned());
     handle
@@ -282,14 +296,31 @@ pub fn play_bgm_handle_with_mix(
     dtx_pan: i32,
     master: f32,
 ) -> Handle<AudioInstance> {
+    play_bgm_handle_with_mix_from_seconds(
+        audio, instances, bgm, source, path, dtx_volume, dtx_pan, master, 0.0,
+    )
+}
+
+/// Play a preloaded BGM handle from a stream-local offset in seconds.
+pub fn play_bgm_handle_with_mix_from_seconds(
+    audio: &Audio,
+    instances: &mut Assets<AudioInstance>,
+    bgm: &mut BgmHandle,
+    source: Handle<KiraAudioSource>,
+    path: &str,
+    dtx_volume: i32,
+    dtx_pan: i32,
+    master: f32,
+    start_seconds: f64,
+) -> Handle<AudioInstance> {
     stop_bgm(audio, bgm, instances);
     let gain = dtx_linear(dtx_volume) * master.clamp(0.0, 1.0);
-    let handle = audio
-        .play(source)
-        .looped()
+    let mut cmd = audio.play(source);
+    cmd.looped()
+        .start_from(start_seconds.max(0.0))
         .with_volume(linear_gain_to_db(gain))
-        .with_panning((dtx_pan as f32 / 100.0).clamp(-1.0, 1.0))
-        .handle();
+        .with_panning((dtx_pan as f32 / 100.0).clamp(-1.0, 1.0));
+    let handle = cmd.handle();
     bgm.instance = Some(handle.clone());
     bgm.path = Some(path.to_owned());
     handle
