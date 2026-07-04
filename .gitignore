@@ -28,3 +28,5 @@ Thumbs.db
 # Local notes scratch
 /docs/notes/local/
 
+.superpowers/
+sessions.db
