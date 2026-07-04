@@ -4,6 +4,7 @@
 
 pub mod core_sub_acts;
 pub mod easing;
+pub mod parallax;
 pub mod perf_common;
 pub mod skin;
 pub mod theme;
@@ -100,6 +101,7 @@ pub fn plugin(app: &mut App) {
             (
                 widget::album_art::album_art_tween_system,
                 widget::album_art::apply_album_art_opacity,
+                parallax::parallax_info_tween_system,
             )
                 .chain(),
         );
