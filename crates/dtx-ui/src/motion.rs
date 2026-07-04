@@ -38,8 +38,8 @@ impl SpringValue {
     /// Semi-implicit Euler integration; clamps dt to avoid explosion
     /// on hitches. Snaps when close and slow.
     pub fn tick(&mut self, dt_s: f32) {
-        let dt = dt_s.clamp(0.0, 1.0 / 30.0);
-        let omega = self.stiffness.sqrt();
+        let omega = self.stiffness.max(0.0).sqrt();
+        let dt = dt_s.clamp(0.0, (1.0 / 30.0_f32).min(1.0 / omega.max(1.0)));
         let accel = -self.stiffness * (self.value - self.target)
             - 2.0 * self.damping_ratio * omega * self.velocity;
         self.velocity += accel * dt;
