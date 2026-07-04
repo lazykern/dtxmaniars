@@ -44,6 +44,17 @@ pub struct SongInfo {
     /// Path to BGM audio file (ogg/wav) if found, else None.
     /// Search order: `<dtx_stem>.ogg`, `1.ogg`, `<dtx_stem>.wav`, `1.wav`.
     pub bgm_path: Option<PathBuf>,
+    /// Path to the song-select preview audio: `#PREVIEW:` file if
+    /// present, otherwise falls back to `bgm_path` (the full BGM).
+    /// ADR-0015: song-select plays this; gameplay uses `bgm_path`.
+    pub preview_path: Option<PathBuf>,
+    /// True if `preview_path` came from `#PREVIEW:` (a short loop
+    /// clip). False if it's a fallback to the full BGM (autoplay
+    /// through, don't loop). ADR-0015 Q1 resolution.
+    pub preview_is_loopable: bool,
+    /// Path to the album art image (`#PREIMAGE:`) if present.
+    /// ADR-0015 deferred item (e).
+    pub preimage_path: Option<PathBuf>,
 }
 
 impl SongInfo {
@@ -62,13 +73,39 @@ impl SongInfo {
             .clone()
             .unwrap_or_else(|| "Unknown".to_string());
 
+        let bgm_path = dtx_core::resolve_bgm_path(dtx_path, chart);
+
+        // Preview path: prefer #PREVIEW: file; fall back to full BGM.
+        // (ADR-0015 Q1: per-chart, BocaD-compatible.)
+        let (preview_path, preview_is_loopable) =
+            match chart.metadata.preview_filename.as_deref() {
+                Some(name) => {
+                    let p = dtx_path.parent().map(|d| d.join(name));
+                    match p {
+                        Some(p) => (Some(p), true),
+                        None => (bgm_path.clone(), false),
+                    }
+                }
+                None => (bgm_path.clone(), false),
+            };
+
+        // Album art path: #PREIMAGE: (ADR-0015 deferred item (e)).
+        let preimage_path = chart
+            .metadata
+            .preimage_filename
+            .as_deref()
+            .and_then(|name| dtx_path.parent().map(|d| d.join(name)));
+
         Self {
             path: dtx_path.to_path_buf(),
             title,
             artist,
             bpm: chart.metadata.bpm,
             dlevel: chart.metadata.dlevel,
-            bgm_path: dtx_core::resolve_bgm_path(dtx_path, chart),
+            bgm_path,
+            preview_path,
+            preview_is_loopable,
+            preimage_path,
         }
     }
 
@@ -339,6 +376,46 @@ mod tests {
     }
 
     #[test]
+    fn from_chart_preview_path_prefers_explicit_preview() {
+        // When the chart declares #PREVIEW:, the song-select preview
+        // should be that file and `preview_is_loopable` should be true.
+        let chart = Chart {
+            metadata: dtx_core::Metadata {
+                title: Some("X".into()),
+                preview_filename: Some("clip.ogg".into()),
+                preimage_filename: Some("cover.jpg".into()),
+                ..default()
+            },
+            chips: vec![],
+            ..Default::default()
+        };
+        let path = PathBuf::from("/songs/x/x.dtx");
+        let info = SongInfo::from_chart(&path, &chart);
+        assert_eq!(info.preview_path, Some(PathBuf::from("/songs/x/clip.ogg")));
+        assert!(info.preview_is_loopable);
+        assert_eq!(info.preimage_path, Some(PathBuf::from("/songs/x/cover.jpg")));
+    }
+
+    #[test]
+    fn from_chart_preview_path_falls_back_to_bgm() {
+        // When the chart has no #PREVIEW:, preview_path mirrors
+        // bgm_path and looping is disabled (autoplay through).
+        let chart = Chart {
+            metadata: dtx_core::Metadata {
+                title: Some("X".into()),
+                ..default()
+            },
+            chips: vec![],
+            ..Default::default()
+        };
+        // Inject bgm via a chart that resolves to a known path.
+        let path = PathBuf::from("/songs/x/x.dtx");
+        let info = SongInfo::from_chart(&path, &chart);
+        assert_eq!(info.preview_path, info.bgm_path);
+        assert!(!info.preview_is_loopable);
+    }
+
+    #[test]
     fn from_chart_falls_back_to_filename_stem() {
         let chart = Chart::default();
         let path = PathBuf::from("/songs/cool_song.dtx");
@@ -367,6 +444,9 @@ mod tests {
                 bpm: None,
                 dlevel: None,
                 bgm_path: None,
+                preview_path: None,
+                preview_is_loopable: false,
+                preimage_path: None,
             },
             SongInfo {
                 path: PathBuf::from("/b.dtx"),
@@ -375,6 +455,9 @@ mod tests {
                 bpm: None,
                 dlevel: None,
                 bgm_path: None,
+                preview_path: None,
+                preview_is_loopable: false,
+                preimage_path: None,
             },
         ];
         sort_songs(&mut songs, SortMode::ByTitle);

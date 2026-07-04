@@ -615,8 +615,12 @@ fn bgm_preview_on_change(
     }
     let new_index = selection.0;
     if let Some(song) = db.songs.get(new_index)
-        && let Some(bgm_path) = &song.bgm_path
+        && let Some(preview_path) = &song.preview_path
     {
+        // Loop flag follows the source: #PREVIEW: file loops (short
+        // clip), fallback to full BGM plays through. (ADR-0015 Q1.)
+        player.set_looping(song.preview_is_loopable);
+
         // Compute direction from the last accepted index.
         let direction = match player.previous_index {
             None => PreviewSwapDirection::None,
@@ -624,11 +628,11 @@ fn bgm_preview_on_change(
             Some(prev) if new_index < prev => PreviewSwapDirection::Prev,
             Some(_) => PreviewSwapDirection::None,
         };
-        let source = get_or_load_audio_handle(&mut cache, &asset_server, bgm_path);
+        let source = get_or_load_audio_handle(&mut cache, &asset_server, preview_path);
         let accepted = player.play(
             &audio,
             source,
-            bgm_path.clone(),
+            preview_path.clone(),
             &mut events,
             direction,
             &mut instances,
@@ -850,6 +854,9 @@ mod tests {
             bpm: Some(120.0),
             dlevel: Some(50),
             bgm_path: None,
+            preview_path: None,
+            preview_is_loopable: false,
+            preimage_path: None,
         }
     }
 
