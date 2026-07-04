@@ -15,3 +15,6 @@ bevy = { workspace = true, default-features = false, features = ["bevy_asset", "
 # M5+: animation crate. Pinned to git rev in workspace (bevy 0.19 not on crates.io).
 # Add `TweeningPlugin` in lib.rs when first tween is wired.
 bevy_tweening = { workspace = true }
+# ADR-0015: PreviewSwapEvent consumed by widget/album_art. dtx-ui is
+# Game, dtx-audio is Engine — Game→Engine is allowed.
+dtx-audio = { workspace = true }

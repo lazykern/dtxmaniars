@@ -216,6 +216,13 @@ pub fn preview_tick_system(
 }
 
 impl PreviewPlayer {
+    /// Set whether subsequent `play()` calls loop the preview.
+    /// `true` on song select (loop excerpt), `false` on title
+    /// (autoplay-through). Has no effect on a currently-playing
+    /// preview — call `stop()` first or wait for the next swap.
+    pub fn set_looping(&mut self, looping: bool) {
+        self.looping = looping;
+    }
     /// Start playing a new preview. If another preview is currently
     /// playing or crossfading, the request is rejected and the original
     /// continues (busy-gate). Returns `true` if the swap was accepted.
@@ -237,10 +244,11 @@ impl PreviewPlayer {
             return false;
         }
 
-        let new_handle = audio
-            .play(source)
-            .looped()
-            .handle();
+        let new_handle = if self.looping {
+            audio.play(source).looped().handle()
+        } else {
+            audio.play(source).handle()
+        };
 
         // Mute the new instance immediately so the fade-in drives its
         // audible onset (matches osu's `queuedTrack.Volume.Value = 0`).

@@ -93,7 +93,12 @@ pub fn absolute_label(
 
 pub fn plugin(app: &mut App) {
     app.init_resource::<ThemeResource>()
-        .add_plugins((transition::plugin, bevy_tweening::TweeningPlugin));
+        .add_plugins((transition::plugin, bevy_tweening::TweeningPlugin))
+        .add_message::<dtx_audio::PreviewSwapEvent>()
+        .add_systems(
+            Update,
+            widget::album_art::album_art_tween_system,
+        );
 }
 
 #[cfg(test)]
