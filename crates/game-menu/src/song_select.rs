@@ -224,7 +224,11 @@ struct SongSelectOverlay;
 #[derive(Component, Debug, Clone, Copy)]
 pub struct StatusPanelComp;
 
-/// Mark the entity holding a single StatusPane (Drums/Guitar/Bass).
+/// Mark the entity holding the album art image (ADR-0015 item e).
+/// Used by `update_album_art_image` to find the entity and swap its
+/// image on selection change.
+#[derive(Component, Debug, Clone, Copy)]
+pub struct AlbumArtEntity;
 #[derive(Component, Debug, Clone, Copy, PartialEq, Eq)]
 pub enum StatusPaneKind {
     Drums,
@@ -265,6 +269,7 @@ pub fn plugin(app: &mut App) {
                 song_select_navigation,
                 render_selected_song,
                 bgm_preview_on_change,
+                update_album_art_image,
                 update_status_panes,
                 update_density_graph,
                 update_search_filter,
@@ -437,9 +442,11 @@ fn spawn_song_select(mut commands: Commands, db: Res<SongDb>, theme: Res<ThemeRe
                         BackgroundColor(t.panel_bg),
                     ))
                     .with_children(|info| {
-                        // Album-art crossfade placeholder. Real image
-                        // from #PREIMAGE: is future work; today this is
-                        // a tinted panel that fades on selection change.
+                        // Album-art crossfade placeholder. Holds both
+                        // an ImageNode (for #PREIMAGE: when present) and
+                        // a BackgroundColor (placeholder when not). The
+                        // `update_album_art_image` system toggles which
+                        // is visible based on `song.preimage_path`.
                         info.spawn((
                             Node {
                                 width: Val::Px(ALBUM_ART_W),
@@ -448,7 +455,12 @@ fn spawn_song_select(mut commands: Commands, db: Res<SongDb>, theme: Res<ThemeRe
                                 ..default()
                             },
                             BackgroundColor(t.accent.with_alpha(0.18)),
+                            ImageNode {
+                                color: Color::WHITE.with_alpha(0.0),
+                                ..default()
+                            },
                             AlbumArt::default(),
+                            AlbumArtEntity,
                         ));
                         info.spawn((
                             Text::new("Chart info"),
@@ -585,6 +597,33 @@ fn render_selected_song(
         } else {
             t.panel_bg
         };
+    }
+}
+
+fn update_album_art_image(
+    selection: Res<SelectionIndex>,
+    db: Res<SongDb>,
+    asset_server: Res<AssetServer>,
+    mut query: Query<(&AlbumArtEntity, &mut ImageNode, &mut BackgroundColor)>,
+) {
+    if !selection.is_changed() {
+        return;
+    }
+    let Some(song) = db.songs.get(selection.0) else {
+        return;
+    };
+    for (_, mut image, mut bg) in &mut query {
+        if let Some(path) = &song.preimage_path {
+            // Real #PREIMAGE: present: show the image, hide the placeholder.
+            image.image = asset_server.load(path.to_string_lossy().to_string());
+            image.color = image.color.with_alpha(1.0);
+            bg.0 = bg.0.with_alpha(0.0);
+        } else {
+            // No image: show the placeholder, hide the image.
+            image.image = Handle::default();
+            image.color = image.color.with_alpha(0.0);
+            bg.0 = bg.0.with_alpha(0.18);
+        }
     }
 }
 
@@ -1020,6 +1059,23 @@ mod tests {
         assert!(s.contains("Y"));
         assert!(s.contains("120"));
         assert!(s.contains("50"));
+    }
+
+    #[test]
+    #[test]
+    fn make_song_with_preimage() {
+        let song = SongInfo {
+            path: std::path::PathBuf::from("/x.dtx"),
+            title: "X".into(),
+            artist: "Y".into(),
+            bpm: Some(120.0),
+            dlevel: Some(50),
+            bgm_path: None,
+            preview_path: None,
+            preview_is_loopable: false,
+            preimage_path: Some(std::path::PathBuf::from("/x/cover.jpg")),
+        };
+        assert_eq!(song.preimage_path, Some(std::path::PathBuf::from("/x/cover.jpg")));
     }
 
     #[test]
