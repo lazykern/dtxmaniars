@@ -13,3 +13,4 @@ pub mod phrase_meter;
 pub mod rolling_counter;
 pub mod score_detailed;
 pub mod stage_background;
+pub mod stage_panel;
