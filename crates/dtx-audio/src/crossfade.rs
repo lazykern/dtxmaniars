@@ -1,0 +1,110 @@
+//! Two-track audio crossfade helpers for the preview BGM.
+//!
+//! ADR-0015 Phase 2. Matches osu-lazer's `MusicController.changeTrack`
+//! constants: 150ms fade-out + 220ms fade-in with 30ms pre-roll delay
+//! (`osu-lazer/osu.Game/Overlays/MusicController.cs:41,519-520`).
+//!
+//! These are thin wrappers over `bevy_kira_audio::AudioInstance::set_decibels`.
+//! The state machine in [`crate::preview::PreviewState`] schedules the
+//! delayed fade-in; this module only knows the durations and the kira
+//! tween shapes.
+//!
+//! Layer: Engine. No Pure or Game deps.
+
+use std::time::Duration;
+
+use bevy::asset::Assets;
+use bevy::prelude::*;
+use bevy_kira_audio::prelude::*;
+use bevy_kira_audio::AudioInstance;
+
+/// Fade-out duration in milliseconds (osu `MusicController.cs:520`).
+pub const PREVIEW_FADE_OUT_MS: u32 = 150;
+
+/// Fade-in duration in milliseconds (osu `MusicController.cs:519`).
+pub const PREVIEW_FADE_IN_MS: u32 = 220;
+
+/// Pre-roll delay before fade-in starts, in milliseconds
+/// (osu `DELAY_BEFORE_FADE = 30`, `MusicController.cs:41`).
+pub const PREVIEW_FADE_DELAY_MS: u32 = 30;
+
+/// Start a linear fade-out on the given audio instance.
+///
+/// Volume tweens to -60dB (effectively silent) over `ms` milliseconds.
+/// No-op if the instance no longer exists in `instances` (e.g. dropped
+/// during a re-entrant swap).
+pub fn start_fade_out(
+    instances: &mut Assets<AudioInstance>,
+    handle: &Handle<AudioInstance>,
+    ms: u32,
+) {
+    if let Some(mut instance) = instances.get_mut(handle) {
+        instance.set_decibels(-60.0, AudioTween::linear(Duration::from_millis(ms as u64)));
+    }
+}
+
+/// Start a linear fade-in on the given audio instance, after a delay.
+///
+/// The tween runs over `delay_ms + fade_ms` total. During the first
+/// `delay_ms` the value is held near the start (the current value, which
+/// the caller is expected to have set to -60dB). The value then
+/// interpolates linearly to 0dB across the remaining `fade_ms`.
+///
+/// For precise "held then tween" semantics (silent for exactly
+/// `delay_ms`, then linear to 0dB over `fade_ms`), drive the call from
+/// the [`crate::preview::PreviewState`] state machine at the exact
+/// `delay_ms` tick boundary.
+///
+/// No-op if the instance no longer exists in `instances`.
+pub fn start_fade_in_with_delay(
+    instances: &mut Assets<AudioInstance>,
+    handle: &Handle<AudioInstance>,
+    fade_ms: u32,
+    delay_ms: u32,
+) {
+    if let Some(mut instance) = instances.get_mut(handle) {
+        let total = Duration::from_millis(delay_ms as u64 + fade_ms as u64);
+        instance.set_decibels(0.0, AudioTween::linear(total));
+    }
+}
+
+/// Mute an audio instance using the project's "instant" convention.
+///
+/// Uses `AudioTween::default()` which is a 10ms linear fade — below
+/// human perception threshold, so audibly instant. Matches the
+/// convention in `crate::stop_bgm` and friends.
+pub fn mute(
+    instances: &mut Assets<AudioInstance>,
+    handle: &Handle<AudioInstance>,
+) {
+    if let Some(mut instance) = instances.get_mut(handle) {
+        instance.set_decibels(-60.0, AudioTween::default());
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use bevy::asset::Handle;
+
+    #[test]
+    fn constants_match_osu_reference() {
+        // osu-lazer/osu.Game/Overlays/MusicController.cs:41,519-520
+        assert_eq!(PREVIEW_FADE_OUT_MS, 150);
+        assert_eq!(PREVIEW_FADE_IN_MS, 220);
+        assert_eq!(PREVIEW_FADE_DELAY_MS, 30);
+    }
+
+    #[test]
+    fn helpers_tolerate_missing_instance() {
+        // A default handle won't resolve to a real AudioInstance in a
+        // bare Assets<AudioInstance>. Each helper must short-circuit
+        // gracefully rather than panic.
+        let mut instances = Assets::<AudioInstance>::default();
+        let handle = Handle::<AudioInstance>::default();
+
+        start_fade_out(&mut instances, &handle, 150);
+        start_fade_in_with_delay(&mut instances, &handle, 220, 30);
+        mute(&mut instances, &handle);
+    }
+}

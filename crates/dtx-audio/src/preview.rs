@@ -1,22 +1,32 @@
-//! Preview audio handle cache.
+//! Preview audio: handle cache, playback state, and swap events.
 //!
-//! ADR-0015 Phase 1: dedupe audio source loads by resolved file path.
-//! Switching to a chart whose `bgm_path` is already cached avoids the
-//! `AssetServer` load + decode overhead.
+//! ADR-0015. Two pieces live here:
 //!
-//! Bevy's `AssetServer` already dedupes `Handle<T>` by path, so the
-//! primary value of this cache is the explicit lookup hook that
-//! `PreviewPlayer` uses. Future multi-diff (M6+) and decode-pool (M14+)
-//! work builds on the same shape.
+//! - [`AudioHandleCache`] — path-keyed cache of loaded
+//!   `Handle<KiraAudioSource>` for preview BGM (Phase 1).
+//! - [`PreviewPlayer`] + [`PreviewState`] + [`PreviewSwapEvent`] — the
+//!   crossfade state machine and the event `dtx-ui` widgets subscribe
+//!   to for parallax / album-art animation (Phase 2).
 //!
-//! Layer: Engine (bevy + bevy_kira_audio). No `Pure` or `Game` deps.
+//! Layer: Engine (bevy + bevy_kira_audio). No Pure or Game deps.
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 use bevy::asset::Handle;
 use bevy::prelude::*;
+use bevy_kira_audio::AudioInstance;
 use bevy_kira_audio::AudioSource as KiraAudioSource;
+use bevy_kira_audio::prelude::*;
+
+use crate::crossfade::{
+    PREVIEW_FADE_DELAY_MS, PREVIEW_FADE_IN_MS, PREVIEW_FADE_OUT_MS, mute, start_fade_in_with_delay,
+    start_fade_out,
+};
+
+// =====================================================================
+// Phase 1: AudioHandleCache
+// =====================================================================
 
 /// Cache of loaded Kira audio source handles keyed by resolved file path.
 ///
@@ -77,9 +87,221 @@ pub fn get_or_load(
     handle
 }
 
+// =====================================================================
+// Phase 2: PreviewPlayer + PreviewState + PreviewSwapEvent
+// =====================================================================
+
+/// Direction of a preview swap. Used by `dtx-ui` widgets to drive
+/// parallax / album-art animation that matches the user's scroll.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum PreviewSwapDirection {
+    #[default]
+    None,
+    Next,
+    Prev,
+}
+
+/// Event published when a preview swap starts. Consumers: `dtx-ui`
+/// widgets (album art tween, info wedge parallax).
+///
+/// Not emitted for the first play (no swap), only for changes.
+#[derive(Message, Debug, Clone)]
+pub struct PreviewSwapEvent {
+    pub old_path: Option<PathBuf>,
+    pub new_path: PathBuf,
+    pub direction: PreviewSwapDirection,
+}
+
+/// The crossfade state machine.
+///
+/// - `Idle` — no preview playing.
+/// - `Playing` — a preview is currently playing; `current` is the
+///   audio instance handle. A new swap will crossfade from this.
+/// - `Crossfading` — a crossfade is in progress. `old` is fading out,
+///   `new` is fading in. `fade_in_started` flips once the pre-roll
+///   delay elapses and the fade-in tween is kicked off.
+#[derive(Resource, Debug, Default, Clone)]
+pub struct PreviewPlayer {
+    pub state: PreviewState,
+    /// Whether the preview loops. Per-screen: `true` on song select,
+    /// `false` on title (autoplay-through). Mutated by callers before
+    /// the next `play_preview` call.
+    pub looping: bool,
+    /// The most recently accepted selection index. Used by callers to
+    /// compute `PreviewSwapDirection`. `None` until the first accepted
+    /// play.
+    pub previous_index: Option<usize>,
+}
+
+#[derive(Debug, Default, Clone)]
+pub enum PreviewState {
+    #[default]
+    Idle,
+    Playing {
+        current: Handle<AudioInstance>,
+    },
+    Crossfading {
+        old: Handle<AudioInstance>,
+        new: Handle<AudioInstance>,
+        elapsed_ms: u32,
+        fade_in_started: bool,
+    },
+}
+
+impl PreviewState {
+    /// True when a crossfade is in flight. New swap requests are
+    /// rejected while busy. This also acts as the rapid-mash debounce:
+    /// each swap takes ~400ms, so requests arriving faster than that
+    /// are dropped, mirroring osu-lazer's carousel-snap behavior.
+    pub fn is_busy(&self) -> bool {
+        matches!(self, Self::Crossfading { .. })
+    }
+
+    /// The currently-audible preview handle, if any.
+    pub fn current(&self) -> Option<&Handle<AudioInstance>> {
+        match self {
+            Self::Idle => None,
+            Self::Playing { current } => Some(current),
+            Self::Crossfading { new, .. } => Some(new),
+        }
+    }
+}
+
+/// System: drive the crossfade state machine. Runs every frame in
+/// `Update`. No-op unless `state == Crossfading`.
+///
+/// On reaching `delay_ms`, kicks off the fade-in tween. On reaching
+/// `delay_ms + fade_in_ms`, transitions to `Playing { new }` and drops
+/// the old handle (kira's fade-out tween continues to play out).
+pub fn preview_tick_system(
+    time: Res<Time>,
+    mut player: ResMut<PreviewPlayer>,
+    mut instances: ResMut<Assets<AudioInstance>>,
+) {
+    let delta_ms = (time.delta_secs() * 1000.0) as u32;
+
+    let new_state = match &mut player.state {
+        PreviewState::Crossfading {
+            old: _,
+            new,
+            elapsed_ms,
+            fade_in_started,
+        } => {
+            *elapsed_ms = elapsed_ms.saturating_add(delta_ms);
+
+            if !*fade_in_started && *elapsed_ms >= PREVIEW_FADE_DELAY_MS {
+                start_fade_in_with_delay(
+                    &mut instances,
+                    new,
+                    PREVIEW_FADE_IN_MS,
+                    /* delay = */ 0,
+                );
+                *fade_in_started = true;
+            }
+
+            if *elapsed_ms >= PREVIEW_FADE_DELAY_MS + PREVIEW_FADE_IN_MS {
+                Some(PreviewState::Playing {
+                    current: new.clone(),
+                })
+            } else {
+                None
+            }
+        }
+        _ => None,
+    };
+
+    if let Some(next) = new_state {
+        player.state = next;
+    }
+}
+
+impl PreviewPlayer {
+    /// Start playing a new preview. If another preview is currently
+    /// playing or crossfading, the request is rejected and the original
+    /// continues (busy-gate). Returns `true` if the swap was accepted.
+    ///
+    /// On first play (state == Idle), starts immediately with no fade.
+    /// On a crossfade-eligible swap, schedules old fade-out + new
+    /// fade-in (with 30ms pre-roll) and publishes a `PreviewSwapEvent`
+    /// via `events`.
+    pub fn play(
+        &mut self,
+        audio: &Audio,
+        source: Handle<KiraAudioSource>,
+        path: PathBuf,
+        events: &mut MessageWriter<PreviewSwapEvent>,
+        direction: PreviewSwapDirection,
+        instances: &mut Assets<AudioInstance>,
+    ) -> bool {
+        if self.state.is_busy() {
+            return false;
+        }
+
+        let new_handle = audio
+            .play(source)
+            .looped()
+            .handle();
+
+        // Mute the new instance immediately so the fade-in drives its
+        // audible onset (matches osu's `queuedTrack.Volume.Value = 0`).
+        mute(instances, &new_handle);
+
+        let old_handle = match &self.state {
+            PreviewState::Idle => None,
+            PreviewState::Playing { current } => Some(current.clone()),
+            PreviewState::Crossfading { .. } => unreachable!("busy-gated above"),
+        };
+
+        if let Some(old) = old_handle {
+            start_fade_out(instances, &old, PREVIEW_FADE_OUT_MS);
+            self.state = PreviewState::Crossfading {
+                old,
+                new: new_handle,
+                elapsed_ms: 0,
+                fade_in_started: false,
+            };
+            events.write(PreviewSwapEvent {
+                old_path: Some(path.clone()),
+                new_path: path,
+                direction,
+            });
+        } else {
+            self.state = PreviewState::Playing {
+                current: new_handle,
+            };
+        }
+
+        true
+    }
+
+    /// Stop the current preview with a fade-out. No-op if idle.
+    /// `fade_out_ms=0` uses the crossfade module default.
+    pub fn stop(
+        &mut self,
+        instances: &mut Assets<AudioInstance>,
+        fade_out_ms: u32,
+    ) {
+        let handle = match &self.state {
+            PreviewState::Playing { current } => Some(current.clone()),
+            PreviewState::Crossfading { new, .. } => Some(new.clone()),
+            PreviewState::Idle => None,
+        };
+        if let Some(handle) = handle {
+            let ms = if fade_out_ms == 0 {
+                PREVIEW_FADE_OUT_MS
+            } else {
+                fade_out_ms
+            };
+            start_fade_out(instances, &handle, ms);
+        }
+        self.state = PreviewState::Idle;
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use bevy::asset::Handle;
 
     #[test]
     fn cache_starts_empty() {
@@ -129,22 +351,51 @@ mod tests {
 
     #[test]
     fn get_or_load_cache_hit_does_not_invoke_asset_server() {
-        // Cache hit path is pure: no AssetServer, no asset event side
-        // effects. We pre-populate and confirm the same handle comes
-        // back. The asset_server parameter is required by signature; it
-        // would only be used on a cache miss.
         let mut cache = AudioHandleCache::default();
         let path = PathBuf::from("/songs/a/preview.ogg");
         let handle = Handle::<KiraAudioSource>::default();
         cache.put(path.clone(), handle.clone());
-        // Constructing AssetServer requires a real App; the cache-hit
-        // branch never touches it. Build a real App so the function can
-        // be called. The test asserts the cached handle is returned
-        // unchanged.
         let mut app = App::new();
         app.add_plugins(bevy::asset::AssetPlugin::default());
         let asset_server = app.world().resource::<AssetServer>().clone();
         let returned = get_or_load(&mut cache, &asset_server, &path);
         assert_eq!(returned, handle);
+    }
+
+    // PreviewState tests — exercise the state machine without audio.
+
+    #[test]
+    fn preview_state_starts_idle() {
+        let player = PreviewPlayer::default();
+        assert!(matches!(player.state, PreviewState::Idle));
+        assert!(!player.state.is_busy());
+        assert!(player.state.current().is_none());
+    }
+
+    #[test]
+    fn playing_state_is_not_busy() {
+        let state = PreviewState::Playing {
+            current: Handle::<AudioInstance>::default(),
+        };
+        assert!(!state.is_busy());
+        assert!(state.current().is_some());
+    }
+
+    #[test]
+    fn crossfading_state_is_busy() {
+        let state = PreviewState::Crossfading {
+            old: Handle::<AudioInstance>::default(),
+            new: Handle::<AudioInstance>::default(),
+            elapsed_ms: 0,
+            fade_in_started: false,
+        };
+        assert!(state.is_busy());
+        // The "new" handle is reported as current even mid-crossfade.
+        assert!(state.current().is_some());
+    }
+
+    #[test]
+    fn preview_swap_direction_default_is_none() {
+        assert_eq!(PreviewSwapDirection::default(), PreviewSwapDirection::None);
     }
 }

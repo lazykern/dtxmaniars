@@ -26,7 +26,10 @@ use std::path::PathBuf;
 
 use bevy::prelude::*;
 use bevy_kira_audio::prelude::*;
-use dtx_audio::{BgmHandle, get_or_load_audio_handle, play_bgm_handle, stop_bgm_system};
+use dtx_audio::{
+    BgmHandle, PreviewPlayer, PreviewSwapDirection, PreviewSwapEvent, get_or_load_audio_handle,
+    stop_bgm_system,
+};
 use dtx_library::{SongDb, SongInfo, SortMode};
 use dtx_ui::ThemeResource;
 use dtx_ui::theme::Theme;
@@ -243,6 +246,7 @@ pub fn plugin(app: &mut App) {
             OnExit(AppState::SongSelect),
             (
                 hide_song_select_overlay,
+                stop_preview_system,
                 stop_bgm_system,
                 despawn_song_select,
             )
@@ -564,6 +568,14 @@ fn render_selected_song(
     }
 }
 
+fn stop_preview_system(
+    mut player: ResMut<PreviewPlayer>,
+    mut instances: ResMut<Assets<AudioInstance>>,
+) {
+    player.stop(&mut instances, 0);
+    player.previous_index = None;
+}
+
 fn bgm_preview_on_change(
     selection: Res<SelectionIndex>,
     db: Res<SongDb>,
@@ -571,23 +583,39 @@ fn bgm_preview_on_change(
     asset_server: Res<AssetServer>,
     mut bgm: ResMut<BgmHandle>,
     mut cache: ResMut<dtx_audio::AudioHandleCache>,
+    mut player: ResMut<PreviewPlayer>,
     mut instances: ResMut<Assets<AudioInstance>>,
+    mut events: MessageWriter<PreviewSwapEvent>,
 ) {
     if !selection.is_changed() {
         return;
     }
-    dtx_audio::stop_bgm(&audio, &mut bgm, &mut instances);
-    if let Some(song) = db.songs.get(selection.0)
+    let new_index = selection.0;
+    if let Some(song) = db.songs.get(new_index)
         && let Some(bgm_path) = &song.bgm_path
     {
+        // Compute direction from the last accepted index.
+        let direction = match player.previous_index {
+            None => PreviewSwapDirection::None,
+            Some(prev) if new_index > prev => PreviewSwapDirection::Next,
+            Some(prev) if new_index < prev => PreviewSwapDirection::Prev,
+            Some(_) => PreviewSwapDirection::None,
+        };
         let source = get_or_load_audio_handle(&mut cache, &asset_server, bgm_path);
-        play_bgm_handle(
+        let accepted = player.play(
             &audio,
-            &mut bgm,
-            &mut instances,
             source,
-            &bgm_path.to_string_lossy(),
+            bgm_path.clone(),
+            &mut events,
+            direction,
+            &mut instances,
         );
+        if accepted {
+            player.previous_index = Some(new_index);
+            // Clear BgmHandle so dtx-timing's clock doesn't read the
+            // preview position during gameplay-inactive song select.
+            dtx_audio::stop_bgm(&audio, &mut bgm, &mut instances);
+        }
     }
 }
 

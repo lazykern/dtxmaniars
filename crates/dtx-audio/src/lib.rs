@@ -13,9 +13,13 @@ use bevy::prelude::*;
 use bevy_kira_audio::prelude::*;
 use bevy_kira_audio::AudioSource as KiraAudioSource;
 
+pub mod crossfade;
 pub mod preview;
 
-pub use preview::{get_or_load as get_or_load_audio_handle, AudioHandleCache};
+pub use preview::{
+    get_or_load as get_or_load_audio_handle, preview_tick_system, AudioHandleCache, PreviewPlayer,
+    PreviewState, PreviewSwapDirection, PreviewSwapEvent,
+};
 
 /// The currently-playing BGM instance, if any.
 ///
@@ -56,7 +60,10 @@ pub fn plugin(app: &mut App) {
         .init_resource::<BgmHandle>()
         .init_resource::<ChartSoundBank>()
         .init_resource::<DrumPolyphony>()
-        .init_resource::<AudioHandleCache>();
+        .init_resource::<AudioHandleCache>()
+        .init_resource::<PreviewPlayer>()
+        .add_message::<PreviewSwapEvent>()
+        .add_systems(Update, preview_tick_system);
 }
 
 impl ChartSoundBank {
