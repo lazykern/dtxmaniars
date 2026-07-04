@@ -33,6 +33,7 @@ use dtx_audio::{
 use dtx_library::{SongDb, SongInfo, SortMode};
 use dtx_ui::ThemeResource;
 use dtx_ui::theme::Theme;
+use dtx_ui::widget::album_art::AlbumArt;
 use game_shell::{AppState, TransitionRequest, request_transition};
 
 // ===== Layout positions (verbatim from reference files) =====
@@ -64,6 +65,12 @@ pub const SONG_SEARCH_H: f32 = 300.0;
 pub const SONG_SEARCH_TEXT_INPUT_Y: f32 = 30.0;
 pub const SONG_SEARCH_DESC_Y: f32 = 60.0;
 pub const SONG_SEARCH_STATUS_Y: f32 = 250.0;
+
+/// Album-art placeholder size (ADR-0015 followup). Real image
+/// loading from `#PREIMAGE:` is a separate task; we render a tinted
+/// panel of this size and crossfade its opacity.
+pub const ALBUM_ART_W: f32 = 240.0;
+pub const ALBUM_ART_H: f32 = 180.0;
 
 /// CommandHistory buffer size (CommandHistory.cs:10).
 pub const COMMAND_HISTORY_BUF: usize = 16;
@@ -430,6 +437,19 @@ fn spawn_song_select(mut commands: Commands, db: Res<SongDb>, theme: Res<ThemeRe
                         BackgroundColor(t.panel_bg),
                     ))
                     .with_children(|info| {
+                        // Album-art crossfade placeholder. Real image
+                        // from #PREIMAGE: is future work; today this is
+                        // a tinted panel that fades on selection change.
+                        info.spawn((
+                            Node {
+                                width: Val::Px(ALBUM_ART_W),
+                                height: Val::Px(ALBUM_ART_H),
+                                margin: UiRect::bottom(Val::Px(8.0)),
+                                ..default()
+                            },
+                            BackgroundColor(t.accent.with_alpha(0.18)),
+                            AlbumArt::default(),
+                        ));
                         info.spawn((
                             Text::new("Chart info"),
                             Theme::font(20.0),

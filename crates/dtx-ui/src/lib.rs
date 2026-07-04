@@ -97,7 +97,11 @@ pub fn plugin(app: &mut App) {
         .add_message::<dtx_audio::PreviewSwapEvent>()
         .add_systems(
             Update,
-            widget::album_art::album_art_tween_system,
+            (
+                widget::album_art::album_art_tween_system,
+                widget::album_art::apply_album_art_opacity,
+            )
+                .chain(),
         );
 }
 
