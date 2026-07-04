@@ -6,19 +6,21 @@ Status: Approved
 ## Goal
 
 Replace the bare menu UI (title, song select, settings, song loading) with a
-GITADORA-style visual language — black stage, drifting multicolor streaks,
-yellow selection, bold italic skill numbers — animated with osu!lazer-grade
-motion. Everything rendered procedurally: no image or font assets are added.
+GITADORA-style visual language — black stage, yellow selection, bold
+skill numbers — animated with osu!lazer-grade motion. Everything rendered procedurally: no image or font assets are added.
 
 Mockups from the brainstorm session live in `.superpowers/brainstorm/1333996-1783187662/content/`
 (`song-select-layout-v2.html`, `other-screens.html` are the approved versions).
 
 ## Decisions
 
-- **Style**: GITADORA Energy — black stage `#050505`, animated diagonal
-  gradient streaks, yellow `#ffcc00` selection outline/highlight, full
-  GITADORA palette. Per-difficulty colors: BASIC blue `#0088ff`, ADVANCED
-  yellow `#ffcc00`, EXTREME red `#ff4444`, MASTER purple `#cc33ff`.
+- **Style**: GITADORA Energy — black stage `#050505`, yellow `#ffcc00`
+  selection outline/highlight, full GITADORA palette. Per-difficulty
+  colors: BASIC blue `#0088ff`, ADVANCED yellow `#ffcc00`, EXTREME red
+  `#ff4444`, MASTER purple `#cc33ff`.
+  **Revision 2026-07-05:** no decorative streaks or gradient lines in the
+  background — plain black stage + ambient album-art layer only. Layout
+  quality carries the design.
 - **osu mash-ins**: ambient album-art background tint (crossfades on
   selection), type-to-search in song select, difficulty chips on the selected
   wheel row, settings screen with left section rail + description panel.
@@ -35,8 +37,8 @@ New reusable menu kit in `dtx-ui`, consumed by `game-menu`:
 
 ```
 crates/dtx-ui/src/
-├── theme.rs            extend: stage black, select yellow, streak colors,
-│                       4 difficulty colors
+├── theme.rs            extend: stage black, select yellow,
+│                       4 difficulty colors, lane colors
 ├── easing.rs           existing, reuse
 ├── tween.rs            existing, reuse
 ├── motion.rs           NEW motion primitives
@@ -46,8 +48,8 @@ crates/dtx-ui/src/
 │     RollingNumber { shown, target }                      digit roll
 │     BeatPulse { bpm, phase }                             audio-reactive pulse
 └── widget/
-      stage_background.rs  fullscreen stage: black bg + drifting rotated
-                           gradient streaks + ambient album-art layer
+      stage_background.rs  fullscreen stage: black bg + ambient
+                           album-art layer (no streaks/gradients)
       stage_panel.rs       dark panel (#0d0d0dee, 1px #444 border);
                            yellow-glow selected variant
       song_wheel.rs        wheel container + rows: art thumb, skill number +
@@ -91,13 +93,12 @@ top), preview audio system, folder grouping logic, scores.json persistence.
   BACKSPACE up); no new grouping modes.
 - **Bottom bar**: key hints.
 - **Background**: fullscreen ambient layer tinted by selected song art
-  (see Technical constraints) under dark overlay, plus drifting streaks.
+  (see Technical constraints) under dark overlay.
 
 ### Title
 
-Boxed italic logo "DTXMANIARS" (white border, dark fill, glow), no tagline.
+Boxed logo "DTXMANIARS" (white border, dark fill, glow), no tagline.
 Pulsing yellow PRESS ENTER chip. Version bottom-left, ESC QUIT bottom-right.
-Streaks drift continuously.
 
 ### Settings
 
@@ -123,15 +124,12 @@ chip, yellow progress bar bound to real load progress, status line
 | Row select | Expansion lerp 180ms OutQuint; yellow glow pulses via BeatPulse |
 | Difficulty ←→ | Grid highlight slides, chips update, numbers roll |
 | Selection change | Art crossfade (existing tween), ambient re-tint 400ms, density bars re-grow staggered 20ms/bar, skill/BPM/notes roll |
-| Title idle | Streaks drift and wrap; PRESS ENTER pulses ~60bpm, syncs to chart BPM when preview plays |
+| Title idle | PRESS ENTER pulses ~60bpm, syncs to chart BPM when preview plays |
 | Settings tab switch | Old rows exit left, new enter right, 20ms stagger |
 | Loading | Card scales in 250ms OutQuint; bar lerps to real progress; on done, card zooms + fade to gameplay |
 
 ## Technical constraints
 
-- **Streaks**: Bevy 0.19 `bevy_ui` gradients + `UiTransform` rotation.
-  Verify the gradient+rotation combo renders correctly as a plan-stage spike;
-  fallback is a sprite layer behind the UI camera.
 - **Ambient background**: no backdrop-blur in bevy_ui. Approximate: album
   art fullscreen at low alpha under a dark overlay; downscaled texture with
   linear upscale reads as cheap blur.
@@ -139,8 +137,7 @@ chip, yellow progress bar bound to real load progress, status line
   unavailable.
 - **Skill number**: computed from existing scores.json best as
   achievement % × chart level; display-only, formula tunable later.
-- **Performance**: streaks are a handful of animated nodes; all tweens
-  frame-driven like the existing `ScalarTween`.
+- **Performance**: all tweens frame-driven like the existing `ScalarTween`.
 
 ## Error handling
 
