@@ -101,17 +101,14 @@ pub fn plugin(app: &mut App) {
             (
                 widget::album_art::album_art_tween_system,
                 widget::album_art::apply_album_art_opacity,
+                widget::stage_background::ambient_art_apply_system,
                 parallax::parallax_info_tween_system,
             )
                 .chain(),
         )
         .add_systems(
             Update,
-            (
-                motion::enter_choreo_system,
-                motion::beat_pulse_system,
-                widget::stage_background::ambient_art_apply_system,
-            ),
+            (motion::enter_choreo_system, motion::beat_pulse_system),
         );
 }
 

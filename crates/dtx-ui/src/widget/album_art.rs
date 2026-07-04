@@ -114,7 +114,18 @@ pub fn album_art_tween_system(
 /// System: copy `AlbumArt.opacity` to the entity's `BackgroundColor`
 /// alpha so the visual actually changes. Pairs with
 /// `album_art_tween_system` in the same Update schedule; runs after.
-pub fn apply_album_art_opacity(mut query: Query<(&AlbumArt, &mut BackgroundColor)>) {
+///
+/// Excludes the ambient stage layer (`AmbientArt`): that entity's
+/// visual is its `ImageNode` tint, driven by
+/// `stage_background::ambient_art_apply_system`; touching its
+/// (Node-required) `BackgroundColor` would paint an opaque fullscreen
+/// quad over the stage.
+pub fn apply_album_art_opacity(
+    mut query: Query<
+        (&AlbumArt, &mut BackgroundColor),
+        Without<crate::widget::stage_background::AmbientArt>,
+    >,
+) {
     for (art, mut bg) in &mut query {
         let alpha = bg.0.alpha();
         if (alpha - art.opacity).abs() > 0.001 {
