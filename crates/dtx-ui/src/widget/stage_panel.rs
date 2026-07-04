@@ -5,7 +5,22 @@ use bevy::prelude::*;
 
 use crate::theme::Theme;
 
-/// Base panel: #0d0d0dee fill, 1px #444 border.
+fn selected_glow(theme: &Theme) -> BoxShadow {
+    BoxShadow::new(
+        theme.select_yellow.with_alpha(0.45),
+        Val::Px(0.0),
+        Val::Px(0.0),
+        Val::Px(2.0),
+        Val::Px(14.0),
+    )
+}
+
+fn no_shadow() -> BoxShadow {
+    BoxShadow::new(Color::NONE, Val::Px(0.0), Val::Px(0.0), Val::Px(0.0), Val::Px(0.0))
+}
+
+/// Base panel: #0d0d0dee fill, 1px #444 border. Carries a no-op
+/// `BoxShadow` so `set_panel_selected` toggle queries match it.
 pub fn panel(theme: &Theme, node: Node) -> impl Bundle {
     (
         Node {
@@ -14,25 +29,21 @@ pub fn panel(theme: &Theme, node: Node) -> impl Bundle {
         },
         BackgroundColor(theme.stage_panel_bg),
         BorderColor::all(theme.stage_panel_border),
+        no_shadow(),
     )
 }
 
-/// Selected panel: yellow 2px border + glow.
+/// Selected panel: yellow 1px border + glow. Selection is signaled
+/// by color + glow only; border width matches the base panel.
 pub fn selected_panel(theme: &Theme, node: Node) -> impl Bundle {
     (
         Node {
-            border: UiRect::all(Val::Px(2.0)),
+            border: UiRect::all(Val::Px(1.0)),
             ..node
         },
         BackgroundColor(theme.stage_panel_bg),
         BorderColor::all(theme.select_yellow),
-        BoxShadow::new(
-            theme.select_yellow.with_alpha(0.45),
-            Val::Px(0.0),
-            Val::Px(0.0),
-            Val::Px(2.0),
-            Val::Px(14.0),
-        ),
+        selected_glow(theme),
     )
 }
 
@@ -45,16 +56,10 @@ pub fn set_panel_selected(
 ) {
     if selected {
         *border = BorderColor::all(theme.select_yellow);
-        *shadow = BoxShadow::new(
-            theme.select_yellow.with_alpha(0.45),
-            Val::Px(0.0),
-            Val::Px(0.0),
-            Val::Px(2.0),
-            Val::Px(14.0),
-        );
+        *shadow = selected_glow(theme);
     } else {
         *border = BorderColor::all(theme.stage_panel_border);
-        *shadow = BoxShadow::new(Color::NONE, Val::Px(0.0), Val::Px(0.0), Val::Px(0.0), Val::Px(0.0));
+        *shadow = no_shadow();
     }
 }
 
@@ -85,13 +90,13 @@ pub fn spawn_badge_row(
         })
         .with_children(|row| {
             row.spawn((
-                Text::new(label.to_string()),
+                Text::new(label),
                 Theme::font(12.0),
                 TextColor(theme.clear_green),
             ));
             row.spawn((
                 BadgeValueText { decimals },
-                Text::new(initial.to_string()),
+                Text::new(initial),
                 Theme::font(26.0),
                 TextColor(theme.text_primary),
             ));
@@ -101,11 +106,6 @@ pub fn spawn_badge_row(
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn badge_value_marker_carries_format() {
-        assert!(BadgeValueText { decimals: true }.decimals);
-    }
 
     #[test]
     fn badge_row_spawns_label_and_value() {
@@ -119,7 +119,22 @@ mod tests {
             });
         }
         world.flush();
-        let badges = world.query::<&BadgeValueText>().iter(world).count();
-        assert_eq!(badges, 1);
+
+        let values: Vec<String> = world
+            .query::<(&BadgeValueText, &Text)>()
+            .iter(world)
+            .map(|(_, text)| text.0.clone())
+            .collect();
+        assert_eq!(values, vec!["0.00".to_string()]);
+
+        let texts: Vec<String> = world
+            .query::<&Text>()
+            .iter(world)
+            .map(|text| text.0.clone())
+            .collect();
+        assert!(
+            texts.iter().any(|t| t == "SKILL BY SONG"),
+            "label text missing, got {texts:?}"
+        );
     }
 }
