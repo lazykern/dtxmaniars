@@ -1,6 +1,6 @@
 # 0014: osu-inspired UX redesign (mechanics port unchanged)
 
-Status: accepted
+Status: accepted (amended 2026-07-04)
 Date: 2026-06-28
 
 ## Context
@@ -18,11 +18,17 @@ day one.
 - **Adopt** unified 300ms OutQuint fade overlay on all `AppState` changes.
 - Implementation: `dtx-ui::transition::TransitionOverlay` + `TransitionRequest` event.
 
-### Performance HUD
+### Performance HUD (amended 2026-07-04)
 
 - BocuD mechanics underneath (score, combo, gauge from `dtx-scoring`).
-- osu-style rendering: rolling counters, tweened gauge, animated judgment popups.
-- Widgets live in `dtx-ui/src/widget/`.
+- **Original 2026-06-28:** osu-style rendering: rolling counters, tweened gauge, animated judgment popups.
+- **Amended 2026-07-04:** Performance HUD now uses the **DTXMania classic**
+  layout (frame chrome + side rails, left status panel with SCORE DETAILED,
+  right NOW PLAYING + PHRASE METER, bottom 5 pad chips, yellow judge line).
+  Rationale: user wanted the visible reference layout (`docs/notes/UX_UI_SCREENSHOTS/`).
+  Song select, title, config, result screens stay on the osu redesign.
+- Widgets live in `dtx-ui/src/widget/`. Classic widgets: `frame_chrome`,
+  `score_detailed`, `options_panel`, `now_playing`, `phrase_meter`, `pad_chips`.
 
 ### Song select
 
@@ -50,7 +56,8 @@ day one.
 - ADR-0010 rescoped: port-first = mechanics only.
 - ADR-0011/0012/0013 superseded.
 - `SCREEN_FADE_MS` constant becomes 300 (OutQuint), not 1500.
-- Success criteria: 300ms transitions, 60fps, readable at 1280×720 — not BocuD pixel diff.
+- Success criteria: 300ms transitions, 60fps, readable at 1280×720. Performance
+  screen now matches DTXMania reference layout; other screens use osu redesign.
 
 ## References
 
@@ -63,5 +70,6 @@ day one.
 
 - [ ] All screen changes use `TransitionRequest` (no raw `NextState` from input handlers)
 - [ ] Fade duration = 300ms, easing = OutQuint
-- [ ] HUD widgets use rolling/tweened display
+- [ ] Performance HUD uses DTXMania classic layout (frame chrome + left/right panels + pad chips)
+- [ ] Other screens use osu-style widgets
 - [ ] Theme tokens from `dtx-ui::theme`

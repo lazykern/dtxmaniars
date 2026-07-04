@@ -48,11 +48,12 @@ use dtx_core::chart::Chart;
 use game_shell::{request_transition, AppState, TransitionRequest};
 
 use crate::components::LastJudgment;
+use crate::derived::ChartDerived;
 use crate::drums_perf::{DrumsDangerState, DrumsFillingEffect, DrumsPadState};
 use crate::judge::{BpmChangeList, JudgedChips};
 use crate::resources::{
-    ActiveChart, BgmAdjustState, Combo, DrumGameplaySettings, DrumScoring, GameStartMs,
-    GameplayClock, JudgmentCounts, Score,
+    ActiveChart, BgmAdjustState, Combo, DrumGameplaySettings, DrumScoring, FastSlowCount,
+    GameStartMs, GameplayClock, JudgmentCounts, Score,
 };
 
 /// Marker component for the drums performance stage root entity.
@@ -94,6 +95,7 @@ pub fn plugin(app: &mut App) {
             OnEnter(AppState::Performance),
             (
                 reset_drum_runtime_keep_bank,
+                rebuild_drum_settings_on_enter,
                 on_enter_performance,
                 // Safety net: re-request any WAV slots the loading screen missed.
                 // Idempotent — already-loaded handles are reused, not re-decoded.
@@ -111,6 +113,14 @@ pub fn plugin(app: &mut App) {
             Update,
             detect_end_of_stage.run_if(in_state(AppState::Performance)),
         );
+}
+
+/// Rebuild drum gameplay settings (lane mapping, polyphony) from the active chart.
+fn rebuild_drum_settings_on_enter(
+    chart: Res<ActiveChart>,
+    mut drum_settings: ResMut<DrumGameplaySettings>,
+) {
+    drum_settings.rebuild_from_chart(&chart.chart);
 }
 
 /// Reset drum audio/hit-sound runtime state, including the chart sound bank.
@@ -159,7 +169,8 @@ pub fn on_enter_performance(
     mut played_bgm: ResMut<crate::bgm_scheduler::PlayedBgmChips>,
     mut primary_bgm: ResMut<crate::bgm_scheduler::PrimaryBgmChip>,
     mut gameplay_clock: ResMut<GameplayClock>,
-    mut drum_settings: ResMut<DrumGameplaySettings>,
+    mut derived: ResMut<ChartDerived>,
+    mut fast_slow: ResMut<FastSlowCount>,
     bgm_adjust: Res<BgmAdjustState>,
 ) {
     let has_bgm = crate::bgm_scheduler::chart_has_bgm_chips(&chart.chart)
@@ -174,7 +185,6 @@ pub fn on_enter_performance(
         gameplay_clock.start_wall_clock();
     }
     let drum_chip_count = chart.chart.drum_chips().count();
-    drum_settings.rebuild_from_chart(&chart.chart);
     *bpm_changes = BpmChangeList::from_chart(&chart.chart);
     completion.chart_end_ms = chart_end_ms_real(&chart.chart, &bpm_changes);
     completion.end_requested = false;
@@ -187,9 +197,12 @@ pub fn on_enter_performance(
     counts.reset();
     judged.0.clear();
     last.0 = None;
+    fast_slow.fast = 0;
+    fast_slow.slow = 0;
+    let base_bpm = chart.chart.metadata.bpm.unwrap_or(120.0);
+    crate::derived::compute_from_chart(&mut derived, &chart.chart, &bpm_changes, drum_chip_count as u32);
     played_bgm.0.clear();
     primary_bgm.0 = crate::bgm_scheduler::find_primary_bgm_chip(&chart.chart, &bpm_changes);
-    let base_bpm = chart.chart.metadata.bpm.unwrap_or(120.0);
     start_ms.0 = primary_bgm
         .0
         .and_then(|idx| chart.chart.chips.get(idx))

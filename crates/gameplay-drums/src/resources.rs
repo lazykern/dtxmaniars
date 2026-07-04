@@ -174,6 +174,26 @@ impl JudgmentCounts {
     }
 }
 
+/// Running "Skills by Song" + max possible skill. Updated as judgments land.
+///
+/// Computed via [`crate::skill::calculate_skill_new`] × chart_level × 0.33.
+#[derive(Resource, Default, Debug, Clone, Copy)]
+pub struct SkillValue {
+    pub current: f64,
+    /// Maximum theoretical skill (all P + full combo).
+    pub max: f64,
+}
+
+/// Fast / Slow hit counter (BocuD `CActPerfDrumsJudgementString`).
+///
+/// `fast` = early hits, `slow` = late hits. Updated by `score` system when
+/// judgment delta is non-zero.
+#[derive(Resource, Default, Debug, Clone, Copy)]
+pub struct FastSlowCount {
+    pub fast: u32,
+    pub slow: u32,
+}
+
 /// Scroll speed from `dtx-config` (`gameplay.scroll_speed`, a display
 /// multiplier where 1.0 == DTXManiaNX "x1.0").
 ///
