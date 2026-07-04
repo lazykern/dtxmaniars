@@ -172,6 +172,9 @@ pub enum LaneDisplay {
 }
 
 impl LaneDisplay {
+    pub fn all() -> [Self; 4] {
+        [Self::AllOn, Self::Half, Self::LineOff, Self::AllOff]
+    }
     /// Bar/beat lines visible when ALL ON or HALF (BocuD `nLaneDisp == 0 || == 1`).
     pub const fn shows_timing_lines(self) -> bool {
         matches!(self, Self::AllOn | Self::Half)
@@ -328,13 +331,6 @@ mod tests {
     use super::*;
 
     #[test]
-    fn default_config_has_skin_default() {
-        // CConfigIni default skin name.
-        let cfg = Config::default();
-        assert_eq!(cfg.skin, "Default");
-    }
-
-    #[test]
     fn default_system_vsync_on() {
         let s = SystemConfig::default();
         assert!(s.vsync);
@@ -371,15 +367,11 @@ mod tests {
         let tmp = std::env::temp_dir().join("dtxmaniars_cfg_test");
         let _ = std::fs::remove_dir_all(&tmp);
         let p = tmp.join("config.toml");
-        let mut cfg = Config {
-            skin: "MySkin".to_string(),
-            ..Config::default()
-        };
+        let mut cfg = Config::default();
         cfg.gameplay.scroll_speed = 1.5;
         cfg.audio.bgm_volume = 0.42;
         save(&p, &cfg).unwrap();
         let back = load(&p);
-        assert_eq!(back.skin, "MySkin");
         assert!((back.gameplay.scroll_speed - 1.5).abs() < 0.001);
         assert!((back.audio.bgm_volume - 0.42).abs() < 0.001);
         let _ = std::fs::remove_dir_all(&tmp);
@@ -406,13 +398,12 @@ mod tests {
     #[test]
     fn partial_config_fills_defaults() {
         // Missing sections must be filled with defaults.
-        let s = r#"
-            skin = "Foo"
-        "#;
+        let s = "";
         let cfg: Config = toml::from_str(s).unwrap();
-        assert_eq!(cfg.skin, "Foo");
         assert_eq!(cfg.system, SystemConfig::default());
         assert_eq!(cfg.gameplay, GameplayConfig::default());
+        assert_eq!(cfg.audio, AudioConfig::default());
+        assert_eq!(cfg.drums, drums::DrumsConfig::default());
     }
 
     #[test]

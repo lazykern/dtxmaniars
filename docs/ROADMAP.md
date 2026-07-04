@@ -16,10 +16,10 @@ Drums-first MVP. DTXmaniaNX semantics + osu-lazer fluidity. Bevy 0.19.
 | **M9** | Full Performance HUD (Drums) | All 10 CActPerfDrums* sub-acts + CStagePerfDrumsScreen ported; render in Performance stage | **Done** |
 | **M10** | Full SongSelect UX | DensityGraph + SortMenu + SongSearchMenu + StatusPanel + StatusPane + CommandHistory verbatim per reference | **Done** |
 | **M11** | Full Result UX | Rank icon (S/A/B/C/D/E) + song bar + ghost bar + score + max combo + 5 judgment counts | **Done** |
-| **M12** | Full Config + ChangeSkin | 5 tabs (system/game/play/keyassign/skin) + minimal CStageChangeSkin placeholder | **Done for M13** (full skin browser deferred per ADR-0014/M14) |
+| **M12** | Full Config | 5 tabs (system/game/play/keyassign/skin) | **Done for M13** (skin browser dropped — see ADR-0014/roadmap notes) |
 | **M13** | Integration + full-flow verify | All 9 states boot clean, BocuD timing windows, audio preload/voice pools, focused tests green | **In progress** (final workspace verify pending) |
 | **M13.5** | Playable + osu-smooth drums | Split clock + sub-frame interpolation + framepace; NX scroll/scoring/gauge/combo; pause + StageClear/StageFailed; real loading (bg parse + wait-on-handles); Config edits persist; tiered WAV preload; BocuD `.score.ini` best-score read in song select | **Done** |
-| M14+ | Skin system, CubeTest, Updater, online | TBD | Future |
+| M14+ | CubeTest, Updater, online | TBD | Future |
 
 ## M13.5 — Playable smooth drums (this goal)
 
@@ -47,9 +47,9 @@ from DTXManiaNX-BocuD, **smoothness/UX** patterns from the dtxpt POC.
 
 **ADR-0014 UX redesign** — osu-inspired fluidity. Mechanics stay BocuD-ported; all visuals redesigned.
 
-Completed: 300ms OutQuint transitions, dark theme, osu-style HUD widgets (rolling score, bounce combo, tweened gauge, judgment popup, lane flush), 3-column song select, themed screens (Startup/Title/SongSelect/Config/SongLoading/Result/ChangeSkin/End), BocuD 34/67/84/117 timing windows, chart sound-bank preload, real drum voice reuse, BRP debug, `.mcp.json`, `system_font_discovery` for CJK text.
+Completed: 300ms OutQuint transitions, dark theme, osu-style HUD widgets (rolling score, bounce combo, tweened gauge, judgment popup, lane flush), 3-column song select, themed screens (Startup/Title/SongSelect/Config/SongLoading/Result/End), BocuD 34/67/84/117 timing windows, chart sound-bank preload, real drum voice reuse, BRP debug, `.mcp.json`, `system_font_discovery` for CJK text.
 
-Remaining: data-driven density bars (M10.1), real BGA decode (M7.1), full skin browser/system (M14+).
+Remaining: data-driven density bars (M10.1), real BGA decode (M7.1).
 
 ## Port coverage summary
 
@@ -83,13 +83,12 @@ Gameplay-complete port per active goal. Each milestone ends with `cargo test --w
 
 **M11** — Full Result UX. `Stage/07.Result/` (5 files, 2104 lines). CStageResult + CActResultParameterPanel + ResultInfoPanel + ResultParameterPanel + ResultRankIcon.
 
-**M12** — Full Config + ChangeSkin. `Stage/03.Config/` (14 files, 4996 lines) + `Stage/09.ChangeSkin/` (1 file, 96 lines). 5 config tabs (system/audio/graphics/gameplay/menu/drums/guitar/bass/skin/keyassign) + ChangeSkin thumbnail grid.
+**M12** — Full Config. `Stage/03.Config/` (14 files, 4996 lines). 5 config tabs (system/audio/graphics/gameplay/menu/drums/guitar/bass/skin/keyassign). Skin browser removed from scope — no `CStageChangeSkin` port.
 
 **M13** — Integration + verify. Wire End stage minimal (CStageEnd.cs, 87 lines), end-to-end boot test, all tests green, clippy clean.
 
 ## Out of scope (deliberate deferrals)
 
-- Full BocuD skin system (FDK/Skin/) — M14+
 - CubeTest stage — M14+
 - Updater — M14+
 - Online / Discord rich presence — M14+

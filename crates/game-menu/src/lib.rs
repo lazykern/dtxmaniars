@@ -7,7 +7,6 @@
 
 use bevy::prelude::*;
 
-pub mod change_skin;
 pub mod config;
 pub mod config_key_assign;
 pub mod end;
@@ -30,7 +29,6 @@ impl Plugin for GameMenuPlugin {
             song_select::plugin,
             config::plugin,
             config_key_assign::plugin,
-            change_skin::plugin,
             song_loading::plugin,
             end::plugin,
         ));

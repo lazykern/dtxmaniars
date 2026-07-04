@@ -15,6 +15,12 @@ pub enum CyGroup {
     Common,
 }
 
+impl CyGroup {
+    pub fn all() -> [Self; 2] {
+        [Self::Separate, Self::Common]
+    }
+}
+
 impl Default for CyGroup {
     fn default() -> Self {
         Self::Separate
@@ -35,6 +41,17 @@ pub enum HhGroup {
     CommonAll,
 }
 
+impl HhGroup {
+    pub fn all() -> [Self; 4] {
+        [
+            Self::SeparateAll,
+            Self::HhAndLc,
+            Self::HhAndHo,
+            Self::CommonAll,
+        ]
+    }
+}
+
 impl Default for HhGroup {
     fn default() -> Self {
         Self::SeparateAll
@@ -47,6 +64,12 @@ impl Default for HhGroup {
 pub enum FtGroup {
     Separate,
     Common,
+}
+
+impl FtGroup {
+    pub fn all() -> [Self; 2] {
+        [Self::Separate, Self::Common]
+    }
 }
 
 impl Default for FtGroup {
@@ -69,6 +92,17 @@ pub enum BdGroup {
     AllBd,
 }
 
+impl BdGroup {
+    pub fn all() -> [Self; 4] {
+        [
+            Self::Separate,
+            Self::BdAndLbd,
+            Self::PedalsOnly,
+            Self::AllBd,
+        ]
+    }
+}
+
 impl Default for BdGroup {
     fn default() -> Self {
         Self::Separate
@@ -81,6 +115,12 @@ impl Default for BdGroup {
 pub enum HitSoundPriority {
     ChipOverPad,
     PadOverChip,
+}
+
+impl HitSoundPriority {
+    pub fn all() -> [Self; 2] {
+        [Self::ChipOverPad, Self::PadOverChip]
+    }
 }
 
 impl Default for HitSoundPriority {

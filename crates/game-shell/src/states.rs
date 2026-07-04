@@ -30,8 +30,6 @@ pub enum AppState {
     StageFailed,
     /// CStageResult — post-play results screen.
     Result,
-    /// CStageChangeSkin — skin selection.
-    ChangeSkin,
     /// CStageEnd — exit screen.
     End,
 }

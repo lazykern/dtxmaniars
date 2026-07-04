@@ -27,7 +27,6 @@ AppState::SongSelect     ← CStageSongSelectionNew (in BocuD)
 AppState::SongLoading    ← CStageSongLoading
 AppState::Performance    ← CStagePerfDrumsScreen
 AppState::Result         ← CStageResult
-AppState::ChangeSkin     ← CStageChangeSkin
 AppState::End            ← CStageEnd
 ```
 

@@ -1,14 +1,15 @@
 //! Verifies all 8 stages are defined and unique.
 //!
 //! CStage.cs (BocuD) has 8 EStage values: Startup, Title, Config,
-//! SongSelect, SongLoading, Performance, Result, ChangeSkin, End.
+//! SongSelect, SongLoading, Performance, Result, End.
 //! End is included for the boot exit path.
+//! ChangeSkin was dropped per roadmap refresh (no skin browser planned).
 
 use game_shell::AppState;
 
 #[test]
 fn all_stages_present_and_distinct() {
-    let all: [AppState; 9] = [
+    let all: [AppState; 8] = [
         AppState::Startup,
         AppState::Title,
         AppState::Config,
@@ -16,11 +17,10 @@ fn all_stages_present_and_distinct() {
         AppState::SongLoading,
         AppState::Performance,
         AppState::Result,
-        AppState::ChangeSkin,
         AppState::End,
     ];
     let unique: std::collections::HashSet<_> = all.iter().collect();
-    assert_eq!(unique.len(), 9, "AppState must have 9 distinct variants");
+    assert_eq!(unique.len(), 8, "AppState must have 8 distinct variants");
 }
 
 #[test]
