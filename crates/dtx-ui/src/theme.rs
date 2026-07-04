@@ -26,6 +26,12 @@ pub struct Theme {
     pub gauge_fill: Color,
     pub gauge_track: Color,
     pub selection_highlight: Color,
+    pub stage_bg: Color,
+    pub stage_panel_bg: Color,
+    pub stage_panel_border: Color,
+    pub select_yellow: Color,
+    pub clear_green: Color,
+    pub skill_bar_fill: Color,
 }
 
 impl Default for Theme {
@@ -44,6 +50,12 @@ impl Default for Theme {
             gauge_fill: Color::srgb(0.298, 0.851, 0.392),
             gauge_track: Color::srgba(0.0, 0.0, 0.0, 0.5),
             selection_highlight: Color::srgba(0.0, 0.831, 0.667, 0.15),
+            stage_bg: Color::srgb(0.02, 0.02, 0.02),                 // #050505
+            stage_panel_bg: Color::srgba(0.051, 0.051, 0.051, 0.93), // #0d0d0dee
+            stage_panel_border: Color::srgb(0.267, 0.267, 0.267),    // #444444
+            select_yellow: Color::srgb(1.0, 0.8, 0.0),               // #ffcc00
+            clear_green: Color::srgb(0.0, 0.8, 0.533),               // #00cc88
+            skill_bar_fill: Color::srgb(1.0, 0.8, 0.0),
         }
     }
 }
@@ -103,6 +115,31 @@ impl Theme {
     pub fn label_font() -> TextFont {
         Self::font(18.0)
     }
+
+    /// BASIC / ADVANCED / EXTREME / MASTER colors; >=3 clamps to MASTER.
+    pub fn difficulty_color(&self, difficulty: u8) -> Color {
+        match difficulty {
+            0 => Color::srgb(0.0, 0.533, 1.0),   // #0088ff BASIC
+            1 => Color::srgb(1.0, 0.8, 0.0),     // #ffcc00 ADVANCED
+            2 => Color::srgb(1.0, 0.267, 0.267), // #ff4444 EXTREME
+            _ => Color::srgb(0.8, 0.2, 1.0),     // #cc33ff MASTER+
+        }
+    }
+
+    /// Density-graph display lanes (LC HH LP SD BD HT LT FT CY), GITADORA order.
+    pub fn lane_colors(&self) -> [Color; 9] {
+        [
+            Color::srgb(0.8, 0.2, 1.0),     // LC purple
+            Color::srgb(0.0, 0.667, 1.0),   // HH blue
+            Color::srgb(1.0, 0.4, 0.8),     // LP pink
+            Color::srgb(1.0, 0.8, 0.0),     // SD yellow
+            Color::srgb(0.6, 0.6, 0.65),    // BD gray
+            Color::srgb(0.0, 0.8, 0.4),     // HT green
+            Color::srgb(1.0, 0.267, 0.267), // LT red
+            Color::srgb(1.0, 0.533, 0.0),   // FT orange
+            Color::srgb(0.0, 0.867, 0.867), // CY cyan
+        ]
+    }
 }
 
 #[cfg(test)]
@@ -119,5 +156,37 @@ mod tests {
     fn judgment_colors_distinct() {
         let t = Theme::default();
         assert_ne!(t.judgment_perfect, t.judgment_miss);
+    }
+
+    #[test]
+    fn stage_palette_black_bg_yellow_select() {
+        let t = Theme::default();
+        assert!(t.stage_bg.to_srgba().red < 0.05);
+        let y = t.select_yellow.to_srgba();
+        assert!(y.red > 0.9 && y.green > 0.7 && y.blue < 0.1);
+    }
+
+    #[test]
+    fn difficulty_colors_distinct() {
+        let t = Theme::default();
+        let all = [
+            t.difficulty_color(0),
+            t.difficulty_color(1),
+            t.difficulty_color(2),
+            t.difficulty_color(3),
+        ];
+        for i in 0..4 {
+            for j in (i + 1)..4 {
+                assert_ne!(all[i], all[j]);
+            }
+        }
+        // out-of-range clamps to MASTER color
+        assert_eq!(t.difficulty_color(9), t.difficulty_color(3));
+    }
+
+    #[test]
+    fn lane_colors_cover_nine_display_lanes() {
+        let t = Theme::default();
+        assert_eq!(t.lane_colors().len(), 9);
     }
 }
