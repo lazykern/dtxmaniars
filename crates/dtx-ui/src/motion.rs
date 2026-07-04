@@ -2,6 +2,9 @@
 //! rolling numbers, beat pulse, staggered enter choreography.
 
 use bevy::prelude::*;
+use bevy::ui::Val2;
+
+use crate::easing::EaseFunction;
 
 /// Critically-damp-able spring toward `target`. Tick with real dt.
 #[derive(Component, Debug, Clone)]
@@ -119,6 +122,75 @@ impl BeatPulse {
     }
 }
 
+/// Staggered screen-enter animation: node starts at `offset` px and
+/// slides to rest after `delay_ms`, over `duration_ms` with OutQuint.
+#[derive(Component, Debug, Clone)]
+pub struct EnterChoreo {
+    pub offset: Vec2,
+    pub delay_ms: f32,
+    pub duration_ms: f32,
+    pub elapsed_ms: f32,
+    pub easing: EaseFunction,
+}
+
+impl EnterChoreo {
+    pub fn slide(offset: Vec2, delay_ms: f32, duration_ms: f32) -> Self {
+        Self {
+            offset,
+            delay_ms,
+            duration_ms: duration_ms.max(0.001),
+            elapsed_ms: 0.0,
+            easing: EaseFunction::OutQuint,
+        }
+    }
+
+    pub fn tick(&mut self, delta_ms: f32) {
+        self.elapsed_ms += delta_ms;
+    }
+
+    /// 0 before delay, eased 0..1 across duration, 1 after.
+    pub fn progress(&self) -> f32 {
+        let t = ((self.elapsed_ms - self.delay_ms) / self.duration_ms).clamp(0.0, 1.0);
+        self.easing.ease(t)
+    }
+
+    pub fn finished(&self) -> bool {
+        self.elapsed_ms >= self.delay_ms + self.duration_ms
+    }
+
+    pub fn current_offset(&self) -> Vec2 {
+        self.offset * (1.0 - self.progress())
+    }
+}
+
+/// Drives every `EnterChoreo` + `UiTransform`; removes the component
+/// when finished so idle nodes cost nothing.
+pub fn enter_choreo_system(
+    time: Res<Time>,
+    mut commands: Commands,
+    mut q: Query<(Entity, &mut EnterChoreo, &mut UiTransform)>,
+) {
+    let dt_ms = time.delta_secs() * 1000.0;
+    for (entity, mut choreo, mut tf) in &mut q {
+        choreo.tick(dt_ms);
+        let off = choreo.current_offset();
+        tf.translation = Val2::px(off.x, off.y);
+        if choreo.finished() {
+            tf.translation = Val2::ZERO;
+            commands.entity(entity).remove::<EnterChoreo>();
+        }
+    }
+}
+
+/// Drives every standalone `BeatPulse` + `UiTransform` scale.
+pub fn beat_pulse_system(time: Res<Time>, mut q: Query<(&mut BeatPulse, &mut UiTransform)>) {
+    for (mut pulse, mut tf) in &mut q {
+        pulse.tick(time.delta_secs());
+        let s = pulse.scale();
+        tf.scale = Vec2::splat(s);
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -210,5 +282,45 @@ mod tests {
             p.tick(0.016);
         }
         assert!(p.phase >= 0.0 && p.phase < 1.0);
+    }
+
+    #[test]
+    fn enter_choreo_waits_for_delay_then_progresses() {
+        let mut c = EnterChoreo::slide(Vec2::new(-40.0, 0.0), 60.0, 200.0);
+        c.tick(30.0);
+        assert_eq!(c.progress(), 0.0);
+        c.tick(130.0); // 160ms total = 100ms into 200ms anim
+        let p = c.progress();
+        assert!(p > 0.0 && p < 1.0);
+        c.tick(500.0);
+        assert_eq!(c.progress(), 1.0);
+        assert!(c.finished());
+    }
+
+    #[test]
+    fn enter_choreo_offset_shrinks_to_zero() {
+        let mut c = EnterChoreo::slide(Vec2::new(-40.0, 0.0), 0.0, 200.0);
+        assert_eq!(c.current_offset(), Vec2::new(-40.0, 0.0));
+        c.tick(1000.0);
+        assert_eq!(c.current_offset(), Vec2::ZERO);
+    }
+
+    #[test]
+    fn choreo_system_moves_ui_transform() {
+        let mut app = App::new();
+        app.add_plugins(bevy::time::TimePlugin);
+        app.add_systems(Update, enter_choreo_system);
+        let e = app
+            .world_mut()
+            .spawn((
+                EnterChoreo::slide(Vec2::new(-40.0, 0.0), 0.0, 200.0),
+                UiTransform::default(),
+            ))
+            .id();
+        app.update();
+        app.update();
+        let tf = app.world().get::<UiTransform>(e).unwrap();
+        // after two ticks the node moved off its start offset
+        assert_ne!(tf.translation, Val2::px(-40.0, 0.0));
     }
 }

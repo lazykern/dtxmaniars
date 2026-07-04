@@ -104,6 +104,10 @@ pub fn plugin(app: &mut App) {
                 parallax::parallax_info_tween_system,
             )
                 .chain(),
+        )
+        .add_systems(
+            Update,
+            (motion::enter_choreo_system, motion::beat_pulse_system),
         );
 }
 
