@@ -4,6 +4,7 @@
 
 pub mod core_sub_acts;
 pub mod easing;
+pub mod motion;
 pub mod parallax;
 pub mod perf_common;
 pub mod theme;
