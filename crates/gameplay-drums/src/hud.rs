@@ -126,7 +126,7 @@ fn spawn_hud(
         ));
 
         for col in 0..lane_geometry::COLUMN_COUNT {
-            let tint = lane_geometry::column_color(col).with_alpha(0.10);
+            let tint = lane_geometry::lane_fill_color(col);
             root.spawn((
                 LaneColumn { col },
                 Node {
