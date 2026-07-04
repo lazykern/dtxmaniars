@@ -14,7 +14,7 @@ use crate::interp::RenderClock;
 use crate::judge::{BpmChangeList, JudgedChips};
 use crate::lane_geometry::{chip_color, column_of};
 use crate::lane_map::lane_of;
-use crate::lane_map::LANE_COUNT;
+use crate::lane_map::{lane_channel, LANE_COUNT};
 use crate::layout::PlayfieldLayout;
 use crate::resources::{ActiveChart, GameplayClock, ScrollSettings};
 use game_shell::{AppState, EGameMode, PauseState};
@@ -41,6 +41,12 @@ pub(super) fn plugin(app: &mut App) {
             .chain()
             .run_if(in_state(AppState::Performance))
             .run_if(in_state(PauseState::Running)),
+    )
+    .add_systems(
+        Update,
+        reposition_notes_on_layout_change
+            .run_if(in_state(AppState::Performance))
+            .run_if(resource_changed::<PlayfieldLayout>),
     )
     .add_systems(
         FixedUpdate,
@@ -167,6 +173,27 @@ fn scroll_notes_system(
     let px_per_ms = scroll.pixels_per_ms * layout.scale;
     for (note, mut node) in &mut notes {
         node.top = Val::Px(top_for_note_f(note.target_ms, now, judge_y, px_per_ms));
+    }
+}
+
+/// Re-anchor already-spawned notes to their column when the playfield rescales
+/// (window resize). `scroll_notes_system` only drives `top`; without this, notes
+/// keep the `left`/`width` baked in at spawn-time scale and drift off the strip.
+fn reposition_notes_on_layout_change(
+    mode: Res<EGameMode>,
+    layout: Res<PlayfieldLayout>,
+    mut notes: Query<(&Note, &mut Node), With<NoteVisual>>,
+) {
+    if *mode != EGameMode::Drums {
+        return;
+    }
+    for (note, mut node) in &mut notes {
+        let Some(col) = lane_channel(note.lane).and_then(column_of) else {
+            continue;
+        };
+        node.left = Val::Px(layout.col_left(col) + 2.0);
+        node.width = Val::Px(layout.note_width(col));
+        node.height = Val::Px(layout.note_height());
     }
 }
 

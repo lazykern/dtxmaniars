@@ -204,6 +204,9 @@ fn scroll_timing_lines(
     for (visual, line, mut node) in &mut lines {
         let top = top_for_note_f(line.target_ms, now, judge_y, px_per_ms) - line.height * 0.5;
         node.top = Val::Px(top);
+        // Re-anchor horizontally too, so lines follow the strip across resizes.
+        node.left = Val::Px(layout.strip_left());
+        node.width = Val::Px(layout.strip_width());
         line_tops.insert(visual.line_id, top);
     }
 
