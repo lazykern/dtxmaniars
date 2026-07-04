@@ -17,6 +17,7 @@ pub mod autoplay;
 pub mod bgm_scheduler;
 pub mod components;
 pub mod damage_level;
+pub mod derived;
 pub mod drum_groups;
 pub mod drums_perf;
 pub mod events;
@@ -28,6 +29,8 @@ pub mod input;
 pub mod interp;
 pub mod judge;
 pub mod keyboard_viz;
+pub mod phrase;
+pub mod skill;
 pub mod lane_map;
 pub mod layout;
 pub mod miss;
@@ -87,6 +90,10 @@ pub fn plugin(app: &mut App) {
     .init_resource::<resources::GameplayClock>()
     .init_resource::<resources::DrumGameplaySettings>()
     .init_resource::<resources::DrumAudioSettings>()
+    .init_resource::<resources::SkillValue>()
+    .init_resource::<resources::FastSlowCount>()
+    .init_resource::<phrase::PhraseMeter>()
+    .init_resource::<derived::ChartDerived>()
     .init_resource::<dtx_audio::DrumPolyphony>()
     .init_resource::<lane_map::LaneMap>()
     .init_resource::<hud_cache::HudDisplayCache>()
