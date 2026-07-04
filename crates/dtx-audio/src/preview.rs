@@ -149,6 +149,18 @@ pub struct PreviewPlayer {
     /// compute `PreviewSwapDirection`. `None` until the first accepted
     /// play.
     pub previous_index: Option<usize>,
+    /// Path of the most recently played preview. Used by `play()` to
+    /// short-circuit when the caller asks for the same file again
+    /// (e.g. switching to a sibling chart / difficulty that shares
+    /// the preview BGM, or a redundant arrow press that lands on the
+    /// same row).
+    pub current_path: Option<PathBuf>,
+    /// Most recent path submitted while the state machine was busy.
+    /// `drain_pending_preview` re-runs `play()` with it as soon as
+    /// state returns to `Playing` — guarantees the user's *latest*
+    /// arrow reaches the audio engine even when mashed faster than
+    /// the 250 ms crossfade window.
+    pub pending_path: Option<PathBuf>,
 }
 
 #[derive(Debug, Default, Clone)]
@@ -298,12 +310,17 @@ impl PreviewPlayer {
                 h.push(new.clone());
                 h
             }
-            PreviewState::Idle => return,
+            PreviewState::Idle => {
+                self.pending_path = None;
+                return;
+            }
         };
         for h in &handles {
             stop_with_fade(instances, h, ms);
         }
         self.state = PreviewState::Idle;
+        self.current_path = None;
+        self.pending_path = None;
     }
 
     /// Reset state to Idle and clear the previous-index tracking.
@@ -402,7 +419,10 @@ impl PreviewPlayer {
                 h.push(new.clone());
                 h
             }
-            PreviewState::Idle => return,
+            PreviewState::Idle => {
+                self.pending_path = None;
+                return;
+            }
         };
         let ms = if fade_out_ms == 0 {
             PREVIEW_FADE_OUT_MS
@@ -413,10 +433,53 @@ impl PreviewPlayer {
             stop_with_fade(instances, h, ms);
         }
         self.state = PreviewState::Idle;
+        self.current_path = None;
+        self.pending_path = None;
     }
 }
 
-#[cfg(test)]
+/// Drain the latest path submitted while the state machine was busy
+/// back into `play()` the moment `state == Playing`. System runs every
+/// Update, after `preview_tick_system`.
+///
+/// Without this, mashing arrows faster than the 250 ms crossfade
+/// silently drops every intervening request and the *first* song the
+/// user selected keeps playing audibly while their *latest* intent
+/// never reaches the audio engine. The pending slot holds at most one
+/// path — repeated mashes just overwrite it, always converging on
+/// the user's most recent target.
+pub fn drain_pending_preview(
+    mut player: ResMut<PreviewPlayer>,
+    audio: Res<Audio>,
+    asset_server: Res<AssetServer>,
+    mut cache: ResMut<AudioHandleCache>,
+    mut events: MessageWriter<PreviewSwapEvent>,
+    mut instances: ResMut<Assets<AudioInstance>>,
+) {
+    if player.state.is_busy() {
+        return;
+    }
+    let Some(path) = player.pending_path.take() else {
+        return;
+    };
+    // Same-path short-circuit lives inside play(); we still need to
+    // resolve the source from the cache so play() can be called. This
+    // also re-uses the cached decoded handle, so no extra decode.
+    let source = get_or_load(&mut cache, &asset_server, &path);
+    let _accepted = player.play(
+        &audio,
+        source,
+        path,
+        &mut events,
+        PreviewSwapDirection::None,
+        &mut instances,
+    );
+    // play() may legitimately return false only via the same-path
+    // short-circuit (returns true) or busy-gate (we cleared busy
+    // above). Ignore the result; the path is gone either way.
+}
+
+#[cfg(test)]  
 mod tests {
     use super::*;
     use bevy::asset::Handle;
