@@ -572,7 +572,10 @@ fn stop_preview_system(
     mut player: ResMut<PreviewPlayer>,
     mut instances: ResMut<Assets<AudioInstance>>,
 ) {
-    player.stop(&mut instances, 0);
+    // Align with the 300ms OutQuint screen fade (ADR-0014, dtx-ui).
+    // By the time the new screen's fade-in completes, the preview is
+    // silent and ready for the new BGM. (ADR-0015 Phase 4.)
+    player.stop(&mut instances, 300);
     player.previous_index = None;
 }
 
