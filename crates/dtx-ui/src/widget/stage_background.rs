@@ -85,11 +85,12 @@ mod tests {
         let theme = Theme::default();
         let root = app.world_mut().spawn(Node::default()).id();
 
-        let mut commands = app.world_mut().commands();
-        commands.entity(root).with_children(|p| {
-            spawn_stage_background(p, &theme);
-        });
-        drop(commands);
+        {
+            let mut commands = app.world_mut().commands();
+            commands.entity(root).with_children(|p| {
+                spawn_stage_background(p, &theme);
+            });
+        }
         app.world_mut().flush();
 
         let world = app.world_mut();
