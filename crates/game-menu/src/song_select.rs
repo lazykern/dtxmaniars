@@ -653,35 +653,43 @@ fn bgm_preview_on_change(
         return;
     }
     let new_index = selection.0;
-    if let Some(song) = db.songs.get(new_index)
-        && let Some(preview_path) = &song.preview_path
-    {
-        // Loop flag follows the source: #PREVIEW: file loops (short
-        // clip), fallback to full BGM plays through. (ADR-0015 Q1.)
-        player.set_looping(song.preview_is_loopable);
+    let Some(song) = db.songs.get(new_index) else {
+        return;
+    };
+    let Some(preview_path) = song.preview_path.clone() else {
+        // No preview for this song: stop whatever's currently
+        // playing so we don't leak a stale preview from a prior
+        // selection. (`stop` releases the kira instance via
+        // `stop_with_fade` — see PreviewPlayer docs.)
+        player.stop(&mut instances, 0);
+        return;
+    };
 
-        // Compute direction from the last accepted index.
-        let direction = match player.previous_index {
-            None => PreviewSwapDirection::None,
-            Some(prev) if new_index > prev => PreviewSwapDirection::Next,
-            Some(prev) if new_index < prev => PreviewSwapDirection::Prev,
-            Some(_) => PreviewSwapDirection::None,
-        };
-        let source = get_or_load_audio_handle(&mut cache, &asset_server, preview_path);
-        let accepted = player.play(
-            &audio,
-            source,
-            preview_path.clone(),
-            &mut events,
-            direction,
-            &mut instances,
-        );
-        if accepted {
-            player.previous_index = Some(new_index);
-            // Clear BgmHandle so dtx-timing's clock doesn't read the
-            // preview position during gameplay-inactive song select.
-            dtx_audio::stop_bgm(&audio, &mut bgm, &mut instances);
-        }
+    // Loop flag follows the source: #PREVIEW: file loops (short
+    // clip), fallback to full BGM plays through. (ADR-0015 Q1.)
+    player.set_looping(song.preview_is_loopable);
+
+    // Compute direction from the last accepted index.
+    let direction = match player.previous_index {
+        None => PreviewSwapDirection::None,
+        Some(prev) if new_index > prev => PreviewSwapDirection::Next,
+        Some(prev) if new_index < prev => PreviewSwapDirection::Prev,
+        Some(_) => PreviewSwapDirection::None,
+    };
+    let source = get_or_load_audio_handle(&mut cache, &asset_server, &preview_path);
+    let accepted = player.play(
+        &audio,
+        source,
+        preview_path,
+        &mut events,
+        direction,
+        &mut instances,
+    );
+    if accepted {
+        player.previous_index = Some(new_index);
+        // Clear BgmHandle so dtx-timing's clock doesn't read the
+        // preview position during gameplay-inactive song select.
+        dtx_audio::stop_bgm(&audio, &mut bgm, &mut instances);
     }
 }
 

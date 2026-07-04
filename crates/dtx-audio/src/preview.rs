@@ -21,7 +21,7 @@ use bevy_kira_audio::prelude::*;
 
 use crate::crossfade::{
     PREVIEW_FADE_DELAY_MS, PREVIEW_FADE_IN_MS, PREVIEW_FADE_OUT_MS, mute, start_fade_in_with_delay,
-    start_fade_out,
+    stop_with_fade,
 };
 
 // =====================================================================
@@ -133,9 +133,11 @@ pub enum ScreenFadeTransition {
 /// - `Idle` — no preview playing.
 /// - `Playing` — a preview is currently playing; `current` is the
 ///   audio instance handle. A new swap will crossfade from this.
-/// - `Crossfading` — a crossfade is in progress. `old` is fading out,
-///   `new` is fading in. `fade_in_started` flips once the pre-roll
-///   delay elapses and the fade-in tween is kicked off.
+/// - `Crossfading` — a crossfade is in progress. `old` is `Some` on a
+///   swap from `Playing` and `None` on the initial play (no prior
+///   handle to fade out). `new` is fading in (or has just started).
+///   `fade_in_started` flips once the pre-roll delay elapses and the
+///   fade-in tween is kicked off.
 #[derive(Resource, Debug, Default, Clone)]
 pub struct PreviewPlayer {
     pub state: PreviewState,
@@ -157,7 +159,7 @@ pub enum PreviewState {
         current: Handle<AudioInstance>,
     },
     Crossfading {
-        old: Handle<AudioInstance>,
+        old: Option<Handle<AudioInstance>>,
         new: Handle<AudioInstance>,
         elapsed_ms: u32,
         fade_in_started: bool,
@@ -165,10 +167,11 @@ pub enum PreviewState {
 }
 
 impl PreviewState {
-    /// True when a crossfade is in flight. New swap requests are
-    /// rejected while busy. This also acts as the rapid-mash debounce:
-    /// each swap takes ~400ms, so requests arriving faster than that
-    /// are dropped, mirroring osu-lazer's carousel-snap behavior.
+    /// True when a crossfade is in flight (including the initial fade-in
+    /// from `Idle`). New swap requests are rejected while busy. This
+    /// also acts as the rapid-mash debounce: each swap takes ~250ms,
+    /// so requests arriving faster than that are dropped, mirroring
+    /// osu-lazer's carousel-snap behavior.
     pub fn is_busy(&self) -> bool {
         matches!(self, Self::Crossfading { .. })
     }
@@ -216,8 +219,11 @@ pub fn screen_fade_responder_system(
 /// `Update`. No-op unless `state == Crossfading`.
 ///
 /// On reaching `delay_ms`, kicks off the fade-in tween. On reaching
-/// `delay_ms + fade_in_ms`, transitions to `Playing { new }` and drops
-/// the old handle (kira's fade-out tween continues to play out).
+/// `delay_ms + fade_in_ms`, transitions to `Playing { new }`. The
+/// `old` handle, if any, was scheduled to stop in `play()` with a
+/// fade-out tween of `PREVIEW_FADE_OUT_MS` (150ms) — by the time we
+/// resolve here (250ms in) that tween has long completed and the
+/// kira instance is gone, so no explicit stop is needed.
 pub fn preview_tick_system(
     time: Res<Time>,
     mut player: ResMut<PreviewPlayer>,
@@ -270,26 +276,34 @@ impl PreviewPlayer {
     }
 
     /// Fade the currently-playing preview to silence over `ms`
-    /// milliseconds. No-op if idle. Used to align with
-    /// `ScreenFade`'s fade-out.
+    /// milliseconds, then release the kira instance. Used to align
+    /// with `ScreenFade`'s fade-out.
     ///
-    /// After this call, the state remains in `Playing` or
-    /// `Crossfading` — the caller is expected to follow up with
-    /// `reset()` (e.g. on `ScreenFadeTransition::Done`) to clear
-    /// the handle.
+    /// After this call, the state goes to `Idle` so subsequent `play()`
+    /// calls don't trip on a stale handle. The underlying kira
+    /// instances are scheduled to stop after their respective fade-out
+    /// tweens complete.
     pub fn fade_to_silent(
         &mut self,
         instances: &mut Assets<AudioInstance>,
         ms: u32,
     ) {
-        let handle = match &self.state {
-            PreviewState::Playing { current } => Some(current.clone()),
-            PreviewState::Crossfading { new, .. } => Some(new.clone()),
-            PreviewState::Idle => None,
+        let handles: Vec<Handle<AudioInstance>> = match &self.state {
+            PreviewState::Playing { current } => vec![current.clone()],
+            PreviewState::Crossfading { old, new, .. } => {
+                let mut h = Vec::with_capacity(2);
+                if let Some(o) = old {
+                    h.push(o.clone());
+                }
+                h.push(new.clone());
+                h
+            }
+            PreviewState::Idle => return,
         };
-        if let Some(handle) = handle {
-            start_fade_out(instances, &handle, ms);
+        for h in &handles {
+            stop_with_fade(instances, h, ms);
         }
+        self.state = PreviewState::Idle;
     }
 
     /// Reset state to Idle and clear the previous-index tracking.
@@ -303,10 +317,17 @@ impl PreviewPlayer {
     /// playing or crossfading, the request is rejected and the original
     /// continues (busy-gate). Returns `true` if the swap was accepted.
     ///
-    /// On first play (state == Idle), starts immediately with no fade.
-    /// On a crossfade-eligible swap, schedules old fade-out + new
-    /// fade-in (with 30ms pre-roll) and publishes a `PreviewSwapEvent`
-    /// via `events`.
+    /// Always enters `Crossfading` state (with `old = None` for the
+    /// initial play). This guarantees a 30ms pre-roll + 220ms fade-in
+    /// so the first selection is audible, not pinned at the -60dB
+    /// mute level. The busy-gate debounces rapid mashing the same as
+    /// a swap.
+    ///
+    /// On a swap from `Playing`, the old handle is stopped with a
+    /// 150ms fade-out (the kira instance is released when the tween
+    /// completes — prevents the "mashed previews leaking into
+    /// Performance" bug where every accepted `play()` left a silent
+    /// -60dB kira handle alive in the audio engine).
     pub fn play(
         &mut self,
         audio: &Audio,
@@ -331,52 +352,65 @@ impl PreviewPlayer {
         mute(instances, &new_handle);
 
         let old_handle = match &self.state {
-            PreviewState::Idle => None,
             PreviewState::Playing { current } => Some(current.clone()),
+            PreviewState::Idle => None,
             PreviewState::Crossfading { .. } => unreachable!("busy-gated above"),
         };
 
-        if let Some(old) = old_handle {
-            start_fade_out(instances, &old, PREVIEW_FADE_OUT_MS);
-            self.state = PreviewState::Crossfading {
-                old,
-                new: new_handle,
-                elapsed_ms: 0,
-                fade_in_started: false,
-            };
-            events.write(PreviewSwapEvent {
-                old_path: Some(path.clone()),
-                new_path: path,
-                direction,
-            });
-        } else {
-            self.state = PreviewState::Playing {
-                current: new_handle,
-            };
+        if let Some(old) = &old_handle {
+            // Use stop_with_fade (not set_decibels) so the kira
+            // instance is released once the fade-out tween completes.
+            stop_with_fade(instances, old, PREVIEW_FADE_OUT_MS);
         }
+
+        let old_path_for_event = if old_handle.is_some() {
+            Some(path.clone())
+        } else {
+            None
+        };
+        self.state = PreviewState::Crossfading {
+            old: old_handle,
+            new: new_handle,
+            elapsed_ms: 0,
+            fade_in_started: false,
+        };
+        events.write(PreviewSwapEvent {
+            old_path: old_path_for_event,
+            new_path: path,
+            direction,
+        });
 
         true
     }
 
-    /// Stop the current preview with a fade-out. No-op if idle.
-    /// `fade_out_ms=0` uses the crossfade module default.
+    /// Stop the current preview with a fade-out, releasing the kira
+    /// instance(s). No-op if idle. `fade_out_ms=0` uses the crossfade
+    /// module default. Both the fading-in `new` and (if present) the
+    /// fading-out `old` handles are scheduled to stop.
     pub fn stop(
         &mut self,
         instances: &mut Assets<AudioInstance>,
         fade_out_ms: u32,
     ) {
-        let handle = match &self.state {
-            PreviewState::Playing { current } => Some(current.clone()),
-            PreviewState::Crossfading { new, .. } => Some(new.clone()),
-            PreviewState::Idle => None,
+        let handles: Vec<Handle<AudioInstance>> = match &self.state {
+            PreviewState::Playing { current } => vec![current.clone()],
+            PreviewState::Crossfading { old, new, .. } => {
+                let mut h = Vec::with_capacity(2);
+                if let Some(o) = old {
+                    h.push(o.clone());
+                }
+                h.push(new.clone());
+                h
+            }
+            PreviewState::Idle => return,
         };
-        if let Some(handle) = handle {
-            let ms = if fade_out_ms == 0 {
-                PREVIEW_FADE_OUT_MS
-            } else {
-                fade_out_ms
-            };
-            start_fade_out(instances, &handle, ms);
+        let ms = if fade_out_ms == 0 {
+            PREVIEW_FADE_OUT_MS
+        } else {
+            fade_out_ms
+        };
+        for h in &handles {
+            stop_with_fade(instances, h, ms);
         }
         self.state = PreviewState::Idle;
     }
@@ -468,13 +502,27 @@ mod tests {
     #[test]
     fn crossfading_state_is_busy() {
         let state = PreviewState::Crossfading {
-            old: Handle::<AudioInstance>::default(),
+            old: Some(Handle::<AudioInstance>::default()),
             new: Handle::<AudioInstance>::default(),
             elapsed_ms: 0,
             fade_in_started: false,
         };
         assert!(state.is_busy());
         // The "new" handle is reported as current even mid-crossfade.
+        assert!(state.current().is_some());
+    }
+
+    #[test]
+    fn crossfading_with_no_old_still_busy() {
+        // Initial fade-in from Idle also gates rapid mashing.
+        let state = PreviewState::Crossfading {
+            old: None,
+            new: Handle::<AudioInstance>::default(),
+            elapsed_ms: 0,
+            fade_in_started: false,
+        };
+        assert!(state.is_busy());
+        // The "new" handle is the audible one.
         assert!(state.current().is_some());
     }
 

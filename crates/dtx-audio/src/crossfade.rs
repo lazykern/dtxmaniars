@@ -28,11 +28,30 @@ pub const PREVIEW_FADE_IN_MS: u32 = 220;
 /// (osu `DELAY_BEFORE_FADE = 30`, `MusicController.cs:41`).
 pub const PREVIEW_FADE_DELAY_MS: u32 = 30;
 
-/// Start a linear fade-out on the given audio instance.
+/// Start a linear fade-out on the given audio instance, then stop it.
 ///
-/// Volume tweens to -60dB (effectively silent) over `ms` milliseconds.
+/// Volume tweens to silence over `ms` milliseconds; the underlying
+/// kira sound handle is removed from the audio engine once the tween
+/// completes. This is the *correct* way to fade-and-release a preview
+/// — `set_decibels(-60)` only mutes, leaving the handle alive and
+/// holding the audio source in kira's mixer (leak under mash).
+///
 /// No-op if the instance no longer exists in `instances` (e.g. dropped
 /// during a re-entrant swap).
+pub fn stop_with_fade(
+    instances: &mut Assets<AudioInstance>,
+    handle: &Handle<AudioInstance>,
+    ms: u32,
+) {
+    if let Some(mut instance) = instances.get_mut(handle) {
+        instance.stop(AudioTween::linear(Duration::from_millis(ms as u64)));
+    }
+}
+
+/// Linear volume-only fade-out. Use this only when you intend to keep
+/// the kira instance alive afterwards (rare — e.g. `play()` mutes a
+/// fresh handle to -60dB before the crossfade fade-in lifts it back).
+/// For releasing a preview, prefer [`stop_with_fade`].
 pub fn start_fade_out(
     instances: &mut Assets<AudioInstance>,
     handle: &Handle<AudioInstance>,
@@ -106,5 +125,6 @@ mod tests {
         start_fade_out(&mut instances, &handle, 150);
         start_fade_in_with_delay(&mut instances, &handle, 220, 30);
         mute(&mut instances, &handle);
+        stop_with_fade(&mut instances, &handle, 150);
     }
 }
