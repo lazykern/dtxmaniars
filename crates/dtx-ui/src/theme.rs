@@ -126,15 +126,16 @@ impl Theme {
         }
     }
 
-    /// Density-graph display lanes (LC HH LP SD BD HT LT FT CY), GITADORA order.
+    /// Density-graph display lanes (LC HH LP SD HT BD LT FT CY), GITADORA order
+    /// (matches gameplay-drums lane_geometry::COLUMNS: HT before BD).
     pub fn lane_colors(&self) -> [Color; 9] {
         [
             Color::srgb(0.8, 0.2, 1.0),     // LC purple
             Color::srgb(0.0, 0.667, 1.0),   // HH blue
             Color::srgb(1.0, 0.4, 0.8),     // LP pink
             Color::srgb(1.0, 0.8, 0.0),     // SD yellow
-            Color::srgb(0.6, 0.6, 0.65),    // BD gray
             Color::srgb(0.0, 0.8, 0.4),     // HT green
+            Color::srgb(0.6, 0.6, 0.65),    // BD gray
             Color::srgb(1.0, 0.267, 0.267), // LT red
             Color::srgb(1.0, 0.533, 0.0),   // FT orange
             Color::srgb(0.0, 0.867, 0.867), // CY cyan
