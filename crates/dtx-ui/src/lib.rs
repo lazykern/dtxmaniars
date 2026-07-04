@@ -94,6 +94,7 @@ pub fn absolute_label(
 
 pub fn plugin(app: &mut App) {
     app.init_resource::<ThemeResource>()
+        .init_resource::<widget::density_graph::DensityData>()
         .add_plugins((transition::plugin, bevy_tweening::TweeningPlugin))
         .add_message::<dtx_audio::PreviewSwapEvent>()
         .add_systems(
@@ -108,7 +109,11 @@ pub fn plugin(app: &mut App) {
         )
         .add_systems(
             Update,
-            (motion::enter_choreo_system, motion::beat_pulse_system),
+            (
+                motion::enter_choreo_system,
+                motion::beat_pulse_system,
+                widget::density_graph::density_graph_system,
+            ),
         );
 }
 
