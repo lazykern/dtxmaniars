@@ -31,6 +31,7 @@ pub mod judge;
 pub mod keyboard_viz;
 pub mod phrase;
 pub mod skill;
+pub mod lane_geometry;
 pub mod lane_map;
 pub mod layout;
 pub mod miss;
@@ -101,7 +102,7 @@ pub fn plugin(app: &mut App) {
     .add_systems(Startup, (load_scroll_settings, load_drum_audio_settings))
     .add_systems(
         OnEnter(game_shell::AppState::Performance),
-        apply_config_on_enter.before(orchestrator::on_enter_performance),
+        apply_config_on_enter.before(orchestrator::DrumsEnterSet),
     )
     .add_message::<events::LaneHit>()
     .add_message::<events::JudgmentEvent>()

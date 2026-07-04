@@ -62,7 +62,8 @@ pub fn spawn_judgment_popup(commands: &mut Commands, parent: Entity, theme: &The
             JudgmentPopup::default(),
             Node {
                 position_type: PositionType::Absolute,
-                left: Val::Percent(50.0),
+                // Strip center at ref res: (295 + 558/2) / 1280 ≈ 44.8%.
+                left: Val::Percent(44.8),
                 top: Val::Px(200.0),
                 ..default()
             },

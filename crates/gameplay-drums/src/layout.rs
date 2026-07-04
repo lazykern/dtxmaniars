@@ -5,16 +5,35 @@ use bevy::window::{PrimaryWindow, WindowResized};
 use dtx_ui::theme::{REF_HEIGHT, REF_WIDTH};
 use game_shell::AppState;
 
-use crate::lane_map::LANE_COUNT;
+use crate::lane_geometry::{COLUMNS, STRIP_REF_LEFT, STRIP_REF_WIDTH};
 
 pub const REF_JUDGE_Y: f32 = 620.0;
 pub const REF_LANE_TOP: f32 = 80.0;
 pub const REF_LANE_HEIGHT: f32 = 540.0;
-pub const REF_LANE_LEFT: f32 = 200.0;
-pub const REF_LANE_W: f32 = 80.0;
+pub const REF_KEY_CAP_H: f32 = 42.0;
 pub const REF_LABEL_OFFSET: f32 = 28.0;
 pub const REF_KEY_VIZ_OFFSET: f32 = 64.0;
 pub const REF_BACKBOARD_PAD: f32 = 12.0;
+
+/// Lane strip left edge at ref resolution (NX left-anchored).
+#[inline]
+pub fn ref_lane_left() -> f32 {
+    STRIP_REF_LEFT
+}
+
+/// Phrase meter sits just right of the lane strip.
+#[inline]
+pub fn ref_phrase_x() -> f32 {
+    STRIP_REF_LEFT + STRIP_REF_WIDTH + 8.0
+}
+
+/// Right HUD column (song info, combo, gauge) anchor, just right of the strip.
+#[inline]
+pub fn ref_hud_right_x() -> f32 {
+    STRIP_REF_LEFT + STRIP_REF_WIDTH + 24.0
+}
+
+pub const REF_COMBO_Y: f32 = 72.0;
 
 #[derive(Resource, Clone, Copy, Debug)]
 pub struct PlayfieldLayout {
@@ -55,25 +74,30 @@ impl PlayfieldLayout {
         REF_LANE_HEIGHT * self.scale
     }
 
-    pub fn lane_left(&self, lane: usize) -> f32 {
-        (REF_LANE_LEFT + lane as f32 * REF_LANE_W) * self.scale
+    pub fn col_left(&self, col: usize) -> f32 {
+        COLUMNS[col].ref_x * self.scale
     }
 
-    pub fn lane_width(&self) -> f32 {
-        REF_LANE_W * self.scale
+    pub fn col_width(&self, col: usize) -> f32 {
+        COLUMNS[col].ref_w * self.scale
     }
 
-    pub fn lane_strip_width(&self) -> f32 {
-        LANE_COUNT as f32 * self.lane_width()
+    pub fn strip_left(&self) -> f32 {
+        STRIP_REF_LEFT * self.scale
     }
 
-    pub fn lane_strip_left(&self) -> f32 {
-        self.lane_left(0)
+    pub fn strip_width(&self) -> f32 {
+        STRIP_REF_WIDTH * self.scale
     }
 
-    /// NX prints measure# at x≈858 (`CStagePerfDrumsScreen.cs:3588`).
+    /// NX prints measure# just right of the strip (`CStagePerfDrumsScreen.cs:3588`).
     pub fn measure_label_left(&self) -> f32 {
-        self.lane_strip_left() + self.lane_strip_width() + 8.0 * self.scale
+        self.strip_left() + self.strip_width() + 8.0 * self.scale
+    }
+
+    /// Lane abbreviations (HH, SD, …) sit just above the playfield.
+    pub fn lane_header_top(&self) -> f32 {
+        self.lane_top() - 8.0 * self.scale
     }
 
     pub fn label_top(&self) -> f32 {
@@ -85,11 +109,11 @@ impl PlayfieldLayout {
     }
 
     pub fn key_cap_height(&self) -> f32 {
-        36.0 * self.scale
+        REF_KEY_CAP_H * self.scale
     }
 
     pub fn backboard_left(&self) -> f32 {
-        self.lane_strip_left() - REF_BACKBOARD_PAD * self.scale
+        self.strip_left() - REF_BACKBOARD_PAD * self.scale
     }
 
     pub fn backboard_top(&self) -> f32 {
@@ -97,19 +121,55 @@ impl PlayfieldLayout {
     }
 
     pub fn backboard_width(&self) -> f32 {
-        self.lane_strip_width() + REF_BACKBOARD_PAD * self.scale * 2.0
+        self.strip_width() + REF_BACKBOARD_PAD * self.scale * 2.0
     }
 
     pub fn backboard_height(&self) -> f32 {
         self.lane_height() + REF_BACKBOARD_PAD * self.scale * 2.0
     }
 
-    pub fn note_width(&self) -> f32 {
-        self.lane_width() - 8.0 * self.scale
+    pub fn note_width(&self, col: usize) -> f32 {
+        (self.col_width(col) - 4.0 * self.scale).max(2.0 * self.scale)
+    }
+
+    pub fn phrase_x(&self) -> f32 {
+        ref_phrase_x() * self.scale
+    }
+
+    pub fn progress_bar_left(&self) -> f32 {
+        self.strip_left()
+    }
+
+    pub fn progress_bar_width(&self) -> f32 {
+        self.strip_width()
+    }
+
+    pub fn progress_bar_top(&self) -> f32 {
+        696.0 * self.scale
+    }
+
+    pub fn speed_label_left(&self) -> f32 {
+        (STRIP_REF_LEFT + STRIP_REF_WIDTH - 96.0) * self.scale
+    }
+
+    pub fn ref_hud_right(&self) -> f32 {
+        ref_hud_right_x() * self.scale
+    }
+
+    pub fn px(&self, ref_px: f32) -> f32 {
+        ref_px * self.scale
+    }
+
+    pub fn combo_left(&self) -> f32 {
+        self.ref_hud_right()
+    }
+
+    pub fn combo_top(&self) -> f32 {
+        self.px(REF_COMBO_Y)
     }
 
     pub fn note_height(&self) -> f32 {
-        8.0 * self.scale
+        14.0 * self.scale
     }
 }
 
@@ -154,6 +214,7 @@ fn sync_playfield_layout(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::lane_geometry::{COLUMN_COUNT, STRIP_REF_LEFT, STRIP_REF_WIDTH};
 
     #[test]
     fn judge_below_lane_top() {
@@ -168,5 +229,32 @@ mod tests {
             (layout.lane_top() + layout.lane_height() - layout.judge_y()).abs() < 1.0,
             "lane bottom should align with judge line"
         );
+    }
+
+    #[test]
+    fn col_left_matches_ref_at_default_scale() {
+        let layout = PlayfieldLayout::default(); // scale 1.0 at 1280x720
+        assert!((layout.col_left(0) - STRIP_REF_LEFT).abs() < 0.01);
+        let last = COLUMN_COUNT - 1;
+        assert!(
+            (layout.col_left(last) + layout.col_width(last)
+                - (STRIP_REF_LEFT + STRIP_REF_WIDTH))
+                .abs()
+                < 0.5
+        );
+    }
+
+    #[test]
+    fn columns_monotonic() {
+        let layout = PlayfieldLayout::default();
+        for c in 1..COLUMN_COUNT {
+            assert!(layout.col_left(c) > layout.col_left(c - 1));
+        }
+    }
+
+    #[test]
+    fn strip_width_matches_ref() {
+        let layout = PlayfieldLayout::default();
+        assert!((layout.strip_width() - STRIP_REF_WIDTH).abs() < 0.5);
     }
 }

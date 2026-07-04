@@ -142,9 +142,9 @@ fn spawn_timing_lines(
                 },
                 Node {
                     position_type: PositionType::Absolute,
-                    left: Val::Px(layout.lane_strip_left()),
+                    left: Val::Px(layout.strip_left()),
                     top: Val::Px(top),
-                    width: Val::Px(layout.lane_strip_width()),
+                    width: Val::Px(layout.strip_width()),
                     height: Val::Px(height),
                     ..default()
                 },

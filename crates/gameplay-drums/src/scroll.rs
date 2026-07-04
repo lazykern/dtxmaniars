@@ -12,6 +12,7 @@ use crate::events::NoteMissed;
 use crate::hud::HudRoot;
 use crate::interp::RenderClock;
 use crate::judge::{BpmChangeList, JudgedChips};
+use crate::lane_geometry::{chip_color, column_of};
 use crate::lane_map::lane_of;
 use crate::lane_map::LANE_COUNT;
 use crate::layout::PlayfieldLayout;
@@ -68,25 +69,6 @@ fn should_emit_miss_for_note(
     !judged.contains(&chip_id) && now_ms - target_ms > crate::drum_groups::MAX_JUDGE_WINDOW_MS
 }
 
-/// Per-lane color from the theme palette (gives visual variety).
-pub fn lane_color(lane: u8) -> Color {
-    match lane {
-        0 => Color::srgb(0.0, 0.65, 0.85),
-        1 => Color::srgb(0.95, 0.85, 0.2),
-        2 => Color::srgb(0.85, 0.2, 0.85),
-        3 => Color::srgb(0.2, 0.85, 0.2),
-        4 => Color::srgb(0.2, 0.6, 0.2),
-        5 => Color::srgb(0.75, 0.35, 0.15),
-        6 => Color::srgb(0.9, 0.75, 0.0),
-        7 => Color::srgb(0.3, 0.75, 0.9),
-        8 => Color::srgb(0.85, 0.55, 0.15),
-        9 => Color::srgb(0.55, 0.85, 0.35),
-        10 => Color::srgb(0.65, 0.25, 0.55),
-        11 => Color::srgb(0.45, 0.25, 0.75),
-        _ => Color::WHITE,
-    }
-}
-
 fn spawn_notes_system(
     mut commands: Commands,
     clock: Res<GameplayClock>,
@@ -136,8 +118,11 @@ fn spawn_notes_system(
         if target_ms < now - BACKFILL_MS || target_ms > now + spawn_window_ms {
             continue;
         }
+        let Some(col) = column_of(chip.channel) else {
+            continue;
+        };
         let top = top_for_note(target_ms, now, judge_y, px_per_ms);
-        let left = layout.lane_left(lane as usize) + 2.0;
+        let left = layout.col_left(col) + 2.0;
 
         let note_entity = commands
             .spawn((
@@ -151,11 +136,11 @@ fn spawn_notes_system(
                     position_type: PositionType::Absolute,
                     left: Val::Px(left),
                     top: Val::Px(top),
-                    width: Val::Px(layout.note_width()),
+                    width: Val::Px(layout.note_width(col)),
                     height: Val::Px(layout.note_height()),
                     ..default()
                 },
-                BackgroundColor(lane_color(lane)),
+                BackgroundColor(chip_color(chip.channel)),
             ))
             .id();
         commands.entity(hud).add_child(note_entity);

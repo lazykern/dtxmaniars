@@ -7,15 +7,16 @@ use game_shell::AppState;
 
 use crate::events::{JudgmentEvent, LaneHit};
 use crate::hud::HudRoot;
+use crate::lane_geometry::{column_color, column_of, COLUMN_COUNT};
+use crate::lane_map::lane_channel;
 use crate::layout::PlayfieldLayout;
-use crate::scroll::lane_color;
 
 const RECEPTOR_FLASH_SECS: f32 = 0.12;
 const HIT_BURST_SECS: f32 = 0.18;
 
 #[derive(Component)]
 pub struct LaneReceptor {
-    pub lane: u8,
+    pub col: u8,
 }
 
 #[derive(Component)]
@@ -48,19 +49,19 @@ pub fn spawn_lane_receptors(
     layout: &PlayfieldLayout,
     theme: &dtx_ui::theme::Theme,
 ) {
-    for lane in 0..crate::lane_map::LANE_COUNT {
+    for col in 0..COLUMN_COUNT {
         commands.entity(parent).with_children(|root| {
             root.spawn((
-                LaneReceptor { lane: lane as u8 },
+                LaneReceptor { col: col as u8 },
                 ReceptorFlash {
                     timer: Timer::from_seconds(0.0, TimerMode::Once),
                     strength: 0.0,
                 },
                 Node {
                     position_type: PositionType::Absolute,
-                    left: Val::Px(layout.lane_left(lane) + 2.0),
+                    left: Val::Px(layout.col_left(col) + 2.0),
                     top: Val::Px(layout.judge_y() - 12.0 * layout.scale),
-                    width: Val::Px(layout.lane_width() - 4.0),
+                    width: Val::Px(layout.col_width(col) - 4.0),
                     height: Val::Px(24.0 * layout.scale),
                     ..default()
                 },
@@ -81,14 +82,18 @@ fn flash_receptors_on_hit(
     let Ok(hud) = hud_root.single() else {
         return;
     };
+    let lane_to_col = |lane: u8| -> Option<usize> { lane_channel(lane).and_then(column_of) };
     for hit in lane_hits.read() {
+        let Some(col) = lane_to_col(hit.lane) else {
+            continue;
+        };
         for (receptor, mut flash) in &mut receptors {
-            if receptor.lane == hit.lane {
+            if receptor.col as usize == col {
                 flash.timer = Timer::from_seconds(RECEPTOR_FLASH_SECS, TimerMode::Once);
                 flash.strength = 0.7;
             }
         }
-        spawn_hit_burst(&mut commands, hud, &layout, hit.lane, 0.7);
+        spawn_hit_burst(&mut commands, hud, &layout, col, 0.7);
     }
     for ev in events.read() {
         let strength = match ev.kind {
@@ -101,13 +106,16 @@ fn flash_receptors_on_hit(
         if strength <= 0.0 {
             continue;
         }
+        let Some(col) = lane_to_col(ev.lane) else {
+            continue;
+        };
         for (receptor, mut flash) in &mut receptors {
-            if receptor.lane == ev.lane {
+            if receptor.col as usize == col {
                 flash.timer = Timer::from_seconds(RECEPTOR_FLASH_SECS, TimerMode::Once);
                 flash.strength = strength;
             }
         }
-        spawn_hit_burst(&mut commands, hud, &layout, ev.lane, strength);
+        spawn_hit_burst(&mut commands, hud, &layout, col, strength);
     }
 }
 
@@ -115,10 +123,9 @@ fn spawn_hit_burst(
     commands: &mut Commands,
     hud: Entity,
     layout: &PlayfieldLayout,
-    lane: u8,
+    col: usize,
     strength: f32,
 ) {
-    let lane = lane as usize;
     let burst = commands
         .spawn((
             HitBurst {
@@ -126,13 +133,13 @@ fn spawn_hit_burst(
             },
             Node {
                 position_type: PositionType::Absolute,
-                left: Val::Px(layout.lane_left(lane) + 4.0),
+                left: Val::Px(layout.col_left(col) + 4.0),
                 top: Val::Px(layout.judge_y() - layout.note_height()),
-                width: Val::Px(layout.note_width()),
+                width: Val::Px(layout.note_width(col)),
                 height: Val::Px(layout.note_height() * 1.6),
                 ..default()
             },
-            BackgroundColor(lane_color(lane as u8).with_alpha(0.85 * strength)),
+            BackgroundColor(column_color(col).with_alpha(0.85 * strength)),
         ))
         .id();
     commands.entity(hud).add_child(burst);
@@ -153,7 +160,7 @@ fn tick_receptor_flashes(
             bg.0 = theme.0.panel_bg;
         } else {
             let t = 1.0 - flash.timer.fraction();
-            let base = lane_color(receptor.lane);
+            let base = column_color(receptor.col as usize);
             bg.0 = base.with_alpha(0.15 + 0.35 * flash.strength * t);
         }
     }
@@ -179,10 +186,10 @@ pub fn apply_receptor_layout(
     mut receptors: Query<(&LaneReceptor, &mut Node)>,
 ) {
     for (receptor, mut node) in &mut receptors {
-        let lane = receptor.lane as usize;
-        node.left = Val::Px(layout.lane_left(lane) + 2.0);
+        let col = receptor.col as usize;
+        node.left = Val::Px(layout.col_left(col) + 2.0);
         node.top = Val::Px(layout.judge_y() - 12.0 * layout.scale);
-        node.width = Val::Px(layout.lane_width() - 4.0);
+        node.width = Val::Px(layout.col_width(col) - 4.0);
         node.height = Val::Px(24.0 * layout.scale);
     }
 }
