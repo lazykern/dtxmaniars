@@ -55,6 +55,69 @@ impl SpringValue {
     }
 }
 
+/// Exponential approach for numeric readouts (skill, BPM, notes).
+#[derive(Component, Debug, Clone)]
+pub struct RollingNumber {
+    pub shown: f32,
+    pub target: f32,
+    /// Fraction of remaining distance closed per second (~10 = fast).
+    pub rate: f32,
+}
+
+impl RollingNumber {
+    pub fn new(value: f32) -> Self {
+        Self {
+            shown: value,
+            target: value,
+            rate: 10.0,
+        }
+    }
+
+    pub fn set_target(&mut self, target: f32) {
+        self.target = target;
+    }
+
+    pub fn tick(&mut self, dt_s: f32) {
+        let diff = self.target - self.shown;
+        if diff.abs() < 0.005 {
+            self.shown = self.target;
+            return;
+        }
+        self.shown += diff * (self.rate * dt_s).min(1.0);
+    }
+}
+
+/// BPM-synced pulse in [1.0, 1.0+amplitude]; peak on the beat, decays
+/// across the beat interval (quadratic falloff).
+#[derive(Component, Debug, Clone)]
+pub struct BeatPulse {
+    pub bpm: f32,
+    /// Beat phase in [0, 1).
+    pub phase: f32,
+    pub amplitude: f32,
+}
+
+impl BeatPulse {
+    pub fn new(bpm: f32, amplitude: f32) -> Self {
+        Self {
+            bpm: bpm.max(1.0),
+            phase: 0.0,
+            amplitude,
+        }
+    }
+
+    pub fn tick(&mut self, dt_s: f32) {
+        let beats_per_s = self.bpm / 60.0;
+        self.phase = (self.phase + dt_s * beats_per_s).rem_euclid(1.0);
+    }
+
+    /// 1.0+amplitude at phase 0, easing back to ~1.0 by phase 1.
+    pub fn scale(&self) -> f32 {
+        let falloff = (1.0 - self.phase).powi(2);
+        1.0 + self.amplitude * falloff
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -101,5 +164,47 @@ mod tests {
         s.set_target(1.0);
         s.tick(10.0); // hitch — must not explode
         assert!(s.value.is_finite() && s.value.abs() < 10.0);
+    }
+
+    #[test]
+    fn rolling_number_approaches_target() {
+        let mut r = RollingNumber::new(0.0);
+        r.set_target(100.0);
+        for _ in 0..30 {
+            r.tick(0.016);
+        }
+        assert!(r.shown > 50.0 && r.shown <= 100.0);
+        for _ in 0..300 {
+            r.tick(0.016);
+        }
+        assert!((r.shown - 100.0).abs() < 0.01);
+    }
+
+    #[test]
+    fn rolling_number_snaps_when_close() {
+        let mut r = RollingNumber::new(99.999);
+        r.set_target(100.0);
+        r.tick(0.016);
+        assert_eq!(r.shown, 100.0);
+    }
+
+    #[test]
+    fn beat_pulse_scale_peaks_on_beat() {
+        let mut p = BeatPulse::new(60.0, 0.08);
+        // At phase 0 (on-beat) scale is max.
+        assert!((p.scale() - 1.08).abs() < 0.001);
+        p.tick(0.5); // half a beat at 60bpm
+        assert!(p.scale() < 1.04);
+        p.tick(0.5); // full beat — wraps to peak
+        assert!((p.scale() - 1.08).abs() < 0.01);
+    }
+
+    #[test]
+    fn beat_pulse_bpm_change_keeps_phase_bounded() {
+        let mut p = BeatPulse::new(157.0, 0.05);
+        for _ in 0..1000 {
+            p.tick(0.016);
+        }
+        assert!(p.phase >= 0.0 && p.phase < 1.0);
     }
 }
