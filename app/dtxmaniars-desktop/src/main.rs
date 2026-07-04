@@ -118,8 +118,7 @@ fn load_config_summary() {
     use dtx_config::{default_path, load};
     let cfg = load(&default_path());
     info!(
-        "config: skin={}, master_vol={:.0}%, scroll={:.2}x, vsync={}",
-        cfg.skin,
+        "config: master_vol={:.0}%, scroll={:.2}x, vsync={}",
         cfg.audio.master_volume * 100.0,
         cfg.gameplay.scroll_speed,
         cfg.system.vsync,

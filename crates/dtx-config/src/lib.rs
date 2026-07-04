@@ -1,15 +1,16 @@
 //! dtx-config — persisted user configuration (TOML).
 //!
-//! Port of `references/DTXmaniaNX-BocuD/DTXMania/Core/CConfigIni.cs:3926` (baseline sections).
-//! Full CConfigIni (KeyAssign, Drums/Guitar/Bass tables, skin) is ported in Phase 1 sub-acts.
+//! Port of `references/DTXmaniaNX-BocuD/DTXMania/Core/CConfigIni.cs` (baseline sections).
+//! Full CConfigIni (KeyAssign, Drums tables) is ported. Skin / ChangeSkin /
+//! Guitar/Bass tables dropped — no skin browser per roadmap refresh.
 //!
 //! ## Sections ported
 //! - `System` — nBGAlpha, nMovieAlpha, bAVIEnabled, bBGAEnabled, bVerticalSyncWait (subset)
-//! - `Gameplay` — bTight, bReverse, scroll speed
-//! - `Audio` — bBGMを発声する, bドラム打音を発声する (subset)
+//! - `Gameplay` — bTight, bReverse, scroll speed, damage level, lane display
+//! - `Audio` — bBGMを発声する, bドラム打音を発声する, per-track volume (subset)
+//! - `Drums` — CY/HH/FT/BD grouping, cymbal-free, hit-sound priority, polyphony
 //!
 //! Reference: `references/DTXmaniaNX-BocuD/DTXMania/Core/CConfigIni.cs:1-100` (field names).
-//! Reference: `references/DTXmaniaNX-BocuD/DTXMania/Stage/03.Config/CActConfigList.System.cs:1-50` (System tab fields).
 
 #![allow(dead_code)] // Some fields used by Phase 1 sub-acts, not yet wired.
 
@@ -36,9 +37,6 @@ pub struct Config {
     /// Audio: volumes and device flags.
     #[serde(default)]
     pub audio: AudioConfig,
-    /// Skin subfolder name (relative to `Graphics/Default`).
-    #[serde(default)]
-    pub skin: String,
     /// Drums grouping / cymbal-free / hit-sound priority.
     #[serde(default)]
     pub drums: DrumsConfig,
@@ -50,7 +48,6 @@ impl Default for Config {
             system: SystemConfig::default(),
             gameplay: GameplayConfig::default(),
             audio: AudioConfig::default(),
-            skin: "Default".to_string(),
             drums: DrumsConfig::default(),
         }
     }

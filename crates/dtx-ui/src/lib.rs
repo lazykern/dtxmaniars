@@ -6,7 +6,6 @@ pub mod core_sub_acts;
 pub mod easing;
 pub mod parallax;
 pub mod perf_common;
-pub mod skin;
 pub mod theme;
 pub mod transition;
 pub mod tween;
