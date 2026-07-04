@@ -26,7 +26,7 @@ use std::path::PathBuf;
 
 use bevy::prelude::*;
 use bevy_kira_audio::prelude::*;
-use dtx_audio::{BgmHandle, play_bgm, stop_bgm_system};
+use dtx_audio::{BgmHandle, get_or_load_audio_handle, play_bgm_handle, stop_bgm_system};
 use dtx_library::{SongDb, SongInfo, SortMode};
 use dtx_ui::ThemeResource;
 use dtx_ui::theme::Theme;
@@ -570,6 +570,7 @@ fn bgm_preview_on_change(
     audio: Res<Audio>,
     asset_server: Res<AssetServer>,
     mut bgm: ResMut<BgmHandle>,
+    mut cache: ResMut<dtx_audio::AudioHandleCache>,
     mut instances: ResMut<Assets<AudioInstance>>,
 ) {
     if !selection.is_changed() {
@@ -579,8 +580,14 @@ fn bgm_preview_on_change(
     if let Some(song) = db.songs.get(selection.0)
         && let Some(bgm_path) = &song.bgm_path
     {
-        let path_str = bgm_path.to_string_lossy().to_string();
-        play_bgm(&audio, &asset_server, &mut bgm, &mut instances, &path_str);
+        let source = get_or_load_audio_handle(&mut cache, &asset_server, bgm_path);
+        play_bgm_handle(
+            &audio,
+            &mut bgm,
+            &mut instances,
+            source,
+            &bgm_path.to_string_lossy(),
+        );
     }
 }
 

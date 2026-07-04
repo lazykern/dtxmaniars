@@ -13,6 +13,10 @@ use bevy::prelude::*;
 use bevy_kira_audio::prelude::*;
 use bevy_kira_audio::AudioSource as KiraAudioSource;
 
+pub mod preview;
+
+pub use preview::{get_or_load as get_or_load_audio_handle, AudioHandleCache};
+
 /// The currently-playing BGM instance, if any.
 ///
 /// `instance` is `None` when nothing is playing. The `dtx-timing` plugin reads
@@ -51,7 +55,8 @@ pub fn plugin(app: &mut App) {
     app.add_plugins(AudioPlugin)
         .init_resource::<BgmHandle>()
         .init_resource::<ChartSoundBank>()
-        .init_resource::<DrumPolyphony>();
+        .init_resource::<DrumPolyphony>()
+        .init_resource::<AudioHandleCache>();
 }
 
 impl ChartSoundBank {
