@@ -457,3 +457,43 @@ the player to NOT loop).
 > hard-cuts on rapid scroll. All in `dtx-audio` + thin slices in
 > `dtx-ui` and `game-menu`. No new dependencies. No mechanics changes.
 > No skin system. No decode-pool work in parallel.
+
+## 10. Implementation status (2026-07-04)
+
+All four phases shipped on branch `feat/audio-handle-cache` (5 commits):
+
+| Commit | Phase | Subject |
+|---|---|---|
+| `59ac87f` | — | docs: ADR-0015 hybrid audio + research plan |
+| `b9254eb` | 1 | feat(audio): AudioHandleCache for preview path-key dedupe |
+| `48b80ee` | 2 | feat(audio): crossfade 150/220ms + preview state machine |
+| `c3f62ac` | 3 | feat(audio): album-art tween widget + loop flag per screen |
+| `48ba5ff` | 4 | feat(audio): align SongSelect exit-fade with screen fade |
+
+**What shipped:**
+- `dtx-audio::AudioHandleCache` Resource (Path → Handle<KiraAudioSource>)
+- `dtx-audio::PreviewPlayer` + `PreviewState` (Idle / Playing / Crossfading)
+- `dtx_audio::crossfade` module with `start_fade_out`, `start_fade_in_with_delay`, `mute`
+- `dtx_audio::PreviewSwapEvent` Message consumed by `dtx_ui::widget::album_art`
+- `dtx_audio::PreviewSwapDirection` (Next / Prev / None) for parallax
+- `dtx_ui::widget::album_art` Component + tween system (in-flight guard)
+- 144 unit tests pass across `dtx-audio`, `dtx-ui`, `game-menu`
+- 2 pre-existing `dtx-core` integration test failures on `main` are
+  unaffected; they predate this work
+
+**What was deferred (YAGNI / scope):**
+- `ScrollVelocity` Resource: the `is_busy()` check covers rapid-mash
+  debounce naturally (~400ms per swap → requests arriving faster
+  rejected). Add only if observed glitch.
+- `parallax.rs` (info wedge slide): the message infrastructure ships;
+  the visible widget is a future "modern song select" task. Album art
+  tween (`widget::album_art`) ships but no entity attaches it yet.
+- Fallback for charts without `#PREVIEW:`: `dtx_core::resolve_bgm_path`
+  returns the full BGM first; current preview loops the full song.
+  Fix is a separate `preview_path` field on `SongInfo` with priority
+  `PREVIEW > BGMWAV`. Audibly OK today, not broken.
+- True event-driven fade tied to `ScreenFade` phase transitions
+  (start fade at t=0, not at `OnExit` at t=300ms). The 300ms
+  `stop_preview_system` is good enough; defer until visual glitches.
+- M14+ decode pool, pre-decode next row, mod ducking: untouched
+  per ADR-0015 §3.4.
