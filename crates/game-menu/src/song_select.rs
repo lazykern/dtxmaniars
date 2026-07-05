@@ -716,7 +716,11 @@ fn spawn_song_select(
                             right: Val::Px(16.0),
                             top: Val::Px(WHEEL_TOP),
                             bottom: Val::Px(WHEEL_BOTTOM),
-                            overflow: Overflow::clip(),
+                            // Clip only vertically: rows scroll off the
+                            // top/bottom, but the arc bulges the selected
+                            // row leftward and must not be horizontally
+                            // clipped (else its jacket gets cut off).
+                            overflow: Overflow::clip_y(),
                             ..default()
                         },
                     ))
