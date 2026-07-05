@@ -27,6 +27,7 @@ pub fn spawn_perf_combo(
         p.spawn((
             ComboDisplay::default(),
             PerfComboNumber,
+            GlobalZIndex(20),
             HudRefRect::new(ref_x, ref_y + 18.0, num_w, num_h),
             Node {
                 position_type: PositionType::Absolute,
@@ -42,6 +43,7 @@ pub fn spawn_perf_combo(
         ));
         p.spawn((
             PerfComboCaption,
+            GlobalZIndex(20),
             HudRefRect::new(ref_x, ref_y, num_w, 18.0),
             Node {
                 position_type: PositionType::Absolute,

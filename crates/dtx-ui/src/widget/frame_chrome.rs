@@ -42,8 +42,8 @@ pub fn spawn_frame_chrome(
                     left: Val::Px(x * scale),
                     top: Val::Px(0.0),
                     width: Val::Px(pillar_w * scale),
-                    height: Val::Percent(100.0),
-                    border: UiRect::horizontal(Val::Px(1.0)),
+                    height: Val::Px(REF_HEIGHT * scale),
+                    border: UiRect::horizontal(Val::Px(1.0 * scale)),
                     ..default()
                 },
                 BackgroundColor(pillar_color),
