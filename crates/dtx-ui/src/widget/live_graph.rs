@@ -31,6 +31,13 @@ pub fn bar_height(accuracy_pct: f32, bar_area_h: f32) -> f32 {
     (accuracy_pct.clamp(0.0, 100.0) / 100.0) * bar_area_h
 }
 
+/// Usable bar-drawing height inside a graph panel of ref height `ref_h`
+/// (leaves a small bottom margin). Shared by spawn + the HUD sync system so
+/// bar heights and threshold lines stay aligned.
+pub fn bar_area_h(ref_h: f32) -> f32 {
+    ref_h - 4.0
+}
+
 /// Spawn the graph panel: background plate, threshold lines with labels, and
 /// `GRAPH_SLOTS` zero-height bars anchored to the panel bottom (grow upward).
 pub fn spawn_live_graph(
@@ -43,7 +50,7 @@ pub fn spawn_live_graph(
     ref_w: f32,
     ref_h: f32,
 ) {
-    let bar_area_h = ref_h - 4.0;
+    let bar_area_h = bar_area_h(ref_h);
     let bar_w = ref_w / GRAPH_SLOTS as f32;
     let bg = theme.stage_panel_bg;
     let bar_color = theme.accent;
@@ -153,6 +160,11 @@ mod tests {
     fn bar_clamps_out_of_range() {
         assert!((bar_height(150.0, 200.0) - 200.0).abs() < 0.01);
         assert!((bar_height(-10.0, 200.0) - 0.0).abs() < 0.01);
+    }
+
+    #[test]
+    fn bar_area_leaves_margin() {
+        assert!((bar_area_h(300.0) - 296.0).abs() < 0.01);
     }
 
     #[test]
