@@ -535,7 +535,7 @@ fn spawn_song_select(
                 });
             });
 
-            // ---- far-left column: skill + bpm, then density graph
+            // ---- far-left column: skill + bpm
             root.spawn((
                 Node {
                     position_type: PositionType::Absolute,
@@ -572,26 +572,15 @@ fn spawn_song_select(
                 .with_children(|p| {
                     spawn_badge_row(p, &t, "BPM", "---", false);
                 });
-                left.spawn(panel(
-                    &t,
-                    Node {
-                        width: Val::Percent(100.0),
-                        flex_direction: FlexDirection::Column,
-                        align_items: AlignItems::Center,
-                        padding: UiRect::all(Val::Px(8.0)),
-                        ..default()
-                    },
-                ))
-                .with_children(|p| spawn_density_graph(p, &t));
             });
 
-            // ---- top-center: big jacket + artist
+            // ---- center-top: big square jacket + artist
             root.spawn((
                 Node {
                     position_type: PositionType::Absolute,
                     left: Val::Px(240.0),
                     top: Val::Px(72.0),
-                    width: Val::Px(360.0),
+                    width: Val::Px(300.0),
                     flex_direction: FlexDirection::Column,
                     row_gap: Val::Px(6.0),
                     ..default()
@@ -607,8 +596,8 @@ fn spawn_song_select(
                     panel(
                         &t,
                         Node {
-                            width: Val::Px(360.0),
-                            height: Val::Px(270.0),
+                            width: Val::Px(300.0),
+                            height: Val::Px(300.0),
                             ..default()
                         },
                     ),
@@ -625,27 +614,48 @@ fn spawn_song_select(
                 ));
             });
 
-            // ---- center-bottom: difficulty ladder
+            // ---- center-bottom: density graph + difficulty ladder (side by side)
             root.spawn((
                 Node {
                     position_type: PositionType::Absolute,
                     left: Val::Px(240.0),
-                    top: Val::Px(372.0),
-                    width: Val::Px(360.0),
-                    flex_direction: FlexDirection::Column,
+                    top: Val::Px(408.0),
+                    width: Val::Px(560.0),
+                    flex_direction: FlexDirection::Row,
+                    column_gap: Val::Px(10.0),
                     ..default()
                 },
                 UiTransform::default(),
                 EnterChoreo::slide(Vec2::new(-340.0, 0.0), 60.0, 220.0),
             ))
-            .with_children(|p| spawn_difficulty_grid(p, &t));
+            .with_children(|bottom| {
+                bottom
+                    .spawn(panel(
+                        &t,
+                        Node {
+                            width: Val::Px(120.0),
+                            flex_direction: FlexDirection::Column,
+                            align_items: AlignItems::Center,
+                            padding: UiRect::all(Val::Px(8.0)),
+                            ..default()
+                        },
+                    ))
+                    .with_children(|p| spawn_density_graph(p, &t));
+                bottom
+                    .spawn(Node {
+                        flex_grow: 1.0,
+                        flex_direction: FlexDirection::Column,
+                        ..default()
+                    })
+                    .with_children(|p| spawn_difficulty_grid(p, &t));
+            });
 
             // ---- right: song wheel container (rows spawned separately)
             root.spawn((
                 SongWheel,
                 Node {
                     position_type: PositionType::Absolute,
-                    left: Val::Percent(38.0),
+                    left: Val::Percent(48.0),
                     right: Val::Px(24.0),
                     top: Val::Px(52.0),
                     height: Val::Px(632.0),
