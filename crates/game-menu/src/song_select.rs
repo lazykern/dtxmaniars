@@ -1,17 +1,19 @@
 #![allow(clippy::type_complexity)]
 //! CStageSongSelectionNew — song select screen (M5: real SongDb).
 //!
-//! Merged from `song_select.rs` (M5 song list logic) +
-//! `song_select_full.rs` (strict-port status panel / density / sort / search).
-//! Single plugin, no double-spawn. The song list spawns on OnEnter(SongSelect);
-//! the persistent status panel + density + sort + search spawn on Startup.
+//! GITADORA stage layout (2026-07-05 redesign): plain black stage,
+//! left cluster (album art + skill/bpm badges), center column
+//! (density graph + difficulty grid) and a right-side song wheel
+//! that springs toward the selection. The visual layer sits on top
+//! of the `dtx-ui` stage widgets (`stage_background`, `stage_panel`,
+//! `density_graph`, `difficulty_grid`, `song_wheel`); this file wires
+//! them to `SongSelectSelection`/`Selection` and the M5 song-list
+//! logic below.
 //!
 //! Reference: `references/DTXmaniaNX-BocuD/DTXMania/Stage/04.SongSelectionNew/CStageSongSelectionNew.cs`
 //!
 //! M5 ports the LOGIC: EReturnValue (Selected/ReturnToTitle/CallConfig),
 //! arrow nav, BGM preview on row select (per CActSelectPresound.cs).
-//! Visuals simplified per ADR-0012 (no bigAlbumArt/density graphs/sort menus
-//! in the UI, but the SortMode enum + cycle_sort exist for completeness).
 //!
 //! ## M5 changes from M4
 //!
@@ -32,39 +34,23 @@ use dtx_audio::{
 };
 use dtx_library::{SongDb, SongInfo, SortMode};
 use dtx_ui::ThemeResource;
+use dtx_ui::motion::{EnterChoreo, RollingNumber};
 use dtx_ui::theme::Theme;
 use dtx_ui::widget::album_art::AlbumArt;
-use game_shell::{AppState, TransitionRequest, request_transition};
+use dtx_ui::widget::density_graph::spawn_density_graph;
+use dtx_ui::widget::difficulty_grid::{
+    DifficultyGridData, DifficultySlot, DifficultySlotLabel, DifficultySlotLevel,
+    DifficultySlotPanel, DifficultySlotScore, GRID_MAX_SLOTS, level_text, score_text,
+    spawn_difficulty_grid,
+};
+use dtx_ui::widget::song_wheel::{SongWheel, VISIBLE_HALF, WheelRow, WheelSpring, row_geometry};
+use dtx_ui::widget::stage_background::spawn_stage_background;
+use dtx_ui::widget::stage_panel::{
+    BadgeValueText, panel, selected_panel, set_panel_selected, spawn_badge_row,
+};
+use game_shell::{AppState, TransitionRequest, despawn_stage, request_transition};
 
-// ===== Layout positions (verbatim from reference files) =====
-
-/// StatusPanel position (StatusPanel.cs:10-12).
-pub const STATUS_PANEL_DRUMS_X: f32 = 430.0;
-pub const STATUS_PANEL_DRUMS_Y: f32 = 720.0;
-pub const STATUS_PANEL_GUITAR_X: f32 = 200.0;
-pub const STATUS_PANEL_GUITAR_Y: f32 = 720.0;
-
-/// DensityGraph bar geometry (DensityGraph.cs:30-46).
-pub const DENSITY_GRAPH_BAR_COUNT: usize = 8;
-pub const DENSITY_GRAPH_BAR_DX: f32 = 12.0;
-pub const DENSITY_GRAPH_BAR_W: f32 = 4.0;
-pub const DENSITY_GRAPH_BAR_H: f32 = 252.0;
-pub const DENSITY_GRAPH_BAR_BASE_X: f32 = 36.0;
-pub const DENSITY_GRAPH_BAR_BASE_Y: f32 = 284.0;
-pub const DENSITY_NOTE_TEXT_DRUMS: (f32, f32) = (150.0, 333.0);
-pub const DENSITY_NOTE_TEXT_GB: (f32, f32) = (102.0, 333.0);
-
-/// SortMenu container (SortMenuContainer.cs:25-26).
-pub const SORT_MENU_W: f32 = 662.0;
-pub const SORT_MENU_H: f32 = 92.0;
-pub const SORT_MENU_ELEMENT_SPACING: f32 = 90.0;
-
-/// SongSearchMenu layout (SongSearchMenu.cs:13-22).
-pub const SONG_SEARCH_W: f32 = 500.0;
-pub const SONG_SEARCH_H: f32 = 300.0;
-pub const SONG_SEARCH_TEXT_INPUT_Y: f32 = 30.0;
-pub const SONG_SEARCH_DESC_Y: f32 = 60.0;
-pub const SONG_SEARCH_STATUS_Y: f32 = 250.0;
+// ===== Layout constants =====
 
 /// Album-art placeholder size (ADR-0015 followup). Real image
 /// loading from `#PREIMAGE:` is a separate task; we render a tinted
@@ -86,8 +72,7 @@ pub struct SelectedSong(pub Option<PathBuf>);
 ///
 /// Corresponds to BocuD's per-song entry in `CActSelectSongList`
 /// (folder containing `bsc.dtx`, `adv.dtx`, `ext.dtx`, `mas.dtx`,
-/// `edit.dtx`). Cycling difficulty per row picks which chart inside
-/// the folder plays.
+/// `edit.dtx`). ←/→ picks chart inside folder (clamped, no wrap).
 #[derive(Debug, Clone)]
 pub struct SongFolderView {
     /// Folder path (parent directory of the DTX files).
@@ -248,16 +233,23 @@ impl CommandHistory {
 #[derive(Component)]
 pub struct SongSelectEntity;
 
+/// Wheel row text (title/artist), tagged for per-frame updates.
 #[derive(Component)]
-struct SongRowEntity {
-    index: usize,
-}
-
+struct WheelRowTitle;
 #[derive(Component)]
-struct SortModeText;
-
+struct WheelRowMeta;
+/// Left-cluster dynamic texts.
 #[derive(Component)]
-struct SelectedSongInfo;
+struct SkillValueText;
+#[derive(Component)]
+struct BpmValueText;
+#[derive(Component)]
+struct SearchText;
+#[derive(Component)]
+struct SortChipText;
+/// Big art panel in the left column.
+#[derive(Component)]
+struct BigAlbumArt;
 
 /// Cursor into the song-select list. Two-level: which song folder,
 /// which chart inside it (the latter is the difficulty index).
@@ -300,45 +292,11 @@ impl Selection {
     }
 }
 
-/// Sort menu element (one slot in the ring buffer).
-#[derive(Component, Debug, Clone, Copy, PartialEq, Eq)]
-pub struct SortMenuElement {
-    pub mode: SortMode,
-    /// Animation offset (0 = centered, ±1 = neighbor).
-    pub offset: i8,
-}
-
-/// Mark the entity holding the sort menu container UI.
-#[derive(Component, Debug, Clone, Copy)]
-pub struct SortMenuContainerComp;
-
-/// Mark the entity holding the search menu UI.
-#[derive(Component, Debug, Clone, Copy)]
-pub struct SongSearchMenuComp;
-
-/// Mark the entity holding the density graph UI.
-#[derive(Component, Debug, Clone, Copy)]
-pub struct DensityGraphComp;
-
-/// Overlay chrome hidden until SongSelect (ADR-0014).
-#[derive(Component, Debug, Clone, Copy)]
-struct SongSelectOverlay;
-
-/// Mark the entity holding the status panel UI.
-#[derive(Component, Debug, Clone, Copy)]
-pub struct StatusPanelComp;
-
 /// Mark the entity holding the album art image (ADR-0015 item e).
 /// Used by `update_album_art_image` to find the entity and swap its
 /// image on selection change.
 #[derive(Component, Debug, Clone, Copy)]
 pub struct AlbumArtEntity;
-#[derive(Component, Debug, Clone, Copy, PartialEq, Eq)]
-pub enum StatusPaneKind {
-    Drums,
-    Guitar,
-    Bass,
-}
 
 // ===== Plugin =====
 
@@ -347,24 +305,22 @@ pub fn plugin(app: &mut App) {
         .init_resource::<SongSelectSelection>()
         .init_resource::<CommandHistory>()
         .init_resource::<Selection>()
-        .add_systems(Startup, spawn_song_select_overlay)
         .add_systems(
             OnEnter(AppState::SongSelect),
             (
                 ensure_song_db_loaded,
                 recompute_visible,
+                reset_wheel_spring,
                 spawn_song_select,
-                show_song_select_overlay,
             )
                 .chain(),
         )
         .add_systems(
             OnExit(AppState::SongSelect),
             (
-                hide_song_select_overlay,
                 stop_preview_system,
                 stop_bgm_system,
-                despawn_song_select,
+                despawn_stage::<SongSelectEntity>,
             )
                 .chain(),
         )
@@ -373,12 +329,13 @@ pub fn plugin(app: &mut App) {
             (
                 maybe_recompute_visible,
                 song_select_navigation,
-                render_selected_song,
+                // search_input,          // Task 12
+                respawn_wheel_on_change,
+                wheel_layout_system,
+                update_left_cluster,
+                render_difficulty_grid,
                 bgm_preview_on_change,
                 update_album_art_image,
-                update_status_panes,
-                update_density_graph,
-                update_search_filter,
             )
                 .run_if(in_state(AppState::SongSelect)),
         );
@@ -403,10 +360,15 @@ fn ensure_song_db_loaded(mut db: ResMut<SongDb>) {
     }
 }
 
+/// Reset the wheel spring to the (post-clamp) selected folder so the
+/// wheel doesn't animate in from a stale position left over from the
+/// previous visit to this screen.
+fn reset_wheel_spring(selection: Res<Selection>, mut spring: ResMut<WheelSpring>) {
+    spring.0 = dtx_ui::motion::SpringValue::wheel(selection.folder as f32);
+}
+
 fn spawn_song_select(
     mut commands: Commands,
-    db: Res<SongDb>,
-    selection: Res<Selection>,
     selection_state: Res<SongSelectSelection>,
     theme: Res<ThemeResource>,
 ) {
@@ -417,203 +379,471 @@ fn spawn_song_select(
             Node {
                 width: Val::Percent(100.0),
                 height: Val::Percent(100.0),
-                flex_direction: FlexDirection::Column,
                 ..default()
             },
-            BackgroundColor(t.bg_bottom),
         ))
         .with_children(|root| {
+            spawn_stage_background(root, &t);
+
+            // ---- top bar
             root.spawn((
                 Node {
                     position_type: PositionType::Absolute,
-                    left: Val::Px(-48.0),
-                    top: Val::Px(64.0),
-                    width: Val::Px(560.0),
-                    height: Val::Px(420.0),
+                    top: Val::Px(0.0),
+                    left: Val::Px(0.0),
+                    width: Val::Percent(100.0),
+                    height: Val::Px(52.0),
+                    flex_direction: FlexDirection::Row,
+                    justify_content: JustifyContent::SpaceBetween,
+                    align_items: AlignItems::Center,
+                    padding: UiRect::horizontal(Val::Px(20.0)),
                     ..default()
                 },
-                BackgroundColor(t.bg_top.with_alpha(0.28)),
-            ));
-
-            root.spawn((Node {
-                width: Val::Percent(100.0),
-                padding: UiRect::all(Val::Px(24.0)),
-                flex_direction: FlexDirection::Column,
-                row_gap: Val::Px(8.0),
-                ..default()
-            },))
-                .with_children(|hdr| {
-                    hdr.spawn((
-                        Text::new("Song Select"),
-                        Theme::font(36.0),
-                        TextColor(t.accent),
-                    ));
-                    hdr.spawn((
-                    Text::new(
-                        "↑↓: Navigate  ENTER: Play  TAB: Sort  F5: Refresh  F1: Config  ESC: Title",
-                    ),
-                    Theme::font(14.0),
-                    TextColor(t.text_secondary),
+                UiTransform::default(),
+                EnterChoreo::slide(Vec2::new(0.0, -52.0), 0.0, 200.0),
+            ))
+            .with_children(|bar| {
+                bar.spawn((
+                    Text::new("DTXMANIARS"),
+                    Theme::font(22.0),
+                    TextColor(t.text_primary),
                 ));
-                    hdr.spawn((
-                        Text::new(format!("Sort: {:?}", db.sort_mode)),
-                        Theme::font(12.0),
+                bar.spawn(Node {
+                    flex_direction: FlexDirection::Row,
+                    column_gap: Val::Px(8.0),
+                    align_items: AlignItems::Center,
+                    ..default()
+                })
+                .with_children(|chips| {
+                    chips.spawn((
+                        SearchText,
+                        Text::new("type to search…"),
+                        Theme::font(13.0),
                         TextColor(t.text_secondary),
-                        SortModeText,
                     ));
-                });
-
-            root.spawn((Node {
-                width: Val::Percent(100.0),
-                flex_grow: 1.0,
-                flex_direction: FlexDirection::Row,
-                column_gap: Val::Px(16.0),
-                padding: UiRect {
-                    left: Val::Px(24.0),
-                    right: Val::Px(24.0),
-                    bottom: Val::Px(24.0),
-                    top: Val::Px(0.0),
-                },
-                ..default()
-            },))
-                .with_children(|body| {
-                    body.spawn((
-                        Node {
-                            width: Val::Px(96.0),
-                            height: Val::Px(520.0),
-                            flex_direction: FlexDirection::Row,
-                            align_items: AlignItems::End,
-                            justify_content: JustifyContent::SpaceEvenly,
-                            padding: UiRect::all(Val::Px(8.0)),
-                            ..default()
-                        },
-                        BackgroundColor(t.panel_bg),
-                    ))
-                    .with_children(|density| {
-                        for i in 0..DENSITY_GRAPH_BAR_COUNT {
-                            let frac = 0.25 + (i as f32 * 0.09).min(0.55);
-                            density.spawn((
-                                Node {
-                                    width: Val::Px(DENSITY_GRAPH_BAR_W + 4.0),
-                                    height: Val::Px(DENSITY_GRAPH_BAR_H * frac),
-                                    ..default()
-                                },
-                                BackgroundColor(t.accent.with_alpha(0.65)),
-                            ));
-                        }
-                    });
-
-                    body.spawn((
-                        Node {
-                            flex_grow: 1.0,
-                            flex_direction: FlexDirection::Column,
-                            row_gap: Val::Px(4.0),
-                            max_height: Val::Px(520.0),
-                            overflow: Overflow::scroll_y(),
-                            padding: UiRect::all(Val::Px(8.0)),
-                            ..default()
-                        },
-                        BackgroundColor(t.panel_bg),
-                    ))
-                    .with_children(|list| {
-                        for (i, folder) in selection_state.visible.iter().enumerate() {
-                            let label = format!(
-                                "{} \u{2014} {} [{}]",
-                                folder.title,
-                                folder.artist,
-                                SongFolderView::difficulty_label(selection.difficulty)
-                            );
-                            list.spawn((
-                                SongRowEntity { index: i },
-                                Node {
-                                    width: Val::Percent(100.0),
-                                    min_height: Val::Px(36.0),
-                                    margin: UiRect::vertical(Val::Px(2.0)),
-                                    padding: UiRect::all(Val::Px(8.0)),
-                                    flex_direction: FlexDirection::Row,
-                                    justify_content: JustifyContent::SpaceBetween,
-                                    align_items: AlignItems::Center,
-                                    ..default()
-                                },
-                                BackgroundColor(if i == selection.folder {
-                                    t.selection_highlight
-                                } else {
-                                    Color::NONE
-                                }),
-                            ))
-                            .with_children(|row| {
-                                row.spawn((
-                                    Text::new(label.clone()),
-                                    Theme::font(18.0),
-                                    TextColor(t.text_primary),
-                                ));
-                            });
-                        }
-                    });
-
-                    body.spawn((
-                        Node {
-                            width: Val::Px(280.0),
-                            height: Val::Px(520.0),
-                            flex_direction: FlexDirection::Column,
-                            padding: UiRect::all(Val::Px(16.0)),
-                            row_gap: Val::Px(12.0),
-                            ..default()
-                        },
-                        BackgroundColor(t.panel_bg),
-                    ))
-                    .with_children(|info| {
-                        // Album-art crossfade placeholder. Holds both
-                        // an ImageNode (for #PREIMAGE: when present) and
-                        // a BackgroundColor (placeholder when not). The
-                        // `update_album_art_image` system toggles which
-                        // is visible based on `song.preimage_path`.
-                        info.spawn((
+                    chips
+                        .spawn((
                             Node {
-                                width: Val::Px(ALBUM_ART_W),
-                                height: Val::Px(ALBUM_ART_H),
-                                margin: UiRect::bottom(Val::Px(8.0)),
+                                padding: UiRect::axes(Val::Px(10.0), Val::Px(3.0)),
                                 ..default()
                             },
-                            BackgroundColor(t.accent.with_alpha(0.18)),
-                            ImageNode {
-                                color: Color::WHITE.with_alpha(0.0),
-                                ..default()
-                            },
-                            AlbumArt::default(),
-                            AlbumArtEntity,
-                        ));
-                        info.spawn((
-                            Text::new("Chart info"),
-                            Theme::font(20.0),
-                            TextColor(t.accent),
-                        ));
-                        let detail = selection
-                            .chart_index(&selection_state)
-                            .and_then(|i| db.songs.get(i))
-                            .map(format_song_detail)
-                            .unwrap_or_else(|| "No songs in library.\nF5 to rescan.".into());
-                        info.spawn((
-                            SelectedSongInfo,
-                            Text::new(detail),
-                            Theme::font(14.0),
-                            TextColor(t.text_primary),
-                        ));
-                    });
+                            BackgroundColor(t.select_yellow),
+                        ))
+                        .with_children(|c| {
+                            c.spawn((
+                                SortChipText,
+                                Text::new("SORT: DEFAULT"),
+                                Theme::font(12.0),
+                                TextColor(Color::BLACK),
+                            ));
+                        });
                 });
+            });
+
+            // ---- left column: art + skill/bpm
+            root.spawn((
+                Node {
+                    position_type: PositionType::Absolute,
+                    left: Val::Px(20.0),
+                    top: Val::Px(64.0),
+                    width: Val::Px(300.0),
+                    flex_direction: FlexDirection::Column,
+                    row_gap: Val::Px(10.0),
+                    ..default()
+                },
+                UiTransform::default(),
+                EnterChoreo::slide(Vec2::new(-340.0, 0.0), 30.0, 220.0),
+            ))
+            .with_children(|left| {
+                left.spawn((
+                    BigAlbumArt,
+                    AlbumArt::default(),
+                    AlbumArtEntity,
+                    panel(
+                        &t,
+                        Node {
+                            width: Val::Px(300.0),
+                            height: Val::Px(300.0),
+                            ..default()
+                        },
+                    ),
+                    ImageNode {
+                        color: Color::WHITE.with_alpha(0.0),
+                        ..default()
+                    },
+                ));
+                left.spawn(panel(
+                    &t,
+                    Node {
+                        width: Val::Percent(100.0),
+                        flex_direction: FlexDirection::Column,
+                        ..default()
+                    },
+                ))
+                .with_children(|p| {
+                    spawn_badge_row(p, &t, "SKILL BY SONG", "0.00", true);
+                });
+                left.spawn(panel(
+                    &t,
+                    Node {
+                        width: Val::Percent(100.0),
+                        flex_direction: FlexDirection::Column,
+                        ..default()
+                    },
+                ))
+                .with_children(|p| {
+                    spawn_badge_row(p, &t, "BPM", "---", false);
+                });
+            });
+
+            // ---- center column: density graph + difficulty grid
+            root.spawn((
+                Node {
+                    position_type: PositionType::Absolute,
+                    left: Val::Px(336.0),
+                    top: Val::Px(64.0),
+                    width: Val::Px(280.0),
+                    flex_direction: FlexDirection::Row,
+                    column_gap: Val::Px(10.0),
+                    ..default()
+                },
+                UiTransform::default(),
+                EnterChoreo::slide(Vec2::new(-340.0, 0.0), 60.0, 220.0),
+            ))
+            .with_children(|center| {
+                center
+                    .spawn(panel(
+                        &t,
+                        Node {
+                            width: Val::Px(120.0),
+                            flex_direction: FlexDirection::Column,
+                            align_items: AlignItems::Center,
+                            padding: UiRect::all(Val::Px(8.0)),
+                            ..default()
+                        },
+                    ))
+                    .with_children(|p| spawn_density_graph(p, &t));
+                center
+                    .spawn(Node {
+                        flex_grow: 1.0,
+                        flex_direction: FlexDirection::Column,
+                        ..default()
+                    })
+                    .with_children(|p| spawn_difficulty_grid(p, &t));
+            });
+
+            // ---- right: song wheel container (rows spawned separately)
+            root.spawn((
+                SongWheel,
+                Node {
+                    position_type: PositionType::Absolute,
+                    right: Val::Px(0.0),
+                    top: Val::Px(52.0),
+                    width: Val::Px(620.0),
+                    height: Val::Px(632.0),
+                    overflow: Overflow::clip(),
+                    ..default()
+                },
+            ))
+            .with_children(|wheel| {
+                spawn_wheel_rows(wheel, &selection_state, &t);
+            });
+
+            // ---- bottom hint bar
+            root.spawn((
+                Node {
+                    position_type: PositionType::Absolute,
+                    bottom: Val::Px(0.0),
+                    left: Val::Px(0.0),
+                    width: Val::Percent(100.0),
+                    height: Val::Px(34.0),
+                    justify_content: JustifyContent::Center,
+                    align_items: AlignItems::Center,
+                    column_gap: Val::Px(18.0),
+                    flex_direction: FlexDirection::Row,
+                    ..default()
+                },
+                UiTransform::default(),
+                EnterChoreo::slide(Vec2::new(0.0, 34.0), 0.0, 200.0),
+            ))
+            .with_children(|bar| {
+                for (label, hot) in [
+                    ("↑↓ SELECT", false),
+                    ("←→ DIFFICULTY", false),
+                    ("ENTER PLAY", true),
+                    ("TAB SORT", false),
+                    ("F5 RESCAN", false),
+                    ("F1 SETTINGS", false),
+                    ("ESC BACK", false),
+                ] {
+                    bar.spawn((
+                        Text::new(label),
+                        Theme::font(12.0),
+                        TextColor(if hot {
+                            t.select_yellow
+                        } else {
+                            t.text_secondary
+                        }),
+                    ));
+                }
+            });
         });
 }
 
-fn show_song_select_overlay(mut q: Query<&mut Visibility, With<SongSelectOverlay>>) {
-    for mut vis in &mut q {
-        *vis = Visibility::Visible;
+/// Spawn one absolute-positioned row per visible folder. Positions are
+/// written every frame by `wheel_layout_system`.
+fn spawn_wheel_rows(
+    wheel: &mut ChildSpawnerCommands,
+    selection_state: &SongSelectSelection,
+    t: &Theme,
+) {
+    if selection_state.visible.is_empty() {
+        wheel.spawn((
+            Node {
+                position_type: PositionType::Absolute,
+                left: Val::Px(60.0),
+                top: Val::Px(280.0),
+                padding: UiRect::all(Val::Px(16.0)),
+                ..default()
+            },
+            BackgroundColor(t.stage_panel_bg),
+            Text::new(format!(
+                "no songs found — put song folders in {}\npress F5 to rescan",
+                dtx_library::default_song_dir().display()
+            )),
+            Theme::font(16.0),
+            TextColor(t.text_secondary),
+        ));
+        return;
+    }
+    for (i, folder) in selection_state.visible.iter().enumerate() {
+        wheel
+            .spawn((
+                WheelRow { index: i },
+                Node {
+                    position_type: PositionType::Absolute,
+                    left: Val::Px(0.0),
+                    top: Val::Px(0.0),
+                    width: Val::Px(600.0),
+                    height: Val::Px(dtx_ui::widget::song_wheel::ROW_H),
+                    flex_direction: FlexDirection::Row,
+                    align_items: AlignItems::Center,
+                    column_gap: Val::Px(12.0),
+                    padding: UiRect::horizontal(Val::Px(14.0)),
+                    border: UiRect::all(Val::Px(1.0)),
+                    ..default()
+                },
+                BackgroundColor(t.stage_panel_bg),
+                BorderColor::all(t.stage_panel_border),
+                BoxShadow::new(
+                    Color::NONE,
+                    Val::Px(0.0),
+                    Val::Px(0.0),
+                    Val::Px(0.0),
+                    Val::Px(0.0),
+                ),
+                Visibility::Hidden,
+            ))
+            .with_children(|row| {
+                row.spawn(Node {
+                    flex_direction: FlexDirection::Column,
+                    flex_grow: 1.0,
+                    ..default()
+                })
+                .with_children(|col| {
+                    col.spawn((
+                        WheelRowTitle,
+                        Text::new(folder.title.clone()),
+                        Theme::font(19.0),
+                        TextColor(t.text_primary),
+                    ));
+                    col.spawn((
+                        WheelRowMeta,
+                        Text::new(folder.artist.clone()),
+                        Theme::font(12.0),
+                        TextColor(t.text_secondary),
+                    ));
+                });
+            });
     }
 }
 
-fn hide_song_select_overlay(mut q: Query<&mut Visibility, With<SongSelectOverlay>>) {
-    for mut vis in &mut q {
-        *vis = Visibility::Hidden;
+/// Drive the wheel spring toward the selected index and lay out rows.
+fn wheel_layout_system(
+    time: Res<Time>,
+    selection: Res<Selection>,
+    theme: Res<ThemeResource>,
+    mut spring: ResMut<WheelSpring>,
+    mut rows: Query<(
+        &WheelRow,
+        &mut Node,
+        &mut Visibility,
+        &mut BorderColor,
+        &mut BoxShadow,
+        &mut BackgroundColor,
+    )>,
+) {
+    let t = theme.0;
+    spring.0.set_target(selection.folder as f32);
+    spring.0.tick(time.delta_secs());
+    let center = spring.0.value;
+    const WHEEL_H: f32 = 632.0;
+    for (row, mut node, mut vis, mut border, mut shadow, mut bg) in &mut rows {
+        let offset = row.index as f32 - center;
+        if offset.abs() > (VISIBLE_HALF as f32 + 1.0) {
+            *vis = Visibility::Hidden;
+            continue;
+        }
+        *vis = Visibility::Visible;
+        let g = row_geometry(offset);
+        node.top = Val::Px(WHEEL_H / 2.0 + g.center_y - g.height / 2.0);
+        node.left = Val::Px(g.indent);
+        node.height = Val::Px(g.height);
+        let selected = offset.abs() < 0.5;
+        set_panel_selected(&t, selected, &mut border, &mut shadow);
+        bg.0 = t.stage_panel_bg.with_alpha(0.93 * g.alpha);
     }
+}
+
+/// Push selection → difficulty grid, skill/bpm badges, sort chip.
+fn update_left_cluster(
+    selection: Res<Selection>,
+    selection_state: Res<SongSelectSelection>,
+    db: Res<SongDb>,
+    mut grid: ResMut<DifficultyGridData>,
+    mut badge_texts: Query<(&BadgeValueText, &mut Text)>,
+    mut sort_chip: Query<&mut Text, (With<SortChipText>, Without<BadgeValueText>)>,
+) {
+    if !selection.is_changed() && !selection_state.is_changed() {
+        return;
+    }
+    // difficulty grid
+    let mut data = DifficultyGridData::default();
+    data.selected = selection.difficulty as usize;
+    if let Some(folder) = selection_state.visible.get(selection.folder) {
+        for (slot_i, chart_idx) in folder.chart_indices.iter().enumerate().take(GRID_MAX_SLOTS) {
+            let Some(song) = db.songs.get(*chart_idx) else {
+                continue;
+            };
+            let ini = dtx_scoring::score_ini::score_ini_path(&song.path);
+            let best = dtx_scoring::score_ini::read_best(&ini);
+            data.slots[slot_i] = DifficultySlot {
+                present: true,
+                label: format!("DRUM · {}", SongFolderView::difficulty_label(slot_i as u8)),
+                level: song.dlevel.map(|v| v as f32 / 10.0),
+                achievement: best.as_ref().map(|b| b.accuracy()),
+                rank: best.as_ref().map(|b| b.rank.clone()),
+            };
+        }
+    }
+    *grid = data;
+
+    // skill + bpm badges
+    let (skill, bpm) = selection
+        .chart_index(&selection_state)
+        .and_then(|i| db.songs.get(i))
+        .map(|song| {
+            let ini = dtx_scoring::score_ini::score_ini_path(&song.path);
+            let acc = dtx_scoring::score_ini::read_best(&ini)
+                .map(|b| b.accuracy())
+                .unwrap_or(0.0);
+            (
+                crate::chart_stats::skill_points(song.dlevel, acc),
+                song.bpm.unwrap_or(0.0),
+            )
+        })
+        .unwrap_or((0.0, 0.0));
+    for (badge, mut text) in &mut badge_texts {
+        *text = Text::new(if badge.decimals {
+            format!("{skill:.2}")
+        } else if bpm > 0.0 {
+            format!("{}", bpm.round() as i32)
+        } else {
+            "---".into()
+        });
+    }
+    for mut text in &mut sort_chip {
+        *text = Text::new(format!(
+            "SORT: {}",
+            match selection_state.sort_mode {
+                SortMode::Default => "DEFAULT",
+                SortMode::ByTitle => "TITLE",
+                SortMode::ByArtist => "ARTIST",
+            }
+        ));
+    }
+}
+
+/// Write grid slot data into the widget's text/border entities.
+fn render_difficulty_grid(
+    grid: Res<DifficultyGridData>,
+    theme: Res<ThemeResource>,
+    mut panels: Query<(
+        &DifficultySlotPanel,
+        &mut BorderColor,
+        &mut BoxShadow,
+        &mut BackgroundColor,
+    )>,
+    mut labels: Query<
+        (&DifficultySlotLabel, &mut Text),
+        (Without<DifficultySlotLevel>, Without<DifficultySlotScore>),
+    >,
+    mut levels: Query<
+        (&DifficultySlotLevel, &mut Text),
+        (Without<DifficultySlotLabel>, Without<DifficultySlotScore>),
+    >,
+    mut scores: Query<
+        (&DifficultySlotScore, &mut Text),
+        (Without<DifficultySlotLabel>, Without<DifficultySlotLevel>),
+    >,
+) {
+    if !grid.is_changed() {
+        return;
+    }
+    let t = theme.0;
+    for (panel, mut border, mut shadow, mut bg) in &mut panels {
+        let slot = &grid.slots[panel.0];
+        let selected = slot.present && panel.0 == grid.selected;
+        set_panel_selected(&t, selected, &mut border, &mut shadow);
+        bg.0 = if slot.present {
+            t.stage_panel_bg
+        } else {
+            t.stage_panel_bg.with_alpha(0.35)
+        };
+    }
+    for (label, mut text) in &mut labels {
+        *text = Text::new(grid.slots[label.0].label.clone());
+    }
+    for (level, mut text) in &mut levels {
+        *text = Text::new(level_text(grid.slots[level.0].level));
+    }
+    for (score, mut text) in &mut scores {
+        *text = Text::new(score_text(&grid.slots[score.0]));
+    }
+}
+
+/// When `SongSelectSelection.visible` changes (sort/search/rescan),
+/// despawn the wheel row entities and respawn from the new list.
+fn respawn_wheel_on_change(
+    mut commands: Commands,
+    selection_state: Res<SongSelectSelection>,
+    theme: Res<ThemeResource>,
+    wheel: Query<Entity, With<SongWheel>>,
+    rows: Query<Entity, With<WheelRow>>,
+) {
+    if !selection_state.is_changed() {
+        return;
+    }
+    let Ok(wheel_entity) = wheel.single() else {
+        return;
+    };
+    for row in &rows {
+        commands.entity(row).despawn();
+    }
+    let t = theme.0;
+    commands.entity(wheel_entity).with_children(|w| {
+        spawn_wheel_rows(w, &selection_state, &t);
+    });
 }
 
 fn format_song_detail(song: &dtx_library::SongInfo) -> String {
@@ -638,26 +868,6 @@ fn format_song_detail(song: &dtx_library::SongInfo) -> String {
         ));
     }
     detail
-}
-
-/// ponytail: bevy 0.19 removed `despawn_recursive`; do it manually.
-fn despawn_song_select(
-    mut commands: Commands,
-    parents: Query<Entity, With<SongSelectEntity>>,
-    children: Query<&Children>,
-) {
-    for parent in &parents {
-        despawn_recursive(&mut commands, parent, &children);
-    }
-}
-
-fn despawn_recursive(commands: &mut Commands, entity: Entity, children: &Query<&Children>) {
-    if let Ok(c) = children.get(entity) {
-        for child in c.iter() {
-            despawn_recursive(commands, child, children);
-        }
-    }
-    commands.entity(entity).despawn();
 }
 
 fn song_select_navigation(
@@ -685,17 +895,12 @@ fn song_select_navigation(
         if let Some(folder) = selection_state.visible.get(selection.folder) {
             let count = folder.difficulty_count();
             if count > 0 {
-                selection.difficulty = ((selection.difficulty as usize + 1) % count) as u8;
+                let max = (count - 1) as u8;
+                selection.difficulty = (selection.difficulty + 1).min(max);
             }
         }
     } else if keys.just_pressed(KeyCode::ArrowLeft) {
-        if let Some(folder) = selection_state.visible.get(selection.folder) {
-            let count = folder.difficulty_count();
-            if count > 0 {
-                selection.difficulty =
-                    ((selection.difficulty as usize + count - 1) % count) as u8;
-            }
-        }
+        selection.difficulty = selection.difficulty.saturating_sub(1);
     } else if keys.just_pressed(KeyCode::Tab) {
         selection_state.sort_mode = selection_state.sort_mode.next();
         selection_state.dirty = true;
@@ -722,41 +927,19 @@ fn song_select_navigation(
     }
 }
 
-fn render_selected_song(
-    selection: Res<Selection>,
-    selection_state: Res<SongSelectSelection>,
-    db: Res<SongDb>,
-    theme: Res<ThemeResource>,
-    mut query: Query<&mut Text, With<SelectedSongInfo>>,
-    mut rows: Query<(&SongRowEntity, &mut BackgroundColor)>,
-) {
-    if !selection.is_changed() {
-        return;
-    }
-    let t = theme.0;
-    if let Some(chart_idx) = selection.chart_index(&selection_state)
-        && let Some(song) = db.songs.get(chart_idx)
-    {
-        let detail = format_song_detail(song);
-        for mut text in &mut query {
-            *text = Text::new(detail.clone());
-        }
-    }
-    for (row_entity, mut bg) in &mut rows {
-        bg.0 = if row_entity.index == selection.folder {
-            t.selection_highlight
-        } else {
-            t.panel_bg
-        };
-    }
-}
-
 fn update_album_art_image(
     selection: Res<Selection>,
     selection_state: Res<SongSelectSelection>,
     db: Res<SongDb>,
     asset_server: Res<AssetServer>,
     mut query: Query<(&AlbumArtEntity, &mut ImageNode, &mut BackgroundColor)>,
+    mut ambient: Query<
+        &mut ImageNode,
+        (
+            With<dtx_ui::widget::stage_background::AmbientArt>,
+            Without<AlbumArtEntity>,
+        ),
+    >,
 ) {
     if !selection.is_changed() {
         return;
@@ -778,6 +961,14 @@ fn update_album_art_image(
             image.image = Handle::default();
             image.color = image.color.with_alpha(0.0);
             bg.0 = bg.0.with_alpha(0.18);
+        }
+    }
+    for mut ambient_image in &mut ambient {
+        if let Some(path) = &song.preimage_path {
+            ambient_image.image = asset_server.load(path.to_string_lossy().to_string());
+        } else {
+            // No art: hold the ambient layer at alpha 0 (black stage).
+            ambient_image.image = Handle::default();
         }
     }
 }
@@ -816,7 +1007,10 @@ fn bgm_preview_on_change(
         return;
     };
     let Some(song) = db.songs.get(chart_idx) else {
-        info!("SongSelect preview: chart_idx={} missing from SongDb", chart_idx);
+        info!(
+            "SongSelect preview: chart_idx={} missing from SongDb",
+            chart_idx
+        );
         return;
     };
     info!(
@@ -842,15 +1036,15 @@ fn bgm_preview_on_change(
     }
     info!(
         "SongSelect preview: request path={} loopable={}",
-        preview_path.display(), song.preview_is_loopable
+        preview_path.display(),
+        song.preview_is_loopable
     );
 
     // Loop flag follows the source: #PREVIEW: file loops (short
     // clip), fallback to full BGM plays through. (ADR-0015 Q1.)
     player.set_looping(song.preview_is_loopable);
 
-    // Direction uses the folder index, not the absolute chart index,
-    // so cycling difficulty within the same folder reads as "None".
+    // Direction uses the folder index, not the absolute chart index.
     let direction = match player.previous_index {
         None => PreviewSwapDirection::None,
         Some(prev) if selection.folder > prev => PreviewSwapDirection::Next,
@@ -877,202 +1071,6 @@ fn bgm_preview_on_change(
     );
     if accepted {
         player.previous_index = Some(selection.folder);
-    }
-}
-
-// ===== Strict-port overlay: status panel / density / sort / search (Startup) =====
-
-fn spawn_song_select_overlay(mut commands: Commands, theme: Res<ThemeResource>) {
-    let t = theme.0;
-
-    for kind in [
-        StatusPaneKind::Drums,
-        StatusPaneKind::Guitar,
-        StatusPaneKind::Bass,
-    ] {
-        let (x, y) = match kind {
-            StatusPaneKind::Drums => (STATUS_PANEL_DRUMS_X, STATUS_PANEL_DRUMS_Y),
-            StatusPaneKind::Guitar => (STATUS_PANEL_GUITAR_X, STATUS_PANEL_GUITAR_Y),
-            StatusPaneKind::Bass => (STATUS_PANEL_DRUMS_X, STATUS_PANEL_DRUMS_Y),
-        };
-        commands.spawn((
-            SongSelectOverlay,
-            Visibility::Hidden,
-            StatusPanelComp,
-            kind,
-            Node {
-                position_type: PositionType::Absolute,
-                left: Val::Px(x),
-                top: Val::Px(y),
-                width: Val::Px(220.0),
-                height: Val::Px(140.0),
-                flex_direction: FlexDirection::Column,
-                ..default()
-            },
-            BackgroundColor(t.panel_bg),
-            Text::new("(no song)"),
-            Theme::font(14.0),
-            TextColor(t.text_secondary),
-        ));
-    }
-
-    commands.spawn((
-        SongSelectOverlay,
-        Visibility::Hidden,
-        DensityGraphComp,
-        Node {
-            position_type: PositionType::Absolute,
-            left: Val::Px(0.0),
-            top: Val::Px(0.0),
-            width: Val::Px(200.0),
-            height: Val::Px(350.0),
-            ..default()
-        },
-    ));
-    for i in 0..DENSITY_GRAPH_BAR_COUNT {
-        commands.spawn((
-            SongSelectOverlay,
-            Visibility::Hidden,
-            Node {
-                position_type: PositionType::Absolute,
-                left: Val::Px(DENSITY_GRAPH_BAR_BASE_X + (i as f32) * DENSITY_GRAPH_BAR_DX),
-                top: Val::Px(DENSITY_GRAPH_BAR_BASE_Y - DENSITY_GRAPH_BAR_H),
-                width: Val::Px(DENSITY_GRAPH_BAR_W),
-                height: Val::Px(DENSITY_GRAPH_BAR_H * 0.5),
-                ..default()
-            },
-            BackgroundColor(t.accent.with_alpha(0.75)),
-        ));
-    }
-
-    let sorters = [SortMode::Default, SortMode::ByTitle, SortMode::ByArtist];
-    commands.spawn((
-        SongSelectOverlay,
-        Visibility::Hidden,
-        SortMenuContainerComp,
-        Node {
-            position_type: PositionType::Absolute,
-            right: Val::Px(0.0),
-            top: Val::Px(0.0),
-            width: Val::Px(SORT_MENU_W),
-            height: Val::Px(SORT_MENU_H),
-            flex_direction: FlexDirection::Row,
-            ..default()
-        },
-        BackgroundColor(t.panel_bg),
-    ));
-    for (i, mode) in sorters.iter().enumerate() {
-        let offset = i as i8 - 2;
-        commands.spawn((
-            SongSelectOverlay,
-            Visibility::Hidden,
-            SortMenuElement {
-                mode: *mode,
-                offset,
-            },
-            Node {
-                position_type: PositionType::Absolute,
-                left: Val::Px(SORT_MENU_ELEMENT_SPACING * (i as f32) - 30.0),
-                top: Val::Px(40.0),
-                width: Val::Px(80.0),
-                height: Val::Px(40.0),
-                ..default()
-            },
-            BackgroundColor(t.selection_highlight),
-            Text::new(mode_label(*mode)),
-            Theme::font(18.0),
-            TextColor(t.text_primary),
-        ));
-    }
-
-    commands.spawn((
-        SongSelectOverlay,
-        Visibility::Hidden,
-        SongSearchMenuComp,
-        Node {
-            position_type: PositionType::Absolute,
-            left: Val::Px(380.0),
-            top: Val::Px(150.0),
-            width: Val::Px(SONG_SEARCH_W),
-            height: Val::Px(SONG_SEARCH_H),
-            flex_direction: FlexDirection::Column,
-            ..default()
-        },
-        BackgroundColor(t.panel_bg),
-        Text::new("Search\n\n(description)\n\nStatus: (typing...)"),
-        Theme::font(16.0),
-        TextColor(t.text_secondary),
-    ));
-}
-
-fn mode_label(m: SortMode) -> &'static str {
-    match m {
-        SortMode::Default => "Default",
-        SortMode::ByTitle => "Title",
-        SortMode::ByArtist => "Artist",
-    }
-}
-
-fn update_status_panes(
-    sel: Res<SongSelectSelection>,
-    mut q: Query<(&StatusPaneKind, &mut Text), With<StatusPanelComp>>,
-) {
-    if !sel.is_changed() {
-        return;
-    }
-    let song = sel.song.as_ref();
-    for (kind, mut text) in &mut q {
-        let label = match kind {
-            StatusPaneKind::Drums => "Drums",
-            StatusPaneKind::Guitar => "Guitar",
-            StatusPaneKind::Bass => "Bass",
-        };
-        *text = Text::new(match song {
-            Some(s) => format!(
-                "{}\n{}\nBPM: {}\nLevel: {}\nNotes: {}\n({})",
-                label,
-                s.title,
-                s.bpm
-                    .map(|v| format!("{:.1}", v))
-                    .unwrap_or_else(|| "?".into()),
-                s.dlevel
-                    .map(|v| v.to_string())
-                    .unwrap_or_else(|| "?".into()),
-                s.notes_total(),
-                kind_str(*kind)
-            ),
-            None => format!("{}\n(no song)", label),
-        });
-    }
-}
-
-fn kind_str(k: StatusPaneKind) -> &'static str {
-    match k {
-        StatusPaneKind::Drums => "drums",
-        StatusPaneKind::Guitar => "guitar",
-        StatusPaneKind::Bass => "bass",
-    }
-}
-
-fn update_density_graph(
-    sel: Res<SongSelectSelection>,
-    bars: Query<
-        Entity,
-        (
-            With<Node>,
-            Without<StatusPanelComp>,
-            Without<SortMenuContainerComp>,
-            Without<StatusPaneKind>,
-        ),
-    >,
-) {
-    let _ = sel;
-    let _ = bars;
-}
-
-fn update_search_filter(mut sel: ResMut<SongSelectSelection>) {
-    if sel.is_changed() && sel.search_query.len() > 64 {
-        sel.search_query.truncate(64);
     }
 }
 
@@ -1123,42 +1121,6 @@ mod tests {
             preview_is_loopable: false,
             preimage_path: None,
         }
-    }
-
-    // Position / layout constants (from old song_select_full.rs)
-    #[test]
-    fn status_panel_positions_match_reference() {
-        // StatusPanel.cs:9-13
-        assert_eq!(STATUS_PANEL_DRUMS_X, 430.0);
-        assert_eq!(STATUS_PANEL_DRUMS_Y, 720.0);
-        assert_eq!(STATUS_PANEL_GUITAR_X, 200.0);
-    }
-
-    #[test]
-    fn density_graph_geometry_matches_reference() {
-        assert_eq!(DENSITY_GRAPH_BAR_COUNT, 8);
-        assert_eq!(DENSITY_GRAPH_BAR_DX, 12.0);
-        assert_eq!(DENSITY_GRAPH_BAR_W, 4.0);
-        assert_eq!(DENSITY_GRAPH_BAR_H, 252.0);
-        assert_eq!(DENSITY_GRAPH_BAR_BASE_X, 36.0);
-        assert_eq!(DENSITY_GRAPH_BAR_BASE_Y, 284.0);
-        assert_eq!(DENSITY_NOTE_TEXT_DRUMS, (150.0, 333.0));
-    }
-
-    #[test]
-    fn sort_menu_constants_match_reference() {
-        assert_eq!(SORT_MENU_W, 662.0);
-        assert_eq!(SORT_MENU_H, 92.0);
-        assert_eq!(SORT_MENU_ELEMENT_SPACING, 90.0);
-    }
-
-    #[test]
-    fn song_search_constants_match_reference() {
-        assert_eq!(SONG_SEARCH_W, 500.0);
-        assert_eq!(SONG_SEARCH_H, 300.0);
-        assert_eq!(SONG_SEARCH_TEXT_INPUT_Y, 30.0);
-        assert_eq!(SONG_SEARCH_DESC_Y, 60.0);
-        assert_eq!(SONG_SEARCH_STATUS_Y, 250.0);
     }
 
     #[test]
@@ -1244,7 +1206,11 @@ mod tests {
             preview_is_loopable: false,
             preimage_path: None,
         };
-        let all = vec![chart("bsc.dtx", 50), chart("adv.dtx", 70), chart("mas.dtx", 95)];
+        let all = vec![
+            chart("bsc.dtx", 50),
+            chart("adv.dtx", 70),
+            chart("mas.dtx", 95),
+        ];
         sel.recompute(&all);
         assert_eq!(sel.visible.len(), 1);
         let folder = &sel.visible[0];
@@ -1330,15 +1296,27 @@ mod tests {
         let mut sel_state = SongSelectSelection::default();
         sel_state.recompute(&songs);
         assert_eq!(
-            Selection { folder: 0, difficulty: 0 }.chart_index(&sel_state),
+            Selection {
+                folder: 0,
+                difficulty: 0
+            }
+            .chart_index(&sel_state),
             Some(0)
         );
         assert_eq!(
-            Selection { folder: 0, difficulty: 1 }.chart_index(&sel_state),
+            Selection {
+                folder: 0,
+                difficulty: 1
+            }
+            .chart_index(&sel_state),
             Some(1)
         );
         assert_eq!(
-            Selection { folder: 1, difficulty: 0 }.chart_index(&sel_state),
+            Selection {
+                folder: 1,
+                difficulty: 0
+            }
+            .chart_index(&sel_state),
             None
         );
     }
@@ -1352,7 +1330,10 @@ mod tests {
             artist: "X".into(),
             chart_indices: vec![0, 1],
         });
-        let mut cursor = Selection { folder: 0, difficulty: 5 };
+        let mut cursor = Selection {
+            folder: 0,
+            difficulty: 5,
+        };
         cursor.clamp_to_visible(&sel_state);
         assert_eq!(cursor.difficulty, 1);
     }
@@ -1366,7 +1347,10 @@ mod tests {
             artist: "X".into(),
             chart_indices: vec![0],
         });
-        let mut cursor = Selection { folder: 5, difficulty: 0 };
+        let mut cursor = Selection {
+            folder: 5,
+            difficulty: 0,
+        };
         cursor.clamp_to_visible(&sel_state);
         assert_eq!(cursor.folder, 0);
     }
@@ -1374,7 +1358,10 @@ mod tests {
     #[test]
     fn selection_clamp_to_empty_resets_to_zero() {
         let sel_state = SongSelectSelection::default();
-        let mut cursor = Selection { folder: 3, difficulty: 2 };
+        let mut cursor = Selection {
+            folder: 3,
+            difficulty: 2,
+        };
         cursor.clamp_to_visible(&sel_state);
         assert_eq!(cursor.folder, 0);
         assert_eq!(cursor.difficulty, 0);
@@ -1404,7 +1391,10 @@ mod tests {
             preview_is_loopable: false,
             preimage_path: Some(std::path::PathBuf::from("/x/cover.jpg")),
         };
-        assert_eq!(song.preimage_path, Some(std::path::PathBuf::from("/x/cover.jpg")));
+        assert_eq!(
+            song.preimage_path,
+            Some(std::path::PathBuf::from("/x/cover.jpg"))
+        );
     }
 
     #[test]
