@@ -2,7 +2,6 @@
 
 use bevy::prelude::*;
 use dtx_ui::theme::Theme;
-use dtx_ui::ThemeResource;
 use game_shell::AppState;
 
 use crate::events::{JudgmentEvent, LaneHit};
@@ -29,6 +28,15 @@ pub(super) fn plugin(app: &mut App) {
     );
 }
 
+fn key_cap_border_radius(cap_h: f32, scale: f32) -> BorderRadius {
+    BorderRadius {
+        top_left: Val::Px(cap_h * 0.4),
+        top_right: Val::Px(cap_h * 0.4),
+        bottom_left: Val::Px(4.0 * scale),
+        bottom_right: Val::Px(4.0 * scale),
+    }
+}
+
 pub fn spawn_key_caps(
     commands: &mut Commands,
     parent: Entity,
@@ -50,12 +58,7 @@ pub fn spawn_key_caps(
                     border: UiRect::all(Val::Px(2.0 * layout.scale)),
                     align_items: AlignItems::Center,
                     justify_content: JustifyContent::Center,
-                    border_radius: BorderRadius {
-                        top_left: Val::Px(cap_h * 0.4),
-                        top_right: Val::Px(cap_h * 0.4),
-                        bottom_left: Val::Px(4.0 * layout.scale),
-                        bottom_right: Val::Px(4.0 * layout.scale),
-                    },
+                    border_radius: key_cap_border_radius(cap_h, layout.scale),
                     ..default()
                 },
                 BackgroundColor(Color::srgb(0.11, 0.11, 0.13)),
@@ -77,6 +80,8 @@ fn apply_key_cap_layout(layout: Res<PlayfieldLayout>, mut caps: Query<(&KeyCap, 
         node.top = Val::Px(layout.key_viz_top());
         node.width = Val::Px(layout.col_width(col) - 4.0);
         node.height = Val::Px(layout.key_cap_height());
+        node.border = UiRect::all(Val::Px(2.0 * layout.scale));
+        node.border_radius = key_cap_border_radius(layout.key_cap_height(), layout.scale);
     }
 }
 
@@ -112,27 +117,29 @@ fn flash_key_caps_on_hit(
     }
 }
 
-pub fn decay_key_cap_flashes(
-    _theme: Res<ThemeResource>,
-    time: Res<Time>,
-    mut caps: Query<(&KeyCap, &mut BackgroundColor)>,
-) {
+pub fn decay_key_cap_flashes(mut caps: Query<(&KeyCap, &mut BackgroundColor)>, time: Res<Time>) {
     let dt = time.delta_secs();
     let rest = Color::srgb(0.11, 0.11, 0.13);
+    let target = rest.to_srgba();
+    let f = (dt * 6.0).min(1.0);
     for (_cap, mut bg) in &mut caps {
         if bg.0 == rest {
             continue;
         }
         let cur = bg.0.to_srgba();
-        let target = rest.to_srgba();
-        let lerp = |a: f32, b: f32| a + (b - a) * (dt * 6.0).min(1.0);
+        let lerp = |a: f32, b: f32| a + (b - a) * f;
         let next = Color::srgba(
             lerp(cur.red, target.red),
             lerp(cur.green, target.green),
             lerp(cur.blue, target.blue),
-            1.0,
+            lerp(cur.alpha, target.alpha),
         );
-        bg.0 = if (next.to_srgba().red - target.red).abs() < 0.01 {
+        let n = next.to_srgba();
+        bg.0 = if (n.red - target.red).abs() < 0.01
+            && (n.green - target.green).abs() < 0.01
+            && (n.blue - target.blue).abs() < 0.01
+            && (n.alpha - target.alpha).abs() < 0.01
+        {
             rest
         } else {
             next
