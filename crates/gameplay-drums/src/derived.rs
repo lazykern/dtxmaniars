@@ -6,8 +6,9 @@
 use bevy::prelude::Resource;
 use dtx_core::Chart;
 
-use crate::judge::BpmChangeList;
+use crate::judge::{BarLengthChangeList, BpmChangeList};
 use crate::phrase::PhraseMeter;
+use dtx_timing::math::ChartTiming;
 
 /// All chart-derived data needed by the Performance HUD.
 ///
@@ -30,10 +31,15 @@ pub fn compute_from_chart(
     derived: &mut ChartDerived,
     chart: &Chart,
     bpm_changes: &BpmChangeList,
+    bar_changes: &BarLengthChangeList,
     drum_chip_count: u32,
 ) {
     let base_bpm = chart.metadata.bpm.unwrap_or(120.0);
-    derived.phrase = PhraseMeter::from_chart(chart, base_bpm, &bpm_changes.changes);
+    let timing = ChartTiming {
+        bpm_changes: &bpm_changes.changes,
+        bar_changes: &bar_changes.changes,
+    };
+    derived.phrase = PhraseMeter::from_chart(chart, base_bpm, timing);
     derived.chart_level = chart
         .metadata
         .dlevel

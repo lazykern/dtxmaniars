@@ -13,7 +13,7 @@ use dtx_core::channel::EChannel;
 use dtx_core::chart::{Chart, Chip, Metadata};
 use game_shell::AppState;
 use gameplay_drums::components::LastJudgment;
-use gameplay_drums::judge::{BpmChangeList, JudgedChips};
+use gameplay_drums::judge::{BarLengthChangeList, BpmChangeList, JudgedChips};
 use gameplay_drums::orchestrator::{
     detect_end_of_stage, enter_derive_from_chart, enter_reset_run_state, enter_seed_bgm_state,
     on_exit_performance, DrumsStageCompletion,
@@ -56,6 +56,7 @@ fn build_app() -> App {
     .init_resource::<GameStartMs>()
     .init_resource::<BgmAdjustState>()
     .init_resource::<BpmChangeList>()
+    .init_resource::<BarLengthChangeList>()
     .init_resource::<BgmHandle>()
     .init_resource::<dtx_audio::ChartSoundBank>()
     .init_resource::<dtx_audio::DrumPolyphony>()

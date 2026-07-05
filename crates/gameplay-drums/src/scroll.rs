@@ -11,12 +11,13 @@ use crate::components::{Note, NoteVisual};
 use crate::events::NoteMissed;
 use crate::hud::HudRoot;
 use crate::interp::RenderClock;
-use crate::judge::{BpmChangeList, JudgedChips};
+use crate::judge::{BarLengthChangeList, BpmChangeList, JudgedChips};
 use crate::lane_geometry::{chip_color, column_of, is_hollow};
 use crate::lane_map::lane_of;
 use crate::lane_map::{lane_channel, LANE_COUNT};
 use crate::layout::PlayfieldLayout;
 use crate::resources::{ActiveChart, GameplayClock, ScrollSettings};
+use dtx_timing::math::ChartTiming;
 use game_shell::{AppState, EGameMode, PauseState};
 
 const BACKFILL_MS: i64 = 500;
@@ -81,6 +82,7 @@ fn spawn_notes_system(
     mode: Res<EGameMode>,
     chart: Res<ActiveChart>,
     bpm_changes: Res<BpmChangeList>,
+    bar_changes: Res<BarLengthChangeList>,
     layout: Res<PlayfieldLayout>,
     scroll: Res<ScrollSettings>,
     judged: Res<JudgedChips>,
@@ -103,6 +105,10 @@ fn spawn_notes_system(
         existing.iter().map(|n| n.chip_id).collect();
 
     let base_bpm = chart.chart.metadata.bpm.unwrap_or(120.0);
+    let timing = ChartTiming {
+        bpm_changes: &bpm_changes.changes,
+        bar_changes: &bar_changes.changes,
+    };
     let judge_y = layout.judge_y();
     // Ref-space NX velocity scaled into the live (redesigned) playfield.
     let px_per_ms = scroll.pixels_per_ms * layout.scale;
@@ -115,12 +121,8 @@ fn spawn_notes_system(
         let Some(lane) = lane_of(chip.channel) else {
             continue;
         };
-        let target_ms = crate::judge::chip_target_ms_with_speed(
-            chip,
-            base_bpm,
-            &bpm_changes.changes,
-            scroll.play_speed,
-        );
+        let target_ms =
+            crate::judge::chip_target_ms_with_speed(chip, base_bpm, timing, scroll.play_speed);
         if target_ms < now - BACKFILL_MS || target_ms > now + spawn_window_ms {
             continue;
         }

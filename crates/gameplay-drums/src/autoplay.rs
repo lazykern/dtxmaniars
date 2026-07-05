@@ -11,9 +11,10 @@
 use bevy::prelude::*;
 
 use crate::events::LaneHit;
-use crate::judge::{chip_target_ms, BpmChangeList, JudgedChips};
+use crate::judge::{chip_target_ms, BarLengthChangeList, BpmChangeList, JudgedChips};
 use crate::lane_map::{lane_of, LaneId};
 use crate::resources::{ActiveChart, GameplayClock};
+use dtx_timing::math::ChartTiming;
 
 /// Resource flag — when true, the autoplay system emits LaneHit for each
 /// chip at its target ms. Toggleable from config (M5+).
@@ -41,6 +42,7 @@ pub fn autoplay_system(
     clock: Res<GameplayClock>,
     chart: Res<ActiveChart>,
     bpm_changes: Res<BpmChangeList>,
+    bar_changes: Res<BarLengthChangeList>,
     mut judged: ResMut<JudgedChips>,
     mut lane_hits: MessageWriter<LaneHit>,
 ) {
@@ -50,6 +52,10 @@ pub fn autoplay_system(
     let current_ms = clock.current_ms;
 
     let base_bpm = chart.chart.metadata.bpm.unwrap_or(120.0);
+    let timing = ChartTiming {
+        bpm_changes: &bpm_changes.changes,
+        bar_changes: &bar_changes.changes,
+    };
 
     for (idx, chip) in chart.chart.chips.iter().enumerate() {
         if judged.0.contains(&idx) {
@@ -61,7 +67,7 @@ pub fn autoplay_system(
             judged.0.insert(idx);
             continue;
         };
-        let target_ms = chip_target_ms(chip, base_bpm, &bpm_changes.changes);
+        let target_ms = chip_target_ms(chip, base_bpm, timing);
         if target_ms <= current_ms {
             lane_hits.write(LaneHit {
                 lane: lane as LaneId,
@@ -91,6 +97,7 @@ mod tests {
             .init_resource::<GameplayClock>()
             .init_resource::<JudgedChips>()
             .init_resource::<BpmChangeList>()
+            .init_resource::<BarLengthChangeList>()
             .init_resource::<AutoplayEnabled>()
             .add_message::<LaneHit>()
             .add_systems(Update, autoplay_system.run_if(autoplay_active));
@@ -104,6 +111,7 @@ mod tests {
             .init_resource::<GameplayClock>()
             .init_resource::<JudgedChips>()
             .init_resource::<BpmChangeList>()
+            .init_resource::<BarLengthChangeList>()
             .init_resource::<AutoplayEnabled>()
             .init_resource::<crate::resources::DrumGameplaySettings>()
             .init_resource::<crate::resources::Score>()

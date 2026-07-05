@@ -8,7 +8,9 @@ use crate::drum_groups::{resolve_judgments, DrumPad};
 use crate::events::{EmptyHit, JudgmentEvent, LaneHit};
 use crate::resources::{ActiveChart, DrumGameplaySettings, GameplayClock};
 use dtx_scoring::classify;
-use dtx_timing::math::{chip_time_ms_with_bpm_changes, BpmChange};
+use dtx_timing::math::{
+    chip_time_ms_with_bpm_and_bar_changes, BarLengthChange, BpmChange, ChartTiming,
+};
 
 #[derive(Resource, Default, Debug)]
 pub struct JudgedChips(pub HashSet<usize>);
@@ -40,9 +42,32 @@ impl BpmChangeList {
     }
 }
 
+/// Sorted list of bar-length (meter change) events parsed from `#02` chips.
+#[derive(Resource, Default, Debug, Clone)]
+pub struct BarLengthChangeList {
+    pub changes: Vec<BarLengthChange>,
+}
+
+impl BarLengthChangeList {
+    pub fn from_chart(chart: &dtx_core::Chart) -> Self {
+        let mut changes: Vec<BarLengthChange> = chart
+            .chips
+            .iter()
+            .filter(|c| c.channel == dtx_core::EChannel::BarLength)
+            .map(|c| BarLengthChange {
+                measure: c.measure,
+                ratio: c.value,
+            })
+            .collect();
+        changes.sort_by_key(|c| c.measure);
+        Self { changes }
+    }
+}
+
 pub(super) fn plugin(app: &mut App) {
     app.init_resource::<JudgedChips>()
         .init_resource::<BpmChangeList>()
+        .init_resource::<BarLengthChangeList>()
         .add_systems(
             FixedUpdate,
             judge_lane_hit_system
@@ -56,6 +81,7 @@ pub(crate) fn judge_lane_hit_system(
     clock: Res<GameplayClock>,
     chart: Res<ActiveChart>,
     bpm_changes: Res<BpmChangeList>,
+    bar_changes: Res<BarLengthChangeList>,
     drum_settings: Res<DrumGameplaySettings>,
     input_offset: Res<crate::resources::InputOffsetMs>,
     mut judged: ResMut<JudgedChips>,
@@ -66,6 +92,10 @@ pub(crate) fn judge_lane_hit_system(
         return;
     }
     let base_bpm = chart.chart.metadata.bpm.unwrap_or(120.0);
+    let timing = ChartTiming {
+        bpm_changes: &bpm_changes.changes,
+        bar_changes: &bar_changes.changes,
+    };
 
     for hit in lane_hits.read() {
         let Some(pad) = DrumPad::from_lane(hit.lane) else {
@@ -81,7 +111,7 @@ pub(crate) fn judge_lane_hit_system(
             &chart.chart,
             &judged.0,
             base_bpm,
-            &bpm_changes.changes,
+            timing,
             &drum_settings.groups,
         );
 
@@ -105,8 +135,8 @@ pub(crate) fn judge_lane_hit_system(
     }
 }
 
-pub fn chip_target_ms(chip: &dtx_core::Chip, base_bpm: f32, bpm_changes: &[BpmChange]) -> i64 {
-    chip_time_ms_with_bpm_changes(chip.measure, chip.value, base_bpm, bpm_changes)
+pub fn chip_target_ms(chip: &dtx_core::Chip, base_bpm: f32, timing: ChartTiming<'_>) -> i64 {
+    chip_time_ms_with_bpm_and_bar_changes(chip.measure, chip.value, base_bpm, timing)
 }
 
 /// Chip target with optional play-speed scaling (`nPlaySpeed / 20.0`).
@@ -114,13 +144,13 @@ pub fn chip_target_ms(chip: &dtx_core::Chip, base_bpm: f32, bpm_changes: &[BpmCh
 pub fn chip_target_ms_with_speed(
     chip: &dtx_core::Chip,
     base_bpm: f32,
-    bpm_changes: &[BpmChange],
+    timing: ChartTiming<'_>,
     play_speed: f32,
 ) -> i64 {
     if play_speed <= 0.0 || (play_speed - 1.0).abs() < f32::EPSILON {
-        return chip_target_ms(chip, base_bpm, bpm_changes);
+        return chip_target_ms(chip, base_bpm, timing);
     }
-    ((chip_target_ms(chip, base_bpm, bpm_changes) as f64) / (play_speed as f64)) as i64
+    ((chip_target_ms(chip, base_bpm, timing) as f64) / (play_speed as f64)) as i64
 }
 
 /// Chart time for auto-play chips (BGM/SE) including BGM adjust offset.
@@ -129,10 +159,10 @@ pub fn chip_target_ms_with_speed(
 pub fn auto_chip_target_ms(
     chip: &dtx_core::Chip,
     base_bpm: f32,
-    bpm_changes: &[BpmChange],
+    timing: ChartTiming<'_>,
     bgm_adjust_ms: i32,
 ) -> i64 {
-    chip_target_ms(chip, base_bpm, bpm_changes) + i64::from(bgm_adjust_ms)
+    chip_target_ms(chip, base_bpm, timing) + i64::from(bgm_adjust_ms)
 }
 
 #[cfg(test)]
@@ -178,7 +208,7 @@ mod tests {
             &chart,
             &judged.0,
             120.0,
-            &[],
+            ChartTiming::default(),
             &groups,
         );
         assert_eq!(results.len(), 1);
@@ -204,7 +234,7 @@ mod tests {
             &chart,
             &HashSet::new(),
             120.0,
-            &[],
+            ChartTiming::default(),
             &groups,
         );
 
@@ -228,7 +258,7 @@ mod tests {
             &chart,
             &HashSet::new(),
             120.0,
-            &[],
+            ChartTiming::default(),
             &groups,
         );
 
@@ -246,7 +276,7 @@ mod tests {
             &chart,
             &HashSet::new(),
             120.0,
-            &[],
+            ChartTiming::default(),
             &groups,
         );
         assert!(results.is_empty());
@@ -284,7 +314,11 @@ mod tests {
 
         let bpm_changes = BpmChangeList::from_chart(&chart);
         let base_bpm = chart.metadata.bpm.unwrap_or(120.0);
-        let target_ms = chip_target_ms(&chart.chips[0], base_bpm, &bpm_changes.changes);
+        let timing = ChartTiming {
+            bpm_changes: &bpm_changes.changes,
+            bar_changes: &[],
+        };
+        let target_ms = chip_target_ms(&chart.chips[0], base_bpm, timing);
         assert_eq!(12000 - target_ms, 0);
     }
 

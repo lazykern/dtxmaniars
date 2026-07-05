@@ -50,11 +50,12 @@ use game_shell::{request_transition, AppState, TransitionRequest};
 use crate::components::LastJudgment;
 use crate::derived::ChartDerived;
 use crate::drums_perf::{DrumsDangerState, DrumsFillingEffect, DrumsPadState};
-use crate::judge::{BpmChangeList, JudgedChips};
+use crate::judge::{BarLengthChangeList, BpmChangeList, JudgedChips};
 use crate::resources::{
     ActiveChart, ActiveDrumSounds, BgmAdjustState, Combo, DrumGameplaySettings, DrumScoring,
     FastSlowCount, GameStartMs, GameplayClock, JudgmentCounts, Score,
 };
+use dtx_timing::math::ChartTiming;
 
 /// Marker set wrapping the drums `OnEnter(Performance)` chain.
 ///
@@ -211,6 +212,7 @@ pub fn enter_derive_from_chart(
     chart: Res<ActiveChart>,
     mut completion: ResMut<DrumsStageCompletion>,
     mut bpm_changes: ResMut<BpmChangeList>,
+    mut bar_changes: ResMut<BarLengthChangeList>,
     mut gameplay_clock: ResMut<GameplayClock>,
     mut derived: ResMut<ChartDerived>,
 ) {
@@ -227,13 +229,15 @@ pub fn enter_derive_from_chart(
     }
     let drum_chip_count = chart.chart.drum_chips().count();
     *bpm_changes = BpmChangeList::from_chart(&chart.chart);
-    completion.chart_end_ms = chart_end_ms_real(&chart.chart, &bpm_changes);
+    *bar_changes = BarLengthChangeList::from_chart(&chart.chart);
+    completion.chart_end_ms = chart_end_ms_real(&chart.chart, &bpm_changes, &bar_changes);
     completion.end_requested = false;
     completion.gauge_failed = false;
     crate::derived::compute_from_chart(
         &mut derived,
         &chart.chart,
         &bpm_changes,
+        &bar_changes,
         drum_chip_count as u32,
     );
 }
@@ -243,6 +247,7 @@ pub fn enter_derive_from_chart(
 pub fn enter_seed_bgm_state(
     chart: Res<ActiveChart>,
     bpm_changes: Res<BpmChangeList>,
+    bar_changes: Res<BarLengthChangeList>,
     bgm_adjust: Res<BgmAdjustState>,
     mut played_bgm: ResMut<crate::bgm_scheduler::PlayedBgmChips>,
     mut primary_bgm: ResMut<crate::bgm_scheduler::PrimaryBgmChip>,
@@ -251,18 +256,17 @@ pub fn enter_seed_bgm_state(
 ) {
     played_bgm.0.clear();
     *bgm_recovery = crate::bgm_scheduler::BgmRecoveryState::default();
-    primary_bgm.0 = crate::bgm_scheduler::find_primary_bgm_chip(&chart.chart, &bpm_changes);
+    let timing = ChartTiming {
+        bpm_changes: &bpm_changes.changes,
+        bar_changes: &bar_changes.changes,
+    };
+    primary_bgm.0 = crate::bgm_scheduler::find_primary_bgm_chip(&chart.chart, timing);
     let base_bpm = chart.chart.metadata.bpm.unwrap_or(120.0);
     start_ms.0 = primary_bgm
         .0
         .and_then(|idx| chart.chart.chips.get(idx))
         .map(|chip| {
-            crate::judge::auto_chip_target_ms(
-                chip,
-                base_bpm,
-                &bpm_changes.changes,
-                bgm_adjust.total_ms(),
-            )
+            crate::judge::auto_chip_target_ms(chip, base_bpm, timing, bgm_adjust.total_ms())
         })
         .unwrap_or(0);
     info!(
@@ -339,13 +343,22 @@ fn despawn_stage_root(mut commands: Commands, query: Query<Entity, With<DrumsSta
     }
 }
 
-/// Compute the last drum chip's `target_ms` using BPM-change-aware timing.
-/// Returns 0 if the chart is empty. Adds a 2000ms buffer for BGM tail.
-pub fn chart_end_ms_real(chart: &Chart, bpm_changes: &BpmChangeList) -> i64 {
+/// Compute the last drum chip's `target_ms` using BPM-change- and
+/// bar-length-aware timing. Returns 0 if the chart is empty. Adds a 2000ms
+/// buffer for BGM tail.
+pub fn chart_end_ms_real(
+    chart: &Chart,
+    bpm_changes: &BpmChangeList,
+    bar_changes: &BarLengthChangeList,
+) -> i64 {
     let base_bpm = chart.metadata.bpm.unwrap_or(120.0);
+    let timing = ChartTiming {
+        bpm_changes: &bpm_changes.changes,
+        bar_changes: &bar_changes.changes,
+    };
     chart
         .drum_chips()
-        .map(|c| crate::judge::chip_target_ms(c, base_bpm, &bpm_changes.changes))
+        .map(|c| crate::judge::chip_target_ms(c, base_bpm, timing))
         .max()
         .unwrap_or(0)
         .saturating_add(2000)
@@ -470,6 +483,7 @@ mod tests {
             .init_resource::<LastJudgment>()
             .init_resource::<GameStartMs>()
             .init_resource::<BpmChangeList>()
+            .init_resource::<BarLengthChangeList>()
             .init_resource::<GameplayClock>()
             .init_resource::<crate::derived::ChartDerived>()
             .init_resource::<crate::resources::CurrentEmptyHitTemplates>()
@@ -486,6 +500,53 @@ mod tests {
         app.update();
         let completion = app.world().resource::<DrumsStageCompletion>();
         assert!(completion.chart_end_ms > 0);
+    }
+
+    #[test]
+    fn chart_end_ms_real_applies_sticky_bar_length() {
+        // Regression test for the reported bug: without the bar-length fix,
+        // this chart's shape (171 BPM constant, bar-length chips at
+        // m14=1.5/m21=0.75/m22=1/m27=0.75/m30=1, last drum chip at raw
+        // measure 61 + fraction 0.9369125) computes chart_end_ms_real as
+        // 88929 — ~2946ms *before* the real bgm_d.ogg ends (90070ms,
+        // GameStartMs=1805 -> 91875ms in chart-ms space). With the fix it
+        // should land a few hundred ms *after* real song end instead.
+        // See docs/superpowers/specs/2026-07-05-bar-length-timing-fix-design.md.
+        use dtx_core::channel::EChannel;
+        use dtx_core::chart::{Chart, Chip, Metadata};
+        use dtx_timing::math::BarLengthChange;
+
+        let mut chart = Chart {
+            metadata: Metadata {
+                bpm: Some(171.0),
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        chart
+            .chips
+            .push(Chip::new(61, EChannel::BassDrum, 0.9369125));
+        for (measure, ratio) in [(14, 1.5), (21, 0.75), (22, 1.0), (27, 0.75), (30, 1.0)] {
+            chart
+                .chips
+                .push(Chip::new(measure, EChannel::BarLength, ratio));
+        }
+
+        let bpm_changes = BpmChangeList::from_chart(&chart);
+        let bar_changes = BarLengthChangeList::from_chart(&chart);
+        let end_ms = chart_end_ms_real(&chart, &bpm_changes, &bar_changes);
+
+        // 90438 (computed target) + 2000 (buffer) = 92438, real song end in
+        // chart-ms space is 1805 + 90070 = 91875. Allow a small tolerance.
+        assert!(
+            (end_ms - 92438).abs() <= 5,
+            "expected ~92438ms, got {end_ms}ms"
+        );
+        assert!(
+            end_ms > 91875,
+            "chart must end at/after the real song end (91875ms), got {end_ms}ms \
+             (bug reproduces if this is ~88929ms, ~2946ms too early)"
+        );
     }
 
     #[test]

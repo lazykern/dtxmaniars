@@ -12,12 +12,13 @@ use crate::drum_groups::{
     chip_over_pad, empty_hit_fallback_lanes, nearest_chip_on_channel, sound_pad_channel, DrumPad,
 };
 use crate::events::{EmptyHit, JudgmentEvent};
-use crate::judge::{auto_chip_target_ms, chip_target_ms, BpmChangeList};
+use crate::judge::{auto_chip_target_ms, chip_target_ms, BarLengthChangeList, BpmChangeList};
 use crate::lane_map::lane_channel;
 use crate::resources::{
     ActiveChart, ActiveDrumSounds, BgmAdjustState, CurrentEmptyHitTemplates, DrumAudioSettings,
     DrumGameplaySettings, GameplayClock,
 };
+use dtx_timing::math::ChartTiming;
 use game_shell::{AppState, PauseState};
 
 pub(super) fn plugin(app: &mut App) {
@@ -41,6 +42,7 @@ fn capture_empty_hit_templates(
     clock: Res<GameplayClock>,
     chart: Res<ActiveChart>,
     bpm_changes: Res<BpmChangeList>,
+    bar_changes: Res<BarLengthChangeList>,
     bgm_adjust: Res<BgmAdjustState>,
     mut templates: ResMut<CurrentEmptyHitTemplates>,
 ) {
@@ -50,6 +52,10 @@ fn capture_empty_hit_templates(
     let now = clock.current_ms;
     let base_bpm = chart.chart.metadata.bpm.unwrap_or(120.0);
     let bgm_shift = bgm_adjust.total_ms();
+    let timing = ChartTiming {
+        bpm_changes: &bpm_changes.changes,
+        bar_changes: &bar_changes.changes,
+    };
     for event in &chart.chart.empty_hit_events {
         let target_ms = auto_chip_target_ms(
             &dtx_core::Chip::with_wav(
@@ -59,7 +65,7 @@ fn capture_empty_hit_templates(
                 event.wav_slot,
             ),
             base_bpm,
-            &bpm_changes.changes,
+            timing,
             bgm_shift,
         );
         if target_ms <= now {
@@ -74,6 +80,7 @@ fn play_judgment_sounds(
     drum_settings: Res<DrumGameplaySettings>,
     chart: Res<ActiveChart>,
     bpm_changes: Res<BpmChangeList>,
+    bar_changes: Res<BarLengthChangeList>,
     audio: Res<Audio>,
     asset_server: Res<AssetServer>,
     mut instances: ResMut<Assets<AudioInstance>>,
@@ -90,6 +97,10 @@ fn play_judgment_sounds(
         .and_then(|p| p.parent())
         .map(|p| p.to_path_buf());
     let base_bpm = chart.chart.metadata.bpm.unwrap_or(120.0);
+    let timing = ChartTiming {
+        bpm_changes: &bpm_changes.changes,
+        bar_changes: &bar_changes.changes,
+    };
 
     for ev in events.read() {
         if ev.kind == JudgmentKind::Miss {
@@ -101,16 +112,10 @@ fn play_judgment_sounds(
         let Some((wav_slot, channel)) = resolve_judgment_sound(
             pad,
             ev.chip_idx,
-            ev.delta_ms
-                + chip_target_ms(
-                    &chart.chart.chips[ev.chip_idx],
-                    base_bpm,
-                    &bpm_changes.changes,
-                ),
+            ev.delta_ms + chip_target_ms(&chart.chart.chips[ev.chip_idx], base_bpm, timing),
             &chart,
             &drum_settings,
-            &bpm_changes,
-            base_bpm,
+            timing,
         ) else {
             continue;
         };
@@ -156,6 +161,7 @@ fn play_empty_hit_sounds(
     drum_settings: Res<DrumGameplaySettings>,
     chart: Res<ActiveChart>,
     bpm_changes: Res<BpmChangeList>,
+    bar_changes: Res<BarLengthChangeList>,
     templates: Res<CurrentEmptyHitTemplates>,
     audio: Res<Audio>,
     asset_server: Res<AssetServer>,
@@ -172,7 +178,10 @@ fn play_empty_hit_sounds(
         .as_ref()
         .and_then(|p| p.parent())
         .map(|p| p.to_path_buf());
-    let base_bpm = chart.chart.metadata.bpm.unwrap_or(120.0);
+    let timing = ChartTiming {
+        bpm_changes: &bpm_changes.changes,
+        bar_changes: &bar_changes.changes,
+    };
 
     for hit in events.read() {
         let Some(pad) = DrumPad::from_lane(hit.lane) else {
@@ -182,10 +191,9 @@ fn play_empty_hit_sounds(
             pad,
             hit.audio_ms,
             &chart,
-            &bpm_changes,
+            timing,
             &templates,
             &drum_settings,
-            base_bpm,
         );
         let Some(path) = wav_path(&chart.chart, wav_slot, source_dir.as_deref()) else {
             continue;
@@ -229,8 +237,7 @@ fn resolve_judgment_sound(
     audio_ms: i64,
     chart: &ActiveChart,
     drum_settings: &DrumGameplaySettings,
-    bpm_changes: &BpmChangeList,
-    base_bpm: f32,
+    timing: ChartTiming<'_>,
 ) -> Option<(u32, EChannel)> {
     let judged = chart.chart.chips.get(judged_idx)?;
     if chip_over_pad(pad, &drum_settings.config) {
@@ -240,13 +247,10 @@ fn resolve_judgment_sound(
         return Some((judged.wav_slot, judged.channel));
     }
     let pad_ch = sound_pad_channel(pad, &drum_settings.presence);
-    if let Some((_idx, wav_slot, channel)) = nearest_chip_on_channel(
-        pad_ch,
-        audio_ms,
-        &chart.chart,
-        base_bpm,
-        &bpm_changes.changes,
-    ) {
+    let base_bpm = chart.chart.metadata.bpm.unwrap_or(120.0);
+    if let Some((_idx, wav_slot, channel)) =
+        nearest_chip_on_channel(pad_ch, audio_ms, &chart.chart, base_bpm, timing)
+    {
         if wav_slot != 0 {
             return Some((wav_slot, channel));
         }
@@ -261,11 +265,11 @@ fn resolve_empty_hit_sound(
     pad: DrumPad,
     audio_ms: i64,
     chart: &ActiveChart,
-    bpm_changes: &BpmChangeList,
+    timing: ChartTiming<'_>,
     templates: &CurrentEmptyHitTemplates,
     drum_settings: &DrumGameplaySettings,
-    base_bpm: f32,
 ) -> (u32, EChannel) {
+    let base_bpm = chart.chart.metadata.bpm.unwrap_or(120.0);
     for &lane in empty_hit_fallback_lanes(pad, &drum_settings.groups) {
         if let Some(ev) = templates.get(lane) {
             if ev.wav_slot != 0 {
@@ -276,7 +280,7 @@ fn resolve_empty_hit_sound(
             }
         }
         if let Some((wav_slot, channel)) =
-            find_nearest_chip_wav(&chart.chart, lane, audio_ms, base_bpm, &bpm_changes.changes)
+            find_nearest_chip_wav(&chart.chart, lane, audio_ms, base_bpm, timing)
         {
             return (wav_slot, channel);
         }
@@ -289,7 +293,7 @@ fn find_nearest_chip_wav(
     lane: u8,
     audio_ms: i64,
     base_bpm: f32,
-    bpm_changes: &[dtx_timing::math::BpmChange],
+    timing: ChartTiming<'_>,
 ) -> Option<(u32, EChannel)> {
     let lane_ch = lane_channel(lane)?;
     let mut best: Option<(u32, EChannel, i64)> = None;
@@ -297,7 +301,7 @@ fn find_nearest_chip_wav(
         if chip.channel != lane_ch || chip.wav_slot == 0 {
             continue;
         }
-        let target_ms = chip_target_ms(chip, base_bpm, bpm_changes);
+        let target_ms = chip_target_ms(chip, base_bpm, timing);
         let dist = (audio_ms - target_ms).abs();
         match best {
             Some((_, _, d)) if d <= dist => {}

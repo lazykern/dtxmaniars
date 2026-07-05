@@ -7,9 +7,12 @@ use bevy::prelude::*;
 use bevy_kira_audio::prelude::*;
 use std::collections::HashSet;
 
-use crate::judge::{auto_chip_target_ms, BpmChangeList};
-use crate::resources::{ActiveChart, ActiveDrumSounds, BgmAdjustState, DrumAudioSettings, GameplayClock};
+use crate::judge::{auto_chip_target_ms, BarLengthChangeList, BpmChangeList};
+use crate::resources::{
+    ActiveChart, ActiveDrumSounds, BgmAdjustState, DrumAudioSettings, GameplayClock,
+};
 use dtx_core::EChannel;
+use dtx_timing::math::ChartTiming;
 use game_shell::{AppState, PauseState};
 
 #[derive(Resource, Default, Debug)]
@@ -33,6 +36,7 @@ fn schedule_se_chips(
     clock: Res<GameplayClock>,
     chart: Res<ActiveChart>,
     bpm_changes: Res<BpmChangeList>,
+    bar_changes: Res<BarLengthChangeList>,
     bgm_adjust: Res<BgmAdjustState>,
     settings: Res<DrumAudioSettings>,
     audio: Res<Audio>,
@@ -51,6 +55,10 @@ fn schedule_se_chips(
     }
     let now = clock.current_ms;
     let base_bpm = chart.chart.metadata.bpm.unwrap_or(120.0);
+    let timing = ChartTiming {
+        bpm_changes: &bpm_changes.changes,
+        bar_changes: &bar_changes.changes,
+    };
     let bgm_shift = bgm_adjust.total_ms();
     let source_dir = chart.source_path.as_ref().and_then(|p| p.parent());
 
@@ -65,7 +73,7 @@ fn schedule_se_chips(
             played.0.insert(idx);
             continue;
         }
-        let target_ms = auto_chip_target_ms(chip, base_bpm, &bpm_changes.changes, bgm_shift);
+        let target_ms = auto_chip_target_ms(chip, base_bpm, timing, bgm_shift);
         if now < target_ms {
             continue;
         }

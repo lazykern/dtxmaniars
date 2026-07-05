@@ -5,16 +5,16 @@ use std::collections::{HashMap, HashSet};
 use bevy::prelude::*;
 use bevy_kira_audio::prelude::*;
 use dtx_core::beat_lines::{tick_to_measure_fraction, TimingLineKind};
-use dtx_timing::math::chip_time_ms_with_bpm_changes;
+use dtx_timing::math::{chip_time_ms_with_bpm_and_bar_changes, ChartTiming};
 use dtx_ui::{theme::Theme, ThemeResource};
 
 use crate::hud::HudRoot;
 use crate::interp::RenderClock;
-use crate::judge::BpmChangeList;
+use crate::judge::{BarLengthChangeList, BpmChangeList};
 use crate::layout::PlayfieldLayout;
 use crate::resources::{
-    DrumAudioSettings, GameplayClock, MetronomeEnabled, MetronomeSound, ScrollSettings,
-    ShowPerfInfo, ShowTimingLines, TimingLineCrossed, TimingLineList, ActiveChart,
+    ActiveChart, DrumAudioSettings, GameplayClock, MetronomeEnabled, MetronomeSound,
+    ScrollSettings, ShowPerfInfo, ShowTimingLines, TimingLineCrossed, TimingLineList,
 };
 use crate::scroll::{lookahead_ms, top_for_note_f};
 use game_shell::{AppState, EGameMode, PauseState};
@@ -48,7 +48,10 @@ struct BarMeasureLabel {
 pub(super) fn plugin(app: &mut App) {
     app.init_resource::<TimingLineCrossed>()
         .init_resource::<MetronomeSound>()
-        .add_systems(OnEnter(AppState::Performance), (preload_metronome_sound, init_timing_lines))
+        .add_systems(
+            OnEnter(AppState::Performance),
+            (preload_metronome_sound, init_timing_lines),
+        )
         .add_systems(
             Update,
             (
@@ -69,10 +72,7 @@ pub(super) fn plugin(app: &mut App) {
         );
 }
 
-fn preload_metronome_sound(
-    asset_server: Res<AssetServer>,
-    mut metronome: ResMut<MetronomeSound>,
-) {
+fn preload_metronome_sound(asset_server: Res<AssetServer>, mut metronome: ResMut<MetronomeSound>) {
     metronome.0 = Some(asset_server.load(METRONOME_PATH));
 }
 
@@ -91,6 +91,7 @@ fn spawn_timing_lines(
     mode: Res<EGameMode>,
     lines: Res<TimingLineList>,
     bpm_changes: Res<BpmChangeList>,
+    bar_changes: Res<BarLengthChangeList>,
     layout: Res<PlayfieldLayout>,
     scroll: Res<ScrollSettings>,
     show_lines: Res<ShowTimingLines>,
@@ -111,6 +112,10 @@ fn spawn_timing_lines(
     let existing_label_ids: HashSet<usize> = existing_labels.iter().map(|v| v.line_id).collect();
     let now = clock.current_ms;
     let base_bpm = lines.base_bpm;
+    let timing = ChartTiming {
+        bpm_changes: &bpm_changes.changes,
+        bar_changes: &bar_changes.changes,
+    };
     let judge_y = layout.judge_y();
     let px_per_ms = scroll.pixels_per_ms * layout.scale;
     let spawn_window_ms = lookahead_ms(&layout, &scroll);
@@ -120,12 +125,7 @@ fn spawn_timing_lines(
             continue;
         }
         let (measure, fraction) = tick_to_measure_fraction(line.tick);
-        let target_ms = chip_time_ms_with_bpm_changes(
-            measure,
-            fraction,
-            base_bpm,
-            &bpm_changes.changes,
-        );
+        let target_ms = chip_time_ms_with_bpm_and_bar_changes(measure, fraction, base_bpm, timing);
         if target_ms < now - BACKFILL_MS || target_ms > now + spawn_window_ms {
             continue;
         }
@@ -136,10 +136,7 @@ fn spawn_timing_lines(
         let entity = commands
             .spawn((
                 TimingLineVisual { line_id: idx },
-                TimingLineEntity {
-                    target_ms,
-                    height,
-                },
+                TimingLineEntity { target_ms, height },
                 Node {
                     position_type: PositionType::Absolute,
                     left: Val::Px(layout.strip_left()),
@@ -262,6 +259,7 @@ fn tick_metronome_on_cross(
     audio_settings: Res<DrumAudioSettings>,
     mut crossed: ResMut<TimingLineCrossed>,
     bpm_changes: Res<BpmChangeList>,
+    bar_changes: Res<BarLengthChangeList>,
     audio: Res<Audio>,
 ) {
     if *mode != EGameMode::Drums
@@ -279,18 +277,17 @@ fn tick_metronome_on_cross(
 
     let now = clock.current_ms;
     let base_bpm = lines.base_bpm;
+    let timing = ChartTiming {
+        bpm_changes: &bpm_changes.changes,
+        bar_changes: &bar_changes.changes,
+    };
 
     for (idx, line) in lines.lines.iter().enumerate() {
         if !line.visible || crossed.0.contains(&idx) {
             continue;
         }
         let (measure, fraction) = tick_to_measure_fraction(line.tick);
-        let target_ms = chip_time_ms_with_bpm_changes(
-            measure,
-            fraction,
-            base_bpm,
-            &bpm_changes.changes,
-        );
+        let target_ms = chip_time_ms_with_bpm_and_bar_changes(measure, fraction, base_bpm, timing);
         if now < target_ms {
             continue;
         }
@@ -313,10 +310,7 @@ fn tick_metronome_on_cross(
 
 fn line_style(kind: TimingLineKind, scale: f32) -> (f32, Color) {
     match kind {
-        TimingLineKind::Bar => (
-            BAR_LINE_HEIGHT * scale,
-            Color::srgba(1.0, 1.0, 1.0, 0.85),
-        ),
+        TimingLineKind::Bar => (BAR_LINE_HEIGHT * scale, Color::srgba(1.0, 1.0, 1.0, 0.85)),
         TimingLineKind::Beat => (
             BEAT_LINE_HEIGHT * scale,
             Color::srgba(0.55, 0.55, 0.55, 0.55),

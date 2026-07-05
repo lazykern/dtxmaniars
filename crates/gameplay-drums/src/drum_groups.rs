@@ -11,7 +11,7 @@ use dtx_core::{Chart, EChannel};
 
 use crate::judge::chip_target_ms;
 use crate::lane_map::{lane_of, LaneId, LANE_COUNT, LANE_ORDER};
-use dtx_timing::math::BpmChange;
+use dtx_timing::math::ChartTiming;
 
 pub const MAX_JUDGE_WINDOW_MS: i64 = 117;
 
@@ -147,7 +147,7 @@ pub fn resolve_judgments(
     chart: &Chart,
     judged: &HashSet<usize>,
     base_bpm: f32,
-    bpm_changes: &[BpmChange],
+    bpm_changes: ChartTiming<'_>,
     groups: &EffectiveGroups,
 ) -> Vec<(usize, i64)> {
     let hits = match pad {
@@ -198,7 +198,7 @@ fn single_channel_hit(
     chart: &Chart,
     judged: &HashSet<usize>,
     base_bpm: f32,
-    bpm_changes: &[BpmChange],
+    bpm_changes: ChartTiming<'_>,
 ) -> Vec<Candidate> {
     closest_candidate(channel, audio_ms, chart, judged, base_bpm, bpm_changes)
         .into_iter()
@@ -211,7 +211,7 @@ fn closest_candidate(
     chart: &Chart,
     judged: &HashSet<usize>,
     base_bpm: f32,
-    bpm_changes: &[BpmChange],
+    bpm_changes: ChartTiming<'_>,
 ) -> Option<Candidate> {
     let mut best: Option<Candidate> = None;
     for (idx, chip) in chart.chips.iter().enumerate() {
@@ -255,7 +255,7 @@ fn candidates_for_channels(
     chart: &Chart,
     judged: &HashSet<usize>,
     base_bpm: f32,
-    bpm_changes: &[BpmChange],
+    bpm_changes: ChartTiming<'_>,
 ) -> Vec<Candidate> {
     channels
         .iter()
@@ -292,7 +292,7 @@ fn resolve_ft_group(
     chart: &Chart,
     judged: &HashSet<usize>,
     base_bpm: f32,
-    bpm_changes: &[BpmChange],
+    bpm_changes: ChartTiming<'_>,
     ft_group: FtGroup,
 ) -> Vec<Candidate> {
     let lt = closest_candidate(
@@ -348,7 +348,7 @@ fn resolve_hh_pad(
     chart: &Chart,
     judged: &HashSet<usize>,
     base_bpm: f32,
-    bpm_changes: &[BpmChange],
+    bpm_changes: ChartTiming<'_>,
     hh: HhGroup,
 ) -> Vec<Candidate> {
     let hc = closest_candidate(
@@ -399,7 +399,7 @@ fn resolve_hho_pad(
     chart: &Chart,
     judged: &HashSet<usize>,
     base_bpm: f32,
-    bpm_changes: &[BpmChange],
+    bpm_changes: ChartTiming<'_>,
     hh: HhGroup,
 ) -> Vec<Candidate> {
     let hc = closest_candidate(
@@ -450,7 +450,7 @@ fn resolve_cy_pad(
     chart: &Chart,
     judged: &HashSet<usize>,
     base_bpm: f32,
-    bpm_changes: &[BpmChange],
+    bpm_changes: ChartTiming<'_>,
     groups: &EffectiveGroups,
 ) -> Vec<Candidate> {
     let cy = closest_candidate(
@@ -519,7 +519,7 @@ fn resolve_rd_pad(
     chart: &Chart,
     judged: &HashSet<usize>,
     base_bpm: f32,
-    bpm_changes: &[BpmChange],
+    bpm_changes: ChartTiming<'_>,
     groups: &EffectiveGroups,
 ) -> Vec<Candidate> {
     match (groups.cy, groups.cymbal_free) {
@@ -566,7 +566,7 @@ fn resolve_lc_pad(
     chart: &Chart,
     judged: &HashSet<usize>,
     base_bpm: f32,
-    bpm_changes: &[BpmChange],
+    bpm_changes: ChartTiming<'_>,
     groups: &EffectiveGroups,
 ) -> Vec<Candidate> {
     // Reference: `CStagePerfDrumsScreen.cs:1698-1786` (EPad.LC).
@@ -665,7 +665,7 @@ fn resolve_bd_pedal_group(
     chart: &Chart,
     judged: &HashSet<usize>,
     base_bpm: f32,
-    bpm_changes: &[BpmChange],
+    bpm_changes: ChartTiming<'_>,
     bd: BdGroup,
 ) -> Vec<Candidate> {
     let chip_bd = closest_candidate(
@@ -717,7 +717,7 @@ fn resolve_bd_pad(
     chart: &Chart,
     judged: &HashSet<usize>,
     base_bpm: f32,
-    bpm_changes: &[BpmChange],
+    bpm_changes: ChartTiming<'_>,
     bd: BdGroup,
 ) -> Vec<Candidate> {
     match bd {
@@ -767,7 +767,7 @@ fn resolve_lp_pad(
     chart: &Chart,
     judged: &HashSet<usize>,
     base_bpm: f32,
-    bpm_changes: &[BpmChange],
+    bpm_changes: ChartTiming<'_>,
     bd: BdGroup,
 ) -> Vec<Candidate> {
     match bd {
@@ -809,7 +809,7 @@ fn resolve_lbd_pad(
     chart: &Chart,
     judged: &HashSet<usize>,
     base_bpm: f32,
-    bpm_changes: &[BpmChange],
+    bpm_changes: ChartTiming<'_>,
     bd: BdGroup,
 ) -> Vec<Candidate> {
     match bd {
@@ -936,7 +936,7 @@ pub fn nearest_chip_on_channel(
     audio_ms: i64,
     chart: &Chart,
     base_bpm: f32,
-    bpm_changes: &[BpmChange],
+    bpm_changes: ChartTiming<'_>,
 ) -> Option<(usize, u32, EChannel)> {
     let mut best: Option<(usize, i64)> = None;
     for (idx, chip) in chart.chips.iter().enumerate() {
@@ -994,7 +994,15 @@ mod tests {
             cymbal_free: false,
         };
         let judged = HashSet::new();
-        let hits = resolve_judgments(DrumPad::Cy, 1000, &chart, &judged, 120.0, &[], &groups);
+        let hits = resolve_judgments(
+            DrumPad::Cy,
+            1000,
+            &chart,
+            &judged,
+            120.0,
+            ChartTiming::default(),
+            &groups,
+        );
         assert_eq!(hits.len(), 1);
         assert_eq!(hits[0].0, 0);
     }
@@ -1012,7 +1020,7 @@ mod tests {
             &chart,
             &HashSet::new(),
             120.0,
-            &[],
+            ChartTiming::default(),
             &groups,
         );
         assert_eq!(hits.len(), 1);
@@ -1032,7 +1040,7 @@ mod tests {
             &chart,
             &HashSet::new(),
             120.0,
-            &[],
+            ChartTiming::default(),
             &groups,
         );
         assert_eq!(hits.len(), 1);
@@ -1068,7 +1076,7 @@ mod tests {
             &chart,
             &HashSet::new(),
             120.0,
-            &[],
+            ChartTiming::default(),
             &groups,
         );
         assert_eq!(hits.len(), 1);
@@ -1106,7 +1114,7 @@ mod tests {
             &chart,
             &HashSet::new(),
             120.0,
-            &[],
+            ChartTiming::default(),
             &groups,
         );
         assert_eq!(hits.len(), 1);
@@ -1129,7 +1137,7 @@ mod tests {
             &chart,
             &HashSet::new(),
             120.0,
-            &[],
+            ChartTiming::default(),
             &groups,
         );
         assert_eq!(hits.len(), 1);
@@ -1153,7 +1161,7 @@ mod tests {
             &chart,
             &HashSet::new(),
             120.0,
-            &[],
+            ChartTiming::default(),
             &groups,
         );
         assert_eq!(hits.len(), 1);

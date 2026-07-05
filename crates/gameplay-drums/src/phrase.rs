@@ -13,7 +13,7 @@
 
 use bevy::prelude::Resource;
 use dtx_core::Chart;
-use dtx_timing::math::{chip_time_ms_with_bpm_changes, BpmChange};
+use dtx_timing::math::{chip_time_ms_with_bpm_and_bar_changes, ChartTiming};
 
 /// BocuD constant (CActPerfProgressBar.cs:514). Number of vertical sections.
 pub const PHRASE_SECTION_COUNT: usize = 64;
@@ -54,13 +54,14 @@ impl PhraseMeter {
     }
 
     /// Build from a chart using its drum chips.
-    pub fn from_chart(chart: &Chart, base_bpm: f32, bpm_changes: &[BpmChange]) -> Self {
+    pub fn from_chart(chart: &Chart, base_bpm: f32, timing: ChartTiming<'_>) -> Self {
         let mut sections = [0u32; PHRASE_SECTION_COUNT];
         let mut last_ms: i64 = 0;
         let mut total: u32 = 0;
 
         for chip in chart.drum_chips() {
-            let t = chip_time_ms_with_bpm_changes(chip.measure, chip.value, base_bpm, bpm_changes);
+            let t =
+                chip_time_ms_with_bpm_and_bar_changes(chip.measure, chip.value, base_bpm, timing);
             if t < 0 {
                 continue;
             }
@@ -72,8 +73,12 @@ impl PhraseMeter {
 
         if total > 0 {
             for chip in chart.drum_chips() {
-                let t =
-                    chip_time_ms_with_bpm_changes(chip.measure, chip.value, base_bpm, bpm_changes);
+                let t = chip_time_ms_with_bpm_and_bar_changes(
+                    chip.measure,
+                    chip.value,
+                    base_bpm,
+                    timing,
+                );
                 if t < 0 {
                     continue;
                 }
@@ -129,10 +134,11 @@ impl PhraseMeter {
 mod tests {
     use super::*;
     use dtx_core::{Chart, Chip, EChannel};
+    use dtx_timing::math::BpmChange;
 
     #[test]
     fn empty_chart_zero_sections() {
-        let p = PhraseMeter::from_chart(&Chart::default(), 120.0, &[]);
+        let p = PhraseMeter::from_chart(&Chart::default(), 120.0, ChartTiming::default());
         assert_eq!(p.last_chip_ms, 0);
         assert_eq!(p.total_drum_chips, 0);
         assert_eq!(p.sections.iter().sum::<u32>(), 0);
@@ -144,7 +150,7 @@ mod tests {
             chips: vec![Chip::new(0, EChannel::BassDrum, 0.5)],
             ..Default::default()
         };
-        let p = PhraseMeter::from_chart(&chart, 120.0, &[]);
+        let p = PhraseMeter::from_chart(&chart, 120.0, ChartTiming::default());
         assert_eq!(p.total_drum_chips, 1);
         assert_eq!(p.sections[0], 1);
         assert_eq!(p.last_chip_ms, 1000);
@@ -159,7 +165,7 @@ mod tests {
             ],
             ..Default::default()
         };
-        let p = PhraseMeter::from_chart(&chart, 120.0, &[]);
+        let p = PhraseMeter::from_chart(&chart, 120.0, ChartTiming::default());
         assert_eq!(p.total_drum_chips, 2);
         assert_eq!(p.sections[0], 2);
     }
@@ -177,7 +183,11 @@ mod tests {
             measure: 1,
             bpm: 240.0,
         }];
-        let p = PhraseMeter::from_chart(&chart, 120.0, &changes);
+        let timing = ChartTiming {
+            bpm_changes: &changes,
+            bar_changes: &[],
+        };
+        let p = PhraseMeter::from_chart(&chart, 120.0, timing);
         assert_eq!(p.total_drum_chips, 2);
         assert_eq!(p.sections.iter().sum::<u32>(), 2);
     }
@@ -191,7 +201,7 @@ mod tests {
             chips,
             ..Default::default()
         };
-        let p = PhraseMeter::from_chart(&chart, 120.0, &[]);
+        let p = PhraseMeter::from_chart(&chart, 120.0, ChartTiming::default());
         assert_eq!(p.block_units(0), BLOCKS_MAX);
     }
 

@@ -12,10 +12,10 @@ use dtx_core::chart::Chart;
 use std::collections::HashSet;
 use std::path::Path;
 
-use crate::judge::{auto_chip_target_ms, BpmChangeList};
+use crate::judge::{auto_chip_target_ms, BarLengthChangeList, BpmChangeList};
 use crate::resources::{ActiveChart, ActiveDrumSounds, BgmAdjustState, DrumAudioSettings};
 use dtx_core::EChannel;
-use dtx_timing::math::chip_time_ms_with_bpm_changes;
+use dtx_timing::math::ChartTiming;
 use game_shell::{AppState, PauseState};
 
 #[derive(Resource, Default, Debug)]
@@ -133,7 +133,7 @@ pub fn chip_wav_path(chart: &Chart, chip_idx: usize, source_dir: Option<&Path>) 
 }
 
 /// Find the chip index of the earliest BGM chip (by chart time).
-pub fn find_primary_bgm_chip(chart: &Chart, bpm_changes: &BpmChangeList) -> Option<usize> {
+pub fn find_primary_bgm_chip(chart: &Chart, timing: ChartTiming<'_>) -> Option<usize> {
     let base_bpm = chart.metadata.bpm.unwrap_or(120.0);
     chart
         .chips
@@ -141,7 +141,9 @@ pub fn find_primary_bgm_chip(chart: &Chart, bpm_changes: &BpmChangeList) -> Opti
         .enumerate()
         .filter(|(_, c)| c.channel == EChannel::BGM && c.wav_slot != 0)
         .min_by_key(|(_, c)| {
-            chip_time_ms_with_bpm_changes(c.measure, c.value, base_bpm, &bpm_changes.changes)
+            dtx_timing::math::chip_time_ms_with_bpm_and_bar_changes(
+                c.measure, c.value, base_bpm, timing,
+            )
         })
         .map(|(idx, _)| idx)
 }
@@ -150,6 +152,7 @@ fn schedule_bgm_chips(
     gameplay_clock: Res<crate::resources::GameplayClock>,
     chart: Res<ActiveChart>,
     bpm_changes: Res<BpmChangeList>,
+    bar_changes: Res<BarLengthChangeList>,
     bgm_adjust: Res<BgmAdjustState>,
     primary: Res<PrimaryBgmChip>,
     audio: Res<Audio>,
@@ -170,6 +173,10 @@ fn schedule_bgm_chips(
         return;
     }
     let base_bpm = chart.chart.metadata.bpm.unwrap_or(120.0);
+    let timing = ChartTiming {
+        bpm_changes: &bpm_changes.changes,
+        bar_changes: &bar_changes.changes,
+    };
     let bgm_shift = bgm_adjust.total_ms();
     let source_dir = chart.source_path.as_ref().and_then(|p| p.parent());
 
@@ -184,7 +191,7 @@ fn schedule_bgm_chips(
             played.0.insert(idx);
             continue;
         }
-        let target_ms = auto_chip_target_ms(chip, base_bpm, &bpm_changes.changes, bgm_shift);
+        let target_ms = auto_chip_target_ms(chip, base_bpm, timing, bgm_shift);
         if now < target_ms {
             continue;
         }
@@ -373,7 +380,11 @@ mod tests {
             ..Default::default()
         };
         let bpm = BpmChangeList::from_chart(&chart);
-        assert_eq!(find_primary_bgm_chip(&chart, &bpm), Some(1));
+        let timing = ChartTiming {
+            bpm_changes: &bpm.changes,
+            bar_changes: &[],
+        };
+        assert_eq!(find_primary_bgm_chip(&chart, timing), Some(1));
     }
 
     #[test]
