@@ -15,6 +15,9 @@ pub struct Metadata {
     /// being loaded into memory (BocuD CStageSongLoading.cs:220-230).
     pub sound_nowloading: Option<String>,
     pub bpm: Option<f32>,
+    /// Raw drums difficulty from `#DLEVEL`.
+    /// Older charts use 0..100 (77 = 7.70); some modern exports use
+    /// hundred-scale values (355 = 3.55, 980 = 9.80).
     pub dlevel: Option<u32>,
     pub glevel: Option<u32>,
     pub blevel: Option<u32>,
@@ -79,6 +82,17 @@ pub struct EmptyHitEvent {
     pub measure: u32,
     pub value: f32,
     pub wav_slot: u32,
+}
+
+/// Convert raw DTX drums level into the GITADORA-style display value.
+///
+/// `#DLEVEL: 77` means 7.70; `#DLEVEL: 355` means 3.55.
+pub fn display_dlevel(raw: u32) -> f32 {
+    if raw > 100 {
+        raw as f32 / 100.0
+    } else {
+        raw as f32 / 10.0
+    }
 }
 
 impl Chart {
@@ -148,6 +162,15 @@ mod tests {
         let m2 = m.clone();
         assert_eq!(m.title, m2.title);
         assert_eq!(m.bpm, m2.bpm);
+    }
+
+    #[test]
+    fn display_dlevel_handles_tenths_and_hundredths() {
+        assert!((display_dlevel(77) - 7.7).abs() < 0.001);
+        assert!((display_dlevel(94) - 9.4).abs() < 0.001);
+        assert!((display_dlevel(355) - 3.55).abs() < 0.001);
+        assert!((display_dlevel(615) - 6.15).abs() < 0.001);
+        assert!((display_dlevel(1000) - 10.0).abs() < 0.001);
     }
 
     #[test]

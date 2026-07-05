@@ -69,7 +69,12 @@ fn spawn_result(
         .artist
         .clone()
         .unwrap_or_else(|| "Unknown".into());
-    let difficulty = chart.chart.metadata.dlevel.unwrap_or(0);
+    let difficulty = chart
+        .chart
+        .metadata
+        .dlevel
+        .map(|v| format!("{:.2}", dtx_core::display_dlevel(v)))
+        .unwrap_or_else(|| "--".into());
     let total = counts.total();
     let pct = counts.perfect_pct();
     let rank = Rank::from_perfect_pct(pct);

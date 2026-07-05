@@ -429,7 +429,7 @@ fn spawn_loading(
                                 Text::new(format!(
                                     "{difficulty} {}",
                                     dlevel
-                                        .map(|v| format!("{:.2}", v as f32 / 10.0))
+                                        .map(|v| format!("{:.2}", dtx_core::display_dlevel(v)))
                                         .unwrap_or_else(|| "--".into())
                                 )),
                                 Theme::font(12.0),

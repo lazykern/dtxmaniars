@@ -24,7 +24,8 @@
 //! - On OnExit: stop BGM.
 //! - TAB key cycles sort mode.
 
-use std::path::PathBuf;
+use std::collections::HashMap;
+use std::path::{Path, PathBuf};
 
 use bevy::prelude::*;
 use bevy_kira_audio::prelude::*;
@@ -128,8 +129,9 @@ impl SongSelectSelection {
         song.title.to_lowercase().contains(&q) || song.artist.to_lowercase().contains(&q)
     }
 
-    /// Group charts by parent folder, sort within folder by `dlevel`
-    /// ascending. Top-level sort mode applies to the folder list.
+    /// Group charts by parent folder. If set.def exists, use its L1..L5
+    /// chart order; otherwise sort within folder by display level.
+    /// Top-level sort mode applies to the folder list.
     pub fn recompute(&mut self, all: &[SongInfo]) {
         use std::collections::BTreeMap;
         let mut by_folder: BTreeMap<PathBuf, Vec<usize>> = BTreeMap::new();
@@ -147,10 +149,18 @@ impl SongSelectSelection {
         let mut v: Vec<SongFolderView> = by_folder
             .into_iter()
             .map(|(folder, mut indices)| {
+                let set_order = read_set_def_order(&folder);
                 indices.sort_by(|&a, &b| {
-                    let la = all[a].dlevel.unwrap_or(u32::MAX);
-                    let lb = all[b].dlevel.unwrap_or(u32::MAX);
-                    la.cmp(&lb).then_with(|| a.cmp(&b))
+                    let oa = set_order_for(&set_order, &all[a].path);
+                    let ob = set_order_for(&set_order, &all[b].path);
+                    match (oa, ob) {
+                        (Some(oa), Some(ob)) => oa.cmp(&ob).then_with(|| a.cmp(&b)),
+                        (Some(_), None) => std::cmp::Ordering::Less,
+                        (None, Some(_)) => std::cmp::Ordering::Greater,
+                        (None, None) => display_level_key(&all[a])
+                            .cmp(&display_level_key(&all[b]))
+                            .then_with(|| a.cmp(&b)),
+                    }
                 });
                 let title = all[indices[0]].title.clone();
                 let artist = all[indices[0]].artist.clone();
@@ -169,6 +179,61 @@ impl SongSelectSelection {
         }
         self.visible = v;
     }
+}
+
+fn display_level_key(song: &SongInfo) -> u32 {
+    song.dlevel
+        .map(|v| (dtx_core::display_dlevel(v) * 100.0).round() as u32)
+        .unwrap_or(u32::MAX)
+}
+
+fn set_order_for(order: &HashMap<String, usize>, path: &Path) -> Option<usize> {
+    let name = path.file_name()?.to_str()?.to_ascii_lowercase();
+    order.get(&name).copied()
+}
+
+fn read_set_def_order(folder: &Path) -> HashMap<String, usize> {
+    let Ok(bytes) = std::fs::read(folder.join("set.def")) else {
+        return HashMap::new();
+    };
+    let text = decode_set_def(&bytes);
+    let mut order = HashMap::new();
+    for line in text.lines().map(str::trim) {
+        let upper = line.to_ascii_uppercase();
+        for i in 1..=5 {
+            let key = format!("#L{i}FILE");
+            if upper.starts_with(&key) {
+                let file = line[key.len()..].trim_matches([':', ' ', '\t']);
+                let file = Path::new(file)
+                    .file_name()
+                    .and_then(|s| s.to_str())
+                    .unwrap_or(file)
+                    .to_ascii_lowercase();
+                if !file.is_empty() {
+                    order.insert(file, i - 1);
+                }
+            }
+        }
+    }
+    order
+}
+
+fn decode_set_def(bytes: &[u8]) -> String {
+    if bytes.starts_with(&[0xff, 0xfe]) {
+        let units = bytes[2..]
+            .chunks_exact(2)
+            .map(|c| u16::from_le_bytes([c[0], c[1]]))
+            .collect::<Vec<_>>();
+        return String::from_utf16_lossy(&units);
+    }
+    if bytes.starts_with(&[0xfe, 0xff]) {
+        let units = bytes[2..]
+            .chunks_exact(2)
+            .map(|c| u16::from_be_bytes([c[0], c[1]]))
+            .collect::<Vec<_>>();
+        return String::from_utf16_lossy(&units);
+    }
+    String::from_utf8_lossy(bytes).into_owned()
 }
 
 // ===== CommandHistory (CommandHistory.cs) =====
@@ -776,7 +841,7 @@ fn update_left_cluster(
             data.slots[slot_i] = DifficultySlot {
                 present: true,
                 label: format!("DRUM · {}", SongFolderView::difficulty_label(slot_i as u8)),
-                level: song.dlevel.map(|v| v as f32 / 10.0),
+                level: song.dlevel.map(dtx_core::display_dlevel),
                 achievement: best.as_ref().map(|b| b.accuracy()),
                 rank: best.as_ref().map(|b| b.rank.clone()),
             };
@@ -1296,9 +1361,62 @@ mod tests {
         let folder = &sel.visible[0];
         assert_eq!(folder.title, "Alpha");
         assert_eq!(folder.difficulty_count(), 3);
-        // Within folder: easiest (lowest dlevel) first.
+        // Within folder: easiest (lowest displayed level) first.
         assert_eq!(all[folder.chart_indices[0]].dlevel, Some(50));
         assert_eq!(all[folder.chart_indices[2]].dlevel, Some(95));
+    }
+
+    #[test]
+    fn recompute_uses_set_def_chart_order() {
+        let root = std::env::temp_dir().join(format!(
+            "dtxmaniars-setdef-{}-{}",
+            std::process::id(),
+            "song-select"
+        ));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).unwrap();
+        let mut bytes = vec![0xff, 0xfe];
+        for unit in "#L1FILE bas.dtx\r\n#L2FILE adv.dtx\r\n#L3FILE ext.dtx\r\n#L4FILE mas.dtx\r\n"
+            .encode_utf16()
+        {
+            bytes.extend(unit.to_le_bytes());
+        }
+        std::fs::write(root.join("set.def"), bytes).unwrap();
+
+        let chart = |file: &str, level: u32| SongInfo {
+            path: root.join(file),
+            title: "Alpha".into(),
+            artist: "X".into(),
+            bpm: Some(120.0),
+            dlevel: Some(level),
+            bgm_path: None,
+            preview_path: None,
+            preview_is_loopable: false,
+            preimage_path: None,
+        };
+        let all = vec![
+            chart("ext.dtx", 77),
+            chart("mas.dtx", 94),
+            chart("bas.dtx", 355),
+            chart("adv.dtx", 615),
+        ];
+        let mut sel = SongSelectSelection::default();
+        sel.recompute(&all);
+        let names: Vec<_> = sel.visible[0]
+            .chart_indices
+            .iter()
+            .map(|&i| {
+                all[i]
+                    .path
+                    .file_name()
+                    .unwrap()
+                    .to_str()
+                    .unwrap()
+                    .to_string()
+            })
+            .collect();
+        assert_eq!(names, ["bas.dtx", "adv.dtx", "ext.dtx", "mas.dtx"]);
+        let _ = std::fs::remove_dir_all(&root);
     }
 
     #[test]

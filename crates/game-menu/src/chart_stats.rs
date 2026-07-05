@@ -11,10 +11,10 @@ use std::path::PathBuf;
 
 use crate::song_select::{Selection, SongSelectSelection};
 
-/// Display skill: (dlevel/10) × achievement% / 100 × 20.
+/// Display skill: level × achievement% / 100 × 20.
 /// 100% on a 9.80 chart = 196.0 skill points. Display-only.
 pub fn skill_points(dlevel: Option<u32>, achievement_pct: f32) -> f32 {
-    let level = dlevel.unwrap_or(0) as f32 / 10.0;
+    let level = dlevel.map(dtx_core::display_dlevel).unwrap_or(0.0);
     level * (achievement_pct / 100.0) * 20.0
 }
 
@@ -120,6 +120,7 @@ mod tests {
     #[test]
     fn skill_formula_matches_gitadora_shape() {
         assert!((skill_points(Some(98), 100.0) - 196.0).abs() < 0.01);
+        assert!((skill_points(Some(355), 100.0) - 71.0).abs() < 0.01);
         assert!((skill_points(Some(78), 93.04) - (7.8 * 0.9304 * 20.0)).abs() < 0.01);
         assert_eq!(skill_points(None, 100.0), 0.0);
         assert_eq!(skill_points(Some(50), 0.0), 0.0);

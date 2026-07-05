@@ -43,7 +43,7 @@ pub fn compute_from_chart(
     derived.chart_level = chart
         .metadata
         .dlevel
-        .map(|v| v as f64 / 10.0)
+        .map(|v| dtx_core::display_dlevel(v) as f64)
         .unwrap_or(0.0);
     derived.total_drum_chips = drum_chip_count;
     derived.max_skill = crate::skill::game_skill(100.0, derived.chart_level, false);

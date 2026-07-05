@@ -33,7 +33,7 @@ pub use assets::resolve_bgm_path;
 pub use beat_lines::{expand_timing_lines, TimingLine, TimingLineKind};
 pub use channel::EChannel;
 pub use chip_transform::{apply_mirror, apply_random, RandomMode};
-pub use chart::{Chart, Chip, EmptyHitEvent, Metadata};
+pub use chart::{display_dlevel, Chart, Chip, EmptyHitEvent, Metadata};
 pub use error::DtxError;
 pub use parser::parse;
 

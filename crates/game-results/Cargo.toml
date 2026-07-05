@@ -12,6 +12,7 @@ workspace = true
 
 [dependencies]
 bevy = { workspace = true, features = ["default"] }
+dtx-core = { workspace = true }
 dtx-scoring = { workspace = true }
 dtx-ui = { workspace = true }
 gameplay-drums = { path = "../gameplay-drums" }

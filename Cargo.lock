@@ -3086,6 +3086,7 @@ name = "game-results"
 version = "0.0.0"
 dependencies = [
  "bevy",
+ "dtx-core",
  "dtx-scoring",
  "dtx-ui",
  "game-shell",
