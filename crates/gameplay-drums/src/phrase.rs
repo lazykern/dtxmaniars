@@ -60,12 +60,7 @@ impl PhraseMeter {
         let mut total: u32 = 0;
 
         for chip in chart.drum_chips() {
-            let t = chip_time_ms_with_bpm_changes(
-                chip.measure,
-                chip.value,
-                base_bpm,
-                bpm_changes,
-            );
+            let t = chip_time_ms_with_bpm_changes(chip.measure, chip.value, base_bpm, bpm_changes);
             if t < 0 {
                 continue;
             }
@@ -75,19 +70,21 @@ impl PhraseMeter {
             total += 1;
         }
 
-        if last_ms > 0 {
+        if total > 0 {
             for chip in chart.drum_chips() {
-                let t = chip_time_ms_with_bpm_changes(
-                    chip.measure,
-                    chip.value,
-                    base_bpm,
-                    bpm_changes,
-                );
+                let t =
+                    chip_time_ms_with_bpm_changes(chip.measure, chip.value, base_bpm, bpm_changes);
                 if t < 0 {
                     continue;
                 }
-                let mut idx = (t as u128 * PHRASE_SECTION_COUNT as u128 / last_ms as u128)
-                    as usize;
+                // Section 0 = top of meter = chart end (t == last_ms).
+                // Section PHRASE_SECTION_COUNT-1 = bottom = chart start (t == 0).
+                let mut idx = if last_ms > 0 {
+                    ((last_ms - t) as u128 * PHRASE_SECTION_COUNT as u128 / last_ms as u128)
+                        as usize
+                } else {
+                    0
+                };
                 if idx >= PHRASE_SECTION_COUNT {
                     idx = PHRASE_SECTION_COUNT - 1;
                 }
@@ -176,7 +173,10 @@ mod tests {
             ],
             ..Default::default()
         };
-        let changes = vec![BpmChange { measure: 1, bpm: 240.0 }];
+        let changes = vec![BpmChange {
+            measure: 1,
+            bpm: 240.0,
+        }];
         let p = PhraseMeter::from_chart(&chart, 120.0, &changes);
         assert_eq!(p.total_drum_chips, 2);
         assert_eq!(p.sections.iter().sum::<u32>(), 2);
@@ -184,8 +184,13 @@ mod tests {
 
     #[test]
     fn block_units_capped_at_max() {
-        let chips: Vec<Chip> = (0..1600).map(|_| Chip::new(0, EChannel::BassDrum, 0.0)).collect();
-        let chart = Chart { chips, ..Default::default() };
+        let chips: Vec<Chip> = (0..1600)
+            .map(|_| Chip::new(0, EChannel::BassDrum, 0.0))
+            .collect();
+        let chart = Chart {
+            chips,
+            ..Default::default()
+        };
         let p = PhraseMeter::from_chart(&chart, 120.0, &[]);
         assert_eq!(p.block_units(0), BLOCKS_MAX);
     }
