@@ -104,4 +104,22 @@ mod tests {
         let g = row_geometry(0.5);
         assert!(g.height > ROW_H && g.height < ROW_H_SELECTED);
     }
+
+    #[test]
+    fn adjacent_rows_never_overlap_constant_gap() {
+        // Load-bearing invariant: for any scroll position the gap
+        // between consecutive rows equals ROW_GAP and rows never
+        // overlap. Sample fractional offsets across the visible range.
+        let mut o = -6.0_f32;
+        while o <= 5.0 {
+            let lower = row_geometry(o);
+            let upper = row_geometry(o + 1.0);
+            let gap = (upper.center_y - upper.height / 2.0) - (lower.center_y + lower.height / 2.0);
+            assert!(
+                (gap - ROW_GAP).abs() < 0.01,
+                "offset {o}: gap {gap} != ROW_GAP {ROW_GAP}"
+            );
+            o += 0.25;
+        }
+    }
 }
