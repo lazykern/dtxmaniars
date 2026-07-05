@@ -60,6 +60,20 @@ pub const ALBUM_ART_H: f32 = 180.0;
 /// CommandHistory buffer size (CommandHistory.cs:10).
 pub const COMMAND_HISTORY_BUF: usize = 16;
 
+/// Song wheel anchors inside the stage (REF units).
+const WHEEL_TOP: f32 = 52.0;
+const WHEEL_BOTTOM: f32 = 40.0;
+
+/// Uniform stage scale plus the stage size (in REF units) that fills
+/// the window edge-to-edge at that scale. Content never renders
+/// smaller than the 1280×720 design; the stage grows in whichever
+/// dimension the window has spare room (taller on 16:10, wider on
+/// ultrawide) so there is no letterboxing.
+fn stage_metrics(win_w: f32, win_h: f32) -> (f32, Vec2) {
+    let s = (win_w / REF_WIDTH).min(win_h / REF_HEIGHT);
+    (s, Vec2::new(win_w / s, win_h / s))
+}
+
 // ===== Resources (shared with other crates) =====
 
 /// The currently-selected song path. Set by SongSelect, consumed by SongLoading.
@@ -431,20 +445,25 @@ pub fn plugin(app: &mut App) {
         );
 }
 
-/// Scale the 1280×720 reference stage to fill the window, preserving
-/// aspect (letterboxed). Mirrors gameplay's `min(w/REF_W, h/REF_H)`
-/// scale so the song-select layout fills the screen like GITADORA.
+/// Scale the reference stage to fill the window edge-to-edge:
+/// uniform `min(w/REF_W, h/REF_H)` scale (mirrors gameplay), with the
+/// stage node stretched to `window / scale` REF units so no
+/// letterbox bands remain.
 fn scale_song_select_stage(
     windows: Query<&Window, With<bevy::window::PrimaryWindow>>,
-    mut stage: Query<&mut UiTransform, With<SongSelectStage>>,
+    mut stage: Query<(&mut UiTransform, &mut Node), With<SongSelectStage>>,
 ) {
     let Ok(win) = windows.single() else {
         return;
     };
-    let s = (win.width() / REF_WIDTH).min(win.height() / REF_HEIGHT);
-    for mut tf in &mut stage {
+    let (s, size) = stage_metrics(win.width(), win.height());
+    for (mut tf, mut node) in &mut stage {
         if tf.scale != Vec2::splat(s) {
             tf.scale = Vec2::splat(s);
+        }
+        if node.width != Val::Px(size.x) || node.height != Val::Px(size.y) {
+            node.width = Val::Px(size.x);
+            node.height = Val::Px(size.y);
         }
     }
 }
@@ -695,8 +714,8 @@ fn spawn_song_select(
                             position_type: PositionType::Absolute,
                             left: Val::Percent(51.0),
                             right: Val::Px(16.0),
-                            top: Val::Px(52.0),
-                            height: Val::Px(620.0),
+                            top: Val::Px(WHEEL_TOP),
+                            bottom: Val::Px(WHEEL_BOTTOM),
                             overflow: Overflow::clip(),
                             ..default()
                         },
@@ -910,6 +929,7 @@ fn wheel_layout_system(
     selection_state: Res<SongSelectSelection>,
     db: Res<SongDb>,
     theme: Res<ThemeResource>,
+    windows: Query<&Window, With<bevy::window::PrimaryWindow>>,
     mut spring: ResMut<WheelSpring>,
     mut phase: Local<f32>,
     mut rows: Query<(
@@ -936,7 +956,14 @@ fn wheel_layout_system(
     *phase = (*phase + time.delta_secs() * bpm / 60.0).rem_euclid(1.0);
     let glow = 0.30 + 0.25 * (1.0 - *phase).powi(2);
 
-    const WHEEL_H: f32 = 620.0;
+    // Wheel container height in REF units (stage stretches to the
+    // window, wheel stretches between its top/bottom anchors).
+    let wheel_h = windows
+        .single()
+        .map(|w| stage_metrics(w.width(), w.height()).1.y)
+        .unwrap_or(REF_HEIGHT)
+        - WHEEL_TOP
+        - WHEEL_BOTTOM;
     for (row, mut node, mut vis, mut border, mut shadow, mut bg) in &mut rows {
         let offset = row.index as f32 - center;
         if offset.abs() > (VISIBLE_HALF as f32 + 1.0) {
@@ -945,7 +972,7 @@ fn wheel_layout_system(
         }
         *vis = Visibility::Visible;
         let g = row_geometry(offset);
-        node.top = Val::Px(WHEEL_H / 2.0 + g.center_y - g.height / 2.0);
+        node.top = Val::Px(wheel_h / 2.0 + g.center_y - g.height / 2.0);
         node.left = Val::Px(g.indent);
         node.height = Val::Px(g.height);
         let selected = offset.abs() < 0.5;
@@ -1436,6 +1463,22 @@ mod tests {
             preview_is_loopable: false,
             preimage_path: None,
         }
+    }
+
+    #[test]
+    fn stage_metrics_fills_window_without_bands() {
+        // Exact 16:9: stage is the reference size.
+        let (s, size) = stage_metrics(2560.0, 1440.0);
+        assert_eq!(s, 2.0);
+        assert_eq!(size, Vec2::new(REF_WIDTH, REF_HEIGHT));
+        // 16:10: width-constrained, stage grows taller than 720.
+        let (s, size) = stage_metrics(1280.0, 800.0);
+        assert_eq!(s, 1.0);
+        assert_eq!(size, Vec2::new(1280.0, 800.0));
+        // Ultrawide: height-constrained, stage grows wider than 1280.
+        let (s, size) = stage_metrics(3440.0, 1440.0);
+        assert_eq!(s, 2.0);
+        assert_eq!(size, Vec2::new(1720.0, 720.0));
     }
 
     #[test]
