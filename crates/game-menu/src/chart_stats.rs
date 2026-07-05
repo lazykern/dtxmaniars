@@ -11,6 +11,16 @@ use std::path::PathBuf;
 
 use crate::song_select::{Selection, SongSelectSelection};
 
+/// Wheel-row skill number, always two decimals (e.g. "79.17").
+pub fn row_skill_text(skill: f32) -> String {
+    format!("{skill:.2}")
+}
+
+/// Achievement percent clamped to a 0..=100 progress-bar fill.
+pub fn bar_fill_pct(achievement: f32) -> f32 {
+    achievement.clamp(0.0, 100.0)
+}
+
 /// Display skill: level × achievement% / 100 × 20.
 /// 100% on a 9.80 chart = 196.0 skill points. Display-only.
 pub fn skill_points(dlevel: Option<u32>, achievement_pct: f32) -> f32 {
@@ -116,6 +126,22 @@ fn poll_stats_task(mut task: ResMut<ChartStatsTask>, mut data: ResMut<DensityDat
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn row_skill_text_two_decimals() {
+        assert_eq!(row_skill_text(79.17), "79.17");
+        assert_eq!(row_skill_text(0.0), "0.00");
+        assert_eq!(row_skill_text(2.9), "2.90");
+    }
+
+    #[test]
+    fn bar_fill_pct_clamps_0_to_100() {
+        assert_eq!(bar_fill_pct(64.8), 64.8);
+        assert_eq!(bar_fill_pct(0.0), 0.0);
+        assert_eq!(bar_fill_pct(100.0), 100.0);
+        assert_eq!(bar_fill_pct(-5.0), 0.0);
+        assert_eq!(bar_fill_pct(123.4), 100.0);
+    }
 
     #[test]
     fn skill_formula_matches_gitadora_shape() {
