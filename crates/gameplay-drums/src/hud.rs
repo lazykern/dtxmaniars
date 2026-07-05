@@ -163,7 +163,7 @@ fn spawn_hud(
         root,
         &t,
         s,
-        lane_geometry::STRIP_REF_LEFT,
+        crate::layout::STRIP_REF_CENTERED_LEFT,
         lane_geometry::STRIP_REF_WIDTH,
     );
     playfield_speed::spawn_playfield_speed(
@@ -171,7 +171,7 @@ fn spawn_hud(
         root,
         &t,
         s,
-        lane_geometry::STRIP_REF_LEFT + lane_geometry::STRIP_REF_WIDTH - 96.0,
+        crate::layout::STRIP_REF_CENTERED_LEFT + lane_geometry::STRIP_REF_WIDTH - 96.0,
     );
     let hud_right = ref_hud_right_x();
     now_playing::spawn_now_playing(&mut commands, root, &t, s, hud_right);
