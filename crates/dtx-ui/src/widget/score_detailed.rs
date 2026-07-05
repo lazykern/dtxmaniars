@@ -1,151 +1,231 @@
-//! DTXMania classic SCORE DETAILED panel (left side).
-//!
-//! Reference: BocuD `CActPerfDrumsStatusPanel.cs:23-205`.
-//! Position: x=22, y=250, rows at y=72/102/132/162/192/222 (30px stride).
-//! Columns: label x=22, count x=80, % x=167.
+//! Left performance stats panel (BocuD `CActPerfDrumsStatusPanel.cs` layout).
 
-use bevy::prelude::*;
 use crate::theme::Theme;
+use crate::widget::hud_ref::{scaled_font, HudRefRect};
+use bevy::prelude::*;
 
-/// Marker for the SCORE number text at top-left (BocuD `CActPerfDrumsScore`).
+#[derive(Component)]
+pub struct ScoreCaptionText;
+
 #[derive(Component)]
 pub struct ScoreNumberText;
 
-/// Marker for the SCORE DETAILED label/header.
 #[derive(Component)]
-pub struct ScoreDetailedHeader;
+pub struct StatsBoxBorder;
 
-/// Marker for one row of the judgment counts (Perfect/Great/Good/Ok/Miss/MaxCombo).
-/// `kind` 0..=5 → Perfect, Great, Good, Ok, Miss, MaxCombo.
 #[derive(Component)]
 pub struct JudgmentRowText {
     pub kind: u8,
 }
 
-/// Marker for the Fast/Slow counter row.
 #[derive(Component)]
 pub struct FastSlowText;
 
-/// Marker for the Skills by Song big number.
+#[derive(Component)]
+pub struct AccuracyText;
+
+#[derive(Component)]
+pub struct DifficultyBadgeText;
+
 #[derive(Component)]
 pub struct SkillBySongText;
 
-/// Spawn the entire left panel: SCORE big + 6 judgment rows + Fast/Slow + Skills.
+#[derive(Component)]
+pub struct SkillCaptionText;
+
 pub fn spawn_score_detailed_panel(
     commands: &mut Commands,
     parent: Entity,
     theme: &Theme,
+    scale: f32,
 ) {
-    let panel_x = 22.0;
-    let panel_y = 60.0;
-    let label_color = theme.text_primary;
-    let label_secondary = theme.text_secondary;
+    let panel_x = 16.0;
+    let box_x = panel_x;
+    let box_y = 78.0;
+    let box_w = 200.0;
+    let box_h = 250.0;
+    let row_x = box_x + 10.0;
+    let row_start_y = box_y + 12.0;
+    let row_stride = 34.0;
 
-    // SCORE big (BocuD x=22, y=15..50)
     commands.entity(parent).with_children(|p| {
+        let caption = HudRefRect::new(panel_x + 14.0, 8.0, 200.0, 22.0);
+        p.spawn((
+            ScoreCaptionText,
+            caption,
+            Node {
+                position_type: PositionType::Absolute,
+                left: Val::Px(caption.left * scale),
+                top: Val::Px(caption.top * scale),
+                width: Val::Px(caption.width * scale),
+                height: Val::Px(caption.height * scale),
+                ..default()
+            },
+            Text::new("SCORE"),
+            scaled_font(scale, 18.0),
+            TextColor(theme.text_secondary),
+        ));
+
+        let score = HudRefRect::new(panel_x + 14.0, 26.0, 220.0, 40.0);
         p.spawn((
             ScoreNumberText,
+            score,
             Node {
                 position_type: PositionType::Absolute,
-                left: Val::Px(panel_x),
-                top: Val::Px(15.0),
-                width: Val::Px(238.0),
-                height: Val::Px(50.0),
+                left: Val::Px(score.left * scale),
+                top: Val::Px(score.top * scale),
+                width: Val::Px(score.width * scale),
+                height: Val::Px(score.height * scale),
                 ..default()
             },
-            Text::new("0000000"),
-            Theme::font(40.0),
-            TextColor(label_color),
+            Text::new("0"),
+            scaled_font(scale, 36.0),
+            TextColor(theme.text_primary),
         ));
 
-        // SCORE DETAILED header
+        let accent = HudRefRect::new(panel_x, 8.0, 3.0, 58.0);
         p.spawn((
-            ScoreDetailedHeader,
+            accent,
             Node {
                 position_type: PositionType::Absolute,
-                left: Val::Px(panel_x),
-                top: Val::Px(panel_y + 30.0),
-                width: Val::Px(238.0),
-                height: Val::Px(20.0),
+                left: Val::Px(accent.left * scale),
+                top: Val::Px(accent.top * scale),
+                width: Val::Px(accent.width * scale),
+                height: Val::Px(accent.height * scale),
                 ..default()
             },
-            Text::new("SCORE DETAILED"),
-            Theme::font(14.0),
-            TextColor(label_secondary),
+            BackgroundColor(theme.select_yellow),
         ));
 
-        // 6 judgment rows: Perfect/Great/Good/Ok/Miss/MaxCombo
+        let border_rect = HudRefRect::new(box_x, box_y, box_w, box_h);
+        p.spawn((
+            StatsBoxBorder,
+            border_rect,
+            Node {
+                position_type: PositionType::Absolute,
+                left: Val::Px(border_rect.left * scale),
+                top: Val::Px(border_rect.top * scale),
+                width: Val::Px(border_rect.width * scale),
+                height: Val::Px(border_rect.height * scale),
+                border: UiRect::all(Val::Px(1.0)),
+                ..default()
+            },
+            BackgroundColor(theme.stage_panel_bg),
+            BorderColor::all(theme.stage_panel_border),
+        ));
+
         let labels = ["Perfect", "Great", "Good", "Ok", "Miss", "MaxCombo"];
         let colors = [
             theme.judgment_perfect,
             theme.judgment_great,
             theme.judgment_good,
-            Color::srgb(0.75, 0.45, 0.95), // Ok = purple
+            Color::srgb(0.75, 0.45, 0.95),
             theme.judgment_miss,
-            theme.accent, // MaxCombo = cyan
+            theme.accent,
         ];
         for (i, (label, color)) in labels.iter().zip(colors.iter()).enumerate() {
-            let row_y = panel_y + 60.0 + i as f32 * 30.0;
+            let row_y = row_start_y + i as f32 * row_stride;
+            let rect = HudRefRect::new(row_x, row_y, box_w - 20.0, 28.0);
             p.spawn((
                 JudgmentRowText { kind: i as u8 },
+                rect,
                 Node {
                     position_type: PositionType::Absolute,
-                    left: Val::Px(panel_x),
-                    top: Val::Px(row_y),
-                    width: Val::Px(238.0),
-                    height: Val::Px(24.0),
+                    left: Val::Px(rect.left * scale),
+                    top: Val::Px(rect.top * scale),
+                    width: Val::Px(rect.width * scale),
+                    height: Val::Px(rect.height * scale),
                     ..default()
                 },
-                Text::new(format!("{label:<10} 0000   0%")),
-                Theme::font(16.0),
+                Text::new(format!("{label:<8} 0   0%")),
+                scaled_font(scale, 15.0),
                 TextColor(*color),
             ));
         }
 
-        // Fast / Slow counter (BocuD y=335)
+        let diff = HudRefRect::new(panel_x + 8.0, box_y + box_h + 10.0, 120.0, 26.0);
         p.spawn((
-            FastSlowText,
+            DifficultyBadgeText,
+            diff,
             Node {
                 position_type: PositionType::Absolute,
-                left: Val::Px(panel_x),
-                top: Val::Px(panel_y + 285.0),
-                width: Val::Px(238.0),
-                height: Val::Px(20.0),
+                left: Val::Px(diff.left * scale),
+                top: Val::Px(diff.top * scale),
+                width: Val::Px(diff.width * scale),
+                height: Val::Px(diff.height * scale),
+                ..default()
+            },
+            Text::new("BASIC 0.00"),
+            scaled_font(scale, 14.0),
+            TextColor(Color::srgb(1.0, 0.25, 0.25)),
+        ));
+
+        let acc = HudRefRect::new(panel_x + 8.0, box_y + box_h + 42.0, 220.0, 44.0);
+        p.spawn((
+            AccuracyText,
+            acc,
+            Node {
+                position_type: PositionType::Absolute,
+                left: Val::Px(acc.left * scale),
+                top: Val::Px(acc.top * scale),
+                width: Val::Px(acc.width * scale),
+                height: Val::Px(acc.height * scale),
+                ..default()
+            },
+            Text::new("100.00%"),
+            scaled_font(scale, 36.0),
+            TextColor(theme.text_primary),
+        ));
+
+        let fs = HudRefRect::new(panel_x + 8.0, box_y + box_h + 90.0, 220.0, 20.0);
+        p.spawn((
+            FastSlowText,
+            fs,
+            Node {
+                position_type: PositionType::Absolute,
+                left: Val::Px(fs.left * scale),
+                top: Val::Px(fs.top * scale),
+                width: Val::Px(fs.width * scale),
+                height: Val::Px(fs.height * scale),
                 ..default()
             },
             Text::new("Fast 0   Slow 0"),
-            Theme::font(14.0),
-            TextColor(label_secondary),
+            scaled_font(scale, 13.0),
+            TextColor(theme.text_secondary),
         ));
 
-        // Skills by Song big number (BocuD x=58, y=363)
+        let skill_cap = HudRefRect::new(panel_x + 8.0, 640.0, 80.0, 18.0);
         p.spawn((
-            SkillBySongText,
+            SkillCaptionText,
+            skill_cap,
             Node {
                 position_type: PositionType::Absolute,
-                left: Val::Px(panel_x + 36.0),
-                top: Val::Px(panel_y + 313.0),
-                width: Val::Px(200.0),
-                height: Val::Px(40.0),
+                left: Val::Px(skill_cap.left * scale),
+                top: Val::Px(skill_cap.top * scale),
+                width: Val::Px(skill_cap.width * scale),
+                height: Val::Px(skill_cap.height * scale),
+                ..default()
+            },
+            Text::new("SKILL"),
+            scaled_font(scale, 13.0),
+            TextColor(theme.text_secondary),
+        ));
+
+        let skill = HudRefRect::new(panel_x + 8.0, 660.0, 200.0, 36.0);
+        p.spawn((
+            SkillBySongText,
+            skill,
+            Node {
+                position_type: PositionType::Absolute,
+                left: Val::Px(skill.left * scale),
+                top: Val::Px(skill.top * scale),
+                width: Val::Px(skill.width * scale),
+                height: Val::Px(skill.height * scale),
                 ..default()
             },
             Text::new("0.00"),
-            Theme::font(32.0),
+            scaled_font(scale, 28.0),
             TextColor(theme.accent),
-        ));
-        // SKILLS BY SONG label
-        p.spawn((
-            Node {
-                position_type: PositionType::Absolute,
-                left: Val::Px(panel_x),
-                top: Val::Px(panel_y + 358.0),
-                width: Val::Px(238.0),
-                height: Val::Px(18.0),
-                ..default()
-            },
-            Text::new("SKILLS BY SONG"),
-            Theme::font(12.0),
-            TextColor(label_secondary),
         ));
     });
 }
@@ -154,8 +234,7 @@ pub fn spawn_score_detailed_panel(
 mod tests {
     use super::*;
     #[test]
-    fn rows_fit_in_panel() {
-        // 6 rows × 30px + header ~30 + 60 padding = 270; panel_y=60 → 60+270=330 < 720.
-        assert!(60.0 + 60.0 + 6.0 * 30.0 < 720.0);
+    fn stats_box_in_left_panel() {
+        assert!(30.0 + 200.0 <= 260.0);
     }
 }
