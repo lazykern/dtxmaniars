@@ -99,15 +99,29 @@ chart-end time for this chart's measure layout.
   `EChannel::BarLength`), registered in `judge.rs`'s `plugin()` via
   `init_resource`, populated in `orchestrator::enter_derive_from_chart`
   alongside `BpmChangeList`.
-- `judge::chip_target_ms`, `chip_target_ms_with_speed`, `auto_chip_target_ms`
-  gain a trailing `bar_changes: &[BarLengthChange]` parameter and delegate to
-  the new core fn.
+- New `ChartTiming<'a> { bpm_changes: &'a [BpmChange], bar_changes: &'a
+  [BarLengthChange] }` in `dtx-timing::math` — `Copy`, `Default` (empty
+  slices). Rather than threading a second parallel slice parameter through
+  every intermediate function (doubling every one of the ~40 call sites
+  below), each system entry point builds one `ChartTiming` from its two
+  `Res<...ChangeList>`s and passes it down by value. `judge::chip_target_ms`,
+  `chip_target_ms_with_speed`, `auto_chip_target_ms` take `timing:
+  ChartTiming<'_>` in place of their old `bpm_changes: &[BpmChange]` param
+  and delegate to the new core fn. This is a refinement over the original
+  two-separate-params idea from brainstorming — same resources, same
+  external behavior, but the ~13 pure pass-through functions in
+  `drum_groups.rs` (e.g. `resolve_hh_pad`, `resolve_cy_pad`,
+  `closest_candidate`) now only need their parameter's *type* widened
+  (`&[BpmChange]` → `ChartTiming<'_>`), not a new parameter inserted —
+  their bodies don't change at all, since they just forward the identifier.
 
 ### Call sites to update
 
-Mechanical: each adds one trailing slice param sourced from
-`Res<BarLengthChangeList>` at the system boundary, same shape as the
-existing `bpm_changes` threading. Rust's exhaustiveness catches any missed
+Mechanical: each of the ~10 system-level entry points adds a new
+`Res<BarLengthChangeList>` param, builds one `ChartTiming`, and passes it
+down instead of `&bpm_changes.changes`. Everything between the entry point
+and the leaf `chip_target_ms` call is an unchanged forwarding chain once
+its parameter type is widened. Rust's exhaustiveness catches any missed
 call site at compile time (signature change is a hard compile error until
 fixed).
 
