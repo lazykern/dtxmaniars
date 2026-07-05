@@ -74,7 +74,10 @@ pub fn spawn_live_graph(
         ));
 
         for (pct, label) in RANK_THRESHOLDS {
-            let line_y = ref_y + (1.0 - pct / 100.0) * bar_area_h;
+            // Bars anchor at the panel bottom and grow up by
+            // `pct/100 * bar_area_h`, so a threshold line must land on that same
+            // bar top (bottom-anchored), not top-anchored — else it sits ~4px off.
+            let line_y = ref_y + ref_h - (pct / 100.0) * bar_area_h;
             p.spawn((
                 HudRefRect::new(ref_x, line_y, ref_w, 1.0),
                 Node {

@@ -25,12 +25,6 @@ pub fn col_ref_x(col: usize) -> f32 {
     STRIP_REF_CENTERED_LEFT + (COLUMNS[col].ref_x - STRIP_REF_LEFT)
 }
 
-/// Lane strip left edge at ref resolution (redesign: centered).
-#[inline]
-pub fn ref_lane_left() -> f32 {
-    STRIP_REF_CENTERED_LEFT
-}
-
 /// Phrase meter sits just right of the lane strip, clear of the side pillar.
 #[inline]
 pub fn ref_phrase_x() -> f32 {
@@ -156,10 +150,6 @@ impl PlayfieldLayout {
 
     pub fn progress_bar_top(&self) -> f32 {
         696.0 * self.scale
-    }
-
-    pub fn speed_label_left(&self) -> f32 {
-        (STRIP_REF_CENTERED_LEFT + STRIP_REF_WIDTH - 96.0) * self.scale
     }
 
     pub fn ref_hud_right(&self) -> f32 {

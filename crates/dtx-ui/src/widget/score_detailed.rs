@@ -107,7 +107,7 @@ pub fn spawn_score_detailed_panel(
                 top: Val::Px(border_rect.top * scale),
                 width: Val::Px(border_rect.width * scale),
                 height: Val::Px(border_rect.height * scale),
-                border: UiRect::all(Val::Px(1.0)),
+                border: UiRect::all(Val::Px(1.0 * scale)),
                 ..default()
             },
             BackgroundColor(theme.stage_panel_bg),

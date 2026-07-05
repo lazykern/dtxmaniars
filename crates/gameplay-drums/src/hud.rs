@@ -574,7 +574,7 @@ fn sync_phrase_meter(
     let blocks = phrase_meter::PHRASE_BLOCKS as f32;
     let cur = ((head_from_top * blocks) as usize).min(phrase_meter::PHRASE_BLOCKS - 1);
     for (sec, rect, mut node, mut color) in &mut q {
-        let units = derived.phrase.block_units(sec.index).max(1);
+        let units = derived.phrase.block_units(sec.index);
         node.left = Val::Px(rect.left * s);
         node.top = Val::Px(rect.top * s);
         node.height = Val::Px(rect.height * s);
@@ -634,15 +634,21 @@ fn sync_live_graph(
     if !history.is_changed() && !layout.is_changed() {
         return;
     }
+    let s = layout.scale;
     let bar_area_h = live_graph::bar_area_h(GRAPH_REF_H);
     for (bar, rect, mut node) in &mut q {
+        // Bars are excluded from apply_hud_ref_layout, so re-apply x/width here
+        // too or they detach from the panel on a window-scale change.
+        node.left = Val::Px(rect.left * s);
+        node.width = Val::Px(rect.width.max(1.0) * s);
         let Some(acc) = history.samples.get(bar.slot).copied().flatten() else {
+            node.top = Val::Px(rect.top * s);
             node.height = Val::Px(0.0);
             continue;
         };
         let h = live_graph::bar_height(acc, bar_area_h);
-        node.top = Val::Px((rect.top - h) * layout.scale);
-        node.height = Val::Px(h * layout.scale);
+        node.top = Val::Px((rect.top - h) * s);
+        node.height = Val::Px(h * s);
     }
 }
 
