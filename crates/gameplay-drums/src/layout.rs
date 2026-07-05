@@ -8,12 +8,14 @@ use game_shell::AppState;
 use crate::lane_geometry::{COLUMNS, STRIP_REF_LEFT, STRIP_REF_WIDTH};
 
 pub const REF_JUDGE_Y: f32 = 620.0;
-pub const REF_LANE_TOP: f32 = 80.0;
-pub const REF_LANE_HEIGHT: f32 = 540.0;
+pub const REF_BACKBOARD_PAD: f32 = 12.0;
+/// Flush to the backboard's top pad so the playfield fills the screen top
+/// edge (no empty band above the lanes).
+pub const REF_LANE_TOP: f32 = REF_BACKBOARD_PAD;
+pub const REF_LANE_HEIGHT: f32 = REF_JUDGE_Y - REF_LANE_TOP;
 pub const REF_KEY_CAP_H: f32 = 42.0;
 pub const REF_LABEL_OFFSET: f32 = 28.0;
 pub const REF_KEY_VIZ_OFFSET: f32 = 64.0;
-pub const REF_BACKBOARD_PAD: f32 = 12.0;
 
 /// Centered strip left edge at ref resolution (redesign: symmetric panels).
 pub const STRIP_REF_CENTERED_LEFT: f32 = (REF_WIDTH - STRIP_REF_WIDTH) / 2.0;

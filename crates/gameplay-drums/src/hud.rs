@@ -36,11 +36,6 @@ const GRAPH_REF_H: f32 = 500.0;
 pub struct HudRoot;
 
 #[derive(Component)]
-struct LaneColumn {
-    col: usize,
-}
-
-#[derive(Component)]
 struct PlayfieldBackboard;
 
 #[derive(Component)]
@@ -53,7 +48,6 @@ pub fn plugin(app: &mut App) {
             spawn_hud,
             (
                 apply_backboard_layout,
-                apply_lane_column_layout,
                 apply_hit_line_layout,
                 apply_progress_layout,
                 apply_speed_layout,
@@ -69,7 +63,6 @@ pub fn plugin(app: &mut App) {
         (
             (
                 apply_backboard_layout,
-                apply_lane_column_layout,
                 apply_hit_line_layout,
                 apply_progress_layout,
                 apply_speed_layout,
@@ -137,22 +130,6 @@ fn spawn_hud(
             BackgroundColor(Color::srgba(0.06, 0.07, 0.11, 0.88)),
         ));
 
-        for col in 0..lane_geometry::COLUMN_COUNT {
-            let tint = lane_geometry::lane_fill_color(col);
-            root.spawn((
-                LaneColumn { col },
-                Node {
-                    position_type: PositionType::Absolute,
-                    left: Val::Px(layout.col_left(col)),
-                    top: Val::Px(layout.lane_top()),
-                    width: Val::Px(layout.col_width(col) - 2.0),
-                    height: Val::Px(layout.lane_height()),
-                    ..default()
-                },
-                BackgroundColor(tint),
-            ));
-        }
-
         root.spawn((
             HitLine,
             Node {
@@ -206,7 +183,7 @@ fn spawn_hud(
         GRAPH_REF_H,
     );
 
-    playfield_viz::spawn_lane_receptors(&mut commands, root, &layout, &t);
+    playfield_viz::spawn_lane_receptors(&mut commands, root, &layout);
     keyboard_viz::spawn_key_caps(&mut commands, root, &layout, &t);
     judgment_popup::spawn_judgment_popup(&mut commands, root, &t);
 }
@@ -220,18 +197,6 @@ fn apply_backboard_layout(
         node.top = Val::Px(layout.backboard_top());
         node.width = Val::Px(layout.backboard_width());
         node.height = Val::Px(layout.backboard_height());
-    }
-}
-
-fn apply_lane_column_layout(
-    layout: Res<PlayfieldLayout>,
-    mut lanes: Query<(&LaneColumn, &mut Node)>,
-) {
-    for (col, mut node) in &mut lanes {
-        node.left = Val::Px(layout.col_left(col.col));
-        node.top = Val::Px(layout.lane_top());
-        node.width = Val::Px(layout.col_width(col.col) - 2.0);
-        node.height = Val::Px(layout.lane_height());
     }
 }
 
@@ -278,7 +243,6 @@ fn apply_hud_ref_layout(
         (&HudRefRect, &mut Node),
         (
             Without<PlayfieldBackboard>,
-            Without<LaneColumn>,
             Without<HitLine>,
             Without<song_progress::SongProgressFill>,
             Without<playfield_speed::PlayfieldSpeedText>,

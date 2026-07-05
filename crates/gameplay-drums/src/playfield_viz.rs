@@ -2,7 +2,6 @@
 
 use bevy::prelude::*;
 use dtx_scoring::JudgmentKind;
-use dtx_ui::ThemeResource;
 use game_shell::AppState;
 
 use crate::events::{JudgmentEvent, LaneHit};
@@ -43,12 +42,7 @@ pub(super) fn plugin(app: &mut App) {
     );
 }
 
-pub fn spawn_lane_receptors(
-    commands: &mut Commands,
-    parent: Entity,
-    layout: &PlayfieldLayout,
-    theme: &dtx_ui::theme::Theme,
-) {
+pub fn spawn_lane_receptors(commands: &mut Commands, parent: Entity, layout: &PlayfieldLayout) {
     for col in 0..COLUMN_COUNT {
         commands.entity(parent).with_children(|root| {
             root.spawn((
@@ -65,7 +59,7 @@ pub fn spawn_lane_receptors(
                     height: Val::Px(24.0 * layout.scale),
                     ..default()
                 },
-                BackgroundColor(theme.panel_bg),
+                BackgroundColor(Color::NONE),
             ));
         });
     }
@@ -147,7 +141,6 @@ fn spawn_hit_burst(
 
 fn tick_receptor_flashes(
     time: Res<Time>,
-    theme: Res<ThemeResource>,
     mut receptors: Query<(&LaneReceptor, &mut ReceptorFlash, &mut BackgroundColor)>,
 ) {
     for (receptor, mut flash, mut bg) in &mut receptors {
@@ -157,7 +150,7 @@ fn tick_receptor_flashes(
         flash.timer.tick(time.delta());
         if flash.timer.is_finished() {
             flash.strength = 0.0;
-            bg.0 = theme.0.panel_bg;
+            bg.0 = Color::NONE;
         } else {
             let t = 1.0 - flash.timer.fraction();
             let base = column_color(receptor.col as usize);

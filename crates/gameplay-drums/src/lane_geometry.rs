@@ -80,14 +80,6 @@ pub fn column_color(col: usize) -> Color {
     Color::srgb(r, g, b)
 }
 
-/// Dark lane-fill tint. Just enough hue to read column position; dark enough
-/// that full-brightness chips (`chip_color`) pop against it (NX keeps lanes dark
-/// and lets the colored chips/pads carry identity).
-pub fn lane_fill_color(col: usize) -> Color {
-    let (r, g, b) = COLUMNS.get(col).map(|c| c.color).unwrap_or((1.0, 1.0, 1.0));
-    Color::srgb(r * 0.13, g * 0.13, b * 0.13)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
