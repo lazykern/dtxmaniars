@@ -42,14 +42,14 @@ pub struct DifficultySlotScore(pub usize);
 /// Spawn the grid slots (all 5; absent slots render empty and dim).
 pub fn spawn_difficulty_grid(parent: &mut ChildSpawnerCommands, theme: &Theme) {
     for i in (0..GRID_MAX_SLOTS).rev() {
-        // MASTER on top like GITADORA (highest index first)
+        // MASTER on top like GITADORA (highest index first).
         parent
             .spawn((
                 DifficultySlotPanel(i),
                 Node {
                     width: Val::Percent(100.0),
-                    flex_direction: FlexDirection::Column,
-                    padding: UiRect::all(Val::Px(6.0)),
+                    flex_direction: FlexDirection::Row,
+                    column_gap: Val::Px(4.0),
                     margin: UiRect::bottom(Val::Px(6.0)),
                     border: UiRect::all(Val::Px(1.0)),
                     ..default()
@@ -59,38 +59,64 @@ pub fn spawn_difficulty_grid(parent: &mut ChildSpawnerCommands, theme: &Theme) {
                 BoxShadow::new(Color::NONE, Val::Px(0.0), Val::Px(0.0), Val::Px(0.0), Val::Px(0.0)),
             ))
             .with_children(|slot| {
+                // Left box: completion rate.
                 slot.spawn((
-                    DifficultySlotLabel(i),
                     Node {
-                        width: Val::Percent(100.0),
-                        padding: UiRect::axes(Val::Px(6.0), Val::Px(1.0)),
+                        width: Val::Px(110.0),
+                        flex_direction: FlexDirection::Column,
+                        justify_content: JustifyContent::Center,
+                        padding: UiRect::all(Val::Px(6.0)),
                         ..default()
                     },
-                    BackgroundColor(theme.difficulty_color(i as u8)),
-                    Text::new(""),
-                    Theme::font(11.0),
-                    TextColor(theme.text_primary),
-                ));
-                slot.spawn(Node {
-                    width: Val::Percent(100.0),
-                    flex_direction: FlexDirection::Row,
-                    justify_content: JustifyContent::SpaceBetween,
-                    align_items: AlignItems::Center,
-                    ..default()
-                })
-                .with_children(|row| {
-                    row.spawn((
-                        DifficultySlotScore(i),
-                        Text::new(""),
-                        Theme::font(11.0),
+                    BackgroundColor(theme.stage_panel_bg),
+                ))
+                .with_children(|box_l| {
+                    box_l.spawn((
+                        Text::new("COMPLETION RATE"),
+                        Theme::font(9.0),
                         TextColor(theme.text_secondary),
                     ));
-                    row.spawn((
-                        DifficultySlotLevel(i),
-                        Text::new("--"),
-                        Theme::font(28.0),
+                    box_l.spawn((
+                        DifficultySlotScore(i),
+                        Text::new(""),
+                        Theme::font(13.0),
                         TextColor(theme.text_primary),
                     ));
+                });
+                // Right box: colored tier bar on top, big level number below.
+                slot.spawn(Node {
+                    flex_grow: 1.0,
+                    flex_direction: FlexDirection::Column,
+                    ..default()
+                })
+                .with_children(|box_r| {
+                    box_r.spawn((
+                        DifficultySlotLabel(i),
+                        Node {
+                            width: Val::Percent(100.0),
+                            padding: UiRect::axes(Val::Px(6.0), Val::Px(1.0)),
+                            ..default()
+                        },
+                        BackgroundColor(theme.difficulty_color(i as u8)),
+                        Text::new(""),
+                        Theme::font(11.0),
+                        TextColor(theme.text_primary),
+                    ));
+                    box_r
+                        .spawn(Node {
+                            width: Val::Percent(100.0),
+                            justify_content: JustifyContent::FlexEnd,
+                            padding: UiRect::horizontal(Val::Px(8.0)),
+                            ..default()
+                        })
+                        .with_children(|num| {
+                            num.spawn((
+                                DifficultySlotLevel(i),
+                                Text::new("--"),
+                                Theme::font(28.0),
+                                TextColor(theme.text_primary),
+                            ));
+                        });
                 });
             });
     }
@@ -136,5 +162,46 @@ mod tests {
         assert_eq!(score_text(&s), "S  93.04%");
         s.rank = None;
         assert_eq!(score_text(&s), "93.04%");
+    }
+
+    #[test]
+    fn grid_spawns_five_of_each_marker() {
+        use bevy::ecs::world::CommandQueue;
+        use bevy::prelude::*;
+        let mut app = App::new();
+        let theme = Theme::default();
+        let mut queue = CommandQueue::default();
+        {
+            let mut commands = Commands::new(&mut queue, app.world());
+            commands
+                .spawn(Node::default())
+                .with_children(|p| spawn_difficulty_grid(p, &theme));
+        }
+        queue.apply(app.world_mut());
+        app.update();
+        let labels = app
+            .world()
+            .iter_entities()
+            .filter(|e| e.contains::<DifficultySlotLabel>())
+            .count();
+        let levels = app
+            .world()
+            .iter_entities()
+            .filter(|e| e.contains::<DifficultySlotLevel>())
+            .count();
+        let scores = app
+            .world()
+            .iter_entities()
+            .filter(|e| e.contains::<DifficultySlotScore>())
+            .count();
+        let panels = app
+            .world()
+            .iter_entities()
+            .filter(|e| e.contains::<DifficultySlotPanel>())
+            .count();
+        assert_eq!(labels, GRID_MAX_SLOTS);
+        assert_eq!(levels, GRID_MAX_SLOTS);
+        assert_eq!(scores, GRID_MAX_SLOTS);
+        assert_eq!(panels, GRID_MAX_SLOTS);
     }
 }
