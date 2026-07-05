@@ -104,15 +104,16 @@ Expected: FAIL — `no field stage_bg`, `no method difficulty_color`.
         }
     }
 
-    /// Density-graph display lanes (LC HH LP SD BD HT LT FT CY), GITADORA order.
+    /// Density-graph display lanes (LC HH LP SD HT BD LT FT CY), GITADORA order
+    /// (matches gameplay-drums lane_geometry::COLUMNS: HT before BD).
     pub fn lane_colors(&self) -> [Color; 9] {
         [
             Color::srgb(0.8, 0.2, 1.0),   // LC purple
             Color::srgb(0.0, 0.667, 1.0), // HH blue
             Color::srgb(1.0, 0.4, 0.8),   // LP pink
             Color::srgb(1.0, 0.8, 0.0),   // SD yellow
-            Color::srgb(0.6, 0.6, 0.65),  // BD gray
             Color::srgb(0.0, 0.8, 0.4),   // HT green
+            Color::srgb(0.6, 0.6, 0.65),  // BD gray
             Color::srgb(1.0, 0.267, 0.267), // LT red
             Color::srgb(1.0, 0.533, 0.0), // FT orange
             Color::srgb(0.0, 0.867, 0.867), // CY cyan
@@ -865,7 +866,7 @@ pub const BAR_MAX_H: f32 = 200.0;
 pub const BAR_STAGGER_MS: f32 = 20.0;
 pub const BAR_GROW_MS: f32 = 220.0;
 
-/// Per-lane note counts in display order LC HH LP SD BD HT LT FT CY.
+/// Per-lane note counts in display order LC HH LP SD HT BD LT FT CY.
 #[derive(Resource, Debug, Clone, Default, PartialEq)]
 pub struct DensityData {
     pub lanes: [u32; LANE_COUNT],
@@ -1368,8 +1369,8 @@ pub fn display_lane(ch: EChannel) -> Option<usize> {
         EChannel::HiHatClose | EChannel::HiHatOpen => 1,
         EChannel::LeftPedal | EChannel::LeftBassDrum => 2,
         EChannel::Snare => 3,
-        EChannel::BassDrum => 4,
-        EChannel::HighTom => 5,
+        EChannel::HighTom => 4,
+        EChannel::BassDrum => 5,
         EChannel::LowTom => 6,
         EChannel::FloorTom => 7,
         EChannel::Cymbal | EChannel::RideCymbal => 8,

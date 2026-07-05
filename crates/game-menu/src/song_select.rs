@@ -165,7 +165,7 @@ impl SongSelectSelection {
         match self.sort_mode {
             SortMode::Default => {}
             SortMode::ByTitle => v.sort_by(|a, b| a.title.cmp(&b.title)),
-            SortMode::ByArtist => v.sort_by(|a, b| a.artist.cmp(&b.title)),
+            SortMode::ByArtist => v.sort_by(|a, b| a.artist.cmp(&b.artist)),
         }
         self.visible = v;
     }
@@ -936,8 +936,10 @@ fn song_select_navigation(
     if keys.just_pressed(KeyCode::ArrowDown) {
         let max = selection_state.visible.len() - 1;
         selection.folder = (selection.folder + 1).min(max);
+        selection.clamp_to_visible(&selection_state);
     } else if keys.just_pressed(KeyCode::ArrowUp) {
         selection.folder = selection.folder.saturating_sub(1);
+        selection.clamp_to_visible(&selection_state);
     } else if keys.just_pressed(KeyCode::ArrowRight) {
         if let Some(folder) = selection_state.visible.get(selection.folder) {
             let count = folder.difficulty_count();
@@ -1025,13 +1027,6 @@ fn update_album_art_image(
     db: Res<SongDb>,
     asset_server: Res<AssetServer>,
     mut query: Query<(&AlbumArtEntity, &mut ImageNode, &mut BackgroundColor)>,
-    mut ambient: Query<
-        &mut ImageNode,
-        (
-            With<dtx_ui::widget::stage_background::AmbientArt>,
-            Without<AlbumArtEntity>,
-        ),
-    >,
 ) {
     if !selection.is_changed() {
         return;
@@ -1053,14 +1048,6 @@ fn update_album_art_image(
             image.image = Handle::default();
             image.color = image.color.with_alpha(0.0);
             bg.0 = bg.0.with_alpha(0.18);
-        }
-    }
-    for mut ambient_image in &mut ambient {
-        if let Some(path) = &song.preimage_path {
-            ambient_image.image = asset_server.load(path.to_string_lossy().to_string());
-        } else {
-            // No art: hold the ambient layer at alpha 0 (black stage).
-            ambient_image.image = Handle::default();
         }
     }
 }

@@ -16,8 +16,8 @@
 
 use bevy::prelude::*;
 use dtx_ui::ThemeResource;
-use dtx_ui::theme::Theme;
 use dtx_ui::motion::EnterChoreo;
+use dtx_ui::theme::Theme;
 use dtx_ui::widget::stage_background::spawn_stage_background;
 use dtx_ui::widget::stage_panel::{panel, set_panel_selected};
 use game_shell::{AppState, TransitionRequest, despawn_stage, request_transition};
@@ -37,7 +37,13 @@ pub enum ConfigTab {
 
 impl ConfigTab {
     pub fn all() -> [Self; 5] {
-        [Self::System, Self::Gameplay, Self::Audio, Self::Drums, Self::Exit]
+        [
+            Self::System,
+            Self::Gameplay,
+            Self::Audio,
+            Self::Drums,
+            Self::Exit,
+        ]
     }
 
     pub fn label(self) -> &'static str {
@@ -98,263 +104,210 @@ pub struct ConfigItem {
 // --- System tab ---
 // ponytail: closures inside vec! need `LazyLock` (format! isn't const-eval-able).
 
-static SYSTEM_ITEMS: LazyLock<Vec<ConfigItem>> = LazyLock::new(|| vec![
-    ConfigItem {
-        label: "VSync",
-        value: |c| bool_label(c.system.vsync).to_string(),
-        adjust: |c, _| c.system.vsync ^= true,
-        desc: "Lock framerate to display refresh. Reduces tearing; adds up to one frame of latency.",
-    },
-    ConfigItem {
-        label: "BGA Alpha",
-        value: |c| c.system.bg_alpha.to_string(),
-        adjust: |c, d| {
-            let v = (c.system.bg_alpha as i32 + d * 8).clamp(0, 255);
-            c.system.bg_alpha = v as u8;
+static SYSTEM_ITEMS: LazyLock<Vec<ConfigItem>> = LazyLock::new(|| {
+    vec![
+        ConfigItem {
+            label: "VSync",
+            value: |c| bool_label(c.system.vsync).to_string(),
+            adjust: |c, _| c.system.vsync ^= true,
+            desc: "Lock framerate to display refresh. Reduces tearing; adds up to one frame of latency.",
         },
-        desc: "Background animation layer opacity, 0-255.",
-    },
-    ConfigItem {
-        label: "Movie Alpha",
-        value: |c| c.system.movie_alpha.to_string(),
-        adjust: |c, d| {
-            let v = (c.system.movie_alpha as i32 + d * 8).clamp(0, 255);
-            c.system.movie_alpha = v as u8;
+        ConfigItem {
+            label: "Perf Info",
+            value: |c| bool_label(c.system.show_perf_info).to_string(),
+            adjust: |c, _| c.system.show_perf_info ^= true,
+            desc: "Show an FPS / frame-time overlay.",
         },
-        desc: "Background movie layer opacity, 0-255.",
-    },
-    ConfigItem {
-        label: "BGA Enabled",
-        value: |c| bool_label(c.system.bga_enabled).to_string(),
-        adjust: |c, _| c.system.bga_enabled ^= true,
-        desc: "Show background animation (BGA) layers during play.",
-    },
-    ConfigItem {
-        label: "Movie Enabled",
-        value: |c| bool_label(c.system.movie_enabled).to_string(),
-        adjust: |c, _| c.system.movie_enabled ^= true,
-        desc: "Show background movie clips during play.",
-    },
-    ConfigItem {
-        label: "Log Output",
-        value: |c| bool_label(c.system.log_enabled).to_string(),
-        adjust: |c, _| c.system.log_enabled ^= true,
-        desc: "Write diagnostic logs to disk while running.",
-    },
-    ConfigItem {
-        label: "Perf Info",
-        value: |c| bool_label(c.system.show_perf_info).to_string(),
-        adjust: |c, _| c.system.show_perf_info ^= true,
-        desc: "Show an FPS / frame-time overlay.",
-    },
-    ConfigItem {
-        label: "Metronome",
-        value: |c| bool_label(c.system.metronome).to_string(),
-        adjust: |c, _| c.system.metronome ^= true,
-        desc: "Play a click on every beat during gameplay.",
-    },
-]);
+        ConfigItem {
+            label: "Metronome",
+            value: |c| bool_label(c.system.metronome).to_string(),
+            adjust: |c, _| c.system.metronome ^= true,
+            desc: "Play a click on every beat during gameplay.",
+        },
+    ]
+});
 
 // --- Gameplay tab ---
 
-static GAMEPLAY_ITEMS: LazyLock<Vec<ConfigItem>> = LazyLock::new(|| vec![
-    ConfigItem {
-        label: "Tight Mode",
-        value: |c| bool_label(c.gameplay.tight).to_string(),
-        adjust: |c, _| c.gameplay.tight ^= true,
-        desc: "Shrink hit-timing windows for a stricter, high-skill judgement.",
-    },
-    ConfigItem {
-        label: "Reverse",
-        value: |c| bool_label(c.gameplay.reverse).to_string(),
-        adjust: |c, _| c.gameplay.reverse ^= true,
-        desc: "Flip lane scroll so notes travel top-to-bottom.",
-    },
-    ConfigItem {
-        label: "Scroll Speed",
-        value: |c| format!("{:.1}x", c.gameplay.scroll_speed),
-        adjust: |c, d| {
-            c.gameplay.scroll_speed = (c.gameplay.scroll_speed + 0.5 * d as f32).clamp(0.5, 4.0);
+static GAMEPLAY_ITEMS: LazyLock<Vec<ConfigItem>> = LazyLock::new(|| {
+    vec![
+        ConfigItem {
+            label: "Scroll Speed",
+            value: |c| format!("{:.1}x", c.gameplay.scroll_speed),
+            adjust: |c, d| {
+                c.gameplay.scroll_speed =
+                    (c.gameplay.scroll_speed + 0.5 * d as f32).clamp(0.5, 9.0);
+            },
+            desc: "Note scroll speed multiplier during gameplay.",
         },
-        desc: "Note scroll speed multiplier during gameplay.",
-    },
-    ConfigItem {
-        label: "Dark Mode",
-        value: |c| bool_label(c.gameplay.dark_mode).to_string(),
-        adjust: |c, _| c.gameplay.dark_mode ^= true,
-        desc: "Hide note graphics; play by sound and timing alone.",
-    },
-    ConfigItem {
-        label: "Fill-In",
-        value: |c| bool_label(c.gameplay.fillin_enabled).to_string(),
-        adjust: |c, _| c.gameplay.fillin_enabled ^= true,
-        desc: "Play auto drum fill-ins during gogo/fill sections of a chart.",
-    },
-    ConfigItem {
-        label: "Stage Failed",
-        value: |c| bool_label(c.gameplay.stage_failed_enabled).to_string(),
-        adjust: |c, _| c.gameplay.stage_failed_enabled ^= true,
-        desc: "Show the Stage Failed sequence when the life gauge hits zero.",
-    },
-    ConfigItem {
-        label: "Input Offset",
-        value: |c| format!("{:+} ms", c.gameplay.input_offset_ms),
-        adjust: |c, d| {
-            c.gameplay.input_offset_ms = (c.gameplay.input_offset_ms + 10 * d)
-                .clamp(-dtx_config::INPUT_OFFSET_CLAMP_MS, dtx_config::INPUT_OFFSET_CLAMP_MS);
+        ConfigItem {
+            label: "Input Offset",
+            value: |c| format!("{:+} ms", c.gameplay.input_offset_ms),
+            adjust: |c, d| {
+                c.gameplay.input_offset_ms = (c.gameplay.input_offset_ms + 10 * d).clamp(
+                    -dtx_config::INPUT_OFFSET_CLAMP_MS,
+                    dtx_config::INPUT_OFFSET_CLAMP_MS,
+                );
+            },
+            desc: "Shift the judgement clock to compensate for input lag, in milliseconds.",
         },
-        desc: "Shift the judgement clock to compensate for input lag, in milliseconds.",
-    },
-    ConfigItem {
-        label: "BGM Offset",
-        value: |c| format!("{:+} ms", c.gameplay.bgm_adjust_ms),
-        adjust: |c, d| {
-            c.gameplay.bgm_adjust_ms = (c.gameplay.bgm_adjust_ms + 10 * d)
-                .clamp(-dtx_config::BGM_ADJUST_CLAMP_MS, dtx_config::BGM_ADJUST_CLAMP_MS);
+        ConfigItem {
+            label: "BGM Offset",
+            value: |c| format!("{:+} ms", c.gameplay.bgm_adjust_ms),
+            adjust: |c, d| {
+                c.gameplay.bgm_adjust_ms = (c.gameplay.bgm_adjust_ms + 10 * d).clamp(
+                    -dtx_config::BGM_ADJUST_CLAMP_MS,
+                    dtx_config::BGM_ADJUST_CLAMP_MS,
+                );
+            },
+            desc: "Shift background music timing relative to notes, in milliseconds.",
         },
-        desc: "Shift background music timing relative to notes, in milliseconds.",
-    },
-    ConfigItem {
-        label: "Play Speed",
-        value: |c| format!("{:.2}x", dtx_config::play_speed_multiplier(c.gameplay.play_speed)),
-        adjust: |c, d| {
-            let raw = (c.gameplay.play_speed as i32 + d)
-                .clamp(dtx_config::PLAY_SPEED_MIN as i32, dtx_config::PLAY_SPEED_MAX as i32);
-            c.gameplay.play_speed = raw as u8;
+        ConfigItem {
+            label: "Play Speed",
+            value: |c| {
+                format!(
+                    "{:.2}x",
+                    dtx_config::play_speed_multiplier(c.gameplay.play_speed)
+                )
+            },
+            adjust: |c, d| {
+                let raw = (c.gameplay.play_speed as i32 + d).clamp(
+                    dtx_config::PLAY_SPEED_MIN as i32,
+                    dtx_config::PLAY_SPEED_MAX as i32,
+                );
+                c.gameplay.play_speed = raw as u8;
+            },
+            desc: "Chart playback speed multiplier (0.5x-2.0x); affects both notes and audio.",
         },
-        desc: "Chart playback speed multiplier (0.5x-2.0x); affects both notes and audio.",
-    },
-    ConfigItem {
-        label: "Damage Level",
-        value: |c| c.gameplay.damage_level.label().to_string(),
-        adjust: |c, d| {
-            let levels = dtx_config::DamageLevel::all();
-            let cur = levels.iter().position(|l| *l == c.gameplay.damage_level).unwrap_or(0) as i32;
-            let next = (cur + d).rem_euclid(levels.len() as i32) as usize;
-            c.gameplay.damage_level = levels[next];
+        ConfigItem {
+            label: "Damage Level",
+            value: |c| c.gameplay.damage_level.label().to_string(),
+            adjust: |c, d| {
+                let levels = dtx_config::DamageLevel::all();
+                let cur = levels
+                    .iter()
+                    .position(|l| *l == c.gameplay.damage_level)
+                    .unwrap_or(0) as i32;
+                let next = (cur + d).rem_euclid(levels.len() as i32) as usize;
+                c.gameplay.damage_level = levels[next];
+            },
+            desc: "How much life is lost per miss.",
         },
-        desc: "How much life is lost per miss.",
-    },
-    ConfigItem {
-        label: "Lane Display",
-        value: |c| lane_display_label(c.gameplay.lane_display).to_string(),
-        adjust: |c, d| {
-            let opts = dtx_config::LaneDisplay::all();
-            let cur = opts.iter().position(|l| *l == c.gameplay.lane_display).unwrap_or(0) as i32;
-            let next = (cur + d).rem_euclid(opts.len() as i32) as usize;
-            c.gameplay.lane_display = opts[next];
+        ConfigItem {
+            label: "Lane Display",
+            value: |c| lane_display_label(c.gameplay.lane_display).to_string(),
+            adjust: |c, d| {
+                let opts = dtx_config::LaneDisplay::all();
+                let cur = opts
+                    .iter()
+                    .position(|l| *l == c.gameplay.lane_display)
+                    .unwrap_or(0) as i32;
+                let next = (cur + d).rem_euclid(opts.len() as i32) as usize;
+                c.gameplay.lane_display = opts[next];
+            },
+            desc: "Toggle visibility of lane backgrounds and bar/beat lines.",
         },
-        desc: "Toggle visibility of lane backgrounds and bar/beat lines.",
-    },
-]);
+    ]
+});
 
 // --- Audio tab ---
 
-static AUDIO_ITEMS: LazyLock<Vec<ConfigItem>> = LazyLock::new(|| vec![
-    ConfigItem {
-        label: "BGM Enabled",
-        value: |c| bool_label(c.audio.bgm_enabled).to_string(),
-        adjust: |c, _| c.audio.bgm_enabled ^= true,
-        desc: "Play background music during songs.",
-    },
-    ConfigItem {
-        label: "Drum Hit Sound",
-        value: |c| bool_label(c.audio.drum_sound_enabled).to_string(),
-        adjust: |c, _| c.audio.drum_sound_enabled ^= true,
-        desc: "Play a sound when a drum pad is hit.",
-    },
-    ConfigItem {
-        label: "Master Volume",
-        value: |c| format!("{}%", (c.audio.master_volume * 100.0).round() as i32),
-        adjust: |c, d| {
-            c.audio.master_volume = (c.audio.master_volume + 0.05 * d as f32).clamp(0.0, 1.0);
+static AUDIO_ITEMS: LazyLock<Vec<ConfigItem>> = LazyLock::new(|| {
+    vec![
+        ConfigItem {
+            label: "Drum Hit Sound",
+            value: |c| bool_label(c.audio.drum_sound_enabled).to_string(),
+            adjust: |c, _| c.audio.drum_sound_enabled ^= true,
+            desc: "Play a sound when a drum pad is hit.",
         },
-        desc: "Overall output volume.",
-    },
-    ConfigItem {
-        label: "BGM Volume",
-        value: |c| format!("{}%", (c.audio.bgm_volume * 100.0).round() as i32),
-        adjust: |c, d| {
-            c.audio.bgm_volume = (c.audio.bgm_volume + 0.05 * d as f32).clamp(0.0, 1.0);
+        ConfigItem {
+            label: "Master Volume",
+            value: |c| format!("{}%", (c.audio.master_volume * 100.0).round() as i32),
+            adjust: |c, d| {
+                c.audio.master_volume = (c.audio.master_volume + 0.05 * d as f32).clamp(0.0, 1.0);
+            },
+            desc: "Overall output volume.",
         },
-        desc: "Background music volume.",
-    },
-    ConfigItem {
-        label: "Drum Volume",
-        value: |c| format!("{}%", (c.audio.drum_volume * 100.0).round() as i32),
-        adjust: |c, d| {
-            c.audio.drum_volume = (c.audio.drum_volume + 0.05 * d as f32).clamp(0.0, 1.0);
+        ConfigItem {
+            label: "Drum Volume",
+            value: |c| format!("{}%", (c.audio.drum_volume * 100.0).round() as i32),
+            adjust: |c, d| {
+                c.audio.drum_volume = (c.audio.drum_volume + 0.05 * d as f32).clamp(0.0, 1.0);
+            },
+            desc: "Drum hit sound volume.",
         },
-        desc: "Drum hit sound volume.",
-    },
-]);
+    ]
+});
 
 // --- Drums tab ---
 
-static DRUMS_ITEMS: LazyLock<Vec<ConfigItem>> = LazyLock::new(|| vec![
-    ConfigItem {
-        label: "CY/RD Group",
-        value: |c| cy_label(c.drums.cy_group).to_string(),
-        adjust: |c, d| cycle_cy(c, d),
-        desc: "Whether the CY and RD pads trigger separate or shared chip sounds.",
-    },
-    ConfigItem {
-        label: "HH Group",
-        value: |c| hh_label(c.drums.hh_group).to_string(),
-        adjust: |c, d| cycle_hh(c, d),
-        desc: "How hi-hat, left-cymbal and open-hi-hat pads are grouped for chip playback.",
-    },
-    ConfigItem {
-        label: "FT Group",
-        value: |c| ft_label(c.drums.ft_group).to_string(),
-        adjust: |c, d| cycle_ft(c, d),
-        desc: "Whether floor tom and low tom pads trigger separate or shared chip sounds.",
-    },
-    ConfigItem {
-        label: "BD Group",
-        value: |c| bd_label(c.drums.bd_group).to_string(),
-        adjust: |c, d| cycle_bd(c, d),
-        desc: "How bass drum and pedal pads are grouped for chip playback.",
-    },
-    ConfigItem {
-        label: "Cymbal Free",
-        value: |c| bool_label(c.drums.cymbal_free).to_string(),
-        adjust: |c, _| c.drums.cymbal_free ^= true,
-        desc: "Allow cymbal pads to be hit freely without a matching chip on the chart.",
-    },
-    ConfigItem {
-        label: "HH Priority",
-        value: |c| hsp_label(c.drums.hit_sound_priority_hh).to_string(),
-        adjust: |c, d| cycle_hsp(c, HspSlot::Hh, d),
-        desc: "Whether chip or pad sound wins when both would play for hi-hat hits.",
-    },
-    ConfigItem {
-        label: "FT Priority",
-        value: |c| hsp_label(c.drums.hit_sound_priority_ft).to_string(),
-        adjust: |c, d| cycle_hsp(c, HspSlot::Ft, d),
-        desc: "Whether chip or pad sound wins when both would play for floor tom hits.",
-    },
-    ConfigItem {
-        label: "CY Priority",
-        value: |c| hsp_label(c.drums.hit_sound_priority_cy).to_string(),
-        adjust: |c, d| cycle_hsp(c, HspSlot::Cy, d),
-        desc: "Whether chip or pad sound wins when both would play for cymbal hits.",
-    },
-    ConfigItem {
-        label: "LP Priority",
-        value: |c| hsp_label(c.drums.hit_sound_priority_lp).to_string(),
-        adjust: |c, d| cycle_hsp(c, HspSlot::Lp, d),
-        desc: "Whether chip or pad sound wins when both would play for left-pedal hits.",
-    },
-    ConfigItem {
-        label: "Polyphonic Sounds",
-        value: |c| c.drums.polyphonic_sounds.to_string(),
-        adjust: |c, d| {
-            c.drums.polyphonic_sounds = (c.drums.polyphonic_sounds as i32 + d).clamp(1, 8) as u8;
+static DRUMS_ITEMS: LazyLock<Vec<ConfigItem>> = LazyLock::new(|| {
+    vec![
+        ConfigItem {
+            label: "CY/RD Group",
+            value: |c| cy_label(c.drums.cy_group).to_string(),
+            adjust: |c, d| cycle_cy(c, d),
+            desc: "Whether the CY and RD pads trigger separate or shared chip sounds.",
         },
-        desc: "Maximum simultaneous drum hit sounds (1-8).",
-    },
-]);
+        ConfigItem {
+            label: "HH Group",
+            value: |c| hh_label(c.drums.hh_group).to_string(),
+            adjust: |c, d| cycle_hh(c, d),
+            desc: "How hi-hat, left-cymbal and open-hi-hat pads are grouped for chip playback.",
+        },
+        ConfigItem {
+            label: "FT Group",
+            value: |c| ft_label(c.drums.ft_group).to_string(),
+            adjust: |c, d| cycle_ft(c, d),
+            desc: "Whether floor tom and low tom pads trigger separate or shared chip sounds.",
+        },
+        ConfigItem {
+            label: "BD Group",
+            value: |c| bd_label(c.drums.bd_group).to_string(),
+            adjust: |c, d| cycle_bd(c, d),
+            desc: "How bass drum and pedal pads are grouped for chip playback.",
+        },
+        ConfigItem {
+            label: "Cymbal Free",
+            value: |c| bool_label(c.drums.cymbal_free).to_string(),
+            adjust: |c, _| c.drums.cymbal_free ^= true,
+            desc: "Allow cymbal pads to be hit freely without a matching chip on the chart.",
+        },
+        ConfigItem {
+            label: "HH Priority",
+            value: |c| hsp_label(c.drums.hit_sound_priority_hh).to_string(),
+            adjust: |c, d| cycle_hsp(c, HspSlot::Hh, d),
+            desc: "Whether chip or pad sound wins when both would play for hi-hat hits.",
+        },
+        ConfigItem {
+            label: "FT Priority",
+            value: |c| hsp_label(c.drums.hit_sound_priority_ft).to_string(),
+            adjust: |c, d| cycle_hsp(c, HspSlot::Ft, d),
+            desc: "Whether chip or pad sound wins when both would play for floor tom hits.",
+        },
+        ConfigItem {
+            label: "CY Priority",
+            value: |c| hsp_label(c.drums.hit_sound_priority_cy).to_string(),
+            adjust: |c, d| cycle_hsp(c, HspSlot::Cy, d),
+            desc: "Whether chip or pad sound wins when both would play for cymbal hits.",
+        },
+        ConfigItem {
+            label: "LP Priority",
+            value: |c| hsp_label(c.drums.hit_sound_priority_lp).to_string(),
+            adjust: |c, d| cycle_hsp(c, HspSlot::Lp, d),
+            desc: "Whether chip or pad sound wins when both would play for left-pedal hits.",
+        },
+        ConfigItem {
+            label: "Polyphonic Sounds",
+            value: |c| c.drums.polyphonic_sounds.to_string(),
+            adjust: |c, d| {
+                c.drums.polyphonic_sounds =
+                    (c.drums.polyphonic_sounds as i32 + d).clamp(1, 8) as u8;
+            },
+            desc: "Maximum simultaneous drum hit sounds (1-8).",
+        },
+    ]
+});
 
 // === Display labels for enum types not yet carrying a `label()` ===
 
@@ -376,25 +329,37 @@ fn lane_display_label(v: dtx_config::LaneDisplay) -> &'static str {
 
 fn cycle_cy(c: &mut dtx_config::Config, d: i32) {
     let opts = dtx_config::CyGroup::all();
-    let cur = opts.iter().position(|x| *x == c.drums.cy_group).unwrap_or(0) as i32;
+    let cur = opts
+        .iter()
+        .position(|x| *x == c.drums.cy_group)
+        .unwrap_or(0) as i32;
     let next = (cur + d).rem_euclid(opts.len() as i32) as usize;
     c.drums.cy_group = opts[next];
 }
 fn cycle_hh(c: &mut dtx_config::Config, d: i32) {
     let opts = dtx_config::HhGroup::all();
-    let cur = opts.iter().position(|x| *x == c.drums.hh_group).unwrap_or(0) as i32;
+    let cur = opts
+        .iter()
+        .position(|x| *x == c.drums.hh_group)
+        .unwrap_or(0) as i32;
     let next = (cur + d).rem_euclid(opts.len() as i32) as usize;
     c.drums.hh_group = opts[next];
 }
 fn cycle_ft(c: &mut dtx_config::Config, d: i32) {
     let opts = dtx_config::FtGroup::all();
-    let cur = opts.iter().position(|x| *x == c.drums.ft_group).unwrap_or(0) as i32;
+    let cur = opts
+        .iter()
+        .position(|x| *x == c.drums.ft_group)
+        .unwrap_or(0) as i32;
     let next = (cur + d).rem_euclid(opts.len() as i32) as usize;
     c.drums.ft_group = opts[next];
 }
 fn cycle_bd(c: &mut dtx_config::Config, d: i32) {
     let opts = dtx_config::BdGroup::all();
-    let cur = opts.iter().position(|x| *x == c.drums.bd_group).unwrap_or(0) as i32;
+    let cur = opts
+        .iter()
+        .position(|x| *x == c.drums.bd_group)
+        .unwrap_or(0) as i32;
     let next = (cur + d).rem_euclid(opts.len() as i32) as usize;
     c.drums.bd_group = opts[next];
 }
@@ -411,8 +376,12 @@ fn cycle_hsp(c: &mut dtx_config::Config, slot: HspSlot, d: i32) {
     *field = opts[next];
 }
 
-enum HspSlot { Hh, Ft, Cy, Lp }
-
+enum HspSlot {
+    Hh,
+    Ft,
+    Cy,
+    Lp,
+}
 
 fn cy_label(v: dtx_config::CyGroup) -> &'static str {
     match v {
@@ -557,7 +526,12 @@ fn spawn_config(
 /// and `config_tab_navigation` (Tab-press respawn) so both paths stay in
 /// sync; despawn + spawn are queued as `Commands` on the same buffer, so
 /// they apply in order without a cross-system flush race.
-fn build_config_content(commands: &mut Commands, t: &Theme, draft: &dtx_config::Config, tab: ConfigTab) {
+fn build_config_content(
+    commands: &mut Commands,
+    t: &Theme,
+    draft: &dtx_config::Config,
+    tab: ConfigTab,
+) {
     let items = tab.items();
 
     commands
@@ -605,10 +579,18 @@ fn build_config_content(commands: &mut Commands, t: &Theme, draft: &dtx_config::
                             margin: UiRect::top(Val::Px(if i == 0 { 24.0 } else { 0.0 })),
                             ..default()
                         },
-                        BackgroundColor(if is_active { t.select_yellow } else { Color::NONE }),
+                        BackgroundColor(if is_active {
+                            t.select_yellow
+                        } else {
+                            Color::NONE
+                        }),
                         Text::new(tab_i.label().to_uppercase()),
                         Theme::font(15.0),
-                        TextColor(if is_active { Color::BLACK } else { t.text_secondary }),
+                        TextColor(if is_active {
+                            Color::BLACK
+                        } else {
+                            t.text_secondary
+                        }),
                     ));
                 }
             });
@@ -707,7 +689,11 @@ fn build_config_content(commands: &mut Commands, t: &Theme, draft: &dtx_config::
                     bar.spawn((
                         Text::new(label),
                         Theme::font(12.0),
-                        TextColor(if hot { t.select_yellow } else { t.text_secondary }),
+                        TextColor(if hot {
+                            t.select_yellow
+                        } else {
+                            t.text_secondary
+                        }),
                     ));
                 }
             });
@@ -799,7 +785,12 @@ fn render_config_selection(
     selection: Res<ConfigSelection>,
     draft: Res<ConfigDraft>,
     active: Res<ActiveConfigTab>,
-    mut rows: Query<(&ConfigItemEntity, &mut BorderColor, &mut BoxShadow, &mut BackgroundColor)>,
+    mut rows: Query<(
+        &ConfigItemEntity,
+        &mut BorderColor,
+        &mut BoxShadow,
+        &mut BackgroundColor,
+    )>,
     mut values: Query<(&ConfigValueText, &mut Text), Without<SettingsDescText>>,
     mut desc: Query<&mut Text, With<SettingsDescText>>,
 ) {
@@ -814,7 +805,10 @@ fn render_config_selection(
         bg.0 = t.stage_panel_bg;
     }
     for (value, mut text) in &mut values {
-        let display = items.get(value.0).map(|i| (i.value)(&draft.0)).unwrap_or_default();
+        let display = items
+            .get(value.0)
+            .map(|i| (i.value)(&draft.0))
+            .unwrap_or_default();
         *text = Text::new(if value.0 == selection.0 {
             format!("◂ {display} ▸")
         } else {
@@ -838,8 +832,16 @@ fn highlight_active_rail_tab(
     let t = theme.0;
     for (label, mut bg, mut color) in &mut rail {
         let is_active = label.0 == tab_idx.0;
-        bg.0 = if is_active { t.select_yellow } else { Color::NONE };
-        *color = TextColor(if is_active { Color::BLACK } else { t.text_secondary });
+        bg.0 = if is_active {
+            t.select_yellow
+        } else {
+            Color::NONE
+        };
+        *color = TextColor(if is_active {
+            Color::BLACK
+        } else {
+            t.text_secondary
+        });
     }
 }
 
@@ -888,23 +890,20 @@ mod tests {
         );
     }
 
-    // === Per-tab item coverage (3.x schema fields bound to UI) ===
+    // === Per-tab item coverage (only settings wired to actual game behavior) ===
 
     #[test]
     fn system_tab_covers_all_fields() {
-        // 8 SystemConfig fields.
-        assert_eq!(SYSTEM_ITEMS.len(), 8);
+        assert_eq!(SYSTEM_ITEMS.len(), 3);
         let labels: Vec<_> = SYSTEM_ITEMS.iter().map(|i| i.label).collect();
         assert!(labels.contains(&"VSync"));
-        assert!(labels.contains(&"BGA Alpha"));
-        assert!(labels.contains(&"BGA Enabled"));
+        assert!(labels.contains(&"Perf Info"));
         assert!(labels.contains(&"Metronome"));
     }
 
     #[test]
     fn gameplay_tab_covers_all_fields() {
-        // 11 GameplayConfig fields.
-        assert_eq!(GAMEPLAY_ITEMS.len(), 11);
+        assert_eq!(GAMEPLAY_ITEMS.len(), 6);
         let labels: Vec<_> = GAMEPLAY_ITEMS.iter().map(|i| i.label).collect();
         assert!(labels.contains(&"Scroll Speed"));
         assert!(labels.contains(&"Input Offset"));
@@ -916,13 +915,10 @@ mod tests {
 
     #[test]
     fn audio_tab_covers_all_fields() {
-        // 5 AudioConfig fields.
-        assert_eq!(AUDIO_ITEMS.len(), 5);
+        assert_eq!(AUDIO_ITEMS.len(), 3);
         let labels: Vec<_> = AUDIO_ITEMS.iter().map(|i| i.label).collect();
         assert!(labels.contains(&"Master Volume"));
-        assert!(labels.contains(&"BGM Volume"));
         assert!(labels.contains(&"Drum Volume"));
-        assert!(labels.contains(&"BGM Enabled"));
         assert!(labels.contains(&"Drum Hit Sound"));
     }
 
@@ -951,13 +947,16 @@ mod tests {
     #[test]
     fn tab_items_round_trip_via_config_tab() {
         for tab in ConfigTab::all() {
-            assert_eq!(tab.items().as_ptr(), match tab {
-                ConfigTab::System => SYSTEM_ITEMS.as_ptr(),
-                ConfigTab::Gameplay => GAMEPLAY_ITEMS.as_ptr(),
-                ConfigTab::Audio => AUDIO_ITEMS.as_ptr(),
-                ConfigTab::Drums => DRUMS_ITEMS.as_ptr(),
-                ConfigTab::Exit => [].as_ptr(),
-            });
+            assert_eq!(
+                tab.items().as_ptr(),
+                match tab {
+                    ConfigTab::System => SYSTEM_ITEMS.as_ptr(),
+                    ConfigTab::Gameplay => GAMEPLAY_ITEMS.as_ptr(),
+                    ConfigTab::Audio => AUDIO_ITEMS.as_ptr(),
+                    ConfigTab::Drums => DRUMS_ITEMS.as_ptr(),
+                    ConfigTab::Exit => [].as_ptr(),
+                }
+            );
         }
     }
 
@@ -981,36 +980,42 @@ mod tests {
     }
 
     #[test]
-    fn scroll_speed_clamps_to_half_and_four() {
+    fn scroll_speed_clamps_to_half_and_nine() {
         let mut d = draft();
-        d.0.gameplay.scroll_speed = 4.0;
+        d.0.gameplay.scroll_speed = 9.0;
         let items = ConfigTab::Gameplay.items();
-        (items[2].adjust)(&mut d.0, 1);
-        assert!((d.0.gameplay.scroll_speed - 4.0).abs() < f32::EPSILON);
+        (items[0].adjust)(&mut d.0, 1);
+        assert!((d.0.gameplay.scroll_speed - 9.0).abs() < f32::EPSILON);
         d.0.gameplay.scroll_speed = 0.5;
-        (items[2].adjust)(&mut d.0, -1);
+        (items[0].adjust)(&mut d.0, -1);
         assert!((d.0.gameplay.scroll_speed - 0.5).abs() < f32::EPSILON);
     }
 
     #[test]
     fn input_offset_clamps_to_clamp_ms() {
-        let cfg = adjust_tab(ConfigTab::Gameplay, 6, 100);
-        assert_eq!(cfg.gameplay.input_offset_ms, dtx_config::INPUT_OFFSET_CLAMP_MS);
-        let cfg = adjust_tab(ConfigTab::Gameplay, 6, -100);
-        assert_eq!(cfg.gameplay.input_offset_ms, -dtx_config::INPUT_OFFSET_CLAMP_MS);
+        let cfg = adjust_tab(ConfigTab::Gameplay, 1, 100);
+        assert_eq!(
+            cfg.gameplay.input_offset_ms,
+            dtx_config::INPUT_OFFSET_CLAMP_MS
+        );
+        let cfg = adjust_tab(ConfigTab::Gameplay, 1, -100);
+        assert_eq!(
+            cfg.gameplay.input_offset_ms,
+            -dtx_config::INPUT_OFFSET_CLAMP_MS
+        );
     }
 
     #[test]
     fn bgm_offset_clamps_to_clamp_ms() {
-        let cfg = adjust_tab(ConfigTab::Gameplay, 7, 100);
+        let cfg = adjust_tab(ConfigTab::Gameplay, 2, 100);
         assert_eq!(cfg.gameplay.bgm_adjust_ms, dtx_config::BGM_ADJUST_CLAMP_MS);
     }
 
     #[test]
     fn master_volume_clamps_zero_to_one() {
-        let cfg = adjust_tab(ConfigTab::Audio, 2, 100);
+        let cfg = adjust_tab(ConfigTab::Audio, 1, 100);
         assert!((cfg.audio.master_volume - 1.0).abs() < f32::EPSILON);
-        let cfg = adjust_tab(ConfigTab::Audio, 2, -100);
+        let cfg = adjust_tab(ConfigTab::Audio, 1, -100);
         assert!((cfg.audio.master_volume - 0.0).abs() < f32::EPSILON);
     }
 
@@ -1019,7 +1024,7 @@ mod tests {
         let mut d = draft();
         d.0.gameplay.damage_level = dtx_config::DamageLevel::None;
         let items = ConfigTab::Gameplay.items();
-        (items[9].adjust)(&mut d.0, -1);
+        (items[4].adjust)(&mut d.0, -1);
         assert_eq!(d.0.gameplay.damage_level, dtx_config::DamageLevel::High);
     }
 
@@ -1028,10 +1033,10 @@ mod tests {
         let mut d = draft();
         d.0.gameplay.play_speed = dtx_config::PLAY_SPEED_MAX;
         let items = ConfigTab::Gameplay.items();
-        (items[8].adjust)(&mut d.0, 1);
+        (items[3].adjust)(&mut d.0, 1);
         assert_eq!(d.0.gameplay.play_speed, dtx_config::PLAY_SPEED_MAX);
         d.0.gameplay.play_speed = dtx_config::PLAY_SPEED_MIN;
-        (items[8].adjust)(&mut d.0, -1);
+        (items[3].adjust)(&mut d.0, -1);
         assert_eq!(d.0.gameplay.play_speed, dtx_config::PLAY_SPEED_MIN);
     }
 
@@ -1053,7 +1058,7 @@ mod tests {
     fn damage_value_renders_label() {
         let d = draft();
         let items = ConfigTab::Gameplay.items();
-        let text = (items[9].value)(&d.0);
+        let text = (items[4].value)(&d.0);
         assert_eq!(text, "Small");
     }
 
@@ -1062,7 +1067,7 @@ mod tests {
         let mut d = draft();
         d.0.audio.master_volume = 0.5;
         let items = ConfigTab::Audio.items();
-        assert_eq!((items[2].value)(&d.0), "50%");
+        assert_eq!((items[1].value)(&d.0), "50%");
     }
 
     #[test]
@@ -1070,7 +1075,7 @@ mod tests {
         let mut d = draft();
         d.0.gameplay.scroll_speed = 1.5;
         let items = ConfigTab::Gameplay.items();
-        assert_eq!((items[2].value)(&d.0), "1.5x");
+        assert_eq!((items[0].value)(&d.0), "1.5x");
     }
 
     // === Selection bookkeeping ===
@@ -1093,14 +1098,14 @@ mod tests {
         assert!(a.0.is_none());
     }
 
-    // === Total field coverage (no schema field left unbound) ===
+    // === Total row count (only settings wired to actual game behavior) ===
 
     #[test]
     fn every_schema_field_has_a_ui_row() {
-        // 8 + 11 + 5 + 10 = 34 rows; matches schema field count.
+        // 3 + 6 + 3 + 10 = 22 rows.
         assert_eq!(
             SYSTEM_ITEMS.len() + GAMEPLAY_ITEMS.len() + AUDIO_ITEMS.len() + DRUMS_ITEMS.len(),
-            34
+            22
         );
     }
 }
