@@ -92,12 +92,7 @@ pub mod math {
     /// Compute chip playback time scaled by `play_speed` (>1.0 = faster).
     /// Faster speed → shorter chart time. `play_speed` ≤ 0 falls back to 1.0.
     #[inline]
-    pub fn chip_time_ms_with_speed(
-        measure: u32,
-        fraction: f32,
-        bpm: f32,
-        play_speed: f32,
-    ) -> i64 {
+    pub fn chip_time_ms_with_speed(measure: u32, fraction: f32, bpm: f32, play_speed: f32) -> i64 {
         let t = chip_time_ms(measure, fraction, bpm);
         if play_speed <= 0.0 || (play_speed - 1.0).abs() < f32::EPSILON {
             return t;
@@ -425,7 +420,9 @@ mod tests {
 
     #[test]
     fn no_bar_changes_matches_bpm_only_timing() {
-        use math::{chip_time_ms_with_bpm_and_bar_changes, chip_time_ms_with_bpm_changes, ChartTiming};
+        use math::{
+            chip_time_ms_with_bpm_and_bar_changes, chip_time_ms_with_bpm_changes, ChartTiming,
+        };
         let t1 = chip_time_ms_with_bpm_changes(5, 0.5, 120.0, &[]);
         let t2 = chip_time_ms_with_bpm_and_bar_changes(5, 0.5, 120.0, ChartTiming::default());
         assert_eq!(t1, t2);
