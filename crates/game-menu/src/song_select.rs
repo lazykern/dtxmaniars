@@ -34,7 +34,7 @@ use dtx_audio::{
 };
 use dtx_library::{SongDb, SongInfo, SortMode};
 use dtx_ui::ThemeResource;
-use dtx_ui::motion::{EnterChoreo, RollingNumber};
+use dtx_ui::motion::EnterChoreo;
 use dtx_ui::theme::Theme;
 use dtx_ui::widget::album_art::AlbumArt;
 use dtx_ui::widget::density_graph::spawn_density_graph;
@@ -45,9 +45,7 @@ use dtx_ui::widget::difficulty_grid::{
 };
 use dtx_ui::widget::song_wheel::{SongWheel, VISIBLE_HALF, WheelRow, WheelSpring, row_geometry};
 use dtx_ui::widget::stage_background::spawn_stage_background;
-use dtx_ui::widget::stage_panel::{
-    BadgeValueText, panel, selected_panel, set_panel_selected, spawn_badge_row,
-};
+use dtx_ui::widget::stage_panel::{BadgeValueText, panel, set_panel_selected, spawn_badge_row};
 use game_shell::{AppState, TransitionRequest, despawn_stage, request_transition};
 
 // ===== Layout constants =====
@@ -239,10 +237,6 @@ struct WheelRowTitle;
 #[derive(Component)]
 struct WheelRowMeta;
 /// Left-cluster dynamic texts.
-#[derive(Component)]
-struct SkillValueText;
-#[derive(Component)]
-struct BpmValueText;
 #[derive(Component)]
 struct SearchText;
 #[derive(Component)]
@@ -718,8 +712,10 @@ fn update_left_cluster(
         return;
     }
     // difficulty grid
-    let mut data = DifficultyGridData::default();
-    data.selected = selection.difficulty as usize;
+    let mut data = DifficultyGridData {
+        selected: selection.difficulty as usize,
+        ..Default::default()
+    };
     if let Some(folder) = selection_state.visible.get(selection.folder) {
         for (slot_i, chart_idx) in folder.chart_indices.iter().enumerate().take(GRID_MAX_SLOTS) {
             let Some(song) = db.songs.get(*chart_idx) else {
@@ -846,6 +842,7 @@ fn respawn_wheel_on_change(
     });
 }
 
+#[cfg(test)]
 fn format_song_detail(song: &dtx_library::SongInfo) -> String {
     let mut detail = format!(
         "Title:  {}\nArtist: {}\nBPM:    {}\nLevel:  {}\nNotes:  {}",
@@ -879,10 +876,10 @@ fn song_select_navigation(
     mut requests: MessageWriter<TransitionRequest>,
 ) {
     if selection_state.visible.is_empty() {
-        if keys.just_pressed(KeyCode::F5) {
-            if let Err(e) = db.rescan(&default_song_dir()) {
-                warn!("SongSelect: refresh failed: {}", e);
-            }
+        if keys.just_pressed(KeyCode::F5)
+            && let Err(e) = db.rescan(&default_song_dir())
+        {
+            warn!("SongSelect: refresh failed: {}", e);
         }
         return;
     }
@@ -920,10 +917,10 @@ fn song_select_navigation(
         request_transition(&mut requests, AppState::Title);
     } else if keys.just_pressed(KeyCode::F1) {
         request_transition(&mut requests, AppState::Config);
-    } else if keys.just_pressed(KeyCode::F5) {
-        if let Err(e) = db.rescan(&default_song_dir()) {
-            warn!("SongSelect: refresh failed: {}", e);
-        }
+    } else if keys.just_pressed(KeyCode::F5)
+        && let Err(e) = db.rescan(&default_song_dir())
+    {
+        warn!("SongSelect: refresh failed: {}", e);
     }
 }
 
@@ -984,6 +981,7 @@ fn stop_preview_system(
     player.previous_index = None;
 }
 
+#[allow(clippy::too_many_arguments)]
 fn bgm_preview_on_change(
     selection: Res<Selection>,
     selection_state: Res<SongSelectSelection>,
@@ -1377,7 +1375,6 @@ mod tests {
         assert!(s.contains("50"));
     }
 
-    #[test]
     #[test]
     fn make_song_with_preimage() {
         let song = SongInfo {
