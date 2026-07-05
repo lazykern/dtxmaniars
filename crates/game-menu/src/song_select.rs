@@ -364,6 +364,10 @@ impl Selection {
 #[derive(Component, Debug, Clone, Copy)]
 pub struct AlbumArtEntity;
 
+/// Artist text shown directly under the big jacket.
+#[derive(Component)]
+struct SelectedArtistText;
+
 // ===== Type-to-search (Task 12) =====
 
 pub fn apply_search_char(query: &mut String, c: char) {
@@ -531,13 +535,13 @@ fn spawn_song_select(
                 });
             });
 
-            // ---- left column: art + skill/bpm
+            // ---- far-left column: skill + bpm, then density graph
             root.spawn((
                 Node {
                     position_type: PositionType::Absolute,
                     left: Val::Px(20.0),
-                    top: Val::Px(64.0),
-                    width: Val::Px(300.0),
+                    top: Val::Px(72.0),
+                    width: Val::Px(200.0),
                     flex_direction: FlexDirection::Column,
                     row_gap: Val::Px(10.0),
                     ..default()
@@ -546,23 +550,6 @@ fn spawn_song_select(
                 EnterChoreo::slide(Vec2::new(-340.0, 0.0), 30.0, 220.0),
             ))
             .with_children(|left| {
-                left.spawn((
-                    BigAlbumArt,
-                    AlbumArt::default(),
-                    AlbumArtEntity,
-                    panel(
-                        &t,
-                        Node {
-                            width: Val::Px(300.0),
-                            height: Val::Px(300.0),
-                            ..default()
-                        },
-                    ),
-                    ImageNode {
-                        color: Color::WHITE.with_alpha(0.0),
-                        ..default()
-                    },
-                ));
                 left.spawn(panel(
                     &t,
                     Node {
@@ -585,43 +572,73 @@ fn spawn_song_select(
                 .with_children(|p| {
                     spawn_badge_row(p, &t, "BPM", "---", false);
                 });
+                left.spawn(panel(
+                    &t,
+                    Node {
+                        width: Val::Percent(100.0),
+                        flex_direction: FlexDirection::Column,
+                        align_items: AlignItems::Center,
+                        padding: UiRect::all(Val::Px(8.0)),
+                        ..default()
+                    },
+                ))
+                .with_children(|p| spawn_density_graph(p, &t));
             });
 
-            // ---- center column: density graph + difficulty grid
+            // ---- top-center: big jacket + artist
             root.spawn((
                 Node {
                     position_type: PositionType::Absolute,
-                    left: Val::Px(336.0),
-                    top: Val::Px(64.0),
-                    width: Val::Px(280.0),
-                    flex_direction: FlexDirection::Row,
-                    column_gap: Val::Px(10.0),
+                    left: Val::Px(240.0),
+                    top: Val::Px(72.0),
+                    width: Val::Px(360.0),
+                    flex_direction: FlexDirection::Column,
+                    row_gap: Val::Px(6.0),
+                    ..default()
+                },
+                UiTransform::default(),
+                EnterChoreo::slide(Vec2::new(-340.0, 0.0), 45.0, 220.0),
+            ))
+            .with_children(|mid| {
+                mid.spawn((
+                    BigAlbumArt,
+                    AlbumArt::default(),
+                    AlbumArtEntity,
+                    panel(
+                        &t,
+                        Node {
+                            width: Val::Px(360.0),
+                            height: Val::Px(270.0),
+                            ..default()
+                        },
+                    ),
+                    ImageNode {
+                        color: Color::WHITE.with_alpha(0.0),
+                        ..default()
+                    },
+                ));
+                mid.spawn((
+                    SelectedArtistText,
+                    Text::new(""),
+                    Theme::font(14.0),
+                    TextColor(t.text_secondary),
+                ));
+            });
+
+            // ---- center-bottom: difficulty ladder
+            root.spawn((
+                Node {
+                    position_type: PositionType::Absolute,
+                    left: Val::Px(240.0),
+                    top: Val::Px(372.0),
+                    width: Val::Px(360.0),
+                    flex_direction: FlexDirection::Column,
                     ..default()
                 },
                 UiTransform::default(),
                 EnterChoreo::slide(Vec2::new(-340.0, 0.0), 60.0, 220.0),
             ))
-            .with_children(|center| {
-                center
-                    .spawn(panel(
-                        &t,
-                        Node {
-                            width: Val::Px(120.0),
-                            flex_direction: FlexDirection::Column,
-                            align_items: AlignItems::Center,
-                            padding: UiRect::all(Val::Px(8.0)),
-                            ..default()
-                        },
-                    ))
-                    .with_children(|p| spawn_density_graph(p, &t));
-                center
-                    .spawn(Node {
-                        flex_grow: 1.0,
-                        flex_direction: FlexDirection::Column,
-                        ..default()
-                    })
-                    .with_children(|p| spawn_difficulty_grid(p, &t));
-            });
+            .with_children(|p| spawn_difficulty_grid(p, &t));
 
             // ---- right: song wheel container (rows spawned separately)
             root.spawn((
@@ -907,6 +924,14 @@ fn update_left_cluster(
     mut grid: ResMut<DifficultyGridData>,
     mut badge_texts: Query<(&BadgeValueText, &mut Text)>,
     mut sort_chip: Query<&mut Text, (With<SortChipText>, Without<BadgeValueText>)>,
+    mut artist_text: Query<
+        &mut Text,
+        (
+            With<SelectedArtistText>,
+            Without<BadgeValueText>,
+            Without<SortChipText>,
+        ),
+    >,
 ) {
     if !selection.is_changed() && !selection_state.is_changed() {
         return;
@@ -967,6 +992,15 @@ fn update_left_cluster(
                 SortMode::ByArtist => "ARTIST",
             }
         ));
+    }
+
+    let artist = selection_state
+        .visible
+        .get(selection.folder)
+        .map(|f| f.artist.clone())
+        .unwrap_or_default();
+    for mut text in &mut artist_text {
+        *text = Text::new(artist.clone());
     }
 }
 
