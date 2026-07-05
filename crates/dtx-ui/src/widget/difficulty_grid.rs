@@ -56,7 +56,13 @@ pub fn spawn_difficulty_grid(parent: &mut ChildSpawnerCommands, theme: &Theme) {
                 },
                 BackgroundColor(theme.stage_panel_bg),
                 BorderColor::all(theme.stage_panel_border),
-                BoxShadow::new(Color::NONE, Val::Px(0.0), Val::Px(0.0), Val::Px(0.0), Val::Px(0.0)),
+                BoxShadow::new(
+                    Color::NONE,
+                    Val::Px(0.0),
+                    Val::Px(0.0),
+                    Val::Px(0.0),
+                    Val::Px(0.0),
+                ),
             ))
             .with_children(|slot| {
                 // Left box: completion rate.

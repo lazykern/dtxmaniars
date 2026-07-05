@@ -3,7 +3,7 @@
 //! display skill formula.
 
 use bevy::prelude::*;
-use bevy::tasks::{block_on, futures_lite::future, AsyncComputeTaskPool, Task};
+use bevy::tasks::{AsyncComputeTaskPool, Task, block_on, futures_lite::future};
 use dtx_core::channel::EChannel;
 use dtx_ui::widget::density_graph::{DensityData, LANE_COUNT};
 use game_shell::AppState;
@@ -154,8 +154,14 @@ mod tests {
 
     #[test]
     fn display_lane_groups_hh_and_cy() {
-        assert_eq!(display_lane(EChannel::HiHatClose), display_lane(EChannel::HiHatOpen));
-        assert_eq!(display_lane(EChannel::Cymbal), display_lane(EChannel::RideCymbal));
+        assert_eq!(
+            display_lane(EChannel::HiHatClose),
+            display_lane(EChannel::HiHatOpen)
+        );
+        assert_eq!(
+            display_lane(EChannel::Cymbal),
+            display_lane(EChannel::RideCymbal)
+        );
         assert_eq!(display_lane(EChannel::HighTom), Some(4));
         assert_eq!(display_lane(EChannel::BassDrum), Some(5));
         assert_eq!(display_lane(EChannel::Snare), Some(3));
