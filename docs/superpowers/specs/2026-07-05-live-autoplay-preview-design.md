@@ -41,6 +41,8 @@ loop back to the preview point).
 | Mix content | BGM chips (0x01) + drum-lane chips + auto-SE chips (0x61–0x65) |
 | Dwell debounce | 250 ms after selection settles |
 | Volume model | Live `master`/`bgm`/`drum` sliders from `dtx-config`, same as gameplay |
+| Same-song re-select | No restart — keep the preview playing when selection moves but resolves to the same song |
+| Round-trip resume | Freeze preview clock on exit to gameplay; resume in place on return for the same song |
 | Audio similarity | Out of scope for v1 (revisit only if the density heuristic picks bad spots) |
 
 ## Architecture
@@ -128,7 +130,28 @@ removed:
   `dtx-config`, matching the gameplay mix.
 - Stopping the preview fades all active preview instances out over 150 ms.
 
-### 5. Memory / lifetimes
+### 5. Session continuity (osu-style resume)
+
+osu never restarts the preview unless the track genuinely changed
+(`SongSelect.ensurePlayingSelected` gated on `isNewTrack`; `OnResuming`
+calls `music.Play(restart:false)` — resume in place, no re-seek). We mirror
+this feel without a single continuous track:
+
+- **Same-song re-select**: when the selection changes but resolves to the
+  same chart identity (path), do not restart — the running preview keeps
+  playing. Only a different chart starts a new preview at its preview point.
+- **Round-trip resume**: on exit from song select into gameplay for chart X,
+  freeze the `PreviewClock` position (and the chip cursor / active BGM
+  offset) rather than discarding it. On return to song select:
+  - selection is still chart X → resume the preview from the frozen clock
+    position (pause/resume semantics), re-arming the fade-in;
+  - selection is a different chart → start that chart's preview fresh at its
+    preview point.
+- The frozen position is preview-clock time, not gameplay-clock time — we do
+  not couple to the gameplay clock. Resuming re-derives the BGM seek offset
+  and chip cursor from the frozen `PreviewClock` value.
+
+### 6. Memory / lifetimes
 
 - `PreviewSoundBank` (separate from the gameplay `ChartSoundBank`) holds
   handles for the currently previewed song only.
@@ -158,3 +181,10 @@ removed:
 - `#PREVIEW` clip as an instant first layer with crossfade into the live
   engine.
 - Persistent SongDb cache for the computed preview point.
+- Other osu song-select audio polish, deferred as orthogonal to the preview
+  engine (revisit individually later):
+  - playback-rate/pitch preview for mods (osu DT/HT `ApplyModTrackAdjustments`);
+  - low-pass duck when a confirmation dialog/overlay opens;
+  - window-unfocus global volume fade;
+  - carousel hover / invalid-selection UI samples;
+  - low-pass muffle handoff of the preview into the gameplay loader.
