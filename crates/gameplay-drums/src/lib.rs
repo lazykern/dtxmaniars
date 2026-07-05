@@ -93,6 +93,7 @@ pub fn plugin(app: &mut App) {
     .init_resource::<resources::DrumAudioSettings>()
     .init_resource::<resources::SkillValue>()
     .init_resource::<resources::FastSlowCount>()
+    .init_resource::<resources::AccuracyHistory>()
     .init_resource::<phrase::PhraseMeter>()
     .init_resource::<derived::ChartDerived>()
     .init_resource::<dtx_audio::DrumPolyphony>()

@@ -555,9 +555,29 @@ impl GameplayClock {
     }
 }
 
+/// Per-slot accuracy history for the live graph (128 song-position buckets).
+#[derive(Resource, Debug, Clone)]
+pub struct AccuracyHistory {
+    pub samples: [Option<f32>; 128],
+}
+
+impl Default for AccuracyHistory {
+    fn default() -> Self {
+        Self { samples: [None; 128] }
+    }
+}
+
+impl AccuracyHistory {
+    pub fn record(&mut self, slot: usize, accuracy_pct: f32) {
+        if let Some(s) = self.samples.get_mut(slot) {
+            *s = Some(accuracy_pct);
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{GameplayClock, JudgmentCounts, ScrollSettings};
+    use super::{AccuracyHistory, GameplayClock, JudgmentCounts, ScrollSettings};
 
     #[test]
     fn achievement_pct_empty_is_full() {
@@ -715,5 +735,19 @@ mod tests {
         }
         // visual clock stays close to the judgement clock.
         assert!((clock.visual_ms() - clock.current_ms as f64).abs() < 25.0);
+    }
+
+    #[test]
+    fn accuracy_history_defaults_empty() {
+        let h = AccuracyHistory::default();
+        assert_eq!(h.samples.len(), 128);
+        assert!(h.samples.iter().all(|s| s.is_none()));
+    }
+
+    #[test]
+    fn accuracy_history_records_slot() {
+        let mut h = AccuracyHistory::default();
+        h.record(3, 88.0);
+        assert_eq!(h.samples[3], Some(88.0));
     }
 }

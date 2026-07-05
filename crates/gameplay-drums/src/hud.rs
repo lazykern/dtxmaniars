@@ -5,7 +5,8 @@ use dtx_scoring::JudgmentKind;
 use dtx_ui::{
     widget::{
         combo_display::ComboDisplay, frame_chrome, hud_ref::HudRefRect, judgment_popup,
-        now_playing, perf_combo, phrase_meter, playfield_speed, score_detailed, song_progress,
+        live_graph, now_playing, perf_combo, phrase_meter, playfield_speed, score_detailed,
+        song_progress,
     },
     ThemeResource,
 };
@@ -21,8 +22,8 @@ pub use crate::lane_map::LANE_COUNT;
 use crate::layout::{ref_hud_right_x, ref_phrase_x, PlayfieldLayout};
 use crate::playfield_viz;
 use crate::resources::{
-    ActiveChart, Combo, FastSlowCount, GameplayClock, JudgmentCounts, Score, ScrollSettings,
-    SkillValue,
+    AccuracyHistory, ActiveChart, Combo, FastSlowCount, GameplayClock, JudgmentCounts, Score,
+    ScrollSettings, SkillValue,
 };
 
 #[derive(Component)]
@@ -83,6 +84,8 @@ pub fn plugin(app: &mut App) {
             sync_phrase_playhead,
             sync_hud_judgment,
             keyboard_viz::decay_key_cap_flashes,
+            sample_accuracy_history,
+            sync_live_graph,
         )
             .run_if(in_state(AppState::Performance)),
     );
@@ -93,10 +96,12 @@ fn spawn_hud(
     mode: Res<EGameMode>,
     theme: Res<ThemeResource>,
     layout: Res<PlayfieldLayout>,
+    mut history: ResMut<AccuracyHistory>,
 ) {
     if *mode != EGameMode::Drums {
         return;
     }
+    *history = AccuracyHistory::default();
     let t = theme.0;
     let s = layout.scale;
     let root = commands
@@ -177,6 +182,17 @@ fn spawn_hud(
     now_playing::spawn_now_playing(&mut commands, root, &t, s, hud_right);
     // Combo below the song-info card (was clipping at y=72). Card ≈ y 20..118.
     perf_combo::spawn_perf_combo(&mut commands, root, &t, s, hud_right, 150.0);
+    // Placeholder coords — a later task repositions the live accuracy graph.
+    live_graph::spawn_live_graph(
+        &mut commands,
+        root,
+        &t,
+        s,
+        ref_hud_right_x() + 60.0,
+        300.0,
+        140.0,
+        300.0,
+    );
 
     playfield_viz::spawn_lane_receptors(&mut commands, root, &layout, &t);
     keyboard_viz::spawn_key_caps(&mut commands, root, &layout, &t);
@@ -256,6 +272,7 @@ fn apply_hud_ref_layout(
             Without<playfield_speed::PlayfieldSpeedText>,
             Without<phrase_meter::PhrasePlayhead>,
             Without<phrase_meter::PhraseSection>,
+            Without<live_graph::LiveGraphBar>,
         ),
     >,
 ) {
@@ -540,6 +557,40 @@ fn sync_phrase_playhead(
         n.left = Val::Px(rect.left * layout.scale);
         n.width = Val::Px(rect.width * layout.scale);
         n.height = Val::Px(rect.height * layout.scale);
+    }
+}
+
+fn sample_accuracy_history(
+    counts: Res<JudgmentCounts>,
+    clock: Res<GameplayClock>,
+    derived: Res<ChartDerived>,
+    mut history: ResMut<AccuracyHistory>,
+) {
+    if !clock.is_changed() {
+        return;
+    }
+    let total = derived.phrase.last_chip_ms.max(1);
+    let slot = live_graph::slot_for_pos(clock.current_ms, total);
+    history.record(slot, counts.achievement_pct());
+}
+
+fn sync_live_graph(
+    history: Res<AccuracyHistory>,
+    layout: Res<PlayfieldLayout>,
+    mut q: Query<(&live_graph::LiveGraphBar, &HudRefRect, &mut Node)>,
+) {
+    if !history.is_changed() && !layout.is_changed() {
+        return;
+    }
+    let bar_area_h = 300.0 - 4.0;
+    for (bar, rect, mut node) in &mut q {
+        let Some(acc) = history.samples.get(bar.slot).copied().flatten() else {
+            node.height = Val::Px(0.0);
+            continue;
+        };
+        let h = live_graph::bar_height(acc, bar_area_h);
+        node.top = Val::Px((rect.top - h) * layout.scale);
+        node.height = Val::Px(h * layout.scale);
     }
 }
 
