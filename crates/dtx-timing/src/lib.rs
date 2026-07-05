@@ -131,16 +131,127 @@ pub mod math {
         pub bpm: f32,
     }
 
-    /// Compute chip playback time (ms) with a list of BPM change events.
+    /// A bar-length (meter change) event at a specific measure — DTX channel
+    /// `02` / `EChannel::BarLength`. `ratio` scales that measure's duration
+    /// (e.g. `1.5` = 1.5x a normal 4-beat measure, `0.75` = 3/4 length).
     ///
-    /// Algorithm (mirrors `CChip.cs:ComputeTime` in BocuD):
-    /// 1. Sort `bpm_changes` by measure.
-    /// 2. For each interval (start_measure, end_measure] where start_measure is
-    ///    the previous BPM change (or 0) and end_measure is the next one, use
-    ///    the BPM from `start_measure`'s change (or `base_bpm` if no prior).
-    /// 3. If the chip's measure falls past the last change, use the last
-    ///    change's BPM.
-    /// 4. Sum interval durations in ms, then add the final partial-measure.
+    /// **Sticky**: like `BpmChange`, a ratio persists until the next
+    /// `BarLengthChange` — verified empirically against a real chart (see
+    /// `docs/superpowers/specs/2026-07-05-bar-length-timing-fix-design.md`).
+    #[derive(Debug, Clone, Copy, PartialEq)]
+    pub struct BarLengthChange {
+        pub measure: u32,
+        pub ratio: f32,
+    }
+
+    /// Bundled BPM + bar-length change lists for a chart, passed by value
+    /// (`Copy`) instead of threading two parallel slice parameters through
+    /// every timing call site.
+    #[derive(Debug, Clone, Copy, Default)]
+    pub struct ChartTiming<'a> {
+        pub bpm_changes: &'a [BpmChange],
+        pub bar_changes: &'a [BarLengthChange],
+    }
+
+    /// Active BPM at measure `m`: the most recent `BpmChange` at or before
+    /// `m` (sorted ascending by measure), or `base_bpm` if none yet.
+    fn active_bpm_at(m: u32, base_bpm: f32, sorted_bpm: &[BpmChange]) -> f64 {
+        let mut bpm = base_bpm as f64;
+        for c in sorted_bpm {
+            if c.measure > m {
+                break;
+            }
+            bpm = c.bpm as f64;
+        }
+        bpm
+    }
+
+    /// Active bar-length ratio at measure `m`: the most recent
+    /// `BarLengthChange` at or before `m` (sorted ascending by measure), or
+    /// `1.0` if none yet.
+    fn active_bar_ratio_at(m: u32, sorted_bar: &[BarLengthChange]) -> f64 {
+        let mut ratio = 1.0f64;
+        for c in sorted_bar {
+            if c.measure > m {
+                break;
+            }
+            ratio = c.ratio as f64;
+        }
+        ratio
+    }
+
+    /// Active BPM strictly *before* measure `m` (a change landing exactly at
+    /// `m` is excluded). Used only for the chip's own fractional remainder:
+    /// mirrors the legacy interval algorithm, which never applied a change
+    /// at the chip's own measure to that chip's partial-measure position
+    /// (see `bpm_segment.rs::case2_one_change_with_fraction`).
+    fn active_bpm_before(m: u32, base_bpm: f32, sorted_bpm: &[BpmChange]) -> f64 {
+        let mut bpm = base_bpm as f64;
+        for c in sorted_bpm {
+            if c.measure >= m {
+                break;
+            }
+            bpm = c.bpm as f64;
+        }
+        bpm
+    }
+
+    /// Active bar-length ratio strictly *before* measure `m`. Same rationale
+    /// as `active_bpm_before` — applied only to the chip's own fractional
+    /// remainder, not the full-measure sum.
+    fn active_bar_ratio_before(m: u32, sorted_bar: &[BarLengthChange]) -> f64 {
+        let mut ratio = 1.0f64;
+        for c in sorted_bar {
+            if c.measure >= m {
+                break;
+            }
+            ratio = c.ratio as f64;
+        }
+        ratio
+    }
+
+    /// Compute chip playback time (ms) with BPM changes AND bar-length
+    /// (meter) changes folded in. Walks measures `0..measure` summing each
+    /// measure's duration (`bar_ratio(m) * 4 * 60_000 / bpm(m)`), then adds
+    /// the scaled partial-measure fraction. O(measure count) per call —
+    /// trivial at chart-load time (called once per chip).
+    ///
+    /// Pass `timing.bar_changes = &[]` to behave like
+    /// `chip_time_ms_with_bpm_changes`.
+    pub fn chip_time_ms_with_bpm_and_bar_changes(
+        measure: u32,
+        fraction: f32,
+        base_bpm: f32,
+        timing: ChartTiming<'_>,
+    ) -> i64 {
+        if base_bpm <= 0.0 {
+            return 0;
+        }
+        let mut sorted_bpm: Vec<BpmChange> = timing.bpm_changes.to_vec();
+        sorted_bpm.sort_by_key(|c| c.measure);
+        let mut sorted_bar: Vec<BarLengthChange> = timing.bar_changes.to_vec();
+        sorted_bar.sort_by_key(|c| c.measure);
+
+        let mut total_ms = 0.0f64;
+        for m in 0..measure {
+            let bpm = active_bpm_at(m, base_bpm, &sorted_bpm);
+            let ratio = active_bar_ratio_at(m, &sorted_bar);
+            if bpm > 0.0 {
+                total_ms += ratio * 4.0 * 60_000.0 / bpm;
+            }
+        }
+        let bpm = active_bpm_before(measure, base_bpm, &sorted_bpm);
+        let ratio = active_bar_ratio_before(measure, &sorted_bar);
+        if bpm > 0.0 {
+            total_ms += (fraction as f64) * ratio * 4.0 * 60_000.0 / bpm;
+        }
+        total_ms as i64
+    }
+
+    /// Compute chip playback time (ms) with a list of BPM change events.
+    /// Equivalent to `chip_time_ms_with_bpm_and_bar_changes` with no bar
+    /// changes (kept as a convenience for callers that don't need
+    /// bar-length awareness, e.g. call sites not yet migrated).
     ///
     /// Pass `bpm_changes = &[]` to behave like [`chip_time_ms`].
     pub fn chip_time_ms_with_bpm_changes(
@@ -149,46 +260,15 @@ pub mod math {
         base_bpm: f32,
         bpm_changes: &[BpmChange],
     ) -> i64 {
-        if base_bpm <= 0.0 {
-            return 0;
-        }
-        // Sort changes by measure (BocuD does this once on chart load).
-        let mut sorted: Vec<BpmChange> = bpm_changes.to_vec();
-        sorted.sort_by_key(|c| c.measure);
-
-        let mut total_ms: f64 = 0.0;
-        let mut current_bpm: f64 = base_bpm as f64;
-        let mut interval_start: u32 = 0;
-
-        for ch in &sorted {
-            if ch.measure >= measure {
-                break;
-            }
-            if ch.measure > interval_start {
-                // Close out the interval [interval_start, ch.measure) at current_bpm.
-                total_ms += measure_duration_ms(interval_start, ch.measure, current_bpm);
-            } else if ch.measure == interval_start {
-                // BPM changes at the same measure → ignore prior duration.
-            }
-            current_bpm = ch.bpm as f64;
-            interval_start = ch.measure;
-        }
-
-        // Final partial: [interval_start, measure + fraction) at current_bpm.
-        let partial_measures = (measure - interval_start) as f64 + fraction as f64;
-        total_ms += partial_measures * 4.0 * 60_000.0 / current_bpm;
-
-        total_ms as i64
-    }
-
-    /// Compute the duration in ms of measures [start, end) at a given BPM.
-    #[inline]
-    fn measure_duration_ms(start: u32, end: u32, bpm: f64) -> f64 {
-        if bpm <= 0.0 {
-            return 0.0;
-        }
-        let measures = (end - start) as f64;
-        measures * 4.0 * 60_000.0 / bpm
+        chip_time_ms_with_bpm_and_bar_changes(
+            measure,
+            fraction,
+            base_bpm,
+            ChartTiming {
+                bpm_changes,
+                bar_changes: &[],
+            },
+        )
     }
 }
 
@@ -330,6 +410,111 @@ mod tests {
         // 120 BPM = 2000ms/measure. 4 measures = 8000ms.
         let d = measure_duration_ms(0, 4, 120.0);
         assert!((d - 8000.0).abs() < 0.01);
+    }
+
+    #[test]
+    fn bar_change_construct() {
+        use math::BarLengthChange;
+        let c = BarLengthChange {
+            measure: 14,
+            ratio: 1.5,
+        };
+        assert_eq!(c.measure, 14);
+        assert!((c.ratio - 1.5).abs() < 0.01);
+    }
+
+    #[test]
+    fn no_bar_changes_matches_bpm_only_timing() {
+        use math::{chip_time_ms_with_bpm_and_bar_changes, chip_time_ms_with_bpm_changes, ChartTiming};
+        let t1 = chip_time_ms_with_bpm_changes(5, 0.5, 120.0, &[]);
+        let t2 = chip_time_ms_with_bpm_and_bar_changes(5, 0.5, 120.0, ChartTiming::default());
+        assert_eq!(t1, t2);
+    }
+
+    #[test]
+    fn single_scaled_measure_is_sticky() {
+        use math::{chip_time_ms_with_bpm_and_bar_changes, BarLengthChange, ChartTiming};
+        // 120 BPM = 2000ms/measure normally. Measure 1 onward is ratio 2.0
+        // (no reset chip), so it stays doubled for every later measure too.
+        let bar_changes = [BarLengthChange {
+            measure: 1,
+            ratio: 2.0,
+        }];
+        let timing = ChartTiming {
+            bpm_changes: &[],
+            bar_changes: &bar_changes,
+        };
+        // Measure 0: unscaled (2000ms). Measure 1: scaled (4000ms).
+        let t_measure_1 = chip_time_ms_with_bpm_and_bar_changes(1, 0.0, 120.0, timing);
+        assert_eq!(t_measure_1, 2000);
+        let t_measure_2 = chip_time_ms_with_bpm_and_bar_changes(2, 0.0, 120.0, timing);
+        // measure 0 (2000) + measure 1 scaled (4000) = 6000
+        assert_eq!(t_measure_2, 6000);
+    }
+
+    #[test]
+    fn bar_change_reset_stops_stickiness() {
+        use math::{chip_time_ms_with_bpm_and_bar_changes, BarLengthChange, ChartTiming};
+        // Measure 1 doubles (2000->4000), measure 2 resets to 1.0 (back to 2000).
+        let bar_changes = [
+            BarLengthChange {
+                measure: 1,
+                ratio: 2.0,
+            },
+            BarLengthChange {
+                measure: 2,
+                ratio: 1.0,
+            },
+        ];
+        let timing = ChartTiming {
+            bpm_changes: &[],
+            bar_changes: &bar_changes,
+        };
+        // measure 0 (2000) + measure 1 scaled (4000) + measure 2 unscaled (2000) = 8000
+        let t = chip_time_ms_with_bpm_and_bar_changes(3, 0.0, 120.0, timing);
+        assert_eq!(t, 8000);
+    }
+
+    #[test]
+    fn reproduces_real_chart_sticky_bar_lengths() {
+        // Regression test for the reported bug: 雑踏、僕らの街 (MASTER),
+        // 171 BPM constant, bar-length chips at m14=1.5/m21=0.75/m22=1/
+        // m27=0.75/m30=1. Last drum chip sits at raw measure 61.9369125
+        // (measure 61, fraction ~0.9369125) — see
+        // docs/superpowers/specs/2026-07-05-bar-length-timing-fix-design.md.
+        // Expected ~90438ms (not the buggy uniform-measure 86929ms).
+        use math::{chip_time_ms_with_bpm_and_bar_changes, BarLengthChange, ChartTiming};
+        let bar_changes = [
+            BarLengthChange {
+                measure: 14,
+                ratio: 1.5,
+            },
+            BarLengthChange {
+                measure: 21,
+                ratio: 0.75,
+            },
+            BarLengthChange {
+                measure: 22,
+                ratio: 1.0,
+            },
+            BarLengthChange {
+                measure: 27,
+                ratio: 0.75,
+            },
+            BarLengthChange {
+                measure: 30,
+                ratio: 1.0,
+            },
+        ];
+        let timing = ChartTiming {
+            bpm_changes: &[],
+            bar_changes: &bar_changes,
+        };
+        let t = chip_time_ms_with_bpm_and_bar_changes(61, 0.9369125, 171.0, timing);
+        assert!(
+            (t - 90438).abs() <= 2,
+            "expected ~90438ms, got {t}ms (bug reproduces if this is ~86929ms)"
+        );
     }
 
     fn measure_duration_ms(start: u32, end: u32, bpm: f64) -> f64 {
