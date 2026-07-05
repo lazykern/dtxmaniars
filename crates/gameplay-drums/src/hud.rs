@@ -3,6 +3,7 @@
 use bevy::prelude::*;
 use dtx_scoring::JudgmentKind;
 use dtx_ui::{
+    theme::REF_WIDTH,
     widget::{
         combo_display::ComboDisplay, frame_chrome, hud_ref::HudRefRect, judgment_popup,
         live_graph, now_playing, perf_combo, phrase_meter, playfield_speed, score_detailed,
@@ -19,7 +20,7 @@ use crate::keyboard_viz;
 use crate::lane_geometry;
 
 pub use crate::lane_map::LANE_COUNT;
-use crate::layout::{ref_hud_right_x, ref_phrase_x, PlayfieldLayout};
+use crate::layout::{ref_hud_right_x, ref_phrase_x, PlayfieldLayout, STRIP_REF_CENTERED_LEFT};
 use crate::playfield_viz;
 use crate::resources::{
     AccuracyHistory, ActiveChart, Combo, FastSlowCount, GameplayClock, JudgmentCounts, Score,
@@ -160,7 +161,14 @@ fn spawn_hud(
         ));
     });
 
-    frame_chrome::spawn_frame_chrome(&mut commands, root, &t, s);
+    frame_chrome::spawn_frame_chrome(
+        &mut commands,
+        root,
+        &t,
+        s,
+        STRIP_REF_CENTERED_LEFT,
+        STRIP_REF_CENTERED_LEFT + lane_geometry::STRIP_REF_WIDTH,
+    );
     score_detailed::spawn_score_detailed_panel(&mut commands, root, &t, s);
     phrase_meter::spawn_phrase_meter(&mut commands, root, &t, s, ref_phrase_x());
     song_progress::spawn_song_progress(
@@ -180,19 +188,13 @@ fn spawn_hud(
     );
     let hud_right = ref_hud_right_x();
     now_playing::spawn_now_playing(&mut commands, root, &t, s, hud_right);
-    // Combo below the song-info card (was clipping at y=72). Card ≈ y 20..118.
-    perf_combo::spawn_perf_combo(&mut commands, root, &t, s, hud_right, 150.0);
-    // Placeholder coords — a later task repositions the live accuracy graph.
-    live_graph::spawn_live_graph(
-        &mut commands,
-        root,
-        &t,
-        s,
-        ref_hud_right_x() + 60.0,
-        300.0,
-        140.0,
-        300.0,
-    );
+    // Combo centered on the recentered lane strip (was pinned to the right column).
+    let combo_ref_x = STRIP_REF_CENTERED_LEFT + lane_geometry::STRIP_REF_WIDTH / 2.0 - 180.0;
+    perf_combo::spawn_perf_combo(&mut commands, root, &t, s, combo_ref_x, 150.0);
+    // Live accuracy graph fills the right column past the song card / phrase meter.
+    let graph_x = hud_right + 40.0;
+    let graph_w = REF_WIDTH - graph_x - 12.0;
+    live_graph::spawn_live_graph(&mut commands, root, &t, s, graph_x, 300.0, graph_w, 300.0);
 
     playfield_viz::spawn_lane_receptors(&mut commands, root, &layout, &t);
     keyboard_viz::spawn_key_caps(&mut commands, root, &layout, &t);
@@ -582,7 +584,7 @@ fn sync_live_graph(
     if !history.is_changed() && !layout.is_changed() {
         return;
     }
-    let bar_area_h = 300.0 - 4.0;
+    let bar_area_h = live_graph::bar_area_h(300.0);
     for (bar, rect, mut node) in &mut q {
         let Some(acc) = history.samples.get(bar.slot).copied().flatten() else {
             node.height = Val::Px(0.0);
