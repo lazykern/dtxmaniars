@@ -20,17 +20,20 @@ pub struct Column {
 }
 
 /// Columns ordered left→right at 1280x720. Contiguous, strip = x 295..853 (w 558).
+// GITADORA note-chip palette (sampled from real gameplay / DTXManiaNX pad sheet):
+// LC magenta, HH blue, LP pink, SD yellow, HT green, BD purple, LT red,
+// FT amber, CY orange, RD blue.
 pub const COLUMNS: [Column; COLUMN_COUNT] = [
-    Column { label: "LC", ref_x: 295.0, ref_w: 72.0, color: (0.80, 0.27, 0.80) }, // purple
-    Column { label: "HH", ref_x: 367.0, ref_w: 49.0, color: (0.20, 0.73, 0.93) }, // cyan
-    Column { label: "LP", ref_x: 416.0, ref_w: 51.0, color: (1.00, 0.40, 0.67) }, // pink
-    Column { label: "SD", ref_x: 467.0, ref_w: 57.0, color: (1.00, 0.87, 0.20) }, // yellow
-    Column { label: "HT", ref_x: 524.0, ref_w: 49.0, color: (1.00, 0.33, 0.33) }, // red
-    Column { label: "BD", ref_x: 573.0, ref_w: 69.0, color: (1.00, 0.53, 0.20) }, // orange
-    Column { label: "LT", ref_x: 642.0, ref_w: 49.0, color: (0.33, 0.87, 0.33) }, // green
-    Column { label: "FT", ref_x: 691.0, ref_w: 54.0, color: (0.20, 0.53, 1.00) }, // blue
-    Column { label: "CY", ref_x: 745.0, ref_w: 70.0, color: (0.87, 0.40, 1.00) }, // violet
-    Column { label: "RD", ref_x: 815.0, ref_w: 38.0, color: (0.40, 0.87, 0.80) }, // teal
+    Column { label: "LC", ref_x: 295.0, ref_w: 72.0, color: (0.945, 0.247, 0.725) }, // magenta
+    Column { label: "HH", ref_x: 367.0, ref_w: 49.0, color: (0.000, 0.541, 1.000) }, // blue
+    Column { label: "LP", ref_x: 416.0, ref_w: 51.0, color: (1.000, 0.353, 0.627) }, // pink
+    Column { label: "SD", ref_x: 467.0, ref_w: 57.0, color: (0.941, 0.824, 0.000) }, // yellow
+    Column { label: "HT", ref_x: 524.0, ref_w: 49.0, color: (0.157, 0.765, 0.157) }, // green
+    Column { label: "BD", ref_x: 573.0, ref_w: 69.0, color: (0.588, 0.353, 0.941) }, // purple
+    Column { label: "LT", ref_x: 642.0, ref_w: 49.0, color: (0.882, 0.176, 0.176) }, // red
+    Column { label: "FT", ref_x: 691.0, ref_w: 54.0, color: (1.000, 0.659, 0.000) }, // amber
+    Column { label: "CY", ref_x: 745.0, ref_w: 70.0, color: (1.000, 0.471, 0.000) }, // orange
+    Column { label: "RD", ref_x: 815.0, ref_w: 38.0, color: (0.000, 0.541, 1.000) }, // blue
 ];
 
 /// Strip left edge / total width at ref resolution.

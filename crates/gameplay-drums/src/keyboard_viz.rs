@@ -28,12 +28,15 @@ pub(super) fn plugin(app: &mut App) {
     );
 }
 
+/// GITADORA-style pad: strong half-circle dome on top, near-flat base. A large
+/// top radius clamps to width/2 on narrow lanes (full semicircle) and reads as
+/// an arch on wide cymbal lanes.
 fn key_cap_border_radius(cap_h: f32, scale: f32) -> BorderRadius {
     BorderRadius {
-        top_left: Val::Px(cap_h * 0.4),
-        top_right: Val::Px(cap_h * 0.4),
-        bottom_left: Val::Px(4.0 * scale),
-        bottom_right: Val::Px(4.0 * scale),
+        top_left: Val::Px(cap_h),
+        top_right: Val::Px(cap_h),
+        bottom_left: Val::Px(3.0 * scale),
+        bottom_right: Val::Px(3.0 * scale),
     }
 }
 
@@ -51,9 +54,9 @@ pub fn spawn_key_caps(
                 KeyCap { col: col as u8 },
                 Node {
                     position_type: PositionType::Absolute,
-                    left: Val::Px(layout.col_left(col) + 2.0),
+                    left: Val::Px(layout.col_left(col)),
                     top: Val::Px(layout.key_viz_top()),
-                    width: Val::Px(layout.col_width(col) - 4.0),
+                    width: Val::Px(layout.col_width(col)),
                     height: Val::Px(cap_h),
                     border: UiRect::all(Val::Px(2.0 * layout.scale)),
                     align_items: AlignItems::Center,
@@ -76,9 +79,9 @@ pub fn spawn_key_caps(
 fn apply_key_cap_layout(layout: Res<PlayfieldLayout>, mut caps: Query<(&KeyCap, &mut Node)>) {
     for (cap, mut node) in &mut caps {
         let col = cap.col as usize;
-        node.left = Val::Px(layout.col_left(col) + 2.0);
+        node.left = Val::Px(layout.col_left(col));
         node.top = Val::Px(layout.key_viz_top());
-        node.width = Val::Px(layout.col_width(col) - 4.0);
+        node.width = Val::Px(layout.col_width(col));
         node.height = Val::Px(layout.key_cap_height());
         node.border = UiRect::all(Val::Px(2.0 * layout.scale));
         node.border_radius = key_cap_border_radius(layout.key_cap_height(), layout.scale);
