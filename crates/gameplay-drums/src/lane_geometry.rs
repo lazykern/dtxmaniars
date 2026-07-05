@@ -68,6 +68,12 @@ pub fn chip_color(channel: EChannel) -> Color {
     }
 }
 
+/// Merged-secondary chips render as an outline (transparent fill) so they read
+/// distinct from the filled primary sharing their column: HHO vs HH, LBD vs BD.
+pub fn is_hollow(channel: EChannel) -> bool {
+    matches!(channel, EChannel::HiHatOpen | EChannel::LeftBassDrum)
+}
+
 /// Column base color as a Bevy `Color`.
 pub fn column_color(col: usize) -> Color {
     let (r, g, b) = COLUMNS.get(col).map(|c| c.color).unwrap_or((1.0, 1.0, 1.0));
@@ -139,5 +145,14 @@ mod tests {
     fn non_drum_channel_has_no_column() {
         assert_eq!(column_of(EChannel::BGM), None);
         assert_eq!(column_of(EChannel::BarLine), None);
+    }
+
+    #[test]
+    fn only_open_hh_and_left_bass_are_hollow() {
+        assert!(is_hollow(EChannel::HiHatOpen));
+        assert!(is_hollow(EChannel::LeftBassDrum));
+        assert!(!is_hollow(EChannel::HiHatClose));
+        assert!(!is_hollow(EChannel::BassDrum));
+        assert!(!is_hollow(EChannel::Snare));
     }
 }

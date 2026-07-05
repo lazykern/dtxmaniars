@@ -12,7 +12,7 @@ use crate::events::NoteMissed;
 use crate::hud::HudRoot;
 use crate::interp::RenderClock;
 use crate::judge::{BpmChangeList, JudgedChips};
-use crate::lane_geometry::{chip_color, column_of};
+use crate::lane_geometry::{chip_color, column_of, is_hollow};
 use crate::lane_map::lane_of;
 use crate::lane_map::{lane_channel, LANE_COUNT};
 use crate::layout::PlayfieldLayout;
@@ -129,26 +129,36 @@ fn spawn_notes_system(
         };
         let top = top_for_note(target_ms, now, judge_y, px_per_ms);
         let left = layout.col_left(col) + 2.0;
+        let color = chip_color(chip.channel);
+        let hollow = is_hollow(chip.channel);
 
-        let note_entity = commands
-            .spawn((
-                Note {
-                    chip_id: idx,
-                    lane,
-                    target_ms,
+        let mut note_cmd = commands.spawn((
+            Note {
+                chip_id: idx,
+                lane,
+                target_ms,
+            },
+            NoteVisual,
+            Node {
+                position_type: PositionType::Absolute,
+                left: Val::Px(left),
+                top: Val::Px(top),
+                width: Val::Px(layout.note_width(col)),
+                height: Val::Px(layout.note_height()),
+                border: if hollow {
+                    UiRect::all(Val::Px(2.0 * layout.scale))
+                } else {
+                    UiRect::ZERO
                 },
-                NoteVisual,
-                Node {
-                    position_type: PositionType::Absolute,
-                    left: Val::Px(left),
-                    top: Val::Px(top),
-                    width: Val::Px(layout.note_width(col)),
-                    height: Val::Px(layout.note_height()),
-                    ..default()
-                },
-                BackgroundColor(chip_color(chip.channel)),
-            ))
-            .id();
+                ..default()
+            },
+        ));
+        if hollow {
+            note_cmd.insert((BackgroundColor(Color::NONE), BorderColor::all(color)));
+        } else {
+            note_cmd.insert(BackgroundColor(color));
+        }
+        let note_entity = note_cmd.id();
         commands.entity(hud).add_child(note_entity);
     }
 }
