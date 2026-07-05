@@ -296,11 +296,18 @@ impl CommandHistory {
 #[derive(Component)]
 pub struct SongSelectEntity;
 
-/// Wheel row text (title/artist), tagged for per-frame updates.
+/// Wheel row title text, tagged for per-frame updates.
 #[derive(Component)]
 struct WheelRowTitle;
+/// Wheel row jacket thumbnail image.
 #[derive(Component)]
-struct WheelRowMeta;
+struct WheelRowJacket;
+/// Wheel row skill number text (yellow).
+#[derive(Component)]
+struct WheelRowSkill;
+/// Wheel row progress-bar fill node (width driven at spawn).
+#[derive(Component)]
+struct WheelRowBar;
 /// Left-cluster dynamic texts.
 #[derive(Component)]
 struct SearchText;
@@ -452,6 +459,8 @@ fn reset_wheel_spring(selection: Res<Selection>, mut spring: ResMut<WheelSpring>
 fn spawn_song_select(
     mut commands: Commands,
     selection_state: Res<SongSelectSelection>,
+    db: Res<SongDb>,
+    assets: Res<AssetServer>,
     theme: Res<ThemeResource>,
 ) {
     let t = theme.0;
@@ -628,7 +637,7 @@ fn spawn_song_select(
                 },
             ))
             .with_children(|wheel| {
-                spawn_wheel_rows(wheel, &selection_state, &t);
+                spawn_wheel_rows(wheel, &selection_state, &db, &assets, &t);
             });
 
             // ---- bottom hint bar
@@ -672,11 +681,26 @@ fn spawn_song_select(
         });
 }
 
+/// Representative chart for a folder's wheel row: the highest-dlevel
+/// chart present (falls back to the first). Returns the `db.songs`
+/// index, or `None` for an empty folder.
+fn folder_display_chart(folder: &SongFolderView, db: &SongDb) -> Option<usize> {
+    folder
+        .chart_indices
+        .iter()
+        .copied()
+        .filter(|idx| db.songs.get(*idx).is_some())
+        .max_by_key(|idx| db.songs[*idx].dlevel.unwrap_or(0))
+        .or_else(|| folder.chart_indices.first().copied())
+}
+
 /// Spawn one absolute-positioned row per visible folder. Positions are
 /// written every frame by `wheel_layout_system`.
 fn spawn_wheel_rows(
     wheel: &mut ChildSpawnerCommands,
     selection_state: &SongSelectSelection,
+    db: &SongDb,
+    assets: &AssetServer,
     t: &Theme,
 ) {
     if selection_state.visible.is_empty() {
@@ -727,23 +751,84 @@ fn spawn_wheel_rows(
                 Visibility::Hidden,
             ))
             .with_children(|row| {
+                // Jacket thumbnail (or tinted placeholder).
+                let display = folder_display_chart(folder, db).and_then(|i| db.songs.get(i));
+                let jacket_image = display
+                    .and_then(|s| s.preimage_path.as_ref())
+                    .map(|p| assets.load(p.to_string_lossy().to_string()))
+                    .unwrap_or_default();
+                row.spawn((
+                    WheelRowJacket,
+                    Node {
+                        width: Val::Px(58.0),
+                        height: Val::Px(58.0),
+                        ..default()
+                    },
+                    BackgroundColor(t.stage_panel_border),
+                    ImageNode {
+                        image: jacket_image,
+                        ..default()
+                    },
+                ));
+                // Right column: skill+bar row, then title.
                 row.spawn(Node {
                     flex_direction: FlexDirection::Column,
                     flex_grow: 1.0,
+                    row_gap: Val::Px(4.0),
                     ..default()
                 })
                 .with_children(|col| {
+                    let (skill, ach) = display
+                        .map(|s| {
+                            let ini = dtx_scoring::score_ini::score_ini_path(&s.path);
+                            let acc = dtx_scoring::score_ini::read_best(&ini)
+                                .map(|b| b.accuracy())
+                                .unwrap_or(0.0);
+                            (crate::chart_stats::skill_points(s.dlevel, acc), acc)
+                        })
+                        .unwrap_or((0.0, 0.0));
+                    // Skill number + progress bar on one line.
+                    col.spawn(Node {
+                        flex_direction: FlexDirection::Row,
+                        align_items: AlignItems::Center,
+                        column_gap: Val::Px(10.0),
+                        ..default()
+                    })
+                    .with_children(|line| {
+                        line.spawn((
+                            WheelRowSkill,
+                            Text::new(crate::chart_stats::row_skill_text(skill)),
+                            Theme::font(15.0),
+                            TextColor(t.select_yellow),
+                        ));
+                        // Progress-bar track.
+                        line.spawn((
+                            Node {
+                                flex_grow: 1.0,
+                                height: Val::Px(6.0),
+                                border: UiRect::all(Val::Px(1.0)),
+                                ..default()
+                            },
+                            BackgroundColor(Color::NONE),
+                            BorderColor::all(t.stage_panel_border),
+                        ))
+                        .with_children(|track| {
+                            track.spawn((
+                                WheelRowBar,
+                                Node {
+                                    width: Val::Percent(crate::chart_stats::bar_fill_pct(ach)),
+                                    height: Val::Percent(100.0),
+                                    ..default()
+                                },
+                                BackgroundColor(t.select_yellow),
+                            ));
+                        });
+                    });
                     col.spawn((
                         WheelRowTitle,
                         Text::new(folder.title.clone()),
-                        Theme::font(19.0),
+                        Theme::font(18.0),
                         TextColor(t.text_primary),
-                    ));
-                    col.spawn((
-                        WheelRowMeta,
-                        Text::new(folder.artist.clone()),
-                        Theme::font(12.0),
-                        TextColor(t.text_secondary),
                     ));
                 });
             });
@@ -938,6 +1023,8 @@ fn render_difficulty_grid(
 fn respawn_wheel_on_change(
     mut commands: Commands,
     selection_state: Res<SongSelectSelection>,
+    db: Res<SongDb>,
+    assets: Res<AssetServer>,
     theme: Res<ThemeResource>,
     wheel: Query<Entity, With<SongWheel>>,
     rows: Query<Entity, With<WheelRow>>,
@@ -953,7 +1040,7 @@ fn respawn_wheel_on_change(
     }
     let t = theme.0;
     commands.entity(wheel_entity).with_children(|w| {
-        spawn_wheel_rows(w, &selection_state, &t);
+        spawn_wheel_rows(w, &selection_state, &db, &assets, &t);
     });
 }
 
@@ -1266,6 +1353,39 @@ mod tests {
             preview_is_loopable: false,
             preimage_path: None,
         }
+    }
+
+    #[test]
+    fn folder_display_chart_picks_highest_dlevel() {
+        let mut db = SongDb::default();
+        let mut a = make_song("a", "");
+        a.dlevel = Some(30);
+        let mut b = make_song("b", "");
+        b.dlevel = Some(90);
+        let mut c = make_song("c", "");
+        c.dlevel = Some(50);
+        db.songs.push(a);
+        db.songs.push(b);
+        db.songs.push(c);
+        let folder = SongFolderView {
+            folder: std::path::PathBuf::from("/x"),
+            title: "t".into(),
+            artist: "x".into(),
+            chart_indices: vec![0, 1, 2],
+        };
+        assert_eq!(folder_display_chart(&folder, &db), Some(1));
+    }
+
+    #[test]
+    fn folder_display_chart_empty_is_none() {
+        let db = SongDb::default();
+        let folder = SongFolderView {
+            folder: std::path::PathBuf::from("/x"),
+            title: "t".into(),
+            artist: "x".into(),
+            chart_indices: vec![],
+        };
+        assert_eq!(folder_display_chart(&folder, &db), None);
     }
 
     #[test]
