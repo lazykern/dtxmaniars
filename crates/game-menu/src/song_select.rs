@@ -292,6 +292,19 @@ impl Selection {
 #[derive(Component, Debug, Clone, Copy)]
 pub struct AlbumArtEntity;
 
+// ===== Type-to-search (Task 12) =====
+
+pub fn apply_search_char(query: &mut String, c: char) {
+    if query.len() >= 64 || c.is_control() {
+        return;
+    }
+    query.push(c);
+}
+
+pub fn apply_search_backspace(query: &mut String) {
+    query.pop();
+}
+
 // ===== Plugin =====
 
 pub fn plugin(app: &mut App) {
@@ -303,6 +316,7 @@ pub fn plugin(app: &mut App) {
             OnEnter(AppState::SongSelect),
             (
                 ensure_song_db_loaded,
+                reset_search,
                 recompute_visible,
                 reset_wheel_spring,
                 spawn_song_select,
@@ -323,7 +337,7 @@ pub fn plugin(app: &mut App) {
             (
                 maybe_recompute_visible,
                 song_select_navigation,
-                // search_input,          // Task 12
+                search_input,
                 respawn_wheel_on_change,
                 wheel_layout_system,
                 update_left_cluster,
@@ -352,6 +366,15 @@ fn ensure_song_db_loaded(mut db: ResMut<SongDb>) {
             warn!("SongSelect: scan failed: {}", e);
         }
     }
+}
+
+/// Clear the search query on screen entry so a stale filter from a
+/// previous visit doesn't hide songs. Runs before `recompute_visible`
+/// so the cleared query is applied when the visible list is first
+/// computed.
+fn reset_search(mut sel: ResMut<SongSelectSelection>) {
+    sel.search_query.clear();
+    sel.dirty = true;
 }
 
 /// Reset the wheel spring to the (post-clamp) selected folder so the
@@ -924,6 +947,51 @@ fn song_select_navigation(
     }
 }
 
+/// Live type-to-search: printable keys append, Backspace deletes,
+/// filter recomputes immediately. Nav/hotkeys still work (arrows,
+/// Enter, Tab, F-keys, Esc are not printable characters).
+fn search_input(
+    mut chars: MessageReader<bevy::input::keyboard::KeyboardInput>,
+    mut selection_state: ResMut<SongSelectSelection>,
+    mut search_text: Query<&mut Text, With<SearchText>>,
+) {
+    use bevy::input::keyboard::Key;
+    let mut changed = false;
+    for ev in chars.read() {
+        if !ev.state.is_pressed() {
+            continue;
+        }
+        match &ev.logical_key {
+            Key::Character(s) => {
+                for c in s.chars() {
+                    apply_search_char(&mut selection_state.search_query, c);
+                }
+                changed = true;
+            }
+            Key::Space => {
+                apply_search_char(&mut selection_state.search_query, ' ');
+                changed = true;
+            }
+            Key::Backspace => {
+                apply_search_backspace(&mut selection_state.search_query);
+                changed = true;
+            }
+            _ => {}
+        }
+    }
+    if changed {
+        selection_state.dirty = true;
+        let q = selection_state.search_query.clone();
+        for mut text in &mut search_text {
+            *text = Text::new(if q.is_empty() {
+                "type to search…".to_string()
+            } else {
+                format!("search: {q}")
+            });
+        }
+    }
+}
+
 fn update_album_art_image(
     selection: Res<Selection>,
     selection_state: Res<SongSelectSelection>,
@@ -1399,5 +1467,25 @@ mod tests {
         assert_eq!(SortMode::Default.next(), SortMode::ByTitle);
         assert_eq!(SortMode::ByTitle.next(), SortMode::ByArtist);
         assert_eq!(SortMode::ByArtist.next(), SortMode::Default);
+    }
+
+    #[test]
+    fn apply_search_edit_appends_and_deletes() {
+        let mut q = String::new();
+        apply_search_char(&mut q, 'a');
+        apply_search_char(&mut q, 'B');
+        assert_eq!(q, "aB");
+        apply_search_backspace(&mut q);
+        assert_eq!(q, "a");
+        apply_search_backspace(&mut q);
+        apply_search_backspace(&mut q);
+        assert_eq!(q, "");
+    }
+
+    #[test]
+    fn apply_search_char_caps_length() {
+        let mut q = "x".repeat(64);
+        apply_search_char(&mut q, 'y');
+        assert_eq!(q.len(), 64);
     }
 }
