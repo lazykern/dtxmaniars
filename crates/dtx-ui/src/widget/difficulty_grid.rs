@@ -134,5 +134,7 @@ mod tests {
         s.achievement = Some(93.04);
         s.rank = Some("S".into());
         assert_eq!(score_text(&s), "S  93.04%");
+        s.rank = None;
+        assert_eq!(score_text(&s), "93.04%");
     }
 }
