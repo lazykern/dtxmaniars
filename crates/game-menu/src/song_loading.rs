@@ -18,14 +18,14 @@
 //!
 //! BGM playback + real asset progress → M5.
 
-use bevy::input::keyboard::KeyCode;
 use bevy::input::ButtonInput;
+use bevy::input::keyboard::KeyCode;
 use bevy::prelude::*;
-use bevy::tasks::{block_on, futures_lite::future, AsyncComputeTaskPool, Task};
+use bevy::tasks::{AsyncComputeTaskPool, Task, block_on, futures_lite::future};
 use bevy_kira_audio::prelude::{Audio, AudioInstance, AudioSource as KiraAudioSource};
 use dtx_audio::BgmHandle;
 use dtx_bga::{ActiveChartRes, BgaLayerOverlay, BgaPlayer};
-use dtx_core::{resolve_bgm_path, Chart};
+use dtx_core::{Chart, resolve_bgm_path};
 use dtx_ui::motion::EnterChoreo;
 use dtx_ui::widget::stage_background::spawn_stage_background;
 use dtx_ui::widget::stage_panel::panel;
@@ -34,7 +34,7 @@ use game_shell::{AppState, TransitionRequest, despawn_stage, request_transition}
 use gameplay_drums::resources::ActiveChart as DrumsActiveChart;
 use gameplay_guitar::resources::ActiveChart as GuitarActiveChart;
 
-use crate::song_select::{Selection, SelectedSong, SongSelectSelection};
+use crate::song_select::{SelectedSong, Selection, SongSelectSelection};
 
 #[derive(Component)]
 pub struct LoadingEntity;
@@ -155,9 +155,10 @@ fn start_load(
         // done — fall back to "Loading…" if the chart doesn't ship one.
         let path_clone = path.clone();
         let pool = AsyncComputeTaskPool::get();
-        task.0 = Some(pool.spawn(async move {
-            dtx_assets::load_dtx(&path_clone).map_err(|e| e.to_string())
-        }));
+        task.0 =
+            Some(pool.spawn(async move {
+                dtx_assets::load_dtx(&path_clone).map_err(|e| e.to_string())
+            }));
     } else {
         warn!("SongLoading entered with no SelectedSong; using empty chart");
         task.0 = None;
@@ -229,7 +230,8 @@ fn poll_chart_parse(
             use gameplay_drums::sound_bank;
             let immediate = sound_bank::collect_immediate_wav_slots(&chart);
             let deferred = sound_bank::collect_deferred_wav_slots(&chart);
-            required.0 = sound_bank::preload_slots(&drums_chart, &asset_server, &mut bank, &immediate);
+            required.0 =
+                sound_bank::preload_slots(&drums_chart, &asset_server, &mut bank, &immediate);
             let deferred_handles =
                 sound_bank::preload_slots(&drums_chart, &asset_server, &mut bank, &deferred);
             info!(
@@ -243,13 +245,16 @@ fn poll_chart_parse(
             ghost.drums = path
                 .as_ref()
                 .and_then(|p| {
-                    dtx_scoring::score_ini::read_ghost_lag(
-                        dtx_scoring::score_ini::ghost_path(p, "dr", "perfect"),
-                    )
+                    dtx_scoring::score_ini::read_ghost_lag(dtx_scoring::score_ini::ghost_path(
+                        p, "dr", "perfect",
+                    ))
                 })
                 .unwrap_or_default();
             if !ghost.drums.is_empty() {
-                info!("SongLoading: loaded {} ghost lag samples", ghost.drums.len());
+                info!(
+                    "SongLoading: loaded {} ghost lag samples",
+                    ghost.drums.len()
+                );
             }
             // Per-chart SOUND_NOWLOADING cue (BocuD #SOUND_NOWLOADING). Falls
             // back to silence when the chart doesn't ship one — there's no
@@ -336,7 +341,14 @@ fn spawn_loading(
             crate::song_select::SongFolderView::difficulty_label(selection.difficulty).to_string(),
             s.preimage_path.clone(),
         ),
-        None => ("Unknown".into(), String::new(), None, None, String::new(), None),
+        None => (
+            "Unknown".into(),
+            String::new(),
+            None,
+            None,
+            String::new(),
+            None,
+        ),
     };
 
     commands
@@ -488,7 +500,10 @@ fn watch_cancel_key(
     if cancel.0 {
         return;
     }
-    if matches!(*phase, LoadPhase::Idle | LoadPhase::Ready | LoadPhase::Failed) {
+    if matches!(
+        *phase,
+        LoadPhase::Idle | LoadPhase::Ready | LoadPhase::Failed
+    ) {
         return;
     }
     if keys.just_pressed(KeyCode::Escape) {
@@ -519,7 +534,14 @@ fn play_nowloading(
     }
     // Reuse the BGM slot for the nowloading jingle so `stop_bgm` on exit
     // cleans it up. Volume 0.6 — soft, doesn't fight the BGMLoadingSound.
-    let _ = dtx_audio::play_bgm(audio, asset_server, bgm, instances, &path.to_string_lossy(), 0);
+    let _ = dtx_audio::play_bgm(
+        audio,
+        asset_server,
+        bgm,
+        instances,
+        &path.to_string_lossy(),
+        0,
+    );
 }
 
 /// Stop any nowloading clip on exit so it doesn't bleed into Performance.
@@ -535,7 +557,10 @@ fn stop_nowloading(
 /// `drums.ogg` heuristic file exists. Currently unused; surfaced for callers
 /// that want to short-circuit load when only BGM is missing.
 #[allow(dead_code)]
-fn primary_bgm_hint(chart: &Chart, source_path: Option<&std::path::Path>) -> Option<std::path::PathBuf> {
+fn primary_bgm_hint(
+    chart: &Chart,
+    source_path: Option<&std::path::Path>,
+) -> Option<std::path::PathBuf> {
     let p = source_path?;
     resolve_bgm_path(p, chart)
 }

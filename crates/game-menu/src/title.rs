@@ -1,9 +1,9 @@
 //! Title screen — osu-style themed menu (ADR-0014).
 
 use bevy::prelude::*;
-use dtx_ui::{Theme, ThemeResource};
 use dtx_ui::motion::{BeatPulse, EnterChoreo};
 use dtx_ui::widget::stage_background::spawn_stage_background;
+use dtx_ui::{Theme, ThemeResource};
 use game_shell::{AppState, TransitionRequest, despawn_stage, request_transition};
 
 #[derive(Component)]
@@ -81,30 +81,28 @@ fn spawn_title(mut commands: Commands, theme: Res<ThemeResource>) {
                     TextColor(Color::BLACK),
                 ));
             });
-            root.spawn((
-                Node {
-                    position_type: PositionType::Absolute,
-                    bottom: Val::Px(12.0),
-                    left: Val::Px(0.0),
-                    width: Val::Percent(100.0),
-                    flex_direction: FlexDirection::Row,
-                    justify_content: JustifyContent::SpaceBetween,
-                    padding: UiRect::horizontal(Val::Px(20.0)),
-                    ..default()
-                },
-            ))
-            .with_children(|bar| {
-                bar.spawn((
-                    Text::new(format!("v{}", env!("CARGO_PKG_VERSION"))),
-                    Theme::font(12.0),
-                    TextColor(t.text_secondary),
-                ));
-                bar.spawn((
-                    Text::new("ESC QUIT"),
-                    Theme::font(12.0),
-                    TextColor(t.text_secondary),
-                ));
-            });
+            root.spawn((Node {
+                position_type: PositionType::Absolute,
+                bottom: Val::Px(12.0),
+                left: Val::Px(0.0),
+                width: Val::Percent(100.0),
+                flex_direction: FlexDirection::Row,
+                justify_content: JustifyContent::SpaceBetween,
+                padding: UiRect::horizontal(Val::Px(20.0)),
+                ..default()
+            },))
+                .with_children(|bar| {
+                    bar.spawn((
+                        Text::new(format!("v{}", env!("CARGO_PKG_VERSION"))),
+                        Theme::font(12.0),
+                        TextColor(t.text_secondary),
+                    ));
+                    bar.spawn((
+                        Text::new("ESC QUIT"),
+                        Theme::font(12.0),
+                        TextColor(t.text_secondary),
+                    ));
+                });
         });
 }
 
