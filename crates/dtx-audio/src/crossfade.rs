@@ -28,7 +28,10 @@ pub const PREVIEW_FADE_IN_MS: u32 = 220;
 /// (osu `DELAY_BEFORE_FADE = 30`, `MusicController.cs:41`).
 pub const PREVIEW_FADE_DELAY_MS: u32 = 30;
 
-/// Start a linear fade-out on the given audio instance, then stop it.
+/// Start a fade-out on the given audio instance using `Easing::Out`,
+/// then stop it. Matches osu-lazer's `MusicController.changeTrack`:
+/// `lastTrack.VolumeTo(0, 150, Easing.Out)`
+/// (`osu-lazer/osu.Game/Overlays/MusicController.cs:520`).
 ///
 /// Volume tweens to silence over `ms` milliseconds; the underlying
 /// kira sound handle is removed from the audio engine once the tween
@@ -44,21 +47,28 @@ pub fn stop_with_fade(
     ms: u32,
 ) {
     if let Some(mut instance) = instances.get_mut(handle) {
-        instance.stop(AudioTween::linear(Duration::from_millis(ms as u64)));
+        instance.stop(AudioTween::new(
+            Duration::from_millis(ms as u64),
+            AudioEasing::OutPowi(2),
+        ));
     }
 }
 
-/// Linear volume-only fade-out. Use this only when you intend to keep
-/// the kira instance alive afterwards (rare — e.g. `play()` mutes a
-/// fresh handle to -60dB before the crossfade fade-in lifts it back).
-/// For releasing a preview, prefer [`stop_with_fade`].
+/// Volume-only fade-out with `Easing::Out`. Use this only when you
+/// intend to keep the kira instance alive afterwards (rare — e.g.
+/// `play()` mutes a fresh handle to -60dB before the crossfade
+/// fade-in lifts it back). For releasing a preview, prefer
+/// [`stop_with_fade`].
 pub fn start_fade_out(
     instances: &mut Assets<AudioInstance>,
     handle: &Handle<AudioInstance>,
     ms: u32,
 ) {
     if let Some(mut instance) = instances.get_mut(handle) {
-        instance.set_decibels(-60.0, AudioTween::linear(Duration::from_millis(ms as u64)));
+        instance.set_decibels(
+            -60.0,
+            AudioTween::new(Duration::from_millis(ms as u64), AudioEasing::OutPowi(2)),
+        );
     }
 }
 
@@ -92,10 +102,7 @@ pub fn start_fade_in_with_delay(
 /// Uses `AudioTween::default()` which is a 10ms linear fade — below
 /// human perception threshold, so audibly instant. Matches the
 /// convention in `crate::stop_bgm` and friends.
-pub fn mute(
-    instances: &mut Assets<AudioInstance>,
-    handle: &Handle<AudioInstance>,
-) {
+pub fn mute(instances: &mut Assets<AudioInstance>, handle: &Handle<AudioInstance>) {
     if let Some(mut instance) = instances.get_mut(handle) {
         instance.set_decibels(-60.0, AudioTween::default());
     }

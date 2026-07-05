@@ -8,6 +8,7 @@
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
+use std::time::Duration;
 
 use bevy::prelude::*;
 use bevy_kira_audio::prelude::*;
@@ -67,7 +68,11 @@ pub fn plugin(app: &mut App) {
         .add_message::<ScreenFadeTransition>()
         .add_systems(
             Update,
-            (preview_tick_system, screen_fade_responder_system, drain_pending_preview),
+            (
+                preview_tick_system,
+                screen_fade_responder_system,
+                drain_pending_preview,
+            ),
         );
 }
 
@@ -229,12 +234,26 @@ impl DrumPolyphony {
 }
 
 /// Stop the currently-playing BGM instance, if any.
-pub fn stop_bgm(audio: &Audio, bgm: &mut BgmHandle, instances: &mut Assets<AudioInstance>) {
+///
+/// Stops only the tracked [`BgmHandle`] kira instance — never falls
+/// back to a global `audio.stop()`. If the handle is stale (no longer
+/// in `Assets<AudioInstance>`, e.g. consumed by another play call),
+/// this is a no-op + warn. Falling back to a global stop would kill
+/// every kira instance in the mixer, including in-flight previews and
+/// the just-started new BGM if called from `play_bgm` re-entrantly.
+///
+/// The `_audio` parameter is retained for API stability; it is no
+/// longer used. Callers can keep passing `&audio` as before.
+pub fn stop_bgm(_audio: &Audio, bgm: &mut BgmHandle, instances: &mut Assets<AudioInstance>) {
     if let Some(prev) = bgm.instance.take() {
         if let Some(mut instance) = instances.get_mut(&prev) {
             instance.stop(AudioTween::default());
         } else {
-            audio.stop();
+            warn!(
+                "stop_bgm: tracked instance {:?} not in Assets<AudioInstance>; \
+                 skipping (global stop would kill other kira audio)",
+                prev
+            );
         }
     }
     bgm.path = None;
@@ -242,17 +261,24 @@ pub fn stop_bgm(audio: &Audio, bgm: &mut BgmHandle, instances: &mut Assets<Audio
 
 /// Play a BGM file (path is loaded via `AssetServer`), looped, at default gain.
 /// Stops any currently-playing BGM first. Returns the new instance handle.
+///
+/// `fade_in_ms` — if non-zero, kira fades from silence to the volume set
+/// by `with_volume` over that many milliseconds (linear). Used to align
+/// BGM onset with a screen fade-in (see `ScreenFadeTransition::In`).
 pub fn play_bgm(
     audio: &Audio,
     asset_server: &AssetServer,
     bgm: &mut BgmHandle,
     instances: &mut Assets<AudioInstance>,
     path: &str,
+    fade_in_ms: u32,
 ) -> Handle<AudioInstance> {
-    play_bgm_from_seconds(audio, asset_server, bgm, instances, path, 0.0)
+    play_bgm_from_seconds(audio, asset_server, bgm, instances, path, 0.0, fade_in_ms)
 }
 
 /// Play a BGM file from a stream-local offset in seconds.
+///
+/// See [`play_bgm`] for the `fade_in_ms` semantics.
 pub fn play_bgm_from_seconds(
     audio: &Audio,
     asset_server: &AssetServer,
@@ -260,32 +286,55 @@ pub fn play_bgm_from_seconds(
     instances: &mut Assets<AudioInstance>,
     path: &str,
     start_seconds: f64,
+    fade_in_ms: u32,
 ) -> Handle<AudioInstance> {
     stop_bgm(audio, bgm, instances);
     let source = asset_server
         .load_builder()
         .override_unapproved()
         .load(path.to_owned());
-    let mut cmd = audio.play(source);
-    cmd.looped().start_from(start_seconds.max(0.0));
-    let handle = cmd.handle();
+    let handle = if fade_in_ms > 0 {
+        // kira fade_in tweens a silence→identity multiplier; `with_volume`
+        // is the post-fade target level, not the starting level.
+        audio
+            .play(source)
+            .looped()
+            .start_from(start_seconds.max(0.0))
+            .with_volume(0.0)
+            .fade_in(AudioTween::new(
+                Duration::from_millis(fade_in_ms as u64),
+                AudioEasing::Linear,
+            ))
+            .handle()
+    } else {
+        audio
+            .play(source)
+            .looped()
+            .start_from(start_seconds.max(0.0))
+            .handle()
+    };
     bgm.instance = Some(handle.clone());
     bgm.path = Some(path.to_owned());
     handle
 }
 
 /// Play a preloaded BGM handle, looped, at default gain.
+///
+/// `fade_in_ms` — see [`play_bgm`].
 pub fn play_bgm_handle(
     audio: &Audio,
     bgm: &mut BgmHandle,
     instances: &mut Assets<AudioInstance>,
     source: Handle<KiraAudioSource>,
     path: &str,
+    fade_in_ms: u32,
 ) -> Handle<AudioInstance> {
-    play_bgm_handle_with_mix(audio, bgm, instances, source, path, 100, 0, 1.0)
+    play_bgm_handle_with_mix(audio, bgm, instances, source, path, 100, 0, 1.0, fade_in_ms)
 }
 
 /// Play a preloaded BGM handle, looped, with DTX mix settings.
+///
+/// `fade_in_ms` — see [`play_bgm`].
 pub fn play_bgm_handle_with_mix(
     audio: &Audio,
     bgm: &mut BgmHandle,
@@ -295,13 +344,16 @@ pub fn play_bgm_handle_with_mix(
     dtx_volume: i32,
     dtx_pan: i32,
     master: f32,
+    fade_in_ms: u32,
 ) -> Handle<AudioInstance> {
     play_bgm_handle_with_mix_from_seconds(
-        audio, instances, bgm, source, path, dtx_volume, dtx_pan, master, 0.0,
+        audio, instances, bgm, source, path, dtx_volume, dtx_pan, master, 0.0, fade_in_ms,
     )
 }
 
 /// Play a preloaded BGM handle from a stream-local offset in seconds.
+///
+/// `fade_in_ms` — see [`play_bgm`].
 pub fn play_bgm_handle_with_mix_from_seconds(
     audio: &Audio,
     instances: &mut Assets<AudioInstance>,
@@ -312,15 +364,32 @@ pub fn play_bgm_handle_with_mix_from_seconds(
     dtx_pan: i32,
     master: f32,
     start_seconds: f64,
+    fade_in_ms: u32,
 ) -> Handle<AudioInstance> {
     stop_bgm(audio, bgm, instances);
     let gain = dtx_linear(dtx_volume) * master.clamp(0.0, 1.0);
-    let mut cmd = audio.play(source);
-    cmd.looped()
-        .start_from(start_seconds.max(0.0))
-        .with_volume(linear_gain_to_db(gain))
-        .with_panning((dtx_pan as f32 / 100.0).clamp(-1.0, 1.0));
-    let handle = cmd.handle();
+    let panning = (dtx_pan as f32 / 100.0).clamp(-1.0, 1.0);
+    let handle = if fade_in_ms > 0 {
+        audio
+            .play(source)
+            .looped()
+            .start_from(start_seconds.max(0.0))
+            .with_volume(linear_gain_to_db(gain))
+            .fade_in(AudioTween::new(
+                Duration::from_millis(fade_in_ms as u64),
+                AudioEasing::Linear,
+            ))
+            .with_panning(panning)
+            .handle()
+    } else {
+        audio
+            .play(source)
+            .looped()
+            .start_from(start_seconds.max(0.0))
+            .with_volume(linear_gain_to_db(gain))
+            .with_panning(panning)
+            .handle()
+    };
     bgm.instance = Some(handle.clone());
     bgm.path = Some(path.to_owned());
     handle
@@ -365,7 +434,10 @@ pub fn pause_audio_instance(instances: &mut Assets<AudioInstance>, handle: &Hand
 }
 
 /// Resume a single audio instance, if it exists.
-pub fn resume_audio_instance(instances: &mut Assets<AudioInstance>, handle: &Handle<AudioInstance>) {
+pub fn resume_audio_instance(
+    instances: &mut Assets<AudioInstance>,
+    handle: &Handle<AudioInstance>,
+) {
     if let Some(mut inst) = instances.get_mut(handle) {
         inst.resume(AudioTween::default());
     }
@@ -382,6 +454,15 @@ pub fn pause_polyphony(instances: &mut Assets<AudioInstance>, polyphony: &DrumPo
 pub fn resume_polyphony(instances: &mut Assets<AudioInstance>, polyphony: &DrumPolyphony) {
     for handle in polyphony.active_handles() {
         resume_audio_instance(instances, handle);
+    }
+}
+
+/// Stop every active drum polyphony voice.
+pub fn stop_polyphony(instances: &mut Assets<AudioInstance>, polyphony: &DrumPolyphony) {
+    for handle in polyphony.active_handles() {
+        if let Some(mut inst) = instances.get_mut(handle) {
+            inst.stop(AudioTween::default());
+        }
     }
 }
 

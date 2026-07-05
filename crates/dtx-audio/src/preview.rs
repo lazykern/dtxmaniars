@@ -15,13 +15,13 @@ use std::path::{Path, PathBuf};
 
 use bevy::asset::Handle;
 use bevy::prelude::*;
+use bevy_kira_audio::prelude::*;
 use bevy_kira_audio::AudioInstance;
 use bevy_kira_audio::AudioSource as KiraAudioSource;
-use bevy_kira_audio::prelude::*;
 
 use crate::crossfade::{
-    PREVIEW_FADE_DELAY_MS, PREVIEW_FADE_IN_MS, PREVIEW_FADE_OUT_MS, mute, start_fade_in_with_delay,
-    stop_with_fade,
+    mute, start_fade_in_with_delay, stop_with_fade, PREVIEW_FADE_DELAY_MS, PREVIEW_FADE_IN_MS,
+    PREVIEW_FADE_OUT_MS,
 };
 
 // =====================================================================
@@ -296,11 +296,7 @@ impl PreviewPlayer {
     /// calls don't trip on a stale handle. The underlying kira
     /// instances are scheduled to stop after their respective fade-out
     /// tweens complete.
-    pub fn fade_to_silent(
-        &mut self,
-        instances: &mut Assets<AudioInstance>,
-        ms: u32,
-    ) {
+    pub fn fade_to_silent(&mut self, instances: &mut Assets<AudioInstance>, ms: u32) {
         let handles: Vec<Handle<AudioInstance>> = match &self.state {
             PreviewState::Playing { current } => vec![current.clone()],
             PreviewState::Crossfading { old, new, .. } => {
@@ -364,14 +360,16 @@ impl PreviewPlayer {
         let old_path_for_event = self.current_path.clone();
         if let Some(old) = &old_path_for_event {
             info!(
-                "Preview: path changed {} -> {}; stopping main track",
+                "Preview: path changed {} -> {}",
                 old.display(),
                 path.display()
             );
-            audio.stop();
         }
         if self.state.is_busy() {
-            info!("Preview: force-stopping in-flight preview before {}", path.display());
+            info!(
+                "Preview: force-stopping in-flight preview before {}",
+                path.display()
+            );
             self.stop(instances, 0);
         }
 
@@ -428,11 +426,7 @@ impl PreviewPlayer {
     /// instance(s). No-op if idle. `fade_out_ms=0` uses the crossfade
     /// module default. Both the fading-in `new` and (if present) the
     /// fading-out `old` handles are scheduled to stop.
-    pub fn stop(
-        &mut self,
-        instances: &mut Assets<AudioInstance>,
-        fade_out_ms: u32,
-    ) {
+    pub fn stop(&mut self, instances: &mut Assets<AudioInstance>, fade_out_ms: u32) {
         let handles: Vec<Handle<AudioInstance>> = match &self.state {
             PreviewState::Playing { current } => vec![current.clone()],
             PreviewState::Crossfading { old, new, .. } => {
@@ -454,7 +448,11 @@ impl PreviewPlayer {
         } else {
             fade_out_ms
         };
-        info!("Preview: stopping {} handle(s), fade={}ms", handles.len(), ms);
+        info!(
+            "Preview: stopping {} handle(s), fade={}ms",
+            handles.len(),
+            ms
+        );
         for h in &handles {
             stop_with_fade(instances, h, ms);
         }
@@ -543,8 +541,14 @@ mod tests {
     #[test]
     fn cache_clear_empties_all_entries() {
         let mut cache = AudioHandleCache::default();
-        cache.put(PathBuf::from("/a.ogg"), Handle::<KiraAudioSource>::default());
-        cache.put(PathBuf::from("/b.ogg"), Handle::<KiraAudioSource>::default());
+        cache.put(
+            PathBuf::from("/a.ogg"),
+            Handle::<KiraAudioSource>::default(),
+        );
+        cache.put(
+            PathBuf::from("/b.ogg"),
+            Handle::<KiraAudioSource>::default(),
+        );
         assert_eq!(cache.len(), 2);
         cache.clear();
         assert!(cache.is_empty());
