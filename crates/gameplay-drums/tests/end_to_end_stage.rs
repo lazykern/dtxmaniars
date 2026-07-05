@@ -15,7 +15,8 @@ use game_shell::AppState;
 use gameplay_drums::components::LastJudgment;
 use gameplay_drums::judge::{BpmChangeList, JudgedChips};
 use gameplay_drums::orchestrator::{
-    detect_end_of_stage, on_enter_performance, on_exit_performance, DrumsStageCompletion,
+    detect_end_of_stage, enter_derive_from_chart, enter_reset_run_state, enter_seed_bgm_state,
+    on_exit_performance, DrumsStageCompletion,
 };
 use gameplay_drums::resources::{
     ActiveChart, BgmAdjustState, Combo, GameStartMs, GameplayClock, JudgmentCounts, Score,
@@ -64,8 +65,18 @@ fn build_app() -> App {
     .init_resource::<gameplay_drums::resources::CurrentEmptyHitTemplates>()
     .init_resource::<gameplay_drums::resources::ActiveDrumSounds>()
     .init_resource::<gameplay_drums::se_scheduler::PlayedSeChips>()
+    .init_resource::<gameplay_drums::resources::FastSlowCount>()
+    .init_resource::<gameplay_drums::derived::ChartDerived>()
     .add_message::<game_shell::TransitionRequest>()
-    .add_systems(OnEnter(AppState::Performance), on_enter_performance)
+    .add_systems(
+        OnEnter(AppState::Performance),
+        (
+            enter_reset_run_state,
+            enter_derive_from_chart,
+            enter_seed_bgm_state,
+        )
+            .chain(),
+    )
     .add_systems(OnExit(AppState::Performance), on_exit_performance)
     .add_systems(
         Update,

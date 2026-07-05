@@ -97,10 +97,12 @@ mod tests {
     use super::*;
 
     #[test]
-    fn lane_map_drums_default_covers_digits_1_9() {
+    fn lane_map_drums_default_matches_bocud() {
+        // BocuD default: X = HH, Space = BD.
+        // references/DTXmaniaNX-BocuD/DTXMania/Core/CConfigIni.cs:3783
         let m = LaneMap::default_drums();
-        assert_eq!(m.lane_for_key(KeyCode::Digit1), Some(0));
-        assert_eq!(m.lane_for_key(KeyCode::Digit9), Some(8));
+        assert_eq!(m.lane_for_key(KeyCode::KeyX), Some(0));
+        assert_eq!(m.lane_for_key(KeyCode::Space), Some(2));
     }
 
     #[test]
@@ -109,7 +111,7 @@ mod tests {
         // itself doesn't change; the gating is at the system level.
         let m = LaneMap::default_drums();
         // LaneMap is purely structural — it does not depend on EGameMode.
-        assert!(m.lane_for_key(KeyCode::Digit1).is_some());
+        assert!(m.lane_for_key(KeyCode::KeyX).is_some());
     }
 
     #[test]

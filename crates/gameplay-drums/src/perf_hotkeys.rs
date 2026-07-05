@@ -19,7 +19,7 @@ use crate::resources::{BgmAdjustState, InputOffsetMs, ScrollSettings, ShowPerfIn
 /// NX drum scroll index step ≡ multiplier step 0.5 (`CStagePerfDrumsScreen.cs:634-640`).
 pub const SCROLL_SPEED_STEP: f32 = 0.5;
 pub const SCROLL_SPEED_MIN: f32 = 0.5;
-pub const SCROLL_SPEED_MAX: f32 = 4.0;
+pub const SCROLL_SPEED_MAX: f32 = 9.0;
 
 /// NX in-song input adjust (`ChangeInputAdjustTimeInPlaying`, ±99 clamp).
 pub const INPUT_OFFSET_STEP_MS: i32 = 10;
@@ -107,10 +107,7 @@ pub(super) fn plugin(app: &mut App) {
         )
         .add_systems(
             Update,
-            (
-                handle_perf_hotkeys,
-                debounced_persist_perf_hotkeys,
-            )
+            (handle_perf_hotkeys, debounced_persist_perf_hotkeys)
                 .chain()
                 .run_if(in_state(AppState::Performance))
                 .run_if(in_state(PauseState::Running))
@@ -172,29 +169,21 @@ fn handle_perf_hotkeys(
         draft.mark_song_bgm_dirty();
         changed = true;
     } else if keys.just_pressed(KeyCode::ArrowUp) {
-        draft.cfg.gameplay.scroll_speed =
-            adjust_scroll_speed(draft.cfg.gameplay.scroll_speed, 1);
+        draft.cfg.gameplay.scroll_speed = adjust_scroll_speed(draft.cfg.gameplay.scroll_speed, 1);
         draft.mark_dirty();
         changed = true;
     } else if keys.just_pressed(KeyCode::ArrowDown) {
-        draft.cfg.gameplay.scroll_speed =
-            adjust_scroll_speed(draft.cfg.gameplay.scroll_speed, -1);
+        draft.cfg.gameplay.scroll_speed = adjust_scroll_speed(draft.cfg.gameplay.scroll_speed, -1);
         draft.mark_dirty();
         changed = true;
     } else if keys.just_pressed(KeyCode::ArrowLeft) {
-        draft.cfg.gameplay.input_offset_ms = adjust_input_offset_ms(
-            draft.cfg.gameplay.input_offset_ms,
-            -1,
-            ctrl,
-        );
+        draft.cfg.gameplay.input_offset_ms =
+            adjust_input_offset_ms(draft.cfg.gameplay.input_offset_ms, -1, ctrl);
         draft.mark_dirty();
         changed = true;
     } else if keys.just_pressed(KeyCode::ArrowRight) {
-        draft.cfg.gameplay.input_offset_ms = adjust_input_offset_ms(
-            draft.cfg.gameplay.input_offset_ms,
-            1,
-            ctrl,
-        );
+        draft.cfg.gameplay.input_offset_ms =
+            adjust_input_offset_ms(draft.cfg.gameplay.input_offset_ms, 1, ctrl);
         draft.mark_dirty();
         changed = true;
     }
@@ -204,9 +193,7 @@ fn handle_perf_hotkeys(
         if draft.song_bgm_dirty {
             if let Some(path) = chart.source_path.as_ref() {
                 let ini = dtx_scoring::score_ini::score_ini_path(path);
-                if let Err(e) =
-                    dtx_scoring::score_ini::write_bgm_adjust(&ini, bgm_adjust.song_ms)
-                {
+                if let Err(e) = dtx_scoring::score_ini::write_bgm_adjust(&ini, bgm_adjust.song_ms) {
                     warn!("perf hotkeys: failed to persist BGMAdjust to {ini:?}: {e}");
                 } else {
                     draft.song_bgm_dirty = false;
@@ -259,7 +246,7 @@ mod tests {
     fn scroll_speed_steps_and_clamps() {
         assert!((adjust_scroll_speed(1.0, 1) - 1.5).abs() < f32::EPSILON);
         assert!((adjust_scroll_speed(0.5, -1) - 0.5).abs() < f32::EPSILON);
-        assert!((adjust_scroll_speed(4.0, 1) - 4.0).abs() < f32::EPSILON);
+        assert!((adjust_scroll_speed(9.0, 1) - 9.0).abs() < f32::EPSILON);
     }
 
     #[test]
