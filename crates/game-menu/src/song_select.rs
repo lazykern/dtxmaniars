@@ -686,11 +686,16 @@ fn spawn_wheel_rows(
 }
 
 /// Drive the wheel spring toward the selected index and lay out rows.
+/// The selected row's yellow glow pulses in time with the previewed
+/// song's BPM (audio-reactive, spec 2026-07-05).
 fn wheel_layout_system(
     time: Res<Time>,
     selection: Res<Selection>,
+    selection_state: Res<SongSelectSelection>,
+    db: Res<SongDb>,
     theme: Res<ThemeResource>,
     mut spring: ResMut<WheelSpring>,
+    mut phase: Local<f32>,
     mut rows: Query<(
         &WheelRow,
         &mut Node,
@@ -704,6 +709,17 @@ fn wheel_layout_system(
     spring.0.set_target(selection.folder as f32);
     spring.0.tick(time.delta_secs());
     let center = spring.0.value;
+
+    // Advance the beat phase using the selected chart's BPM.
+    let bpm = selection
+        .chart_index(&selection_state)
+        .and_then(|i| db.songs.get(i))
+        .and_then(|s| s.bpm)
+        .unwrap_or(120.0)
+        .max(1.0);
+    *phase = (*phase + time.delta_secs() * bpm / 60.0).rem_euclid(1.0);
+    let glow = 0.30 + 0.25 * (1.0 - *phase).powi(2);
+
     const WHEEL_H: f32 = 632.0;
     for (row, mut node, mut vis, mut border, mut shadow, mut bg) in &mut rows {
         let offset = row.index as f32 - center;
@@ -717,7 +733,18 @@ fn wheel_layout_system(
         node.left = Val::Px(g.indent);
         node.height = Val::Px(g.height);
         let selected = offset.abs() < 0.5;
-        set_panel_selected(&t, selected, &mut border, &mut shadow);
+        if selected {
+            *border = BorderColor::all(t.select_yellow);
+            *shadow = BoxShadow::new(
+                t.select_yellow.with_alpha(glow),
+                Val::Px(0.0),
+                Val::Px(0.0),
+                Val::Px(2.0),
+                Val::Px(14.0),
+            );
+        } else {
+            set_panel_selected(&t, false, &mut border, &mut shadow);
+        }
         bg.0 = t.stage_panel_bg.with_alpha(0.93 * g.alpha);
     }
 }
