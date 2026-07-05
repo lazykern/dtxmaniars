@@ -68,21 +68,32 @@ impl dtx_input::keyboard::KeyLaneMap for LaneMap {
 }
 
 impl LaneMap {
-    /// Default drums layout: number row 1–9 mapped left to right.
+    /// Default drums layout: DTXManiaIX / BocuD defaults.
+    /// Ported from `references/DTXmaniaNX-BocuD/DTXMania/Core/CConfigIni.cs:3783`
+    /// (`tSetDefaultKeyAssignments`). SlimDX `Key` codes decoded via
+    /// `references/DTXmaniaNX-BocuD/FDK/Input/SlimDX.DirectInput.Key.cs`.
     pub fn default_drums() -> Self {
         let keys = [
-            (KeyCode::Digit1, 0u8), // HH
-            (KeyCode::Digit2, 1),   // SD
-            (KeyCode::Digit3, 2),   // BD
-            (KeyCode::Digit4, 3),   // HT
-            (KeyCode::Digit5, 4),   // LT
-            (KeyCode::Digit6, 5),   // FT
-            (KeyCode::Digit7, 6),   // CY
-            (KeyCode::Digit8, 7),   // HHO
-            (KeyCode::Digit9, 8),   // RD
-            (KeyCode::Digit0, 9),   // LC
-            (KeyCode::Minus, 10),   // LP
-            (KeyCode::Equal, 11),   // LBD
+            (KeyCode::KeyX, 0u8),      // HH     (SlimDX X = 33)
+            (KeyCode::KeyC, 1),        // SD     (C)
+            (KeyCode::KeyD, 1),        // SD     (D)
+            (KeyCode::Space, 2),       // BD     (Space)
+            (KeyCode::Convert, 2),     // BD     (Convert)
+            (KeyCode::KeyV, 3),        // HT     (V)
+            (KeyCode::KeyF, 3),        // HT     (F)
+            (KeyCode::KeyB, 4),        // LT     (B)
+            (KeyCode::KeyG, 4),        // LT     (G)
+            (KeyCode::KeyN, 5),        // FT     (N)
+            (KeyCode::KeyH, 5),        // FT     (H)
+            (KeyCode::KeyM, 6),        // CY     (M)
+            (KeyCode::KeyJ, 6),        // CY     (J)
+            (KeyCode::KeyS, 7),        // HHO    (S)
+            (KeyCode::Comma, 8),       // RD     (Comma)
+            (KeyCode::KeyK, 8),        // RD     (K)
+            (KeyCode::KeyZ, 9),        // LC     (Z)
+            (KeyCode::KeyA, 9),        // LC     (A)
+            (KeyCode::NonConvert, 10), // LP     (NoConvert)
+            (KeyCode::AltLeft, 11),    // LBD    (LeftAlt)
         ]
         .into_iter()
         .map(|(k, v)| (k, v as LaneId))
@@ -107,13 +118,29 @@ mod tests {
     use super::*;
 
     #[test]
-    fn default_maps_digits_1_through_9() {
+    fn default_maps_bocud_drums() {
+        // references/DTXmaniaNX-BocuD/DTXMania/Core/CConfigIni.cs:3783
         let m = LaneMap::default_drums();
-        assert_eq!(m.lane_for_key(KeyCode::Digit1), Some(0));
-        assert_eq!(m.lane_for_key(KeyCode::Digit9), Some(8));
-        assert_eq!(m.lane_for_key(KeyCode::Digit0), Some(9));
-        assert_eq!(m.lane_for_key(KeyCode::Minus), Some(10));
-        assert_eq!(m.lane_for_key(KeyCode::KeyA), None);
+        assert_eq!(m.lane_for_key(KeyCode::KeyX), Some(0)); // HH
+        assert_eq!(m.lane_for_key(KeyCode::KeyC), Some(1)); // SD
+        assert_eq!(m.lane_for_key(KeyCode::KeyD), Some(1)); // SD alt
+        assert_eq!(m.lane_for_key(KeyCode::Space), Some(2)); // BD
+        assert_eq!(m.lane_for_key(KeyCode::Convert), Some(2)); // BD alt
+        assert_eq!(m.lane_for_key(KeyCode::KeyV), Some(3)); // HT
+        assert_eq!(m.lane_for_key(KeyCode::KeyF), Some(3)); // HT alt
+        assert_eq!(m.lane_for_key(KeyCode::KeyB), Some(4)); // LT
+        assert_eq!(m.lane_for_key(KeyCode::KeyG), Some(4)); // LT alt
+        assert_eq!(m.lane_for_key(KeyCode::KeyN), Some(5)); // FT
+        assert_eq!(m.lane_for_key(KeyCode::KeyH), Some(5)); // FT alt
+        assert_eq!(m.lane_for_key(KeyCode::KeyM), Some(6)); // CY
+        assert_eq!(m.lane_for_key(KeyCode::KeyJ), Some(6)); // CY alt
+        assert_eq!(m.lane_for_key(KeyCode::KeyS), Some(7)); // HHO
+        assert_eq!(m.lane_for_key(KeyCode::Comma), Some(8)); // RD
+        assert_eq!(m.lane_for_key(KeyCode::KeyK), Some(8)); // RD alt
+        assert_eq!(m.lane_for_key(KeyCode::KeyZ), Some(9)); // LC
+        assert_eq!(m.lane_for_key(KeyCode::KeyA), Some(9)); // LC alt
+        assert_eq!(m.lane_for_key(KeyCode::NonConvert), Some(10)); // LP
+        assert_eq!(m.lane_for_key(KeyCode::AltLeft), Some(11)); // LBD
     }
 
     #[test]
@@ -153,9 +180,9 @@ mod tests {
     #[test]
     fn key_lane_map_trait_impl() {
         let m = LaneMap::default_drums();
-        // Use the trait to look up.
+        // Space is the primary BD binding (BocuD default).
         use dtx_input::keyboard::KeyLaneMap;
-        assert_eq!(KeyLaneMap::lane_for_key(&m, KeyCode::Digit3), Some(2));
+        assert_eq!(KeyLaneMap::lane_for_key(&m, KeyCode::Space), Some(2));
     }
 
     #[test]
