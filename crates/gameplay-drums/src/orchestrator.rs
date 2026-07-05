@@ -43,7 +43,7 @@
 
 use bevy::prelude::*;
 use bevy_kira_audio::prelude::*;
-use dtx_audio::BgmHandle;
+use dtx_audio::{BgmHandle, DrumPolyphony};
 use dtx_core::chart::Chart;
 use game_shell::{request_transition, AppState, TransitionRequest};
 
@@ -52,9 +52,32 @@ use crate::derived::ChartDerived;
 use crate::drums_perf::{DrumsDangerState, DrumsFillingEffect, DrumsPadState};
 use crate::judge::{BpmChangeList, JudgedChips};
 use crate::resources::{
-    ActiveChart, BgmAdjustState, Combo, DrumGameplaySettings, DrumScoring, FastSlowCount,
-    GameStartMs, GameplayClock, JudgmentCounts, Score,
+    ActiveChart, ActiveDrumSounds, BgmAdjustState, Combo, DrumGameplaySettings, DrumScoring,
+    FastSlowCount, GameStartMs, GameplayClock, JudgmentCounts, Score,
 };
+
+/// Marker set wrapping the drums `OnEnter(Performance)` chain.
+///
+/// Allows other plugins to order systems relative to the whole enter sequence
+/// via `.before(DrumsEnterSet)` / `.after(DrumsEnterSet)`.
+#[derive(SystemSet, Debug, Hash, PartialEq, Eq, Clone)]
+pub struct DrumsEnterSet;
+
+/// Per-system labels for the drums `OnEnter(Performance)` chain.
+///
+/// Used because `IntoScheduleConfigs::chain` for a single 5-tuple of generic
+/// systems blows past Rust's trait-solver depth (the type parameters of
+/// `on_enter_performance` alone reach 17 HRTBs). Splitting each system into
+/// its own `add_systems` call and ordering the enum variants via
+/// `configure_sets(...).chain()` sidesteps that limit.
+#[derive(SystemSet, Debug, Hash, PartialEq, Eq, Clone)]
+pub enum DrumsEnterStep {
+    ResetRuntime,
+    OnEnter,
+    PreloadSounds,
+    StartBgm,
+    SpawnStage,
+}
 
 /// Marker component for the drums performance stage root entity.
 ///
@@ -62,6 +85,10 @@ use crate::resources::{
 /// which sets `eStageID = EStage.Performance_6`.
 #[derive(Component, Debug, Clone, Copy)]
 pub struct DrumsStageRoot;
+
+/// Marker set wrapping the drums `OnExit(Performance)` chain.
+#[derive(SystemSet, Debug, Hash, PartialEq, Eq, Clone)]
+pub struct DrumsExitSet;
 
 /// End-of-stage state for drums (BocuD CStagePerfDrumsScreen OnUpdate logic).
 ///
@@ -95,32 +122,28 @@ pub fn plugin(app: &mut App) {
             OnEnter(AppState::Performance),
             (
                 reset_drum_runtime_keep_bank,
-                rebuild_drum_settings_on_enter,
-                on_enter_performance,
+                enter_reset_run_state,
+                enter_derive_from_chart,
+                enter_seed_bgm_state,
                 // Safety net: re-request any WAV slots the loading screen missed.
                 // Idempotent — already-loaded handles are reused, not re-decoded.
                 crate::sound_bank::preload_chart_sounds_on_enter,
                 start_bgm_on_enter,
                 spawn_stage_root,
             )
-                .chain(),
+                .chain()
+                .in_set(DrumsEnterSet),
         )
         .add_systems(
             OnExit(AppState::Performance),
-            (despawn_stage_root, on_exit_performance, reset_drum_runtime).chain(),
+            (despawn_stage_root, on_exit_performance, reset_drum_runtime)
+                .chain()
+                .in_set(DrumsExitSet),
         )
         .add_systems(
             Update,
             detect_end_of_stage.run_if(in_state(AppState::Performance)),
         );
-}
-
-/// Rebuild drum gameplay settings (lane mapping, polyphony) from the active chart.
-fn rebuild_drum_settings_on_enter(
-    chart: Res<ActiveChart>,
-    mut drum_settings: ResMut<DrumGameplaySettings>,
-) {
-    drum_settings.rebuild_from_chart(&chart.chart);
 }
 
 /// Reset drum audio/hit-sound runtime state, including the chart sound bank.
@@ -154,25 +177,42 @@ fn reset_drum_runtime_keep_bank(
     polyphony.reset();
 }
 
-/// On enter: capture chart end time, reset gameplay state, build BPM list.
-pub fn on_enter_performance(
+/// On enter: reset per-run state (score, combo, counts, judged, fast/slow,
+/// drum settings). Split out from the chart-derive step to keep param count
+/// below Bevy 0.19's HRTB solver ceiling (~16 params per system).
+pub fn enter_reset_run_state(
     chart: Res<ActiveChart>,
-    mut completion: ResMut<DrumsStageCompletion>,
     mut score: ResMut<Score>,
     mut scoring: ResMut<DrumScoring>,
     mut combo: ResMut<Combo>,
     mut counts: ResMut<JudgmentCounts>,
     mut judged: ResMut<JudgedChips>,
     mut last: ResMut<LastJudgment>,
-    mut start_ms: ResMut<GameStartMs>,
+    mut fast_slow: ResMut<FastSlowCount>,
+    mut drum_settings: ResMut<DrumGameplaySettings>,
+) {
+    let drum_chip_count = chart.chart.drum_chips().count();
+    score.0 = 0;
+    scoring.reset(drum_chip_count as u32);
+    combo.current = 0;
+    combo.max = 0;
+    counts.reset();
+    judged.0.clear();
+    last.0 = None;
+    fast_slow.fast = 0;
+    fast_slow.slow = 0;
+    drum_settings.rebuild_from_chart(&chart.chart);
+}
+
+/// On enter: derive chart-level state (completion, bpm list, derived cache,
+/// gameplay-clock mode). Kept slim so the chain stays within trait-solver
+/// limits when listed in a tuple.
+pub fn enter_derive_from_chart(
+    chart: Res<ActiveChart>,
+    mut completion: ResMut<DrumsStageCompletion>,
     mut bpm_changes: ResMut<BpmChangeList>,
-    mut played_bgm: ResMut<crate::bgm_scheduler::PlayedBgmChips>,
-    mut primary_bgm: ResMut<crate::bgm_scheduler::PrimaryBgmChip>,
-    mut bgm_recovery: ResMut<crate::bgm_scheduler::BgmRecoveryState>,
     mut gameplay_clock: ResMut<GameplayClock>,
     mut derived: ResMut<ChartDerived>,
-    mut fast_slow: ResMut<FastSlowCount>,
-    bgm_adjust: Res<BgmAdjustState>,
 ) {
     let has_bgm = crate::bgm_scheduler::chart_has_bgm_chips(&chart.chart)
         || chart
@@ -190,21 +230,29 @@ pub fn on_enter_performance(
     completion.chart_end_ms = chart_end_ms_real(&chart.chart, &bpm_changes);
     completion.end_requested = false;
     completion.gauge_failed = false;
+    crate::derived::compute_from_chart(
+        &mut derived,
+        &chart.chart,
+        &bpm_changes,
+        drum_chip_count as u32,
+    );
+}
 
-    score.0 = 0;
-    scoring.reset(drum_chip_count as u32);
-    combo.current = 0;
-    combo.max = 0;
-    counts.reset();
-    judged.0.clear();
-    last.0 = None;
-    fast_slow.fast = 0;
-    fast_slow.slow = 0;
-    let base_bpm = chart.chart.metadata.bpm.unwrap_or(120.0);
-    crate::derived::compute_from_chart(&mut derived, &chart.chart, &bpm_changes, drum_chip_count as u32);
+/// On enter: seed BGM playback state (played list, primary chip, recovery,
+/// start offset). Reads `bpm_changes` set by `enter_derive_from_chart`.
+pub fn enter_seed_bgm_state(
+    chart: Res<ActiveChart>,
+    bpm_changes: Res<BpmChangeList>,
+    bgm_adjust: Res<BgmAdjustState>,
+    mut played_bgm: ResMut<crate::bgm_scheduler::PlayedBgmChips>,
+    mut primary_bgm: ResMut<crate::bgm_scheduler::PrimaryBgmChip>,
+    mut bgm_recovery: ResMut<crate::bgm_scheduler::BgmRecoveryState>,
+    mut start_ms: ResMut<GameStartMs>,
+) {
     played_bgm.0.clear();
     *bgm_recovery = crate::bgm_scheduler::BgmRecoveryState::default();
     primary_bgm.0 = crate::bgm_scheduler::find_primary_bgm_chip(&chart.chart, &bpm_changes);
+    let base_bpm = chart.chart.metadata.bpm.unwrap_or(120.0);
     start_ms.0 = primary_bgm
         .0
         .and_then(|idx| chart.chart.chips.get(idx))
@@ -218,40 +266,24 @@ pub fn on_enter_performance(
         })
         .unwrap_or(0);
     info!(
-        "Performance enter: {} total chips, {} drum-lane chips, has_bgm={} bgm_chart_ms={}",
+        "Performance enter: {} total chips, {} drum-lane chips, bgm_chart_ms={}",
         chart.chart.chips.len(),
-        drum_chip_count,
-        has_bgm,
+        chart.chart.drum_chips().count(),
         start_ms.0,
     );
 }
 
-/// On enter: bootstrap BGM (chip path or heuristic fallback).
+/// On enter: start fallback BGM only for charts without BGM chips.
+/// BGM-channel charts are chart-timed by `bgm_scheduler`, so pre-BGM count-in
+/// chips can play before the primary BGM starts.
 fn start_bgm_on_enter(
     chart: Res<ActiveChart>,
-    bpm_changes: Res<BpmChangeList>,
-    primary: Res<crate::bgm_scheduler::PrimaryBgmChip>,
-    mut played_bgm: ResMut<crate::bgm_scheduler::PlayedBgmChips>,
     audio: Res<Audio>,
     asset_server: Res<AssetServer>,
     mut bgm: ResMut<BgmHandle>,
     mut instances: ResMut<Assets<AudioInstance>>,
-    sound_bank: Res<dtx_audio::ChartSoundBank>,
-    settings: Res<crate::resources::DrumAudioSettings>,
 ) {
     if crate::bgm_scheduler::chart_has_bgm_chips(&chart.chart) {
-        crate::bgm_scheduler::bootstrap_primary_bgm_chip(
-            &chart,
-            &bpm_changes,
-            &primary,
-            &mut played_bgm,
-            &audio,
-            &asset_server,
-            &mut bgm,
-            &mut instances,
-            &sound_bank,
-            settings.master_volume,
-        );
         return;
     }
     let Some(source_path) = chart.source_path.as_ref() else {
@@ -261,7 +293,14 @@ fn start_bgm_on_enter(
     if let Some(bgm_path) = dtx_core::resolve_bgm_path(source_path, &chart.chart) {
         let path_str = bgm_path.to_string_lossy().to_string();
         info!("Performance: starting BGM (no chips) from {path_str}");
-        dtx_audio::play_bgm(&audio, &asset_server, &mut bgm, &mut instances, &path_str);
+        dtx_audio::play_bgm(
+            &audio,
+            &asset_server,
+            &mut bgm,
+            &mut instances,
+            &path_str,
+            dtx_ui::SCREEN_TRANSITION_MS as u32,
+        );
     } else {
         warn!(
             "Performance: no BGM file found near {}",
@@ -270,15 +309,19 @@ fn start_bgm_on_enter(
     }
 }
 
-/// On exit: clear completion state and stop BGM.
+/// On exit: stop all chart audio and clear completion state.
 pub fn on_exit_performance(
     audio: Res<Audio>,
+    active_sounds: Res<ActiveDrumSounds>,
+    polyphony: Res<DrumPolyphony>,
     mut bgm: ResMut<BgmHandle>,
     mut instances: ResMut<Assets<AudioInstance>>,
     mut completion: ResMut<DrumsStageCompletion>,
     mut played_bgm: ResMut<crate::bgm_scheduler::PlayedBgmChips>,
     mut gameplay_clock: ResMut<GameplayClock>,
 ) {
+    active_sounds.stop_all(&mut instances);
+    dtx_audio::stop_polyphony(&mut instances, &polyphony);
     dtx_audio::stop_bgm(&audio, &mut bgm, &mut instances);
     played_bgm.0.clear();
     gameplay_clock.reset();
@@ -428,6 +471,7 @@ mod tests {
             .init_resource::<GameStartMs>()
             .init_resource::<BpmChangeList>()
             .init_resource::<GameplayClock>()
+            .init_resource::<crate::derived::ChartDerived>()
             .init_resource::<crate::resources::CurrentEmptyHitTemplates>()
             .init_resource::<crate::resources::ActiveDrumSounds>()
             .init_resource::<crate::se_scheduler::PlayedSeChips>()
@@ -438,7 +482,7 @@ mod tests {
             .init_resource::<BgmAdjustState>();
         let chart = chart_with_n_chips(3);
         app.world_mut().resource_mut::<ActiveChart>().chart = chart;
-        app.add_systems(Update, on_enter_performance);
+        app.add_systems(Update, enter_derive_from_chart);
         app.update();
         let completion = app.world().resource::<DrumsStageCompletion>();
         assert!(completion.chart_end_ms > 0);
@@ -454,6 +498,8 @@ mod tests {
         ))
         .init_resource::<DrumsStageCompletion>()
         .init_resource::<BgmHandle>()
+        .init_resource::<dtx_audio::DrumPolyphony>()
+        .init_resource::<crate::resources::ActiveDrumSounds>()
         .init_resource::<GameplayClock>()
         .init_resource::<crate::resources::CurrentEmptyHitTemplates>()
         .init_resource::<crate::resources::ActiveDrumSounds>()

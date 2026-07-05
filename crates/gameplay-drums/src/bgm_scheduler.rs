@@ -71,9 +71,20 @@ pub fn bootstrap_primary_bgm_chip(
             sound.volume,
             sound.pan,
             master_volume,
+            // Bootstrap is called from OnEnter(Performance) → start_bgm_on_enter;
+            // pass the screen-fade duration so the BGM fades in aligned
+            // with the visual fade-in (matches osu's seamless feel).
+            dtx_ui::SCREEN_TRANSITION_MS as u32,
         );
     } else {
-        dtx_audio::play_bgm(audio, asset_server, bgm, instances, &path);
+        dtx_audio::play_bgm(
+            audio,
+            asset_server,
+            bgm,
+            instances,
+            &path,
+            dtx_ui::SCREEN_TRANSITION_MS as u32,
+        );
     }
     true
 }
@@ -200,9 +211,11 @@ fn schedule_bgm_chips(
                     sound.volume,
                     sound.pan,
                     settings.master_volume,
+                    // Subsequent chip swaps: no fade-in (already in Performance).
+                    0,
                 );
             } else {
-                dtx_audio::play_bgm(&audio, &asset_server, &mut bgm, &mut instances, &path);
+                dtx_audio::play_bgm(&audio, &asset_server, &mut bgm, &mut instances, &path, 0);
             }
         } else {
             let vol = chart.chart.assets.wav.volume(chip.wav_slot);
@@ -296,6 +309,8 @@ fn recover_primary_bgm(
             sound.pan,
             settings.master_volume,
             start_seconds,
+            // Recovery restart mid-performance: no fade-in.
+            0,
         );
     } else {
         dtx_audio::play_bgm_from_seconds(
@@ -305,6 +320,7 @@ fn recover_primary_bgm(
             &mut instances,
             &path,
             start_seconds,
+            0,
         );
     }
     recovery.attempts += 1;
