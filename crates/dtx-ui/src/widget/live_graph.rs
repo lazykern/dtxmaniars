@@ -150,6 +150,12 @@ mod tests {
     }
 
     #[test]
+    fn bar_clamps_out_of_range() {
+        assert!((bar_height(150.0, 200.0) - 200.0).abs() < 0.01);
+        assert!((bar_height(-10.0, 200.0) - 0.0).abs() < 0.01);
+    }
+
+    #[test]
     fn thresholds_match_rank_boundaries() {
         assert_eq!(RANK_THRESHOLDS[0], (95.0, "S"));
         assert_eq!(RANK_THRESHOLDS[1], (85.0, "A"));
