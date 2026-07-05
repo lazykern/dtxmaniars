@@ -26,26 +26,23 @@ use bevy_kira_audio::prelude::{Audio, AudioInstance, AudioSource as KiraAudioSou
 use dtx_audio::BgmHandle;
 use dtx_bga::{ActiveChartRes, BgaLayerOverlay, BgaPlayer};
 use dtx_core::{resolve_bgm_path, Chart};
+use dtx_ui::motion::EnterChoreo;
+use dtx_ui::widget::stage_background::spawn_stage_background;
+use dtx_ui::widget::stage_panel::panel;
 use dtx_ui::{Theme, ThemeResource};
 use game_shell::{AppState, TransitionRequest, despawn_stage, request_transition};
 use gameplay_drums::resources::ActiveChart as DrumsActiveChart;
 use gameplay_guitar::resources::ActiveChart as GuitarActiveChart;
 
-use crate::song_select::SelectedSong;
+use crate::song_select::{Selection, SelectedSong, SongSelectSelection};
 
 #[derive(Component)]
 pub struct LoadingEntity;
 
+/// Fill bar of the hero-card progress track. Width is lerped toward the
+/// phase-derived target percent every frame in `update_status_text`.
 #[derive(Component)]
-struct JacketImage;
-
-/// Display the DTX `dlevel` (drums) value as a 2-digit string.
-#[derive(Component)]
-struct LevelText;
-
-/// Display the chart's difficulty label (or fall back to genre / "—" ).
-#[derive(Component)]
-struct DifficultyText;
+struct LoadingBarFill;
 
 #[derive(Resource, Debug, Default, Clone, Copy)]
 pub struct LoadingProgress(pub f32);
@@ -173,6 +170,7 @@ fn start_load(
 /// Poll the background parse. When it finishes, publish the chart to the drums,
 /// guitar and BGA resources, then start the audio WAV preload and move to the
 /// `LoadingAudio` phase to wait on the asset handles.
+#[allow(clippy::too_many_arguments)]
 fn poll_chart_parse(
     selected: Res<SelectedSong>,
     audio: Res<Audio>,
@@ -189,7 +187,6 @@ fn poll_chart_parse(
     mut instances: ResMut<Assets<AudioInstance>>,
     mut ghost: ResMut<GhostLag>,
     mut commands: Commands,
-    theme: Res<ThemeResource>,
 ) {
     let Some(active) = task.0.as_mut() else {
         return;
@@ -254,10 +251,6 @@ fn poll_chart_parse(
             if !ghost.drums.is_empty() {
                 info!("SongLoading: loaded {} ghost lag samples", ghost.drums.len());
             }
-            // PREIMAGE jacket — async-load the texture and spawn the UI entity.
-            spawn_jacket(&mut commands, &theme.0, &chart, path.as_deref(), &asset_server);
-            // Level + difficulty text overlays (BocuD DrawLoadingScreenUI parity).
-            spawn_level_ui(&mut commands, &theme.0, &chart);
             // Per-chart SOUND_NOWLOADING cue (BocuD #SOUND_NOWLOADING). Falls
             // back to silence when the chart doesn't ship one — there's no
             // skin-level "soundNowLoading" yet, so we don't synthesize one.
@@ -315,126 +308,173 @@ fn reset_advance_gate(mut gate: ResMut<LoadingAdvanceGate>) {
     gate.0 = false;
 }
 
-fn spawn_loading(mut commands: Commands, theme: Res<ThemeResource>) {
+/// Hero-card loading screen: stage background + a centered panel showing
+/// the selected song's art, title, artist/BPM/difficulty chip, a yellow
+/// progress bar (`LoadingBarFill`), and a status line (`LoadingStatusText`).
+/// Song metadata is read from `Selection`/`SongSelectSelection`/`SongDb` —
+/// all populated by SongSelect before the transition, so it's available
+/// immediately on enter (no need to wait for the chart parse to finish).
+fn spawn_loading(
+    mut commands: Commands,
+    theme: Res<ThemeResource>,
+    selection: Res<Selection>,
+    selection_state: Res<SongSelectSelection>,
+    db: Res<dtx_library::SongDb>,
+    asset_server: Res<AssetServer>,
+) {
     let t = theme.0;
-    commands.spawn((
-        LoadingEntity,
-        Node {
-            width: Val::Percent(100.0),
-            height: Val::Percent(100.0),
-            flex_direction: FlexDirection::Column,
-            justify_content: JustifyContent::Center,
-            align_items: AlignItems::Center,
-            row_gap: Val::Px(20.0),
-            ..default()
-        },
-        BackgroundColor(t.bg_bottom),
-        children![
-            (
-                Text::new("Loading"),
-                Theme::title_font(),
-                TextColor(t.text_primary),
-            ),
-            (
-                Text::new(""),
-                Theme::body_font(),
-                TextColor(t.text_secondary),
-                LoadingStatusText,
-            ),
-        ],
-    ));
-}
-
-/// Spawn the PREIMAGE jacket overlay on top of the loading screen. The
-/// texture itself loads async via `AssetServer::load`; once it finishes the
-/// `Image` node displays it. If the chart has no PREIMAGE or the file is
-/// missing we silently skip — no placeholder per ADR-0014.
-fn spawn_jacket(
-    commands: &mut Commands,
-    theme: &dtx_ui::theme::Theme,
-    chart: &Chart,
-    source_path: Option<&std::path::Path>,
-    asset_server: &AssetServer,
-) {
-    let Some(preimage_name) = chart.metadata.preimage_filename.as_deref() else {
-        return;
+    let song = selection
+        .chart_index(&selection_state)
+        .and_then(|i| db.songs.get(i))
+        .cloned();
+    let (title, artist, bpm, dlevel, difficulty, art) = match &song {
+        Some(s) => (
+            s.title.clone(),
+            s.artist.clone(),
+            s.bpm,
+            s.dlevel,
+            crate::song_select::SongFolderView::difficulty_label(selection.difficulty).to_string(),
+            s.preimage_path.clone(),
+        ),
+        None => ("Unknown".into(), String::new(), None, None, String::new(), None),
     };
-    let Some(parent_dir) = source_path.and_then(|p| p.parent()) else {
-        return;
-    };
-    let img_path = parent_dir.join(preimage_name);
-    if !img_path.is_file() {
-        return;
-    }
-    let handle: Handle<Image> = asset_server.load(img_path.to_string_lossy().to_string());
-    commands.spawn((
-        LoadingEntity,
-        JacketImage,
-        Node {
-            position_type: PositionType::Absolute,
-            width: Val::Px(384.0),
-            height: Val::Px(384.0),
-            left: Val::Px(100.0),
-            top: Val::Px(85.0),
-            ..default()
-        },
-        ImageNode::new(handle),
-    ));
-    let _ = theme;
-}
 
-/// Render the DTX level number + difficulty label as text overlays on the
-/// loading screen. BocuD draws these with skin sprites; we use plain text
-/// because there's no skin system yet (M14+).
-fn spawn_level_ui(
-    commands: &mut Commands,
-    theme: &dtx_ui::theme::Theme,
-    chart: &Chart,
-) {
-    let level = chart
-        .metadata
-        .dlevel
-        .map(|n| format!("{n:02}"))
-        .unwrap_or_else(|| "--".to_string());
-    let difficulty = chart
-        .metadata
-        .genre
-        .clone()
-        .or_else(|| chart.metadata.dlevel.map(|_| "BASIC".into()))
-        .unwrap_or_else(|| "—".into());
-
-    commands.spawn((
-        LoadingEntity,
-        LevelText,
-        Node {
-            position_type: PositionType::Absolute,
-            left: Val::Px(200.0),
-            top: Val::Px(160.0),
-            ..default()
-        },
-        Text::new(level),
-        TextFont {
-            font_size: bevy::prelude::FontSize::Px(96.0),
-            ..default()
-        },
-        TextColor(theme.text_primary),
-    ));
-    commands.spawn((
-        LoadingEntity,
-        DifficultyText,
-        Node {
-            position_type: PositionType::Absolute,
-            left: Val::Px(200.0),
-            top: Val::Px(280.0),
-            ..default()
-        },
-        Text::new(difficulty),
-        TextFont {
-            font_size: bevy::prelude::FontSize::Px(28.0),
-            ..default()
-        },
-        TextColor(theme.text_secondary),
-    ));
+    commands
+        .spawn((
+            LoadingEntity,
+            Node {
+                width: Val::Percent(100.0),
+                height: Val::Percent(100.0),
+                justify_content: JustifyContent::Center,
+                align_items: AlignItems::Center,
+                ..default()
+            },
+        ))
+        .with_children(|root| {
+            spawn_stage_background(root, &t);
+            root.spawn((
+                panel(
+                    &t,
+                    Node {
+                        flex_direction: FlexDirection::Row,
+                        align_items: AlignItems::Center,
+                        column_gap: Val::Px(24.0),
+                        padding: UiRect::all(Val::Px(24.0)),
+                        ..default()
+                    },
+                ),
+                UiTransform::default(),
+                EnterChoreo::slide(Vec2::new(0.0, 40.0), 0.0, 250.0),
+            ))
+            .with_children(|card| {
+                let mut img = ImageNode {
+                    color: Color::WHITE.with_alpha(if art.is_some() { 1.0 } else { 0.0 }),
+                    ..default()
+                };
+                if let Some(p) = &art {
+                    img.image = asset_server.load(p.to_string_lossy().to_string());
+                }
+                card.spawn((
+                    Node {
+                        width: Val::Px(160.0),
+                        height: Val::Px(160.0),
+                        border: UiRect::all(Val::Px(2.0)),
+                        ..default()
+                    },
+                    BackgroundColor(Color::BLACK),
+                    BorderColor::all(t.select_yellow),
+                    img,
+                ));
+                card.spawn(Node {
+                    flex_direction: FlexDirection::Column,
+                    row_gap: Val::Px(6.0),
+                    ..default()
+                })
+                .with_children(|col| {
+                    col.spawn((
+                        Text::new("NOW LOADING"),
+                        Theme::font(12.0),
+                        TextColor(t.text_secondary),
+                    ));
+                    col.spawn((
+                        Text::new(title),
+                        Theme::font(34.0),
+                        TextColor(t.text_primary),
+                    ));
+                    col.spawn(Node {
+                        flex_direction: FlexDirection::Row,
+                        column_gap: Val::Px(10.0),
+                        align_items: AlignItems::Center,
+                        ..default()
+                    })
+                    .with_children(|meta| {
+                        meta.spawn((
+                            Text::new(format!(
+                                "{artist} · BPM {}",
+                                bpm.map(|v| (v.round() as i32).to_string())
+                                    .unwrap_or_else(|| "?".into())
+                            )),
+                            Theme::font(15.0),
+                            TextColor(t.text_secondary),
+                        ));
+                        meta.spawn((
+                            Node {
+                                padding: UiRect::axes(Val::Px(8.0), Val::Px(2.0)),
+                                ..default()
+                            },
+                            BackgroundColor(t.difficulty_color(2)),
+                        ))
+                        .with_children(|chip| {
+                            chip.spawn((
+                                Text::new(format!(
+                                    "{difficulty} {}",
+                                    dlevel
+                                        .map(|v| format!("{:.2}", v as f32 / 10.0))
+                                        .unwrap_or_else(|| "--".into())
+                                )),
+                                Theme::font(12.0),
+                                TextColor(t.text_primary),
+                            ));
+                        });
+                    });
+                    col.spawn((
+                        Node {
+                            width: Val::Px(420.0),
+                            height: Val::Px(8.0),
+                            border: UiRect::all(Val::Px(1.0)),
+                            margin: UiRect::top(Val::Px(14.0)),
+                            ..default()
+                        },
+                        BackgroundColor(Color::srgb(0.13, 0.13, 0.13)),
+                        BorderColor::all(t.stage_panel_border),
+                    ))
+                    .with_children(|track| {
+                        track.spawn((
+                            LoadingBarFill,
+                            Node {
+                                width: Val::Percent(0.0),
+                                height: Val::Percent(100.0),
+                                ..default()
+                            },
+                            BackgroundColor(t.select_yellow),
+                            BoxShadow::new(
+                                t.select_yellow.with_alpha(0.5),
+                                Val::Px(0.0),
+                                Val::Px(0.0),
+                                Val::Px(1.0),
+                                Val::Px(8.0),
+                            ),
+                        ));
+                    });
+                    col.spawn((
+                        Text::new(""),
+                        Theme::font(12.0),
+                        TextColor(t.text_secondary),
+                        LoadingStatusText,
+                    ));
+                });
+            });
+        });
 }
 
 /// Watch for Esc during load. On press, mark the load as cancelled. The next
@@ -479,7 +519,7 @@ fn play_nowloading(
     }
     // Reuse the BGM slot for the nowloading jingle so `stop_bgm` on exit
     // cleans it up. Volume 0.6 — soft, doesn't fight the BGMLoadingSound.
-    let _ = dtx_audio::play_bgm(audio, asset_server, bgm, instances, &path.to_string_lossy());
+    let _ = dtx_audio::play_bgm(audio, asset_server, bgm, instances, &path.to_string_lossy(), 0);
 }
 
 /// Stop any nowloading clip on exit so it doesn't bleed into Performance.
@@ -503,17 +543,43 @@ fn primary_bgm_hint(chart: &Chart, source_path: Option<&std::path::Path>) -> Opt
 #[derive(Component)]
 struct LoadingStatusText;
 
+/// Drives the hero card's smooth progress bar + friendlier status line.
+/// The bar lerps toward a phase-derived target percent every frame so it
+/// never jumps backward or snaps; the status text mirrors DTXManiaNX's
+/// "loading audio chips… N/M" wording.
 fn update_status_text(
+    time: Res<Time>,
     phase: Res<LoadPhase>,
     progress: Res<LoadingProgress>,
+    required: Res<RequiredAudio>,
     mut status_query: Query<&mut Text, With<LoadingStatusText>>,
+    mut bar: Query<&mut Node, With<LoadingBarFill>>,
 ) {
+    let target_pct = match *phase {
+        LoadPhase::Parsing => 8.0,
+        LoadPhase::LoadingAudio => 10.0 + progress.0 * 88.0,
+        LoadPhase::Ready => 100.0,
+        _ => 0.0,
+    };
+    for mut node in &mut bar {
+        let current = match node.width {
+            Val::Percent(p) => p,
+            _ => 0.0,
+        };
+        let next = current + (target_pct - current) * (8.0 * time.delta_secs()).min(1.0);
+        node.width = Val::Percent(next.clamp(0.0, 100.0));
+    }
+    let total = required.0.len();
     let status = match *phase {
         LoadPhase::Idle => String::new(),
-        LoadPhase::Parsing => "Parsing chart...".to_string(),
-        LoadPhase::LoadingAudio => format!("Loading audio... {}%", (progress.0 * 100.0) as u32),
-        LoadPhase::Ready => "Ready".to_string(),
-        LoadPhase::Failed => "Failed".to_string(),
+        LoadPhase::Parsing => "parsing chart…".to_string(),
+        LoadPhase::LoadingAudio => format!(
+            "loading audio chips… {}/{}",
+            ((progress.0 * total as f32).round() as usize).min(total),
+            total
+        ),
+        LoadPhase::Ready => "ready".to_string(),
+        LoadPhase::Failed => "failed — returning to song select".to_string(),
     };
     for mut text in &mut status_query {
         *text = Text::new(status.clone());
