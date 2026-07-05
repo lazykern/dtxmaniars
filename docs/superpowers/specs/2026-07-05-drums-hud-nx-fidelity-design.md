@@ -1,7 +1,7 @@
 # Drums Performance HUD — DTXManiaNX Fidelity Pass
 
 **Date:** 2026-07-05
-**Status:** Design (approved forks, pending spec review)
+**Status:** Superseded — layout/panel/visual sections replaced by `2026-07-05-drums-hud-gitadora-flat-design.md`; mechanics core (lane_geometry, column mapping, colors) still authoritative there.
 
 ## Problem
 
