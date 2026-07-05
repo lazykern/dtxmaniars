@@ -198,12 +198,20 @@ fn reposition_notes_on_layout_change(
         return;
     }
     for (note, mut node) in &mut notes {
-        let Some(col) = lane_channel(note.lane).and_then(column_of) else {
+        let Some(channel) = lane_channel(note.lane) else {
+            continue;
+        };
+        let Some(col) = column_of(channel) else {
             continue;
         };
         node.left = Val::Px(layout.col_left(col) + 2.0);
         node.width = Val::Px(layout.note_width(col));
         node.height = Val::Px(layout.note_height());
+        node.border = if is_hollow(channel) {
+            UiRect::all(Val::Px(2.0 * layout.scale))
+        } else {
+            UiRect::ZERO
+        };
     }
 }
 
