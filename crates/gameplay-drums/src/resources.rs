@@ -4,7 +4,7 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 
 use bevy::prelude::*;
-use bevy_kira_audio::prelude::AudioInstance;
+use bevy_kira_audio::prelude::*;
 use dtx_core::{beat_lines::TimingLine, Chart, Metadata};
 
 /// Expanded bar/beat timing lines for the active chart.
@@ -172,6 +172,20 @@ impl JudgmentCounts {
     pub fn reset(&mut self) {
         *self = Self::default();
     }
+
+    /// GITADORA-style achievement value in 0..100 (Perfect=100, Great=80,
+    /// Good=60, Ok=40, Miss=0), weighted over total judged chips.
+    pub fn achievement_pct(&self) -> f32 {
+        let total = self.total();
+        if total == 0 {
+            return 100.0;
+        }
+        let weighted = self.perfect as f32 * 100.0
+            + self.great as f32 * 80.0
+            + self.good as f32 * 60.0
+            + self.ok as f32 * 40.0;
+        weighted / total as f32
+    }
 }
 
 /// Running "Skills by Song" + max possible skill. Updated as judgments land.
@@ -318,6 +332,20 @@ impl ActiveDrumSounds {
             .chain(self.layer_bgm_instances.iter())
         {
             dtx_audio::resume_audio_instance(instances, handle);
+        }
+    }
+
+    /// Stop all tracked non-primary chart audio (layer BGM stems, HH, stick SE).
+    pub fn stop_all(&self, instances: &mut Assets<AudioInstance>) {
+        for handle in self
+            .hh_open_instances
+            .iter()
+            .chain(self.stick_se_instances.values())
+            .chain(self.layer_bgm_instances.iter())
+        {
+            if let Some(mut inst) = instances.get_mut(handle) {
+                inst.stop(AudioTween::default());
+            }
         }
     }
 }
@@ -507,7 +535,8 @@ impl GameplayClock {
         self.visual_ms += dt_ms;
         let drift = self.audio_ms - self.visual_ms;
         let catchup = (Self::CORRECTION_GAIN * dt_secs).clamp(0.0, 1.0);
-        self.visual_ms += (drift * catchup).clamp(-Self::MAX_CORRECTION_MS, Self::MAX_CORRECTION_MS);
+        self.visual_ms +=
+            (drift * catchup).clamp(-Self::MAX_CORRECTION_MS, Self::MAX_CORRECTION_MS);
     }
 
     /// Snap the clock directly to `audio_ms`. `None` is a no-op (the free-running
@@ -528,7 +557,30 @@ impl GameplayClock {
 
 #[cfg(test)]
 mod tests {
-    use super::{GameplayClock, ScrollSettings};
+    use super::{GameplayClock, JudgmentCounts, ScrollSettings};
+
+    #[test]
+    fn achievement_pct_empty_is_full() {
+        assert!((JudgmentCounts::default().achievement_pct() - 100.0).abs() < 0.01);
+    }
+
+    #[test]
+    fn achievement_pct_all_perfect_is_100() {
+        let c = JudgmentCounts {
+            perfect: 10,
+            ..Default::default()
+        };
+        assert!((c.achievement_pct() - 100.0).abs() < 0.01);
+    }
+
+    #[test]
+    fn achievement_pct_all_good_is_60() {
+        let c = JudgmentCounts {
+            good: 4,
+            ..Default::default()
+        };
+        assert!((c.achievement_pct() - 60.0).abs() < 0.01);
+    }
 
     #[test]
     fn scroll_velocity_matches_nx_at_x1() {
@@ -600,7 +652,11 @@ mod tests {
         for _ in 0..3 {
             clock.tick(1.0 / 60.0, None);
         }
-        assert!((clock.current_ms - 50).abs() <= 1, "got {}", clock.current_ms);
+        assert!(
+            (clock.current_ms - 50).abs() <= 1,
+            "got {}",
+            clock.current_ms
+        );
     }
 
     #[test]
@@ -610,7 +666,11 @@ mod tests {
         // No audio yet: the clock free-runs by dt (does NOT hold at zero).
         clock.tick(1.0 / 60.0, None);
         assert!(clock.is_waiting_for_audio());
-        assert!(clock.current_ms > 0, "free-run should advance, got {}", clock.current_ms);
+        assert!(
+            clock.current_ms > 0,
+            "free-run should advance, got {}",
+            clock.current_ms
+        );
 
         // First real position snaps the clock straight onto the audio timeline.
         clock.tick(1.0 / 60.0, Some(1000));

@@ -309,18 +309,6 @@ fn sync_hud_judgment(
     }
 }
 
-fn accuracy_pct(counts: &JudgmentCounts) -> f32 {
-    let total = counts.total();
-    if total == 0 {
-        return 100.0;
-    }
-    let weighted = counts.perfect as f32 * 100.0
-        + counts.great as f32 * 80.0
-        + counts.good as f32 * 60.0
-        + counts.ok as f32 * 40.0;
-    weighted / total as f32
-}
-
 fn kind_label(kind: JudgmentKind) -> &'static str {
     match kind {
         JudgmentKind::Perfect => "PERFECT",
@@ -380,7 +368,7 @@ fn sync_accuracy(
     if !counts.is_changed() {
         return;
     }
-    let text = format!("{:.2}%", accuracy_pct(&counts));
+    let text = format!("{:.2}%", counts.achievement_pct());
     for mut t in &mut q {
         set_text_if_changed(&mut t, &mut cache.counters_text, text.clone());
     }
@@ -567,7 +555,7 @@ mod tests {
 
     #[test]
     fn accuracy_default_full() {
-        assert!((accuracy_pct(&JudgmentCounts::default()) - 100.0).abs() < 0.01);
+        assert!((JudgmentCounts::default().achievement_pct() - 100.0).abs() < 0.01);
     }
 
     #[test]
