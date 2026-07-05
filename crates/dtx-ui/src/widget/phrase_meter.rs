@@ -1,107 +1,97 @@
-//! DTXMania classic PHRASE METER (right vertical bar).
+//! Vertical phrase-density meter at the playfield's right edge.
 //!
-//! Reference: BocuD `CActPerfProgressBar.cs:29` — x=855, y=15, W=20, H=540.
-//! 64 sections of varying width (0..=10 blocks per section).
+//! 64 horizontal blocks stacked top→bottom; block width encodes drum-chip
+//! density for that slice of the chart (top = chart end, bottom = chart start,
+//! matching `gameplay-drums` phrase math). Widths + played-portion tint are
+//! driven by the HUD sync system.
 
-use bevy::prelude::*;
 use crate::theme::Theme;
+use crate::widget::hud_ref::HudRefRect;
+use bevy::prelude::*;
 
-/// Per-section width in blocks (0..=10). 0 = unset.
-#[derive(Component, Default)]
+/// Block count (mirrors `phrase::PHRASE_SECTION_COUNT`).
+pub const PHRASE_BLOCKS: usize = 64;
+/// Meter top edge (ref px) — below the NOW PLAYING card.
+pub const PHRASE_BAR_Y: f32 = 96.0;
+/// Meter height (ref px).
+pub const PHRASE_BAR_H: f32 = 490.0;
+/// Meter width (ref px).
+pub const PHRASE_BAR_W: f32 = 30.0;
+
+#[derive(Component)]
+pub struct PhraseMeterRoot;
+
+#[derive(Component)]
 pub struct PhraseSection {
-    pub blocks: u8,
+    /// Section index, 0 = top (chart end) … 63 = bottom (chart start).
+    pub index: usize,
 }
 
-/// Marker for the playhead (current time) indicator.
 #[derive(Component)]
 pub struct PhrasePlayhead;
 
-/// Spawn the vertical phrase meter. Returns the parent entity.
-pub fn spawn_phrase_meter(commands: &mut Commands, parent: Entity, theme: &Theme) {
-    let bar_x = 855.0;
-    let bar_y = 15.0;
-    let bar_w = 20.0;
-    let bar_h = 540.0;
-    let block_w = bar_w / 10.0; // each block = 2px
-
-    let bg = Color::srgba(0.0, 0.0, 0.0, 0.6);
-    let attempted = Color::srgb(0.4, 0.4, 0.5);   // grey: not yet completed
-    let full = Color::srgb(0.95, 0.85, 0.1);      // yellow: full clear
-    let partial = Color::srgb(0.2, 0.6, 0.95);    // blue: partial
+pub fn spawn_phrase_meter(
+    commands: &mut Commands,
+    parent: Entity,
+    theme: &Theme,
+    scale: f32,
+    bar_ref_x: f32,
+) {
+    let bar_y = PHRASE_BAR_Y;
+    let bar_w = PHRASE_BAR_W;
+    let bar_h = PHRASE_BAR_H;
+    let slice_h = bar_h / PHRASE_BLOCKS as f32;
+    let block_w = bar_w / 10.0;
 
     commands.entity(parent).with_children(|p| {
-        // Background bar
         p.spawn((
+            PhraseMeterRoot,
+            HudRefRect::new(bar_ref_x - 2.0, bar_y - 2.0, bar_w + 4.0, bar_h + 4.0),
             Node {
                 position_type: PositionType::Absolute,
-                left: Val::Px(bar_x - 2.0),
-                top: Val::Px(bar_y - 2.0),
-                width: Val::Px(bar_w + 4.0),
-                height: Val::Px(bar_h + 4.0),
+                left: Val::Px((bar_ref_x - 2.0) * scale),
+                top: Val::Px((bar_y - 2.0) * scale),
+                width: Val::Px((bar_w + 4.0) * scale),
+                height: Val::Px((bar_h + 4.0) * scale),
+                border: UiRect::all(Val::Px(1.0 * scale)),
                 ..default()
             },
-            BackgroundColor(bg),
-        ));
+            BackgroundColor(theme.stage_panel_bg),
+            BorderColor::all(theme.stage_panel_border),
+        ))
+        .with_children(|bar| {
+            for i in 0..PHRASE_BLOCKS {
+                let y = i as f32 * slice_h;
+                bar.spawn((
+                    PhraseSection { index: i },
+                    HudRefRect::new(2.0, y, block_w, (slice_h - 0.5).max(0.5)),
+                    Node {
+                        position_type: PositionType::Absolute,
+                        left: Val::Px(2.0 * scale),
+                        top: Val::Px(y * scale),
+                        width: Val::Px(block_w * scale),
+                        height: Val::Px((slice_h - 0.5).max(0.5) * scale),
+                        ..default()
+                    },
+                    BackgroundColor(Color::srgb(0.35, 0.36, 0.44)),
+                ));
+            }
 
-        // 64 section blocks (overlapping children → drawn in spawn order, so
-        // later ones cover earlier; this matches BocuD's "current section on top").
-        for i in 0..64 {
-            let slice_h = bar_h / 64.0;
-            let y = bar_y + i as f32 * slice_h;
-            p.spawn((
-                PhraseSection::default(),
+            bar.spawn((
+                PhrasePlayhead,
+                HudRefRect::new(0.0, bar_h - 1.0, bar_w + 4.0, 2.0),
                 Node {
                     position_type: PositionType::Absolute,
-                    left: Val::Px(bar_x),
-                    top: Val::Px(y),
-                    width: Val::Px(block_w), // updated by sync system
-                    height: Val::Px(slice_h),
+                    left: Val::Px(0.0),
+                    top: Val::Px((bar_h - 1.0) * scale),
+                    width: Val::Px((bar_w + 4.0) * scale),
+                    height: Val::Px(2.0 * scale),
                     ..default()
                 },
-                BackgroundColor(attempted),
+                BackgroundColor(theme.accent),
             ));
-        }
-
-        // Playhead line (current time position)
-        p.spawn((
-            PhrasePlayhead,
-            Node {
-                position_type: PositionType::Absolute,
-                left: Val::Px(bar_x - 4.0),
-                top: Val::Px(bar_y + bar_h - 1.0),
-                width: Val::Px(bar_w + 8.0),
-                height: Val::Px(2.0),
-                ..default()
-            },
-            BackgroundColor(theme.accent),
-        ));
-        // Suppress unused-var warnings (we'll use partial/full in the sync system).
-        let _ = (full, partial);
+        });
     });
-}
-
-/// Per-section block width updater. `sections` is the chip-count array from
-/// `gameplay_drums::phrase::PhraseMeter`. `current_section` is the playhead
-/// (0..=64, top→bottom = chart-start→chart-end).
-pub fn sync_phrase_meter(
-    sections: &[u32; 64],
-    current_section: usize,
-    mut q: Query<(&PhraseSection, &mut Node, &mut BackgroundColor)>,
-) {
-    for (i, (_, mut node, mut color)) in q.iter_mut().enumerate() {
-        let count = sections.get(i).copied().unwrap_or(0);
-        let units = (count as f32 / 2.5).min(10.0) as u8;
-        let block_w = 20.0 / 10.0;
-        node.width = Val::Px(block_w * (units as f32 + 1.0));
-        // Color: future sections grey, current/played yellow→blue gradient
-        if i < current_section {
-            *color = BackgroundColor(Color::srgb(0.95, 0.85, 0.1));
-        } else if i == current_section {
-            *color = BackgroundColor(Color::srgb(0.2, 0.6, 0.95));
-        } else {
-            *color = BackgroundColor(Color::srgb(0.4, 0.4, 0.5));
-        }
-    }
 }
 
 #[cfg(test)]
@@ -109,7 +99,8 @@ mod tests {
     use super::*;
     #[test]
     fn bar_in_bounds() {
-        assert!(855.0 + 20.0 <= 1280.0);
-        assert!(15.0 + 540.0 <= 720.0);
+        // Meter must fit within the 1280-wide reference frame from its anchor.
+        let bar_ref_x = 934.0;
+        assert!(bar_ref_x + PHRASE_BAR_W + 4.0 <= 1280.0);
     }
 }

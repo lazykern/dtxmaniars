@@ -31,7 +31,7 @@ pub fn spawn_frame_chrome(
     });
 
     let pillar_w = 10.0;
-    let pillar_color = Color::srgb(0.08, 0.08, 0.10);
+    let pillar_color = Color::srgb(0.14, 0.15, 0.22);
     let edge = theme.stage_panel_border;
     for x in [strip_left_ref - pillar_w - 2.0, strip_right_ref + 2.0] {
         commands.entity(parent).with_children(|p| {

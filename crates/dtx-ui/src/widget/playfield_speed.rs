@@ -13,8 +13,9 @@ pub fn spawn_playfield_speed(
     theme: &Theme,
     scale: f32,
     ref_x: f32,
+    ref_y: f32,
 ) {
-    let y = 676.0;
+    let y = ref_y;
     commands.entity(parent).with_children(|p| {
         p.spawn((
             PlayfieldSpeedText,

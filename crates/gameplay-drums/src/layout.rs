@@ -31,10 +31,10 @@ pub fn ref_lane_left() -> f32 {
     STRIP_REF_CENTERED_LEFT
 }
 
-/// Phrase meter sits just right of the lane strip.
+/// Phrase meter sits just right of the lane strip, clear of the side pillar.
 #[inline]
 pub fn ref_phrase_x() -> f32 {
-    STRIP_REF_CENTERED_LEFT + STRIP_REF_WIDTH + 8.0
+    STRIP_REF_CENTERED_LEFT + STRIP_REF_WIDTH + 15.0
 }
 
 /// Right HUD column (song info, combo, gauge) anchor, just right of the strip.

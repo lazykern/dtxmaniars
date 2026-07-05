@@ -27,6 +27,11 @@ use crate::resources::{
     ScrollSettings, SkillValue,
 };
 
+/// Live accuracy graph geometry (ref px). Shared by spawn + sync so bar
+/// heights and the panel stay aligned.
+const GRAPH_REF_Y: f32 = 96.0;
+const GRAPH_REF_H: f32 = 500.0;
+
 #[derive(Component)]
 pub struct HudRoot;
 
@@ -82,6 +87,7 @@ pub fn plugin(app: &mut App) {
             sync_perf_combo,
             sync_now_playing,
             sync_song_progress,
+            sync_phrase_meter,
             sync_phrase_playhead,
             sync_hud_judgment,
             keyboard_viz::decay_key_cap_flashes,
@@ -179,22 +185,26 @@ fn spawn_hud(
         crate::layout::STRIP_REF_CENTERED_LEFT,
         lane_geometry::STRIP_REF_WIDTH,
     );
-    playfield_speed::spawn_playfield_speed(
-        &mut commands,
-        root,
-        &t,
-        s,
-        crate::layout::STRIP_REF_CENTERED_LEFT + lane_geometry::STRIP_REF_WIDTH - 96.0,
-    );
+    // SPEED lives in the left OPTIONS area (was clipping the CY/RD pads).
+    playfield_speed::spawn_playfield_speed(&mut commands, root, &t, s, 24.0, 470.0);
     let hud_right = ref_hud_right_x();
     now_playing::spawn_now_playing(&mut commands, root, &t, s, hud_right);
     // Combo centered on the recentered lane strip (was pinned to the right column).
     let combo_ref_x = STRIP_REF_CENTERED_LEFT + lane_geometry::STRIP_REF_WIDTH / 2.0 - 180.0;
     perf_combo::spawn_perf_combo(&mut commands, root, &t, s, combo_ref_x, 150.0);
-    // Live accuracy graph fills the right column past the song card / phrase meter.
+    // Live accuracy graph fills the right column below the song card.
     let graph_x = hud_right + 40.0;
     let graph_w = REF_WIDTH - graph_x - 12.0;
-    live_graph::spawn_live_graph(&mut commands, root, &t, s, graph_x, 300.0, graph_w, 300.0);
+    live_graph::spawn_live_graph(
+        &mut commands,
+        root,
+        &t,
+        s,
+        graph_x,
+        GRAPH_REF_Y,
+        graph_w,
+        GRAPH_REF_H,
+    );
 
     playfield_viz::spawn_lane_receptors(&mut commands, root, &layout, &t);
     keyboard_viz::spawn_key_caps(&mut commands, root, &layout, &t);
@@ -540,6 +550,46 @@ fn dlevel_label(dlevel: Option<u32>) -> &'static str {
     }
 }
 
+fn sync_phrase_meter(
+    derived: Res<ChartDerived>,
+    clock: Res<GameplayClock>,
+    layout: Res<PlayfieldLayout>,
+    mut q: Query<(
+        &phrase_meter::PhraseSection,
+        &HudRefRect,
+        &mut Node,
+        &mut BackgroundColor,
+    )>,
+) {
+    if !derived.is_changed() && !clock.is_changed() && !layout.is_changed() {
+        return;
+    }
+    let s = layout.scale;
+    let unit_w = phrase_meter::PHRASE_BAR_W / 10.0;
+    let last = derived.phrase.last_chip_ms.max(1) as f32;
+    let now = clock.current_ms as f32;
+    let frac = (now / last).clamp(0.0, 1.0);
+    // 0 = top (chart end) … 1 = bottom (chart start); song fills bottom→up.
+    let head_from_top = 1.0 - frac;
+    let blocks = phrase_meter::PHRASE_BLOCKS as f32;
+    let cur = ((head_from_top * blocks) as usize).min(phrase_meter::PHRASE_BLOCKS - 1);
+    for (sec, rect, mut node, mut color) in &mut q {
+        let units = derived.phrase.block_units(sec.index).max(1);
+        node.left = Val::Px(rect.left * s);
+        node.top = Val::Px(rect.top * s);
+        node.height = Val::Px(rect.height * s);
+        node.width = Val::Px(unit_w * units as f32 * s);
+        let center_from_top = (sec.index as f32 + 0.5) / blocks;
+        *color = if sec.index == cur {
+            BackgroundColor(Color::srgb(0.30, 0.72, 1.0))
+        } else if center_from_top >= head_from_top {
+            BackgroundColor(Color::srgb(0.95, 0.85, 0.1))
+        } else {
+            BackgroundColor(Color::srgb(0.32, 0.34, 0.42))
+        };
+    }
+}
+
 fn sync_phrase_playhead(
     derived: Res<ChartDerived>,
     gameplay_clock: Res<GameplayClock>,
@@ -552,7 +602,7 @@ fn sync_phrase_playhead(
     let last = derived.phrase.last_chip_ms.max(1) as f32;
     let now = gameplay_clock.current_ms as f32;
     let frac = (now / last).clamp(0.0, 1.0);
-    let bar_h = 540.0;
+    let bar_h = phrase_meter::PHRASE_BAR_H;
     let y = (1.0 - frac) * bar_h;
     for (rect, mut n) in &mut q {
         n.top = Val::Px(y * layout.scale);
@@ -584,7 +634,7 @@ fn sync_live_graph(
     if !history.is_changed() && !layout.is_changed() {
         return;
     }
-    let bar_area_h = live_graph::bar_area_h(300.0);
+    let bar_area_h = live_graph::bar_area_h(GRAPH_REF_H);
     for (bar, rect, mut node) in &mut q {
         let Some(acc) = history.samples.get(bar.slot).copied().flatten() else {
             node.height = Val::Px(0.0);
