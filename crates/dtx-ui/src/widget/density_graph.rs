@@ -61,7 +61,7 @@ pub fn spawn_density_graph(parent: &mut ChildSpawnerCommands, theme: &Theme) {
         })
         .with_children(|rail| {
             let colors = theme.lane_colors();
-            for lane in 0..LANE_COUNT {
+            for (lane, &color) in colors.iter().enumerate() {
                 rail.spawn((
                     DensityBar {
                         lane,
@@ -72,7 +72,7 @@ pub fn spawn_density_graph(parent: &mut ChildSpawnerCommands, theme: &Theme) {
                         height: Val::Px(0.0),
                         ..default()
                     },
-                    BackgroundColor(colors[lane]),
+                    BackgroundColor(color),
                 ));
             }
         });
@@ -111,10 +111,11 @@ pub fn spawn_density_graph(parent: &mut ChildSpawnerCommands, theme: &Theme) {
 pub fn density_graph_system(
     time: Res<Time>,
     data: Res<DensityData>,
+    added: Query<(), Added<DensityTotalText>>,
     mut bars: Query<(&mut DensityBar, &mut Node)>,
     mut totals: Query<&mut Text, With<DensityTotalText>>,
 ) {
-    if data.is_changed() {
+    if data.is_changed() || !added.is_empty() {
         let fractions = bar_fractions(&data.lanes);
         for (mut bar, _) in &mut bars {
             let lane = bar.lane;
@@ -132,6 +133,9 @@ pub fn density_graph_system(
     }
     let dt_ms = time.delta_secs() * 1000.0;
     for (mut bar, mut node) in &mut bars {
+        if bar.tween.finished {
+            continue;
+        }
         bar.tween.tick(dt_ms);
         node.height = Val::Px(BAR_MAX_H * bar.tween.value());
     }
@@ -161,5 +165,37 @@ mod tests {
     #[test]
     fn lane_count_matches_theme_lane_colors() {
         assert_eq!(Theme::default().lane_colors().len(), LANE_COUNT);
+    }
+
+    #[test]
+    fn bars_grow_after_spawn_without_data_change() {
+        let mut app = bevy::app::App::new();
+        app.add_plugins(bevy::time::TimePlugin);
+        app.insert_resource(DensityData {
+            lanes: [10, 0, 0, 0, 0, 0, 0, 0, 0],
+            total: 10,
+        });
+        app.add_systems(bevy::app::Update, density_graph_system);
+        app.update(); // consume initial change with no bars present
+        let theme = Theme::default();
+        {
+            let world = app.world_mut();
+            let mut commands = world.commands();
+            commands.spawn(Node::default()).with_children(|p| {
+                spawn_density_graph(p, &theme);
+            });
+        }
+        app.world_mut().flush();
+        for _ in 0..30 {
+            std::thread::sleep(std::time::Duration::from_millis(2));
+            app.update();
+        }
+        let world = app.world_mut();
+        let mut q = world.query::<(&DensityBar, &Node)>();
+        let lane0 = q.iter(world).find(|(b, _)| b.lane == 0).unwrap();
+        match lane0.1.height {
+            Val::Px(h) => assert!(h > 1.0, "bar height {h} should have grown"),
+            other => panic!("unexpected height {other:?}"),
+        }
     }
 }
