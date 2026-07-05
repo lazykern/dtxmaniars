@@ -15,22 +15,32 @@ pub const REF_LABEL_OFFSET: f32 = 28.0;
 pub const REF_KEY_VIZ_OFFSET: f32 = 64.0;
 pub const REF_BACKBOARD_PAD: f32 = 12.0;
 
-/// Lane strip left edge at ref resolution (NX left-anchored).
+/// Centered strip left edge at ref resolution (redesign: symmetric panels).
+pub const STRIP_REF_CENTERED_LEFT: f32 = (REF_WIDTH - STRIP_REF_WIDTH) / 2.0;
+
+/// A column's left edge in ref px, translated from NX absolute into the
+/// centered strip (columns keep their NX proportional widths + gaps).
+#[inline]
+pub fn col_ref_x(col: usize) -> f32 {
+    STRIP_REF_CENTERED_LEFT + (COLUMNS[col].ref_x - STRIP_REF_LEFT)
+}
+
+/// Lane strip left edge at ref resolution (redesign: centered).
 #[inline]
 pub fn ref_lane_left() -> f32 {
-    STRIP_REF_LEFT
+    STRIP_REF_CENTERED_LEFT
 }
 
 /// Phrase meter sits just right of the lane strip.
 #[inline]
 pub fn ref_phrase_x() -> f32 {
-    STRIP_REF_LEFT + STRIP_REF_WIDTH + 8.0
+    STRIP_REF_CENTERED_LEFT + STRIP_REF_WIDTH + 8.0
 }
 
 /// Right HUD column (song info, combo, gauge) anchor, just right of the strip.
 #[inline]
 pub fn ref_hud_right_x() -> f32 {
-    STRIP_REF_LEFT + STRIP_REF_WIDTH + 24.0
+    STRIP_REF_CENTERED_LEFT + STRIP_REF_WIDTH + 24.0
 }
 
 pub const REF_COMBO_Y: f32 = 72.0;
@@ -75,7 +85,7 @@ impl PlayfieldLayout {
     }
 
     pub fn col_left(&self, col: usize) -> f32 {
-        COLUMNS[col].ref_x * self.scale
+        col_ref_x(col) * self.scale
     }
 
     pub fn col_width(&self, col: usize) -> f32 {
@@ -83,7 +93,7 @@ impl PlayfieldLayout {
     }
 
     pub fn strip_left(&self) -> f32 {
-        STRIP_REF_LEFT * self.scale
+        STRIP_REF_CENTERED_LEFT * self.scale
     }
 
     pub fn strip_width(&self) -> f32 {
@@ -149,7 +159,7 @@ impl PlayfieldLayout {
     }
 
     pub fn speed_label_left(&self) -> f32 {
-        (STRIP_REF_LEFT + STRIP_REF_WIDTH - 96.0) * self.scale
+        (STRIP_REF_CENTERED_LEFT + STRIP_REF_WIDTH - 96.0) * self.scale
     }
 
     pub fn ref_hud_right(&self) -> f32 {
@@ -214,7 +224,8 @@ fn sync_playfield_layout(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::lane_geometry::{COLUMN_COUNT, STRIP_REF_LEFT, STRIP_REF_WIDTH};
+    use crate::lane_geometry::{COLUMN_COUNT, STRIP_REF_WIDTH};
+    use dtx_ui::theme::REF_WIDTH;
 
     #[test]
     fn judge_below_lane_top() {
@@ -232,15 +243,18 @@ mod tests {
     }
 
     #[test]
-    fn col_left_matches_ref_at_default_scale() {
+    fn strip_centered_at_default_scale() {
         let layout = PlayfieldLayout::default(); // scale 1.0 at 1280x720
-        assert!((layout.col_left(0) - STRIP_REF_LEFT).abs() < 0.01);
+        let expected_left = (REF_WIDTH - STRIP_REF_WIDTH) / 2.0; // 361.0
+        assert!((layout.strip_left() - expected_left).abs() < 0.01);
+        assert!((layout.col_left(0) - expected_left).abs() < 0.01);
         let last = COLUMN_COUNT - 1;
         assert!(
             (layout.col_left(last) + layout.col_width(last)
-                - (STRIP_REF_LEFT + STRIP_REF_WIDTH))
+                - (expected_left + STRIP_REF_WIDTH))
                 .abs()
-                < 0.5
+                < 0.5,
+            "strip right edge should be centered"
         );
     }
 
