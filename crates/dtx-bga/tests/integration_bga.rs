@@ -51,10 +51,10 @@ fn bga_fixture_bpm_timing_120() {
     let f = File::open("../dtx-core/tests/fixtures/bga_basic.dtx").expect("fixture exists");
     let chart = parse(f).expect("parses");
     let events = bga_events(&chart);
-    let at_20 = events
+    let at_21 = events
         .iter()
-        .find(|e| e.measure == 20)
-        .expect("event at measure 20");
-    // 120 BPM = 2000ms/measure -> measure 20 = 40000ms
-    assert_eq!(at_20.approx_ms(120.0), 40000);
+        .find(|e| e.measure == 21)
+        .expect("event at chart measure 21");
+    // NX empty first measure: source measure 20 -> chart measure 21 -> 42000ms.
+    assert_eq!(at_21.approx_ms(120.0), 42000);
 }
