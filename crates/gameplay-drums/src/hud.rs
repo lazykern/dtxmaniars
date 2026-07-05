@@ -127,7 +127,7 @@ fn spawn_hud(
                 height: Val::Px(layout.backboard_height()),
                 ..default()
             },
-            BackgroundColor(Color::srgba(0.06, 0.07, 0.11, 0.88)),
+            BackgroundColor(Color::BLACK),
         ));
 
         root.spawn((
