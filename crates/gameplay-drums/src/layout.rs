@@ -13,9 +13,9 @@ pub const REF_BACKBOARD_PAD: f32 = 12.0;
 /// edge (no empty band above the lanes).
 pub const REF_LANE_TOP: f32 = REF_BACKBOARD_PAD;
 pub const REF_LANE_HEIGHT: f32 = REF_JUDGE_Y - REF_LANE_TOP;
-pub const REF_KEY_CAP_H: f32 = 42.0;
-pub const REF_LABEL_OFFSET: f32 = 28.0;
-pub const REF_KEY_VIZ_OFFSET: f32 = 64.0;
+pub const REF_KEY_CAP_H: f32 = 60.0;
+/// Pads sit flush under the judge line (GITADORA-style, no black band).
+pub const REF_KEY_VIZ_OFFSET: f32 = 5.0;
 
 /// Centered strip left edge at ref resolution (redesign: symmetric panels).
 pub const STRIP_REF_CENTERED_LEFT: f32 = (REF_WIDTH - STRIP_REF_WIDTH) / 2.0;
@@ -99,15 +99,6 @@ impl PlayfieldLayout {
     /// NX prints measure# just right of the strip (`CStagePerfDrumsScreen.cs:3588`).
     pub fn measure_label_left(&self) -> f32 {
         self.strip_left() + self.strip_width() + 8.0 * self.scale
-    }
-
-    /// Lane abbreviations (HH, SD, …) sit just above the playfield.
-    pub fn lane_header_top(&self) -> f32 {
-        self.lane_top() - 8.0 * self.scale
-    }
-
-    pub fn label_top(&self) -> f32 {
-        self.judge_y() + REF_LABEL_OFFSET * self.scale
     }
 
     pub fn key_viz_top(&self) -> f32 {
