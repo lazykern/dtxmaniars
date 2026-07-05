@@ -29,7 +29,7 @@ pub fn spawn_stage_background(parent: &mut ChildSpawnerCommands, theme: &Theme) 
         BackgroundColor(theme.stage_bg),
     ));
     parent.spawn((
-        AmbientArt { max_alpha: 0.30 },
+        AmbientArt { max_alpha: 0.14 },
         crate::widget::album_art::AlbumArt::default(),
         Node {
             position_type: PositionType::Absolute,
@@ -53,7 +53,7 @@ pub fn spawn_stage_background(parent: &mut ChildSpawnerCommands, theme: &Theme) 
             height: Val::Percent(100.0),
             ..default()
         },
-        BackgroundColor(theme.stage_bg.with_alpha(0.55)),
+        BackgroundColor(theme.stage_bg.with_alpha(0.72)),
     ));
 }
 
