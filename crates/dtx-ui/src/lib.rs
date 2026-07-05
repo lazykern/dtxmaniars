@@ -95,6 +95,7 @@ pub fn absolute_label(
 pub fn plugin(app: &mut App) {
     app.init_resource::<ThemeResource>()
         .init_resource::<widget::density_graph::DensityData>()
+        .init_resource::<widget::difficulty_grid::DifficultyGridData>()
         .add_plugins((transition::plugin, bevy_tweening::TweeningPlugin))
         .add_message::<dtx_audio::PreviewSwapEvent>()
         .add_systems(
