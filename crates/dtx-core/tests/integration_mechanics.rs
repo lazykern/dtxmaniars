@@ -89,17 +89,12 @@ fn integration_judge_one_miss_one_perfect() {
 fn integration_chip_target_ms_bpm_change() {
     use dtx_timing::math::{chip_time_ms_with_bpm_changes, BpmChange};
     let chart = load_minimal();
-    // Chips are at measure=1,2 with fractions derived from 24-bit value.
+    // Source measure 1 shifts to chart measure 2 (NX empty first measure).
     let chip = &chart.chips[0];
     let t_no_change = chip_time_ms_with_bpm_changes(chip.measure, chip.value, 120.0, &[]);
-    // Just verify it's positive and less than one full measure.
-    assert!(t_no_change > 0);
-    assert!(
-        t_no_change < 2001,
-        "chip should be within first measure at 120bpm"
-    );
+    assert_eq!(t_no_change, 4000);
     let changes = [BpmChange {
-        measure: 0,
+        measure: 1,
         bpm: 240.0,
     }];
     let t_with_change = chip_time_ms_with_bpm_changes(chip.measure, chip.value, 120.0, &changes);
@@ -122,17 +117,19 @@ fn integration_xg_multiplier_applied() {
 #[test]
 fn integration_difficulty_classification_varies() {
     // Same delta classified differently per difficulty.
-    let d_normal = classify_with_difficulty(8, Difficulty::Normal);
-    let d_master = classify_with_difficulty(8, Difficulty::Master);
-    assert_eq!(d_normal, JudgmentKind::Perfect); // 8 < 16 (Normal window)
-    assert_eq!(d_master, JudgmentKind::Great); // 8 > 5 (Master window)
+    // Normal.perfect = 34, Master.perfect = 10 → 15 is Perfect in Normal,
+    // Great in Master (10 < 15 <= 20).
+    let d_normal = classify_with_difficulty(15, Difficulty::Normal);
+    let d_master = classify_with_difficulty(15, Difficulty::Master);
+    assert_eq!(d_normal, JudgmentKind::Perfect);
+    assert_eq!(d_master, JudgmentKind::Great);
 }
 
 #[test]
 fn integration_hit_ranges_default() {
-    // HitRanges::default() returns Normal.
+    // HitRanges::default() returns Normal (BocuD 34/67/84/117ms windows).
     let r = HitRanges::default();
-    assert_eq!(r.perfect, 16);
+    assert_eq!(r.perfect, 34);
 }
 
 #[test]

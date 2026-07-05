@@ -222,10 +222,13 @@ fn parse_chip_line(
 
     // Measure must be a decimal number. If not, this isn't a chip line
     // (e.g. `#WAV01` → "WAV" is not a number).
-    let Ok(measure) = measure_str.parse::<u32>() else {
+    let Ok(raw_measure) = measure_str.parse::<u32>() else {
         let _ = value;
         return Ok(());
     };
+    // DTXManiaNX inserts one empty measure before the chart.
+    // `#000xx` therefore lands at chart measure 1, not measure 0.
+    let measure = raw_measure + 1;
 
     // Channel is hex (uppercase). If not, skip silently — many DTX commands
     // happen to be 5 chars but aren't chip lines.
@@ -460,7 +463,7 @@ mod tests {
         assert_eq!(chart.metadata.dlevel, Some(50));
         assert_eq!(chart.chips.len(), 1);
         assert_eq!(chart.chips[0].channel, EChannel::HiHatClose);
-        assert_eq!(chart.chips[0].measure, 1);
+        assert_eq!(chart.chips[0].measure, 2);
         assert!((chart.chips[0].value - 0.0).abs() < 0.01);
     }
 
@@ -557,7 +560,7 @@ mod tests {
             .filter(|c| c.channel == EChannel::BPMEx)
             .collect();
         assert_eq!(bpm_chips.len(), 1);
-        assert_eq!(bpm_chips[0].measure, 0);
+        assert_eq!(bpm_chips[0].measure, 1);
         assert!(
             (bpm_chips[0].value - 193.0).abs() < 0.01,
             "BPMEx value should resolve to #BPM05 (193), got {}",
@@ -571,10 +574,7 @@ mod tests {
         // than poisoning the timeline with a bogus BPM.
         let input = "#00008: 05\n";
         let chart = parse(Cursor::new(input)).unwrap();
-        assert!(chart
-            .chips
-            .iter()
-            .all(|c| c.channel != EChannel::BPMEx));
+        assert!(chart.chips.iter().all(|c| c.channel != EChannel::BPMEx));
     }
 
     #[test]

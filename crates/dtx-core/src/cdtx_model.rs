@@ -309,8 +309,8 @@ mod tests {
         let c = CDTX::load(&path).expect("load real_chart.dtx");
         assert_eq!(c.chart.metadata.title.as_deref(), Some("Real Chart Demo"));
         assert!(!c.chips.is_empty());
-        // First chip time should be 0 (measure 0).
-        assert_eq!(c.start_time_ms(), 0);
+        // DTXManiaNX inserts one empty measure before source measure 0.
+        assert_eq!(c.start_time_ms(), 2000);
     }
 
     #[test]
@@ -321,7 +321,7 @@ mod tests {
             .join("real_chart.dtx");
         let c = CDTX::load(&path).unwrap();
         assert_eq!(c.bpm_changes.len(), 1);
-        assert_eq!(c.bpm_changes[0].measure, 2);
+        assert_eq!(c.bpm_changes[0].measure, 3);
         assert!((c.bpm_changes[0].bpm - 180.0).abs() < 0.01);
     }
 

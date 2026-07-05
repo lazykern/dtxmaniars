@@ -68,7 +68,8 @@ fn real_chart_has_bpm_change() {
         .map(|c| (c.measure, c.value))
         .collect();
     assert_eq!(changes.len(), 1);
-    assert_eq!(changes[0].0, 2);
+    // Source #00208 shifts to chart measure 3 (NX empty first measure).
+    assert_eq!(changes[0].0, 3);
     assert!((changes[0].1 - 180.0).abs() < 0.01);
 }
 

@@ -65,7 +65,8 @@ fn parse_zero_measure_chip() {
     let input = b"#00011: 10000000\n";
     let chart = parse(&input[..]).expect("measure 0 parses");
     assert_eq!(chart.chips.len(), 1);
-    assert_eq!(chart.chips[0].measure, 0);
+    // DTXManiaNX inserts one empty measure before chart data.
+    assert_eq!(chart.chips[0].measure, 1);
     assert_eq!(chart.chips[0].channel, EChannel::HiHatClose);
 }
 
@@ -74,7 +75,7 @@ fn parse_high_measure_chip() {
     let input = b"#99911: 10000000\n";
     let chart = parse(&input[..]).expect("measure 999 parses");
     assert_eq!(chart.chips.len(), 1);
-    assert_eq!(chart.chips[0].measure, 999);
+    assert_eq!(chart.chips[0].measure, 1000);
 }
 
 #[test]
