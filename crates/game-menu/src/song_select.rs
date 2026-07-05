@@ -36,7 +36,7 @@ use dtx_audio::{
 use dtx_library::{SongDb, SongInfo, SortMode};
 use dtx_ui::ThemeResource;
 use dtx_ui::motion::EnterChoreo;
-use dtx_ui::theme::Theme;
+use dtx_ui::theme::{REF_HEIGHT, REF_WIDTH, Theme};
 use dtx_ui::widget::album_art::AlbumArt;
 use dtx_ui::widget::density_graph::spawn_density_graph;
 use dtx_ui::widget::difficulty_grid::{
@@ -296,6 +296,11 @@ impl CommandHistory {
 #[derive(Component)]
 pub struct SongSelectEntity;
 
+/// The 1280×720 reference-space stage; scaled to fill the window by
+/// `scale_song_select_stage`.
+#[derive(Component)]
+struct SongSelectStage;
+
 /// Wheel row title text, tagged for per-frame updates.
 #[derive(Component)]
 struct WheelRowTitle;
@@ -420,9 +425,28 @@ pub fn plugin(app: &mut App) {
                 render_difficulty_grid,
                 bgm_preview_on_change,
                 update_album_art_image,
+                scale_song_select_stage,
             )
                 .run_if(in_state(AppState::SongSelect)),
         );
+}
+
+/// Scale the 1280×720 reference stage to fill the window, preserving
+/// aspect (letterboxed). Mirrors gameplay's `min(w/REF_W, h/REF_H)`
+/// scale so the song-select layout fills the screen like GITADORA.
+fn scale_song_select_stage(
+    windows: Query<&Window, With<bevy::window::PrimaryWindow>>,
+    mut stage: Query<&mut UiTransform, With<SongSelectStage>>,
+) {
+    let Ok(win) = windows.single() else {
+        return;
+    };
+    let s = (win.width() / REF_WIDTH).min(win.height() / REF_HEIGHT);
+    for mut tf in &mut stage {
+        if tf.scale != Vec2::splat(s) {
+            tf.scale = Vec2::splat(s);
+        }
+    }
 }
 
 // ===== M5: song list logic (OnEnter/OnExit) =====
@@ -474,237 +498,252 @@ fn spawn_song_select(
             Node {
                 width: Val::Percent(100.0),
                 height: Val::Percent(100.0),
+                justify_content: JustifyContent::Center,
+                align_items: AlignItems::Center,
+                overflow: Overflow::clip(),
                 ..default()
             },
         ))
-        .with_children(|root| {
-            spawn_stage_background(root, &t);
-
-            // ---- top bar
-            root.spawn((
-                Node {
-                    position_type: PositionType::Absolute,
-                    top: Val::Px(0.0),
-                    left: Val::Px(0.0),
-                    width: Val::Percent(100.0),
-                    height: Val::Px(52.0),
-                    flex_direction: FlexDirection::Row,
-                    justify_content: JustifyContent::SpaceBetween,
-                    align_items: AlignItems::Center,
-                    padding: UiRect::horizontal(Val::Px(20.0)),
-                    ..default()
-                },
-                UiTransform::default(),
-                EnterChoreo::slide(Vec2::new(0.0, -52.0), 0.0, 200.0),
-            ))
-            .with_children(|bar| {
-                bar.spawn((
-                    Text::new("DTXMANIARS"),
-                    Theme::font(22.0),
-                    TextColor(t.text_primary),
-                ));
-                bar.spawn(Node {
-                    flex_direction: FlexDirection::Row,
-                    column_gap: Val::Px(8.0),
-                    align_items: AlignItems::Center,
-                    ..default()
-                })
-                .with_children(|chips| {
-                    chips.spawn((
-                        SearchText,
-                        Text::new("type to search…"),
-                        Theme::font(13.0),
-                        TextColor(t.text_secondary),
-                    ));
-                    chips
-                        .spawn((
-                            Node {
-                                padding: UiRect::axes(Val::Px(10.0), Val::Px(3.0)),
-                                ..default()
-                            },
-                            BackgroundColor(t.select_yellow),
-                        ))
-                        .with_children(|c| {
-                            c.spawn((
-                                SortChipText,
-                                Text::new("SORT: DEFAULT"),
-                                Theme::font(12.0),
-                                TextColor(Color::BLACK),
-                            ));
-                        });
-                });
-            });
-
-            // ---- far-left column: skill + bpm
-            root.spawn((
-                Node {
-                    position_type: PositionType::Absolute,
-                    left: Val::Px(20.0),
-                    top: Val::Px(72.0),
-                    width: Val::Px(200.0),
-                    flex_direction: FlexDirection::Column,
-                    row_gap: Val::Px(10.0),
-                    ..default()
-                },
-                UiTransform::default(),
-                EnterChoreo::slide(Vec2::new(-340.0, 0.0), 30.0, 220.0),
-            ))
-            .with_children(|left| {
-                left.spawn(panel(
-                    &t,
+        .with_children(|outer| {
+            outer
+                .spawn((
+                    SongSelectStage,
                     Node {
-                        width: Val::Percent(100.0),
-                        flex_direction: FlexDirection::Column,
+                        width: Val::Px(REF_WIDTH),
+                        height: Val::Px(REF_HEIGHT),
                         ..default()
                     },
+                    UiTransform::default(),
                 ))
-                .with_children(|p| {
-                    spawn_badge_row(p, &t, "SKILL BY SONG", "0.00", true);
-                });
-                left.spawn(panel(
-                    &t,
-                    Node {
-                        width: Val::Percent(100.0),
-                        flex_direction: FlexDirection::Column,
-                        ..default()
-                    },
-                ))
-                .with_children(|p| {
-                    spawn_badge_row(p, &t, "BPM", "---", false);
-                });
-            });
+                .with_children(|root| {
+                    spawn_stage_background(root, &t);
 
-            // ---- center-top: big square jacket + artist
-            root.spawn((
-                Node {
-                    position_type: PositionType::Absolute,
-                    left: Val::Px(240.0),
-                    top: Val::Px(72.0),
-                    width: Val::Px(300.0),
-                    flex_direction: FlexDirection::Column,
-                    row_gap: Val::Px(6.0),
-                    ..default()
-                },
-                UiTransform::default(),
-                EnterChoreo::slide(Vec2::new(-340.0, 0.0), 45.0, 220.0),
-            ))
-            .with_children(|mid| {
-                mid.spawn((
-                    BigAlbumArt,
-                    AlbumArt::default(),
-                    AlbumArtEntity,
-                    panel(
-                        &t,
+                    // ---- top bar
+                    root.spawn((
                         Node {
-                            width: Val::Px(300.0),
-                            height: Val::Px(300.0),
+                            position_type: PositionType::Absolute,
+                            top: Val::Px(0.0),
+                            left: Val::Px(0.0),
+                            width: Val::Percent(100.0),
+                            height: Val::Px(52.0),
+                            flex_direction: FlexDirection::Row,
+                            justify_content: JustifyContent::SpaceBetween,
+                            align_items: AlignItems::Center,
+                            padding: UiRect::horizontal(Val::Px(20.0)),
                             ..default()
                         },
-                    ),
-                    ImageNode {
-                        color: Color::WHITE.with_alpha(0.0),
-                        ..default()
-                    },
-                ));
-                mid.spawn((
-                    SelectedArtistText,
-                    Text::new(""),
-                    Theme::font(14.0),
-                    TextColor(t.text_secondary),
-                ));
-            });
-
-            // ---- center-bottom: density graph + difficulty ladder (side by side)
-            root.spawn((
-                Node {
-                    position_type: PositionType::Absolute,
-                    left: Val::Px(240.0),
-                    top: Val::Px(408.0),
-                    width: Val::Px(560.0),
-                    flex_direction: FlexDirection::Row,
-                    column_gap: Val::Px(10.0),
-                    ..default()
-                },
-                UiTransform::default(),
-                EnterChoreo::slide(Vec2::new(-340.0, 0.0), 60.0, 220.0),
-            ))
-            .with_children(|bottom| {
-                bottom
-                    .spawn(panel(
-                        &t,
-                        Node {
-                            width: Val::Px(120.0),
-                            flex_direction: FlexDirection::Column,
+                        UiTransform::default(),
+                        EnterChoreo::slide(Vec2::new(0.0, -52.0), 0.0, 200.0),
+                    ))
+                    .with_children(|bar| {
+                        bar.spawn((
+                            Text::new("DTXMANIARS"),
+                            Theme::font(22.0),
+                            TextColor(t.text_primary),
+                        ));
+                        bar.spawn(Node {
+                            flex_direction: FlexDirection::Row,
+                            column_gap: Val::Px(8.0),
                             align_items: AlignItems::Center,
-                            padding: UiRect::all(Val::Px(8.0)),
+                            ..default()
+                        })
+                        .with_children(|chips| {
+                            chips.spawn((
+                                SearchText,
+                                Text::new("type to search…"),
+                                Theme::font(13.0),
+                                TextColor(t.text_secondary),
+                            ));
+                            chips
+                                .spawn((
+                                    Node {
+                                        padding: UiRect::axes(Val::Px(10.0), Val::Px(3.0)),
+                                        ..default()
+                                    },
+                                    BackgroundColor(t.select_yellow),
+                                ))
+                                .with_children(|c| {
+                                    c.spawn((
+                                        SortChipText,
+                                        Text::new("SORT: DEFAULT"),
+                                        Theme::font(12.0),
+                                        TextColor(Color::BLACK),
+                                    ));
+                                });
+                        });
+                    });
+
+                    // ---- far-left column: skill + bpm
+                    root.spawn((
+                        Node {
+                            position_type: PositionType::Absolute,
+                            left: Val::Px(20.0),
+                            top: Val::Px(72.0),
+                            width: Val::Px(180.0),
+                            flex_direction: FlexDirection::Column,
+                            row_gap: Val::Px(10.0),
+                            ..default()
+                        },
+                        UiTransform::default(),
+                        EnterChoreo::slide(Vec2::new(-340.0, 0.0), 30.0, 220.0),
+                    ))
+                    .with_children(|left| {
+                        left.spawn(panel(
+                            &t,
+                            Node {
+                                width: Val::Percent(100.0),
+                                flex_direction: FlexDirection::Column,
+                                ..default()
+                            },
+                        ))
+                        .with_children(|p| {
+                            spawn_badge_row(p, &t, "SKILL BY SONG", "0.00", true);
+                        });
+                        left.spawn(panel(
+                            &t,
+                            Node {
+                                width: Val::Percent(100.0),
+                                flex_direction: FlexDirection::Column,
+                                ..default()
+                            },
+                        ))
+                        .with_children(|p| {
+                            spawn_badge_row(p, &t, "BPM", "---", false);
+                        });
+                    });
+
+                    // ---- center-top: big square jacket + artist
+                    root.spawn((
+                        Node {
+                            position_type: PositionType::Absolute,
+                            left: Val::Px(216.0),
+                            top: Val::Px(68.0),
+                            width: Val::Px(240.0),
+                            flex_direction: FlexDirection::Column,
+                            row_gap: Val::Px(6.0),
+                            ..default()
+                        },
+                        UiTransform::default(),
+                        EnterChoreo::slide(Vec2::new(-340.0, 0.0), 45.0, 220.0),
+                    ))
+                    .with_children(|mid| {
+                        mid.spawn((
+                            BigAlbumArt,
+                            AlbumArt::default(),
+                            AlbumArtEntity,
+                            panel(
+                                &t,
+                                Node {
+                                    width: Val::Px(240.0),
+                                    height: Val::Px(240.0),
+                                    ..default()
+                                },
+                            ),
+                            ImageNode {
+                                color: Color::WHITE.with_alpha(0.0),
+                                ..default()
+                            },
+                        ));
+                        mid.spawn((
+                            SelectedArtistText,
+                            Text::new(""),
+                            Theme::font(14.0),
+                            TextColor(t.text_secondary),
+                        ));
+                    });
+
+                    // ---- center-bottom: density graph + difficulty ladder (side by side)
+                    root.spawn((
+                        Node {
+                            position_type: PositionType::Absolute,
+                            left: Val::Px(216.0),
+                            top: Val::Px(344.0),
+                            width: Val::Px(396.0),
+                            flex_direction: FlexDirection::Row,
+                            column_gap: Val::Px(8.0),
+                            ..default()
+                        },
+                        UiTransform::default(),
+                        EnterChoreo::slide(Vec2::new(-340.0, 0.0), 60.0, 220.0),
+                    ))
+                    .with_children(|bottom| {
+                        bottom
+                            .spawn(panel(
+                                &t,
+                                Node {
+                                    width: Val::Px(100.0),
+                                    flex_direction: FlexDirection::Column,
+                                    align_items: AlignItems::Center,
+                                    padding: UiRect::all(Val::Px(8.0)),
+                                    ..default()
+                                },
+                            ))
+                            .with_children(|p| spawn_density_graph(p, &t));
+                        bottom
+                            .spawn(Node {
+                                flex_grow: 1.0,
+                                flex_direction: FlexDirection::Column,
+                                ..default()
+                            })
+                            .with_children(|p| spawn_difficulty_grid(p, &t));
+                    });
+
+                    // ---- right: song wheel container (rows spawned separately)
+                    root.spawn((
+                        SongWheel,
+                        Node {
+                            position_type: PositionType::Absolute,
+                            left: Val::Percent(51.0),
+                            right: Val::Px(16.0),
+                            top: Val::Px(52.0),
+                            height: Val::Px(620.0),
+                            overflow: Overflow::clip(),
                             ..default()
                         },
                     ))
-                    .with_children(|p| spawn_density_graph(p, &t));
-                bottom
-                    .spawn(Node {
-                        flex_grow: 1.0,
-                        flex_direction: FlexDirection::Column,
-                        ..default()
-                    })
-                    .with_children(|p| spawn_difficulty_grid(p, &t));
-            });
+                    .with_children(|wheel| {
+                        spawn_wheel_rows(wheel, &selection_state, &db, &assets, &t);
+                    });
 
-            // ---- right: song wheel container (rows spawned separately)
-            root.spawn((
-                SongWheel,
-                Node {
-                    position_type: PositionType::Absolute,
-                    left: Val::Percent(48.0),
-                    right: Val::Px(24.0),
-                    top: Val::Px(52.0),
-                    height: Val::Px(632.0),
-                    overflow: Overflow::clip(),
-                    ..default()
-                },
-            ))
-            .with_children(|wheel| {
-                spawn_wheel_rows(wheel, &selection_state, &db, &assets, &t);
-            });
-
-            // ---- bottom hint bar
-            root.spawn((
-                Node {
-                    position_type: PositionType::Absolute,
-                    bottom: Val::Px(0.0),
-                    left: Val::Px(0.0),
-                    width: Val::Percent(100.0),
-                    height: Val::Px(34.0),
-                    justify_content: JustifyContent::Center,
-                    align_items: AlignItems::Center,
-                    column_gap: Val::Px(18.0),
-                    flex_direction: FlexDirection::Row,
-                    ..default()
-                },
-                UiTransform::default(),
-                EnterChoreo::slide(Vec2::new(0.0, 34.0), 0.0, 200.0),
-            ))
-            .with_children(|bar| {
-                for (label, hot) in [
-                    ("↑↓ SELECT", false),
-                    ("←→ DIFFICULTY", false),
-                    ("ENTER PLAY", true),
-                    ("TAB SORT", false),
-                    ("F5 RESCAN", false),
-                    ("F1 SETTINGS", false),
-                    ("ESC BACK", false),
-                ] {
-                    bar.spawn((
-                        Text::new(label),
-                        Theme::font(12.0),
-                        TextColor(if hot {
-                            t.select_yellow
-                        } else {
-                            t.text_secondary
-                        }),
-                    ));
-                }
-            });
+                    // ---- bottom hint bar
+                    root.spawn((
+                        Node {
+                            position_type: PositionType::Absolute,
+                            bottom: Val::Px(0.0),
+                            left: Val::Px(0.0),
+                            width: Val::Percent(100.0),
+                            height: Val::Px(34.0),
+                            justify_content: JustifyContent::Center,
+                            align_items: AlignItems::Center,
+                            column_gap: Val::Px(18.0),
+                            flex_direction: FlexDirection::Row,
+                            ..default()
+                        },
+                        UiTransform::default(),
+                        EnterChoreo::slide(Vec2::new(0.0, 34.0), 0.0, 200.0),
+                    ))
+                    .with_children(|bar| {
+                        for (label, hot) in [
+                            ("↑↓ SELECT", false),
+                            ("←→ DIFFICULTY", false),
+                            ("ENTER PLAY", true),
+                            ("TAB SORT", false),
+                            ("F5 RESCAN", false),
+                            ("F1 SETTINGS", false),
+                            ("ESC BACK", false),
+                        ] {
+                            bar.spawn((
+                                Text::new(label),
+                                Theme::font(12.0),
+                                TextColor(if hot {
+                                    t.select_yellow
+                                } else {
+                                    t.text_secondary
+                                }),
+                            ));
+                        }
+                    });
+                });
         });
 }
 
@@ -897,7 +936,7 @@ fn wheel_layout_system(
     *phase = (*phase + time.delta_secs() * bpm / 60.0).rem_euclid(1.0);
     let glow = 0.30 + 0.25 * (1.0 - *phase).powi(2);
 
-    const WHEEL_H: f32 = 632.0;
+    const WHEEL_H: f32 = 620.0;
     for (row, mut node, mut vis, mut border, mut shadow, mut bg) in &mut rows {
         let offset = row.index as f32 - center;
         if offset.abs() > (VISIBLE_HALF as f32 + 1.0) {
