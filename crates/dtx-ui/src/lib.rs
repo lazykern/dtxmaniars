@@ -104,7 +104,6 @@ pub fn plugin(app: &mut App) {
             (
                 widget::album_art::album_art_tween_system,
                 widget::album_art::apply_album_art_opacity,
-                widget::stage_background::ambient_art_apply_system,
                 parallax::parallax_info_tween_system,
             )
                 .chain(),

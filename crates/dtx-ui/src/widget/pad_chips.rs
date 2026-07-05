@@ -6,8 +6,8 @@
 //! Lanes shown: LC, HH, SD, BD, RD (the 5 "main" pads; the 10-lane field is
 //! drawn separately by the scroll system).
 
-use bevy::prelude::*;
 use crate::theme::Theme;
+use bevy::prelude::*;
 
 /// Marker for one pad chip. `lane_index` 0..=4.
 #[derive(Component)]
@@ -31,24 +31,26 @@ pub fn spawn_pad_chips(commands: &mut Commands, parent: Entity, _theme: &Theme) 
     let pad_labels = ["LC", "HH", "SD", "BD", "RD"];
     let pad_w = 44.0;
     let pad_h = 60.0;
-    let pad_y = 640.0;
     let pad_x_start = 18.0;
 
     commands.entity(parent).with_children(|p| {
         for (i, (color, label)) in pad_colors.iter().zip(pad_labels.iter()).enumerate() {
             let x = pad_x_start + i as f32 * (pad_w + 4.0);
             p.spawn((
-                PadChip { lane_index: i as u8 },
+                PadChip {
+                    lane_index: i as u8,
+                },
                 Node {
                     position_type: PositionType::Absolute,
                     left: Val::Px(x),
-                    top: Val::Px(pad_y),
+                    bottom: Val::Px(20.0),
                     width: Val::Px(pad_w),
                     height: Val::Px(pad_h),
                     ..default()
                 },
                 BackgroundColor(*color),
-            )).with_children(|pad| {
+            ))
+            .with_children(|pad| {
                 pad.spawn((
                     Node {
                         position_type: PositionType::Absolute,
@@ -69,9 +71,9 @@ pub fn spawn_pad_chips(commands: &mut Commands, parent: Entity, _theme: &Theme) 
 
 /// Pad flash on hit: brighten the BG color for ~100ms.
 pub fn flash_pad_on_hit(
-    mut commands: Commands,
+    commands: Commands,
     time: Res<Time>,
-    mut flashes: Query<(Entity, &mut BackgroundColor, &PadChip)>,
+    flashes: Query<(Entity, &mut BackgroundColor, &PadChip)>,
 ) {
     // Placeholder: in real impl, listen for PadHit events and tween alpha.
     // The hit detection is owned by gameplay-drums; this module just provides
