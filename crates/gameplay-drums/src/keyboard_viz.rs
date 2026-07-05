@@ -37,7 +37,7 @@ pub fn spawn_key_caps(
 ) {
     let cap_h = layout.key_cap_height();
     for col in 0..COLUMN_COUNT {
-        let tint = column_color(col).with_alpha(0.18);
+        let rim = column_color(col);
         commands.entity(parent).with_children(|row| {
             row.spawn((
                 KeyCap { col: col as u8 },
@@ -47,11 +47,19 @@ pub fn spawn_key_caps(
                     top: Val::Px(layout.key_viz_top()),
                     width: Val::Px(layout.col_width(col) - 4.0),
                     height: Val::Px(cap_h),
+                    border: UiRect::all(Val::Px(2.0 * layout.scale)),
                     align_items: AlignItems::Center,
                     justify_content: JustifyContent::Center,
+                    border_radius: BorderRadius {
+                        top_left: Val::Px(cap_h * 0.4),
+                        top_right: Val::Px(cap_h * 0.4),
+                        bottom_left: Val::Px(4.0 * layout.scale),
+                        bottom_right: Val::Px(4.0 * layout.scale),
+                    },
                     ..default()
                 },
-                BackgroundColor(tint),
+                BackgroundColor(Color::srgb(0.11, 0.11, 0.13)),
+                BorderColor::all(rim),
                 children![(
                     Text::new(COLUMNS[col].label),
                     Theme::font(13.0 * layout.scale),
@@ -75,10 +83,8 @@ fn apply_key_cap_layout(layout: Res<PlayfieldLayout>, mut caps: Query<(&KeyCap, 
 fn flash_key_caps_on_hit(
     mut lane_hits: MessageReader<LaneHit>,
     mut events: MessageReader<JudgmentEvent>,
-    theme: Res<ThemeResource>,
     mut caps: Query<(&KeyCap, &mut BackgroundColor)>,
 ) {
-    let accent = theme.0.accent;
     let to_col = |lane: u8| lane_channel(lane).and_then(column_of);
     // Immediate feedback on key press (input lane), mapped to its visual column.
     for hit in lane_hits.read() {
@@ -87,7 +93,7 @@ fn flash_key_caps_on_hit(
         };
         for (cap, mut bg) in &mut caps {
             if cap.col as usize == col {
-                bg.0 = accent.with_alpha(0.45);
+                bg.0 = Color::srgb(0.30, 0.30, 0.34);
             }
         }
     }
@@ -100,27 +106,36 @@ fn flash_key_caps_on_hit(
         };
         for (cap, mut bg) in &mut caps {
             if cap.col as usize == col {
-                bg.0 = accent.with_alpha(0.55);
+                bg.0 = column_color(col).with_alpha(0.85);
             }
         }
     }
 }
 
 pub fn decay_key_cap_flashes(
-    theme: Res<ThemeResource>,
+    _theme: Res<ThemeResource>,
     time: Res<Time>,
     mut caps: Query<(&KeyCap, &mut BackgroundColor)>,
 ) {
     let dt = time.delta_secs();
-    for (cap, mut bg) in &mut caps {
-        let rest = column_color(cap.col as usize).with_alpha(0.18);
-        if bg.0 != rest {
-            let a = (bg.0.alpha() - dt * 4.0).max(rest.alpha());
-            if a <= rest.alpha() + 0.01 {
-                bg.0 = rest;
-            } else {
-                bg.0 = theme.0.accent.with_alpha(a * 0.55);
-            }
+    let rest = Color::srgb(0.11, 0.11, 0.13);
+    for (_cap, mut bg) in &mut caps {
+        if bg.0 == rest {
+            continue;
         }
+        let cur = bg.0.to_srgba();
+        let target = rest.to_srgba();
+        let lerp = |a: f32, b: f32| a + (b - a) * (dt * 6.0).min(1.0);
+        let next = Color::srgba(
+            lerp(cur.red, target.red),
+            lerp(cur.green, target.green),
+            lerp(cur.blue, target.blue),
+            1.0,
+        );
+        bg.0 = if (next.to_srgba().red - target.red).abs() < 0.01 {
+            rest
+        } else {
+            next
+        };
     }
 }
