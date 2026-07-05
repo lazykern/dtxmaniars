@@ -645,9 +645,9 @@ fn spawn_song_select(
                 SongWheel,
                 Node {
                     position_type: PositionType::Absolute,
-                    right: Val::Px(0.0),
+                    left: Val::Percent(38.0),
+                    right: Val::Px(24.0),
                     top: Val::Px(52.0),
-                    width: Val::Px(620.0),
                     height: Val::Px(632.0),
                     overflow: Overflow::clip(),
                     ..default()
@@ -747,7 +747,7 @@ fn spawn_wheel_rows(
                     position_type: PositionType::Absolute,
                     left: Val::Px(0.0),
                     top: Val::Px(0.0),
-                    width: Val::Px(600.0),
+                    width: Val::Percent(92.0),
                     height: Val::Px(dtx_ui::widget::song_wheel::ROW_H),
                     flex_direction: FlexDirection::Row,
                     align_items: AlignItems::Center,
