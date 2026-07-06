@@ -104,7 +104,14 @@ fn resume_chart_audio(
     active.resume_all(&mut instances);
 }
 
-fn spawn_overlay(mut commands: Commands, mut selection: ResMut<PauseSelection>) {
+fn spawn_overlay(
+    mut commands: Commands,
+    mut selection: ResMut<PauseSelection>,
+    practice: Option<Res<crate::practice::PracticeSession>>,
+) {
+    if practice.is_some() {
+        return; // practice pause panel owns the overlay
+    }
     selection.0 = 0;
     let theme = Theme::default();
     commands
@@ -157,7 +164,11 @@ fn pause_menu_input(
     mut next_pause: ResMut<NextState<PauseState>>,
     mut requests: MessageWriter<TransitionRequest>,
     mut rows: Query<(&PauseItem, &mut TextColor)>,
+    practice: Option<Res<crate::practice::PracticeSession>>,
 ) {
+    if practice.is_some() {
+        return;
+    }
     let count = PauseItem::ORDER.len();
     if keys.just_pressed(KeyCode::ArrowDown) {
         selection.0 = (selection.0 + 1) % count;

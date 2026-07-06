@@ -7,10 +7,11 @@
 use bevy::prelude::*;
 use dtx_ui::theme::Theme;
 use dtx_ui::widget::density_strip::{spawn_density_strip, time_to_pct};
-use game_shell::AppState;
+use game_shell::{request_transition, AppState, PauseState, TransitionRequest};
 
-use super::session::PracticeSession;
+use super::session::{preroll_target, PracticeSession};
 use crate::resources::GameplayClock;
+use crate::seek::SeekToChartTime;
 use crate::timeline::ChipTimeline;
 
 /// Format chart ms as `m:ss.d`.
@@ -53,7 +54,19 @@ pub(super) fn plugin(app: &mut App) {
             .run_if(in_state(AppState::Performance))
             .run_if(resource_exists::<PracticeSession>),
     );
-    // Pause panel systems are added in Task 12.
+
+    app.init_resource::<PracticeSelection>()
+        .add_systems(
+            OnEnter(PauseState::Paused),
+            spawn_practice_panel.run_if(resource_exists::<PracticeSession>),
+        )
+        .add_systems(OnExit(PauseState::Paused), despawn_practice_panel)
+        .add_systems(
+            Update,
+            practice_panel_input
+                .run_if(in_state(PauseState::Paused))
+                .run_if(resource_exists::<PracticeSession>),
+        );
 }
 
 fn marker_node(left_pct: f32, width_px: f32, color: Color) -> impl Bundle {
@@ -216,6 +229,255 @@ fn update_transport_markers(
             }
             None => *vis = Visibility::Hidden,
         }
+    }
+}
+
+/// Root marker for the practice pause panel.
+#[derive(Component)]
+struct PracticePanel;
+
+/// One selectable practice-panel row.
+#[derive(Component, Clone, Copy, PartialEq, Eq)]
+enum PracticeItem {
+    Resume,
+    Scrub,
+    RestartSection,
+    SetA,
+    SetB,
+    ClearLoop,
+    Rate,
+    Snap,
+    Preroll,
+    ExitPractice,
+}
+
+impl PracticeItem {
+    const ORDER: [PracticeItem; 10] = [
+        PracticeItem::Resume,
+        PracticeItem::Scrub,
+        PracticeItem::RestartSection,
+        PracticeItem::SetA,
+        PracticeItem::SetB,
+        PracticeItem::ClearLoop,
+        PracticeItem::Rate,
+        PracticeItem::Snap,
+        PracticeItem::Preroll,
+        PracticeItem::ExitPractice,
+    ];
+}
+
+/// Currently highlighted practice-panel row.
+#[derive(Resource, Default)]
+struct PracticeSelection(usize);
+
+#[derive(Component)]
+struct AttemptHistoryText;
+
+fn practice_item_label(item: PracticeItem, session: &PracticeSession) -> String {
+    match item {
+        PracticeItem::Resume => "Resume".into(),
+        PracticeItem::Scrub => match session.scrub_cursor_ms {
+            Some(ms) => format!("Scrub  ◀ {} ▶   (Enter: play here)", format_chart_time(ms)),
+            None => "Scrub  ◀ ▶".into(),
+        },
+        PracticeItem::RestartSection => "Restart section".into(),
+        PracticeItem::SetA => "Set A here".into(),
+        PracticeItem::SetB => "Set B here".into(),
+        PracticeItem::ClearLoop => "Clear loop".into(),
+        PracticeItem::Rate => format!("Rate  ◀ x{:.2} ▶", session.rate),
+        PracticeItem::Snap => format!("Snap  ◀ {} ▶", session.snap.label()),
+        PracticeItem::Preroll => format!("Pre-roll  ◀ {} ▶", session.preroll.label()),
+        PracticeItem::ExitPractice => "Exit practice".into(),
+    }
+}
+
+fn attempt_history_text(session: &PracticeSession) -> String {
+    let mut lines = vec!["Attempts:".to_string()];
+    for (i, a) in session.attempt_history.iter().enumerate().rev().take(5) {
+        lines.push(format!(
+            "#{}  {:.1}%  {:+.0}ms  x{:.2}",
+            i + 1,
+            a.accuracy_pct,
+            a.mean_error_ms,
+            a.rate
+        ));
+    }
+    lines.join("\n")
+}
+
+fn spawn_practice_panel(
+    mut commands: Commands,
+    mut selection: ResMut<PracticeSelection>,
+    mut session: ResMut<PracticeSession>,
+    clock: Res<GameplayClock>,
+) {
+    selection.0 = 0;
+    session.scrub_cursor_ms = Some(clock.current_ms);
+    let theme = Theme::default();
+    commands
+        .spawn((
+            PracticePanel,
+            Node {
+                position_type: PositionType::Absolute,
+                width: Val::Percent(100.0),
+                height: Val::Percent(100.0),
+                flex_direction: FlexDirection::Column,
+                justify_content: JustifyContent::Center,
+                align_items: AlignItems::Center,
+                row_gap: Val::Px(10.0),
+                ..default()
+            },
+            BackgroundColor(Color::srgba(0.0, 0.0, 0.0, 0.72)),
+            GlobalZIndex(1000),
+        ))
+        .with_children(|root| {
+            root.spawn((
+                Text::new("PRACTICE"),
+                Theme::title_font(),
+                TextColor(theme.text_primary),
+                Node {
+                    margin: UiRect::bottom(Val::Px(18.0)),
+                    ..default()
+                },
+            ));
+            for item in PracticeItem::ORDER {
+                root.spawn((
+                    item,
+                    Text::new(practice_item_label(item, &session)),
+                    Theme::hud_font(),
+                    TextColor(theme.text_secondary),
+                ));
+            }
+            root.spawn((
+                AttemptHistoryText,
+                Text::new(attempt_history_text(&session)),
+                Theme::label_font(),
+                TextColor(theme.text_secondary),
+                Node {
+                    margin: UiRect::top(Val::Px(18.0)),
+                    ..default()
+                },
+            ));
+        });
+}
+
+fn despawn_practice_panel(
+    mut commands: Commands,
+    panels: Query<Entity, With<PracticePanel>>,
+    mut session: Option<ResMut<PracticeSession>>,
+) {
+    for e in &panels {
+        commands.entity(e).despawn();
+    }
+    if let Some(session) = session.as_mut() {
+        session.scrub_cursor_ms = None;
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn practice_panel_input(
+    keys: Res<ButtonInput<KeyCode>>,
+    mut selection: ResMut<PracticeSelection>,
+    mut session: ResMut<PracticeSession>,
+    timeline: Res<ChipTimeline>,
+    clock: Res<GameplayClock>,
+    mut next_pause: ResMut<NextState<PauseState>>,
+    mut seeks: MessageWriter<SeekToChartTime>,
+    mut requests: MessageWriter<TransitionRequest>,
+    mut rows: Query<(&PracticeItem, &mut Text, &mut TextColor)>,
+    mut history: Query<&mut Text, (With<AttemptHistoryText>, Without<PracticeItem>)>,
+) {
+    let count = PracticeItem::ORDER.len();
+    if keys.just_pressed(KeyCode::ArrowDown) {
+        selection.0 = (selection.0 + 1) % count;
+    }
+    if keys.just_pressed(KeyCode::ArrowUp) {
+        selection.0 = (selection.0 + count - 1) % count;
+    }
+    let selected = PracticeItem::ORDER[selection.0];
+
+    let left = keys.just_pressed(KeyCode::ArrowLeft);
+    let right = keys.just_pressed(KeyCode::ArrowRight);
+    if left || right {
+        let dir: i8 = if right { 1 } else { -1 };
+        match selected {
+            PracticeItem::Scrub => {
+                let cur = session.scrub_cursor_ms.unwrap_or(clock.current_ms);
+                session.scrub_cursor_ms = Some(timeline.snap_neighbor(cur, session.snap, dir));
+            }
+            PracticeItem::Rate => session.step_rate(dir),
+            PracticeItem::Snap => session.snap = session.snap.next(),
+            PracticeItem::Preroll => session.preroll = session.preroll.next(),
+            _ => {}
+        }
+    }
+
+    if keys.just_pressed(KeyCode::Enter) || keys.just_pressed(KeyCode::Space) {
+        match selected {
+            PracticeItem::Resume => next_pause.set(PauseState::Running),
+            PracticeItem::Scrub => {
+                let intent = session.scrub_cursor_ms.unwrap_or(clock.current_ms);
+                seeks.write(SeekToChartTime {
+                    target_ms: preroll_target(&timeline, session.preroll, intent),
+                    snap: None,
+                    attempt_start_ms: Some(intent),
+                });
+                next_pause.set(PauseState::Running);
+            }
+            PracticeItem::RestartSection => {
+                let intent = session
+                    .loop_region
+                    .map(|r| r.start_ms)
+                    .unwrap_or(session.current_attempt.start_ms);
+                seeks.write(SeekToChartTime {
+                    target_ms: preroll_target(&timeline, session.preroll, intent),
+                    snap: None,
+                    attempt_start_ms: Some(intent),
+                });
+                next_pause.set(PauseState::Running);
+            }
+            PracticeItem::SetA => {
+                let ms =
+                    timeline.bar_start_before(session.scrub_cursor_ms.unwrap_or(clock.current_ms));
+                session.set_loop_start(ms);
+            }
+            PracticeItem::SetB => {
+                let cursor = session.scrub_cursor_ms.unwrap_or(clock.current_ms);
+                let mut ms = timeline.bar_start_before(cursor);
+                // Min region: one bar. If B lands on/before A, push B one
+                // bar past A.
+                if let Some(r) = session.loop_region {
+                    if ms <= r.start_ms {
+                        ms = timeline.snap_neighbor(
+                            r.start_ms,
+                            crate::timeline::SnapDivisor::Bar,
+                            1,
+                        );
+                    }
+                }
+                session.set_loop_end(ms);
+            }
+            PracticeItem::ClearLoop => session.loop_region = None,
+            PracticeItem::Rate | PracticeItem::Snap | PracticeItem::Preroll => {}
+            PracticeItem::ExitPractice => {
+                next_pause.set(PauseState::Running);
+                request_transition(&mut requests, AppState::SongSelect);
+            }
+        }
+    }
+
+    // Repaint rows every frame (labels are cheap, list is 10 rows).
+    let theme = Theme::default();
+    for (item, mut text, mut color) in &mut rows {
+        text.0 = practice_item_label(*item, &session);
+        color.0 = if *item == selected {
+            theme.accent
+        } else {
+            theme.text_secondary
+        };
+    }
+    if let Ok(mut t) = history.single_mut() {
+        t.0 = attempt_history_text(&session);
     }
 }
 
