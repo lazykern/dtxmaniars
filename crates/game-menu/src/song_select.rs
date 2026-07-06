@@ -47,7 +47,7 @@ use dtx_ui::widget::difficulty_grid::{
 use dtx_ui::widget::song_wheel::{SongWheel, VISIBLE_HALF, WheelRow, WheelSpring, row_geometry};
 use dtx_ui::widget::stage_background::spawn_stage_background;
 use dtx_ui::widget::stage_panel::{BadgeValueText, panel, set_panel_selected, spawn_badge_row};
-use game_shell::{AppState, TransitionRequest, despawn_stage, request_transition};
+use game_shell::{AppState, PracticeIntent, TransitionRequest, despawn_stage, request_transition};
 
 // ===== Layout constants =====
 
@@ -1210,6 +1210,7 @@ fn song_select_navigation(
     mut selection_state: ResMut<SongSelectSelection>,
     mut selected_song: ResMut<SelectedSong>,
     mut requests: MessageWriter<TransitionRequest>,
+    mut practice_intent: ResMut<PracticeIntent>,
 ) {
     if selection_state.visible.is_empty() {
         if keys.just_pressed(KeyCode::F5)
@@ -1243,10 +1244,14 @@ fn song_select_navigation(
         if let Some(chart_idx) = selection.chart_index(&selection_state)
             && let Some(song) = db.songs.get(chart_idx)
         {
+            let practice =
+                keys.pressed(KeyCode::ShiftLeft) || keys.pressed(KeyCode::ShiftRight);
+            practice_intent.0 = practice;
             info!(
-                "SongSelect: selected {} ({})",
+                "SongSelect: selected {} ({}){}",
                 song.title,
-                SongFolderView::difficulty_label(selection.difficulty)
+                SongFolderView::difficulty_label(selection.difficulty),
+                if practice { " [practice]" } else { "" }
             );
             selected_song.0 = Some(song.path.clone());
             request_transition(&mut requests, AppState::SongLoading);
