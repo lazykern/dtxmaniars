@@ -43,17 +43,11 @@ impl PrerollSetting {
 
 /// Resolve the actual seek target for an intended attempt start:
 /// back off by the configured pre-roll so the drummer gets ready-time.
-pub fn preroll_target(
-    timeline: &ChipTimeline,
-    preroll: PrerollSetting,
-    intent_ms: i64,
-) -> i64 {
+pub fn preroll_target(timeline: &ChipTimeline, preroll: PrerollSetting, intent_ms: i64) -> i64 {
     match preroll {
         PrerollSetting::Off => intent_ms,
         PrerollSetting::Seconds(s) => (intent_ms - (s * 1000.0) as i64).max(0),
-        PrerollSetting::OneBar => {
-            timeline.bar_start_before((intent_ms - 1).max(0))
-        }
+        PrerollSetting::OneBar => timeline.bar_start_before((intent_ms - 1).max(0)),
     }
 }
 
@@ -163,18 +157,30 @@ impl PracticeSession {
     pub fn set_loop_start(&mut self, ms: i64) {
         let end = self.loop_region.map(|r| r.end_ms);
         self.loop_region = Some(match end {
-            Some(e) if e > ms => LoopRegion { start_ms: ms, end_ms: e },
-            _ => LoopRegion { start_ms: ms, end_ms: i64::MAX },
+            Some(e) if e > ms => LoopRegion {
+                start_ms: ms,
+                end_ms: e,
+            },
+            _ => LoopRegion {
+                start_ms: ms,
+                end_ms: i64::MAX,
+            },
         });
     }
 
     pub fn set_loop_end(&mut self, ms: i64) {
         let start = self.loop_region.map(|r| r.start_ms).unwrap_or(0);
         self.loop_region = Some(if ms > start {
-            LoopRegion { start_ms: start, end_ms: ms }
+            LoopRegion {
+                start_ms: start,
+                end_ms: ms,
+            }
         } else {
             // B placed before A: swap.
-            LoopRegion { start_ms: ms, end_ms: start.max(ms + 1) }
+            LoopRegion {
+                start_ms: ms,
+                end_ms: start.max(ms + 1),
+            }
         });
     }
 

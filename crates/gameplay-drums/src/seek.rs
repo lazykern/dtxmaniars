@@ -17,8 +17,7 @@ use crate::bgm_scheduler::chip_wav_path;
 use crate::components::NoteVisual;
 use crate::judge::JudgedChips;
 use crate::resources::{
-    ActiveChart, ActiveDrumSounds, DrumAudioSettings, GameStartMs, GameplayClock,
-    TimingLineCrossed,
+    ActiveChart, ActiveDrumSounds, DrumAudioSettings, GameStartMs, GameplayClock, TimingLineCrossed,
 };
 use crate::timeline::{ChipTimeline, SnapDivisor};
 
@@ -201,9 +200,7 @@ pub fn apply_seek_system(
                 // is chart time 0.
                 state.start_ms.0 = 0;
                 if let Some(source_path) = chart.source_path.as_ref() {
-                    if let Some(bgm_path) =
-                        dtx_core::resolve_bgm_path(source_path, &chart.chart)
-                    {
+                    if let Some(bgm_path) = dtx_core::resolve_bgm_path(source_path, &chart.chart) {
                         audio.pending.0 = Some(PendingBgm {
                             wav_slot: 0,
                             path: bgm_path.to_string_lossy().to_string(),
@@ -289,11 +286,11 @@ mod tests {
                 ..Default::default()
             },
             chips: vec![
-                Chip::with_wav(0, EChannel::BGM, 0.0, 1), // 0ms
-                Chip::new(0, EChannel::BassDrum, 0.0),    // 0ms
-                Chip::new(1, EChannel::Snare, 0.0),       // 2000ms
+                Chip::with_wav(0, EChannel::BGM, 0.0, 1),  // 0ms
+                Chip::new(0, EChannel::BassDrum, 0.0),     // 0ms
+                Chip::new(1, EChannel::Snare, 0.0),        // 2000ms
                 Chip::with_wav(2, EChannel::SE01, 0.0, 2), // 4000ms
-                Chip::new(3, EChannel::BassDrum, 0.0),    // 6000ms
+                Chip::new(3, EChannel::BassDrum, 0.0),     // 6000ms
             ],
             assets,
             ..Default::default()
@@ -307,10 +304,21 @@ mod tests {
         ChipTimeline::from_chart(&c, &bpm, &bar, 0, 8_000)
     }
 
-    fn seeded(target: i64) -> (HashSet<usize>, HashSet<usize>, HashSet<usize>, HashSet<usize>) {
+    fn seeded(
+        target: i64,
+    ) -> (
+        HashSet<usize>,
+        HashSet<usize>,
+        HashSet<usize>,
+        HashSet<usize>,
+    ) {
         let tl = timeline();
-        let (mut j, mut b, mut s, mut c) =
-            (HashSet::new(), HashSet::new(), HashSet::new(), HashSet::new());
+        let (mut j, mut b, mut s, mut c) = (
+            HashSet::new(),
+            HashSet::new(),
+            HashSet::new(),
+            HashSet::new(),
+        );
         seed_skip_sets(&tl, target, &mut j, &mut b, &mut s, &mut c);
         (j, b, s, c)
     }
@@ -318,7 +326,10 @@ mod tests {
     #[test]
     fn forward_seek_marks_everything_before_target() {
         let (j, b, s, _) = seeded(5_000);
-        assert!(j.contains(&1) && j.contains(&2), "drum chips before target judged");
+        assert!(
+            j.contains(&1) && j.contains(&2),
+            "drum chips before target judged"
+        );
         assert!(!j.contains(&4), "chip after target stays live");
         assert!(b.contains(&0), "bgm chip at 0 marked played");
         assert!(s.contains(&3), "se chip before target marked played");
@@ -328,7 +339,10 @@ mod tests {
     fn backward_seek_to_zero_clears_everything() {
         let (j, b, s, c) = seeded(0);
         assert!(j.is_empty());
-        assert!(b.contains(&0), "bgm chip exactly at target is governing → marked");
+        assert!(
+            b.contains(&0),
+            "bgm chip exactly at target is governing → marked"
+        );
         assert!(s.is_empty());
         assert!(c.is_empty());
     }

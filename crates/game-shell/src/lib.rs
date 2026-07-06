@@ -9,7 +9,7 @@ pub mod states;
 mod performance;
 mod transition;
 
-pub use states::{despawn_stage, AppState, EGameMode, PauseState, PracticeIntent, StageEntity};
+pub use states::{AppState, EGameMode, PauseState, PracticeIntent, StageEntity, despawn_stage};
 pub use transition::{request_transition, TransitionRequest};
 
 /// Root plugin. Registers AppState + transitions + Performance wiring.

@@ -1244,8 +1244,7 @@ fn song_select_navigation(
         if let Some(chart_idx) = selection.chart_index(&selection_state)
             && let Some(song) = db.songs.get(chart_idx)
         {
-            let practice =
-                keys.pressed(KeyCode::ShiftLeft) || keys.pressed(KeyCode::ShiftRight);
+            let practice = keys.pressed(KeyCode::ShiftLeft) || keys.pressed(KeyCode::ShiftRight);
             practice_intent.0 = practice;
             info!(
                 "SongSelect: selected {} ({}){}",
