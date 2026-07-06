@@ -10,4 +10,4 @@ pub use lanes::{
     channel_from_short, channel_short_name, default_lane_width, DisplayLane, LaneArrangement,
     DRUM_CHANNELS, MAX_LANE_WIDTH, MIN_LANE_WIDTH,
 };
-pub use presets::LanePreset;
+pub use presets::{arrangement_for, classic, nx_type_b, nx_type_d, LanePreset};
