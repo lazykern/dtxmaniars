@@ -44,6 +44,7 @@ pub mod resources;
 pub mod score;
 pub mod scroll;
 pub mod se_scheduler;
+pub mod seek;
 pub mod sound_bank;
 pub mod timeline;
 
@@ -101,6 +102,7 @@ pub fn plugin(app: &mut App) {
     .init_resource::<hud_cache::HudDisplayCache>()
     .init_resource::<dtx_input::midi::VirtualSource>()
     .init_resource::<timeline::ChipTimeline>()
+    .init_resource::<seek::PendingBgmStart>()
     .add_systems(Startup, (load_scroll_settings, load_drum_audio_settings))
     .add_systems(
         OnEnter(game_shell::AppState::Performance),
@@ -114,6 +116,7 @@ pub fn plugin(app: &mut App) {
     .add_message::<events::JudgmentEvent>()
     .add_message::<events::NoteMissed>()
     .add_message::<events::EmptyHit>()
+    .add_message::<seek::SeekToChartTime>()
     .init_resource::<perf_common::PerformanceStageState>()
     .configure_sets(
         FixedUpdate,
@@ -134,6 +137,20 @@ pub fn plugin(app: &mut App) {
             .chain()
             .run_if(in_state(game_shell::AppState::Performance))
             // Freeze the gameplay clock while paused.
+            .run_if(in_state(game_shell::PauseState::Running)),
+    )
+    .add_systems(
+        FixedUpdate,
+        seek::apply_seek_system
+            .before(dtx_timing::update_audio_clock_system)
+            .run_if(in_state(game_shell::AppState::Performance)),
+    )
+    .add_systems(
+        FixedUpdate,
+        seek::start_pending_bgm
+            .after(seek::apply_seek_system)
+            .before(dtx_timing::update_audio_clock_system)
+            .run_if(in_state(game_shell::AppState::Performance))
             .run_if(in_state(game_shell::PauseState::Running)),
     )
     .add_plugins((
