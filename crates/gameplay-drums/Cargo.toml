@@ -16,6 +16,7 @@ bevy_kira_audio = { workspace = true }
 dtx-core = { workspace = true }
 dtx-config = { workspace = true }
 dtx-input = { workspace = true }
+dtx-layout = { path = "../dtx-layout" }
 dtx-scoring = { workspace = true }
 dtx-timing = { workspace = true }
 dtx-audio = { workspace = true }
