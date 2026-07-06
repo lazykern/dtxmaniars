@@ -69,6 +69,7 @@ fn build_app() -> App {
     .init_resource::<gameplay_drums::resources::TimingLineCrossed>()
     .init_resource::<gameplay_drums::timeline::ChipTimeline>()
     .init_resource::<gameplay_drums::seek::PendingBgmStart>()
+    .init_resource::<gameplay_drums::seek::LastSeekFrom>()
     .add_message::<game_shell::TransitionRequest>()
     .add_message::<gameplay_drums::seek::SeekToChartTime>()
     .add_systems(

@@ -48,6 +48,13 @@ pub struct PendingBgm {
     pub start_seconds: f64,
 }
 
+/// Chart time the clock held immediately before the most recent applied
+/// seek. `track_attempt_stats` reads it to record a finished attempt's
+/// end point: `apply_seek_system` runs at the top of the tick, so by the
+/// time stats run (after judge) the clock already holds the new position.
+#[derive(Resource, Default, Debug, Clone, Copy)]
+pub struct LastSeekFrom(pub Option<i64>);
+
 /// Rebuild all skip-sets for playback positioned at `target_ms`.
 ///
 /// - `judged`: every chip strictly before the target in the judgement
@@ -121,6 +128,7 @@ pub struct SeekState<'w> {
     pub crossed: ResMut<'w, TimingLineCrossed>,
     pub start_ms: ResMut<'w, GameStartMs>,
     pub clock: ResMut<'w, GameplayClock>,
+    pub last_seek_from: ResMut<'w, LastSeekFrom>,
 }
 
 pub fn apply_seek_system(
@@ -220,6 +228,7 @@ pub fn apply_seek_system(
     }
 
     // 5. Jump the clock last; next measured BGM position re-snaps it.
+    state.last_seek_from.0 = Some(state.clock.current_ms);
     state.clock.seek(resolved);
     info!(
         "seek: target={} resolved={} (snap {:?})",

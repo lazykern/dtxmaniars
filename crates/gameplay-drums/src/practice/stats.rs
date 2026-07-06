@@ -1,10 +1,16 @@
 //! Per-attempt section stats: accumulate judgements between seeks.
 //!
 //! An attempt spans seek-to-seek. On each `SeekToChartTime` the running
-//! attempt is finalized into history (ordered before the seek applies,
-//! so `clock.current_ms` is still the pre-seek time) and a fresh one
-//! starts at the seek's `attempt_start_ms`. Pre-roll chips (judged
-//! before the attempt start in chart time) are excluded.
+//! attempt is finalized into history and a fresh one starts at the
+//! seek's `attempt_start_ms`. Pre-roll chips (judged before the attempt
+//! start in chart time) are excluded.
+//!
+//! Runs after `apply_seek_system` (via `.after(judge_lane_hit_system)`,
+//! which is itself transitively after `apply_seek_system`), so by the
+//! time this runs the clock already holds the post-seek position. The
+//! finished attempt's end point is instead read from
+//! [`crate::seek::LastSeekFrom`], which `apply_seek_system` sets to the
+//! pre-seek clock value before jumping.
 
 use bevy::prelude::*;
 use dtx_scoring::JudgmentKind;
@@ -21,7 +27,6 @@ pub(super) fn plugin(app: &mut App) {
         FixedUpdate,
         track_attempt_stats
             .after(crate::judge::judge_lane_hit_system)
-            .before(crate::seek::apply_seek_system)
             .run_if(in_state(AppState::Performance))
             .run_if(resource_exists::<PracticeSession>),
     );
@@ -56,6 +61,7 @@ pub fn track_attempt_stats(
     mut seeks: MessageReader<SeekToChartTime>,
     timeline: Res<ChipTimeline>,
     clock: Res<GameplayClock>,
+    mut last_seek_from: ResMut<crate::seek::LastSeekFrom>,
     mut session: ResMut<PracticeSession>,
     mut combo: ResMut<Combo>,
 ) {
@@ -77,7 +83,8 @@ pub fn track_attempt_stats(
         session.current_attempt.combo = 0;
     }
     if let Some(seek) = seeks.read().last() {
-        let end_ms = clock.current_ms; // pre-seek (ordered before apply)
+        // Pre-seek clock, captured by apply_seek_system earlier this tick.
+        let end_ms = last_seek_from.0.take().unwrap_or(clock.current_ms);
         let next_start = seek.attempt_start_ms.unwrap_or(seek.target_ms);
         session.roll_attempt(end_ms, next_start);
         // Fresh attempt = fresh visible combo.

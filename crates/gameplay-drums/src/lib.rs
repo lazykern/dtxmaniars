@@ -105,6 +105,7 @@ pub fn plugin(app: &mut App) {
     .init_resource::<dtx_input::midi::VirtualSource>()
     .init_resource::<timeline::ChipTimeline>()
     .init_resource::<seek::PendingBgmStart>()
+    .init_resource::<seek::LastSeekFrom>()
     .add_systems(Startup, (load_scroll_settings, load_drum_audio_settings))
     .add_systems(
         OnEnter(game_shell::AppState::Performance),
