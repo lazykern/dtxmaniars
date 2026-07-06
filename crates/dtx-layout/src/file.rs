@@ -138,6 +138,52 @@ impl LanesSection {
     }
 }
 
+pub const LATEST_VERSION: u32 = 1;
+
+/// Whole layout.toml. Plan 2 adds `scene: SceneSection` for HUD widgets —
+/// the schema is intentionally a struct (not just lanes) from day one.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct LayoutFile {
+    #[serde(default)]
+    pub version: u32,
+    #[serde(default)]
+    pub lanes: LanesSection,
+}
+
+impl Default for LayoutFile {
+    fn default() -> Self {
+        Self {
+            version: LATEST_VERSION,
+            lanes: LanesSection::default(),
+        }
+    }
+}
+
+/// Parse raw TOML, running the version migration chain. Best-effort on
+/// newer-than-known versions (parse what matches, warn).
+pub fn parse_with_migrations(raw: &str) -> LayoutFile {
+    let mut file: LayoutFile = match toml::from_str(raw) {
+        Ok(f) => f,
+        Err(e) => {
+            eprintln!("dtx-layout: parse failed: {e}; using defaults");
+            return LayoutFile::default();
+        }
+    };
+    if file.version > LATEST_VERSION {
+        eprintln!(
+            "dtx-layout: layout.toml version {} newer than supported {}; best-effort load",
+            file.version, LATEST_VERSION
+        );
+        return file;
+    }
+    #[allow(clippy::single_match)]
+    match file.version {
+        0 => file.version = 1,
+        _ => {}
+    }
+    file
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -237,5 +283,59 @@ mod tests {
         let arr = crate::presets::nx_type_d();
         let section = LanesSection::from_arrangement(&arr);
         assert_eq!(section.resolve(), arr);
+    }
+
+    #[test]
+    fn layout_file_round_trip() {
+        let file = LayoutFile {
+            version: LATEST_VERSION,
+            lanes: LanesSection::from_arrangement(&crate::presets::nx_type_b()),
+        };
+        let toml_str = toml::to_string_pretty(&file).unwrap();
+        let back: LayoutFile = toml::from_str(&toml_str).unwrap();
+        assert_eq!(back, file);
+    }
+
+    #[test]
+    fn missing_file_loads_defaults() {
+        let loaded = crate::load(std::path::Path::new("/nonexistent/layout.toml"));
+        assert_eq!(loaded.lanes.resolve(), crate::presets::classic());
+    }
+
+    #[test]
+    fn corrupt_file_loads_defaults() {
+        let dir = std::env::temp_dir().join("dtx-layout-test-corrupt");
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("layout.toml");
+        std::fs::write(&path, "this is [ not toml").unwrap();
+        let loaded = crate::load(&path);
+        assert_eq!(loaded.lanes.resolve(), crate::presets::classic());
+    }
+
+    #[test]
+    fn save_then_load_round_trips() {
+        let dir = std::env::temp_dir().join("dtx-layout-test-save");
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("layout.toml");
+        let file = LayoutFile {
+            version: LATEST_VERSION,
+            lanes: LanesSection::from_arrangement(&crate::presets::nx_type_d()),
+        };
+        crate::save(&path, &file).unwrap();
+        let loaded = crate::load(&path);
+        assert_eq!(loaded, file);
+    }
+
+    #[test]
+    fn version_zero_migrates_to_latest() {
+        let loaded: LayoutFile = parse_with_migrations("[lanes]\npreset = \"classic\"\n");
+        assert_eq!(loaded.version, LATEST_VERSION);
+    }
+
+    #[test]
+    fn newer_version_still_parses_best_effort() {
+        let loaded: LayoutFile =
+            parse_with_migrations("version = 999\n[lanes]\npreset = \"nx-type-b\"\n");
+        assert_eq!(loaded.lanes.preset, crate::presets::LanePreset::NxTypeB);
     }
 }
