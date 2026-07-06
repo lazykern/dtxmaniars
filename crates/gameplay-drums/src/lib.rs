@@ -107,7 +107,14 @@ pub fn plugin(app: &mut App) {
     .init_resource::<timeline::ChipTimeline>()
     .init_resource::<seek::PendingBgmStart>()
     .init_resource::<seek::LastSeekFrom>()
-    .add_systems(Startup, (load_scroll_settings, load_drum_audio_settings))
+    .add_systems(
+        Startup,
+        (
+            load_scroll_settings,
+            load_drum_audio_settings,
+            load_lane_arrangement,
+        ),
+    )
     .add_systems(
         OnEnter(game_shell::AppState::Performance),
         apply_config_on_enter.before(orchestrator::DrumsEnterSet),
@@ -182,6 +189,12 @@ pub fn plugin(app: &mut App) {
         stage_end::plugin,
         practice::plugin,
     ));
+}
+
+/// Load the user's lane arrangement from layout.toml (defaults on absence).
+fn load_lane_arrangement(mut lanes: ResMut<lanes::Lanes>) {
+    let file = dtx_layout::load(&dtx_layout::default_path());
+    lanes.0 = file.lanes.resolve();
 }
 
 fn load_scroll_settings(mut settings: ResMut<resources::ScrollSettings>) {
