@@ -124,6 +124,33 @@ fn active_loop_region_suppresses_end_of_stage() {
 }
 
 #[test]
+fn a_only_loop_region_does_not_suppress_end_of_stage() {
+    // Regression: an A marker with no B (end_ms == i64::MAX, not armed)
+    // must not suppress end-of-stage — the loop watcher only seeks back
+    // once armed, so suppressing here would softlock the stage.
+    let mut app = build_app();
+    enter_performance(&mut app, chart_with_measures(2));
+    app.world_mut().insert_resource(PracticeSession {
+        loop_region: Some(LoopRegion {
+            start_ms: 0,
+            end_ms: i64::MAX,
+        }),
+        ..Default::default()
+    });
+    {
+        let mut clock = app.world_mut().resource_mut::<GameplayClock>();
+        clock.start();
+        clock.sync(Some(50_000));
+    }
+    app.update();
+    let completion = app.world().resource::<DrumsStageCompletion>();
+    assert!(
+        completion.end_requested,
+        "an A-only (unarmed) loop must not suppress end-of-stage"
+    );
+}
+
+#[test]
 fn cleared_loop_region_restores_end_of_stage() {
     let mut app = build_app();
     enter_performance(&mut app, chart_with_measures(2));

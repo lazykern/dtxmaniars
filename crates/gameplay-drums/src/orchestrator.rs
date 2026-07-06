@@ -398,8 +398,10 @@ pub fn detect_end_of_stage(
         return;
     }
     // An armed A/B loop owns the stage end: the loop watcher seeks back
-    // before the chart end is ever reached "for real".
-    if practice.as_ref().is_some_and(|s| s.loop_region.is_some()) {
+    // before the chart end is ever reached "for real". An A-only region
+    // (B never set) is not armed and must not suppress end-of-stage, or
+    // playing to chart end softlocks the stage.
+    if practice.as_ref().is_some_and(|s| s.loop_armed()) {
         return;
     }
     if !clock.is_ready() {
