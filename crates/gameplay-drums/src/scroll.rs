@@ -12,7 +12,7 @@ use crate::events::NoteMissed;
 use crate::hud::HudRoot;
 use crate::interp::RenderClock;
 use crate::judge::{BarLengthChangeList, BpmChangeList, JudgedChips};
-use crate::lane_geometry::{chip_color, column_of, is_hollow};
+use crate::lanes::Lanes;
 use crate::lane_map::lane_of;
 use crate::lane_map::{lane_channel, LANE_COUNT};
 use crate::layout::PlayfieldLayout;
@@ -86,6 +86,7 @@ fn spawn_notes_system(
     layout: Res<PlayfieldLayout>,
     scroll: Res<ScrollSettings>,
     judged: Res<JudgedChips>,
+    lanes: Res<Lanes>,
     existing: Query<&Note>,
     hud_root: Query<Entity, With<HudRoot>>,
 ) {
@@ -126,13 +127,13 @@ fn spawn_notes_system(
         if target_ms < now - BACKFILL_MS || target_ms > now + spawn_window_ms {
             continue;
         }
-        let Some(col) = column_of(chip.channel) else {
+        let Some(col) = lanes.col_of(chip.channel) else {
             continue;
         };
         let top = top_for_note(target_ms, now, judge_y, px_per_ms);
         let left = layout.col_left(col) + 2.0;
-        let color = chip_color(chip.channel);
-        let hollow = is_hollow(chip.channel);
+        let color = lanes.chip_color(chip.channel);
+        let hollow = lanes.is_hollow(chip.channel);
 
         let mut note_cmd = commands.spawn((
             Note {
@@ -194,6 +195,7 @@ fn scroll_notes_system(
 fn reposition_notes_on_layout_change(
     mode: Res<EGameMode>,
     layout: Res<PlayfieldLayout>,
+    lanes: Res<Lanes>,
     mut notes: Query<(&Note, &mut Node), With<NoteVisual>>,
 ) {
     if *mode != EGameMode::Drums {
@@ -203,13 +205,13 @@ fn reposition_notes_on_layout_change(
         let Some(channel) = lane_channel(note.lane) else {
             continue;
         };
-        let Some(col) = column_of(channel) else {
+        let Some(col) = lanes.col_of(channel) else {
             continue;
         };
         node.left = Val::Px(layout.col_left(col) + 2.0);
         node.width = Val::Px(layout.note_width(col));
         node.height = Val::Px(layout.note_height());
-        node.border = if is_hollow(channel) {
+        node.border = if lanes.is_hollow(channel) {
             UiRect::all(Val::Px(2.0 * layout.scale))
         } else {
             UiRect::ZERO
