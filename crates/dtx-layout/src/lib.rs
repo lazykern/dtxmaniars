@@ -10,9 +10,11 @@ use thiserror::Error;
 pub mod file;
 pub mod lanes;
 pub mod presets;
+pub mod scene;
 pub mod widgets;
 
 pub use file::{parse_with_migrations, LanesSection, LayoutFile, LATEST_VERSION};
+pub use scene::{default_instance, SceneSection, WidgetEntry};
 pub use lanes::{
     channel_from_short, channel_short_name, default_lane_width, DisplayLane, LaneArrangement,
     DRUM_CHANNELS, MAX_LANE_WIDTH, MIN_LANE_WIDTH,

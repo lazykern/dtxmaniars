@@ -9,6 +9,7 @@ use crate::lanes::{
     DRUM_CHANNELS, MAX_LANE_WIDTH, MIN_LANE_WIDTH,
 };
 use crate::presets::{arrangement_for, classic, LanePreset};
+use crate::scene::SceneSection;
 
 /// `[lanes]` section of layout.toml. All fields optional — absent = preset default.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
@@ -148,6 +149,8 @@ pub struct LayoutFile {
     pub version: u32,
     #[serde(default)]
     pub lanes: LanesSection,
+    #[serde(default)]
+    pub scene: SceneSection,
 }
 
 impl Default for LayoutFile {
@@ -155,6 +158,7 @@ impl Default for LayoutFile {
         Self {
             version: LATEST_VERSION,
             lanes: LanesSection::default(),
+            scene: SceneSection::default(),
         }
     }
 }
@@ -290,6 +294,7 @@ mod tests {
         let file = LayoutFile {
             version: LATEST_VERSION,
             lanes: LanesSection::from_arrangement(&crate::presets::nx_type_b()),
+            scene: SceneSection::default(),
         };
         let toml_str = toml::to_string_pretty(&file).unwrap();
         let back: LayoutFile = toml::from_str(&toml_str).unwrap();
@@ -320,6 +325,7 @@ mod tests {
         let file = LayoutFile {
             version: LATEST_VERSION,
             lanes: LanesSection::from_arrangement(&crate::presets::nx_type_d()),
+            scene: SceneSection::default(),
         };
         crate::save(&path, &file).unwrap();
         let loaded = crate::load(&path);
