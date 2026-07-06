@@ -104,7 +104,6 @@ pub fn seed_skip_sets(
 #[derive(SystemParam)]
 pub struct SeekAudio<'w> {
     pub audio: Res<'w, Audio>,
-    pub settings: Res<'w, DrumAudioSettings>,
     pub sound_bank: Res<'w, dtx_audio::ChartSoundBank>,
     pub sources: Res<'w, Assets<KiraAudioSource>>,
     pub bgm: ResMut<'w, dtx_audio::BgmHandle>,
