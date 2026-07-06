@@ -234,6 +234,7 @@ fn result_input(keys: Res<ButtonInput<KeyCode>>, mut requests: MessageWriter<Tra
 
 fn save_result_then_despawn(
     commands: Commands,
+    practice: Option<Res<gameplay_drums::practice::PracticeSession>>,
     score: Res<Score>,
     combo: Res<Combo>,
     counts: Res<JudgmentCounts>,
@@ -243,6 +244,12 @@ fn save_result_then_despawn(
     mut store: ResMut<ScoreStoreResource>,
     query: Query<Entity, With<ResultEntity>>,
 ) {
+    // Practice runs are never persisted (no ScoreStore entry, no
+    // score.ini update) — only the UI teardown happens.
+    if practice.is_some() {
+        despawn_stage::<ResultEntity>(commands, query);
+        return;
+    }
     let title = chart
         .chart
         .metadata

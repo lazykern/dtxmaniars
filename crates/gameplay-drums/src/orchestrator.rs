@@ -391,9 +391,15 @@ pub fn detect_end_of_stage(
     mut scoring: ResMut<DrumScoring>,
     counts: Res<JudgmentCounts>,
     _combo: Res<Combo>,
+    practice: Option<Res<crate::practice::PracticeSession>>,
     mut requests: MessageWriter<TransitionRequest>,
 ) {
     if completion.end_requested {
+        return;
+    }
+    // An armed A/B loop owns the stage end: the loop watcher seeks back
+    // before the chart end is ever reached "for real".
+    if practice.as_ref().is_some_and(|s| s.loop_region.is_some()) {
         return;
     }
     if !clock.is_ready() {
