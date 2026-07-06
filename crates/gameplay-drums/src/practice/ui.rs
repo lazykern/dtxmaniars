@@ -90,6 +90,8 @@ fn spawn_transport(
 ) {
     let theme = Theme::default();
     let bpm = chart.chart.metadata.bpm.unwrap_or(120.0);
+    // WidgetKind::PracticeTransport is registry-only in v1: this bar is
+    // bottom-anchored, so anchor-aware movement is deferred to the editor plan.
     commands
         .spawn((
             TransportRoot,

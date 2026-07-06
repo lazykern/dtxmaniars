@@ -141,6 +141,10 @@ fn spawn_hud(
         ))
         .id();
 
+    // Playfield (backboard, hit line, key caps, notes) stays parented to `root`:
+    // moving/scaling it as a widget needs PlayfieldLayout to take an origin
+    // offset, deferred to a later plan. WidgetKind::Playfield exists in the
+    // registry only so the editor can list it (drag disabled there in v1).
     commands.entity(root).with_children(|root| {
         root.spawn((
             PlayfieldBackboard,
