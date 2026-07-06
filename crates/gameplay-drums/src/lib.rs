@@ -19,6 +19,7 @@ pub mod components;
 pub mod damage_level;
 pub mod derived;
 pub mod drum_groups;
+pub mod editor;
 pub mod drums_perf;
 pub mod events;
 pub mod gauge;
@@ -190,6 +191,7 @@ pub fn plugin(app: &mut App) {
         perf_hotkeys::plugin,
         stage_end::plugin,
         practice::plugin,
+        editor::plugin,
     ));
 }
 

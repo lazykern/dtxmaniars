@@ -24,7 +24,8 @@ pub(super) fn plugin(app: &mut App) {
             capture_key_to_lane_input
                 .after(bevy::input::InputSystems)
                 .run_if(in_state(game_shell::AppState::Performance))
-                .run_if(in_state(game_shell::PauseState::Running)),
+                .run_if(in_state(game_shell::PauseState::Running))
+                .run_if(crate::editor::editor_closed),
         )
         .add_systems(
             FixedUpdate,

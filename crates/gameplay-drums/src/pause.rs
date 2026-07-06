@@ -51,7 +51,9 @@ pub(super) fn plugin(app: &mut App) {
         .add_systems(OnExit(AppState::Performance), force_running)
         .add_systems(
             Update,
-            toggle_pause.run_if(in_state(AppState::Performance)),
+            toggle_pause
+                .run_if(in_state(AppState::Performance))
+                .run_if(crate::editor::editor_closed),
         )
         .add_systems(OnEnter(PauseState::Paused), (pause_chart_audio, spawn_overlay))
         .add_systems(OnExit(PauseState::Paused), (resume_chart_audio, despawn_overlay))
