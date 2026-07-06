@@ -12,6 +12,11 @@ fn default_layouts_have_zero_offset_for_parity() {
             (0.0, 0.0),
             "{k:?} default offset must be 0 (parity)"
         );
+        assert_eq!(
+            l.get(k).z,
+            0,
+            "{k:?} default z must be 0 so applied stacking == original paint order"
+        );
     }
 }
 

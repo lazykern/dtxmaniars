@@ -9,13 +9,15 @@ use crate::widgets::{
 };
 
 /// Default instance for a kind (offset 0 ⇒ today's on-screen position via the
-/// container-at-origin technique). z spreads widgets; practice widgets hidden in play.
+/// container-at-origin technique). z stays 0 for every kind so the applied
+/// stacking collapses to spawn/tree order — byte-identical to the pre-registry
+/// paint order, keeping runtime chips/beat-lines (z 0 on HudRoot) in front of
+/// the text widgets exactly as before. The editor sets non-zero z only when the
+/// user reorders. Practice widgets are hidden in play.
 pub fn default_instance(kind: WidgetKind) -> WidgetInstance {
-    let (z, vis_play, vis_practice) = match kind {
-        WidgetKind::Playfield => (0, true, true),
-        WidgetKind::FrameChrome => (1, true, true),
-        WidgetKind::PracticeTransport => (90, false, true),
-        _ => (10, true, true),
+    let (vis_play, vis_practice) = match kind {
+        WidgetKind::PracticeTransport => (false, true),
+        _ => (true, true),
     };
     WidgetInstance {
         kind,
@@ -24,7 +26,7 @@ pub fn default_instance(kind: WidgetKind) -> WidgetInstance {
         origin: Anchor9::TopLeft,
         offset: (0.0, 0.0),
         scale: 1.0,
-        z,
+        z: 0,
         visible_play: vis_play,
         visible_practice: vis_practice,
     }

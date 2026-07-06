@@ -59,6 +59,9 @@ fn spawn_widget_container(commands: &mut Commands, root: Entity, kind: WidgetKin
             },
             ZIndex(0),
             Visibility::Inherited,
+            // Full-screen transparent overlay: never absorb pointer events, so
+            // the plan-3 editor can pick widgets/playfield beneath it.
+            Pickable::IGNORE,
         ))
         .id();
     commands.entity(root).add_child(container);
