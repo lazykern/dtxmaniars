@@ -15,6 +15,8 @@ use gameplay_drums::practice::session::{LoopRegion, PracticeSession};
 use gameplay_drums::resources::{
     ActiveChart, BgmAdjustState, Combo, GameStartMs, GameplayClock, JudgmentCounts, Score,
 };
+use gameplay_drums::se_scheduler::PlayedSeChips;
+use gameplay_drums::seek::SeekToChartTime;
 use gameplay_drums::timeline::build_chip_timeline;
 
 fn chart_with_measures(n: u32) -> Chart {
@@ -173,6 +175,81 @@ fn loop_watcher_seeks_back_to_region_start() {
     // is unclamped): chip 0 sits exactly at A (2000ms), chip 2 exactly at B
     // (6000ms) — neither is strictly before A, so both stay live post-seek.
     let judged = &app.world().resource::<JudgedChips>().0;
-    assert!(!judged.contains(&0), "chip at A (2000ms) is live, not seeded");
-    assert!(!judged.contains(&2), "chip at B (6000ms) is live, not seeded");
+    assert!(
+        !judged.contains(&0),
+        "chip at A (2000ms) is live, not seeded"
+    );
+    assert!(
+        !judged.contains(&2),
+        "chip at B (6000ms) is live, not seeded"
+    );
+}
+
+fn send_seek(app: &mut App, target_ms: i64) {
+    app.world_mut()
+        .resource_mut::<Messages<SeekToChartTime>>()
+        .write(SeekToChartTime {
+            target_ms,
+            snap: None,
+            attempt_start_ms: None,
+        });
+}
+
+#[test]
+fn forward_seek_seeds_skip_sets_and_jumps_clock() {
+    let mut app = build_app();
+    enter_performance(&mut app, chart_with_measures(8));
+    {
+        let mut clock = app.world_mut().resource_mut::<GameplayClock>();
+        clock.start();
+        clock.sync(Some(0));
+    }
+    send_seek(&mut app, 9_000);
+    app.update();
+
+    assert_eq!(app.world().resource::<GameplayClock>().current_ms, 9_000);
+    let judged = &app.world().resource::<JudgedChips>().0;
+    // Chips 0..=3 land before 9000ms at default 120 BPM (measure=2000ms).
+    assert!(judged.contains(&0) && judged.contains(&3));
+    assert!(!judged.contains(&4), "chips past target stay live");
+}
+
+#[test]
+fn backward_seek_prunes_skip_sets() {
+    let mut app = build_app();
+    enter_performance(&mut app, chart_with_measures(8));
+    {
+        let mut clock = app.world_mut().resource_mut::<GameplayClock>();
+        clock.start();
+        clock.sync(Some(0));
+    }
+    send_seek(&mut app, 9_000);
+    app.update();
+    send_seek(&mut app, 0);
+    app.update();
+
+    assert_eq!(app.world().resource::<GameplayClock>().current_ms, 0);
+    assert!(
+        app.world().resource::<JudgedChips>().0.is_empty(),
+        "backward seek must un-mark judged chips"
+    );
+    assert!(app.world().resource::<PlayedSeChips>().0.is_empty());
+}
+
+#[test]
+fn seek_is_inert_without_practice_in_normal_play() {
+    // Regression guard: with no PracticeSession and no seek messages,
+    // a normal stage run is untouched by the new systems.
+    let mut app = build_app();
+    enter_performance(&mut app, chart_with_measures(2));
+    {
+        let mut clock = app.world_mut().resource_mut::<GameplayClock>();
+        clock.start();
+        clock.sync(Some(10_000));
+    }
+    app.update();
+    assert!(
+        app.world().resource::<DrumsStageCompletion>().end_requested,
+        "normal end-of-stage unchanged"
+    );
 }
