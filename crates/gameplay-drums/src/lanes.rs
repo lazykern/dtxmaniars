@@ -44,14 +44,9 @@ impl Lanes {
     }
 
     fn lane_base_color(&self, i: usize) -> (f32, f32, f32) {
-        self.0.lanes[i].color.unwrap_or_else(|| {
-            let primary = self.0.lanes[i].primary;
-            let classic = dtx_layout::classic();
-            classic
-                .lane_index_of(primary)
-                .and_then(|ci| classic.lanes[ci].color)
-                .unwrap_or((1.0, 1.0, 1.0))
-        })
+        self.0.lanes[i]
+            .color
+            .unwrap_or_else(|| classic_channel_color(self.0.lanes[i].primary))
     }
 
     /// Column base color as a Bevy `Color`.
@@ -85,6 +80,25 @@ impl Lanes {
     /// filled primary sharing their lane.
     pub fn is_hollow(&self, channel: EChannel) -> bool {
         self.0.is_secondary(channel)
+    }
+}
+
+/// Classic per-channel base color (matches `dtx_layout::classic()` lane colors),
+/// used as the fallback when a custom lane has no explicit color. Const lookup,
+/// no allocation (called per-chip in the note-spawn hot path).
+fn classic_channel_color(ch: EChannel) -> (f32, f32, f32) {
+    match ch {
+        EChannel::LeftCymbal => (0.945, 0.247, 0.725),
+        EChannel::HiHatClose | EChannel::HiHatOpen => (0.000, 0.541, 1.000),
+        EChannel::LeftPedal | EChannel::LeftBassDrum => (1.000, 0.353, 0.627),
+        EChannel::Snare => (0.941, 0.824, 0.000),
+        EChannel::HighTom => (0.157, 0.765, 0.157),
+        EChannel::BassDrum => (0.588, 0.353, 0.941),
+        EChannel::LowTom => (0.882, 0.176, 0.176),
+        EChannel::FloorTom => (1.000, 0.659, 0.000),
+        EChannel::Cymbal => (1.000, 0.471, 0.000),
+        EChannel::RideCymbal => (0.000, 0.541, 1.000),
+        _ => (1.0, 1.0, 1.0),
     }
 }
 

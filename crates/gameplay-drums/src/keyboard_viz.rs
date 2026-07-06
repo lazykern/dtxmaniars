@@ -22,7 +22,9 @@ pub(super) fn plugin(app: &mut App) {
         Update,
         (
             flash_key_caps_on_hit,
-            respawn_key_caps_on_lanes_change.run_if(resource_changed::<crate::lanes::Lanes>),
+            respawn_key_caps_on_lanes_change
+                .after(crate::layout::PlayfieldLayoutSync)
+                .run_if(resource_changed::<crate::lanes::Lanes>),
             apply_key_cap_layout.run_if(resource_changed::<PlayfieldLayout>),
         )
             .run_if(in_state(AppState::Performance)),
@@ -67,7 +69,7 @@ pub fn spawn_key_caps(
     theme: &dtx_ui::theme::Theme,
 ) {
     let cap_h = layout.key_cap_height();
-    for col in 0..lanes.count() {
+    for col in 0..lanes.count().min(layout.col_count()) {
         let rim = lanes.column_color(col);
         commands.entity(parent).with_children(|row| {
             row.spawn((

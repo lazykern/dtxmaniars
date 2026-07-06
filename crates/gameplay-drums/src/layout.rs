@@ -7,6 +7,11 @@ use game_shell::AppState;
 
 use crate::lanes::Lanes;
 
+/// System set for the playfield-layout rebuild, so consumers that read column
+/// geometry can order themselves after it within Update.
+#[derive(SystemSet, Debug, Clone, PartialEq, Eq, Hash)]
+pub struct PlayfieldLayoutSync;
+
 pub const REF_JUDGE_Y: f32 = 620.0;
 pub const REF_BACKBOARD_PAD: f32 = 12.0;
 /// Flush to the backboard's top pad so the playfield fills the screen top
@@ -86,11 +91,13 @@ impl PlayfieldLayout {
     }
 
     pub fn col_left(&self, col: usize) -> f32 {
-        (self.ref_strip_left() + self.cols[col].0) * self.scale
+        let off = self.cols.get(col).map(|c| c.0).unwrap_or(0.0);
+        (self.ref_strip_left() + off) * self.scale
     }
 
     pub fn col_width(&self, col: usize) -> f32 {
-        self.cols[col].1 * self.scale
+        let w = self.cols.get(col).map(|c| c.1).unwrap_or(0.0);
+        w * self.scale
     }
 
     pub fn strip_left(&self) -> f32 {
@@ -177,6 +184,7 @@ pub(super) fn plugin(app: &mut App) {
         .add_systems(
             Update,
             sync_playfield_layout
+                .in_set(PlayfieldLayoutSync)
                 .run_if(in_state(AppState::Performance).or_else(in_state(AppState::SongLoading))),
         );
 }

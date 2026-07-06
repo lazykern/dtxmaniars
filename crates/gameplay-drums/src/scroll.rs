@@ -130,6 +130,9 @@ fn spawn_notes_system(
         let Some(col) = lanes.col_of(chip.channel) else {
             continue;
         };
+        if col >= layout.col_count() {
+            continue;
+        }
         let top = top_for_note(target_ms, now, judge_y, px_per_ms);
         let left = layout.col_left(col) + 2.0;
         let color = lanes.chip_color(chip.channel);
