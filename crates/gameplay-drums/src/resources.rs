@@ -251,6 +251,19 @@ impl Default for ScrollSettings {
     }
 }
 
+/// Audio playback rate (1.0 = native). Practice rate control writes it;
+/// the gameplay clock advances by `dt * rate` so chart-time math and
+/// judge windows stay in chart-ms. Distinct from
+/// `ScrollSettings::play_speed` (the DTXManiaNX chart-time compressor).
+#[derive(Resource, Debug, Clone, Copy)]
+pub struct AudioRate(pub f64);
+
+impl Default for AudioRate {
+    fn default() -> Self {
+        Self(1.0)
+    }
+}
+
 /// Drum hit audio settings from `dtx-config`.
 #[derive(Resource, Debug, Clone, Copy)]
 pub struct DrumAudioSettings {
@@ -594,7 +607,7 @@ impl AccuracyHistory {
 
 #[cfg(test)]
 mod tests {
-    use super::{AccuracyHistory, GameplayClock, JudgmentCounts, ScrollSettings};
+    use super::{AccuracyHistory, AudioRate, GameplayClock, JudgmentCounts, ScrollSettings};
 
     #[test]
     fn achievement_pct_empty_is_full() {
@@ -805,5 +818,11 @@ mod tests {
         let mut h = AccuracyHistory::default();
         h.record(3, 88.0);
         assert_eq!(h.samples[3], Some(88.0));
+    }
+
+    #[test]
+    fn rate_default_is_native() {
+        let r = AudioRate::default();
+        assert!((r.0 - 1.0).abs() < f64::EPSILON);
     }
 }

@@ -90,6 +90,7 @@ pub fn plugin(app: &mut App) {
     .init_resource::<resources::ShowTimingLines>()
     .init_resource::<resources::JudgmentCounts>()
     .init_resource::<resources::ScrollSettings>()
+    .init_resource::<resources::AudioRate>()
     .init_resource::<resources::GameplayClock>()
     .init_resource::<resources::DrumGameplaySettings>()
     .init_resource::<resources::DrumAudioSettings>()
@@ -255,6 +256,7 @@ fn load_drum_audio_settings(
 fn sync_gameplay_clock(
     audio_clock: Res<dtx_timing::AudioClock>,
     start_ms: Res<resources::GameStartMs>,
+    rate: Res<resources::AudioRate>,
     time: Res<Time<Fixed>>,
     mut gameplay_clock: ResMut<resources::GameplayClock>,
 ) {
@@ -263,7 +265,7 @@ fn sync_gameplay_clock(
     let chart_ms = audio_clock
         .current_ms
         .map(|pos| start_ms.0.saturating_add(pos));
-    gameplay_clock.tick(time.delta_secs_f64(), chart_ms);
+    gameplay_clock.tick(time.delta_secs_f64() * rate.0, chart_ms);
 }
 
 mod midi_consumer {
