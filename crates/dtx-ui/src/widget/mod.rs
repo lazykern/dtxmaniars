@@ -3,6 +3,7 @@
 pub mod album_art;
 pub mod combo_display;
 pub mod density_graph;
+pub mod density_strip;
 pub mod difficulty_grid;
 pub mod frame_chrome;
 pub mod gauge_bar;
