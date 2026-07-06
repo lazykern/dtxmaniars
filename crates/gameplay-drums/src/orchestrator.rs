@@ -53,7 +53,7 @@ use crate::drums_perf::{DrumsDangerState, DrumsFillingEffect, DrumsPadState};
 use crate::judge::{BarLengthChangeList, BpmChangeList, JudgedChips};
 use crate::resources::{
     ActiveChart, ActiveDrumSounds, BgmAdjustState, Combo, DrumGameplaySettings, DrumScoring,
-    FastSlowCount, GameStartMs, GameplayClock, JudgmentCounts, Score,
+    FastSlowCount, GameStartMs, GameplayClock, JudgmentCounts, Score, SkillValue,
 };
 use dtx_timing::math::ChartTiming;
 
@@ -215,6 +215,7 @@ pub fn enter_derive_from_chart(
     mut bar_changes: ResMut<BarLengthChangeList>,
     mut gameplay_clock: ResMut<GameplayClock>,
     mut derived: ResMut<ChartDerived>,
+    mut skill: ResMut<SkillValue>,
 ) {
     let has_bgm = crate::bgm_scheduler::chart_has_bgm_chips(&chart.chart)
         || chart
@@ -240,6 +241,8 @@ pub fn enter_derive_from_chart(
         &bar_changes,
         drum_chip_count as u32,
     );
+    skill.current = 0.0;
+    skill.max = derived.max_skill;
 }
 
 /// On enter: seed BGM playback state (played list, primary chip, recovery,
@@ -486,6 +489,7 @@ mod tests {
             .init_resource::<BarLengthChangeList>()
             .init_resource::<GameplayClock>()
             .init_resource::<crate::derived::ChartDerived>()
+            .init_resource::<SkillValue>()
             .init_resource::<crate::resources::CurrentEmptyHitTemplates>()
             .init_resource::<crate::resources::ActiveDrumSounds>()
             .init_resource::<crate::se_scheduler::PlayedSeChips>()

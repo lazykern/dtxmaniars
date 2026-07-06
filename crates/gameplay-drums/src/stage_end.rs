@@ -26,27 +26,33 @@ struct StageBanner;
 #[derive(Resource, Default)]
 struct BannerTimer(f32);
 
+/// Last performance outcome, consumed by result persistence.
+#[derive(Resource, Debug, Default, Clone, Copy)]
+pub struct LastStageOutcome {
+    pub cleared: bool,
+}
+
 pub(super) fn plugin(app: &mut App) {
     app.init_resource::<BannerTimer>()
+        .init_resource::<LastStageOutcome>()
+        .add_systems(OnEnter(AppState::Performance), reset_stage_outcome)
         .add_systems(
             Update,
             detect_stage_failure.run_if(in_state(AppState::Performance)),
         )
         .add_systems(OnEnter(AppState::StageClear), spawn_clear_banner)
         .add_systems(OnEnter(AppState::StageFailed), spawn_failed_banner)
-        .add_systems(
-            OnExit(AppState::StageClear),
-            despawn_banner,
-        )
-        .add_systems(
-            OnExit(AppState::StageFailed),
-            despawn_banner,
-        )
+        .add_systems(OnExit(AppState::StageClear), despawn_banner)
+        .add_systems(OnExit(AppState::StageFailed), despawn_banner)
         .add_systems(
             Update,
             advance_banner
                 .run_if(in_state(AppState::StageClear).or_else(in_state(AppState::StageFailed))),
         );
+}
+
+fn reset_stage_outcome(mut outcome: ResMut<LastStageOutcome>) {
+    outcome.cleared = false;
 }
 
 /// While playing, a drained gauge sends us to the failure banner immediately.
@@ -66,12 +72,22 @@ fn detect_stage_failure(
     }
 }
 
-fn spawn_clear_banner(commands: Commands, timer: ResMut<BannerTimer>) {
+fn spawn_clear_banner(
+    commands: Commands,
+    timer: ResMut<BannerTimer>,
+    mut outcome: ResMut<LastStageOutcome>,
+) {
+    outcome.cleared = true;
     let theme = Theme::default();
     spawn_banner(commands, timer, "STAGE CLEAR", theme.accent);
 }
 
-fn spawn_failed_banner(commands: Commands, timer: ResMut<BannerTimer>) {
+fn spawn_failed_banner(
+    commands: Commands,
+    timer: ResMut<BannerTimer>,
+    mut outcome: ResMut<LastStageOutcome>,
+) {
+    outcome.cleared = false;
     let theme = Theme::default();
     spawn_banner(commands, timer, "STAGE FAILED", theme.judgment_miss);
 }

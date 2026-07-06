@@ -70,7 +70,7 @@ pub fn spawn_difficulty_grid(parent: &mut ChildSpawnerCommands, theme: &Theme) {
                     Node {
                         width: Val::Px(110.0),
                         flex_direction: FlexDirection::Column,
-                        justify_content: JustifyContent::Center,
+                        row_gap: Val::Px(2.0),
                         padding: UiRect::all(Val::Px(6.0)),
                         ..default()
                     },
@@ -100,7 +100,9 @@ pub fn spawn_difficulty_grid(parent: &mut ChildSpawnerCommands, theme: &Theme) {
                         DifficultySlotLabel(i),
                         Node {
                             width: Val::Percent(100.0),
-                            padding: UiRect::axes(Val::Px(6.0), Val::Px(1.0)),
+                            height: Val::Px(18.0),
+                            align_items: AlignItems::Center,
+                            padding: UiRect::horizontal(Val::Px(6.0)),
                             ..default()
                         },
                         BackgroundColor(theme.difficulty_color(i as u8)),

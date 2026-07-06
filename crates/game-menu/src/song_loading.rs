@@ -145,8 +145,10 @@ fn start_load(
     mut task: ResMut<ChartParseTask>,
     mut bank: ResMut<dtx_audio::ChartSoundBank>,
     mut progress: ResMut<LoadingProgress>,
+    mut cancel: ResMut<CancelRequested>,
 ) {
     progress.0 = 0.0;
+    cancel.0 = false;
     bank.clear();
     if let Some(path) = selected.0.as_ref() {
         *phase = LoadPhase::Parsing;

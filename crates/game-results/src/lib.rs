@@ -4,7 +4,8 @@ use bevy::prelude::*;
 use dtx_scoring::{compute_chart_hash, Rank, ScoreEntry, ScoreStore};
 use dtx_ui::{theme::Theme, ThemeResource};
 use game_shell::{despawn_stage, request_transition, AppState, TransitionRequest};
-use gameplay_drums::resources::{ActiveChart, Combo, JudgmentCounts, Score};
+use gameplay_drums::resources::{ActiveChart, Combo, DrumScoring, JudgmentCounts, Score};
+use gameplay_drums::stage_end::LastStageOutcome;
 
 #[derive(Component)]
 pub struct ResultEntity;
@@ -47,6 +48,26 @@ pub fn plugin(app: &mut App) {
 const STAGGER_MS: f32 = 120.0;
 const FADE_DURATION_MS: f32 = 300.0;
 
+fn pct(count: u32, total: u32) -> f32 {
+    if total == 0 {
+        0.0
+    } else {
+        count as f32 / total as f32 * 100.0
+    }
+}
+
+fn result_rank(counts: &JudgmentCounts, max_combo: u32, total: u32) -> Rank {
+    Rank::from_bocud_counts(
+        total,
+        counts.perfect,
+        counts.great,
+        counts.good,
+        counts.ok,
+        counts.miss,
+        max_combo,
+    )
+}
+
 fn spawn_result(
     mut commands: Commands,
     theme: Res<ThemeResource>,
@@ -54,6 +75,7 @@ fn spawn_result(
     combo: Res<Combo>,
     counts: Res<JudgmentCounts>,
     chart: Res<ActiveChart>,
+    scoring: Res<DrumScoring>,
 ) {
     commands.insert_resource(ResultReveal { elapsed_ms: 0.0 });
 
@@ -75,9 +97,8 @@ fn spawn_result(
         .dlevel
         .map(|v| format!("{:.2}", dtx_core::display_dlevel(v)))
         .unwrap_or_else(|| "--".into());
-    let total = counts.total();
-    let pct = counts.perfect_pct();
-    let rank = Rank::from_perfect_pct(pct);
+    let total = scoring.total_notes;
+    let rank = result_rank(&counts, combo.max, total);
     let t = theme.0;
 
     let stat_rows: Vec<(String, f32)> = vec![
@@ -89,13 +110,41 @@ fn spawn_result(
         (format!("Rank      {rank}"), STAGGER_MS * 5.0),
         (String::new(), STAGGER_MS * 6.0),
         (
-            format!("Perfect   {} ({pct:.1}%)", counts.perfect),
+            format!(
+                "Perfect   {} ({:.1}%)",
+                counts.perfect,
+                pct(counts.perfect, total)
+            ),
             STAGGER_MS * 7.0,
         ),
-        (format!("Great     {}", counts.great), STAGGER_MS * 8.0),
-        (format!("Good      {}", counts.good), STAGGER_MS * 9.0),
-        (format!("Poor      {}", counts.ok), STAGGER_MS * 10.0),
-        (format!("Miss      {}", counts.miss), STAGGER_MS * 11.0),
+        (
+            format!(
+                "Great     {} ({:.1}%)",
+                counts.great,
+                pct(counts.great, total)
+            ),
+            STAGGER_MS * 8.0,
+        ),
+        (
+            format!(
+                "Good      {} ({:.1}%)",
+                counts.good,
+                pct(counts.good, total)
+            ),
+            STAGGER_MS * 9.0,
+        ),
+        (
+            format!("Poor      {} ({:.1}%)", counts.ok, pct(counts.ok, total)),
+            STAGGER_MS * 10.0,
+        ),
+        (
+            format!(
+                "Miss      {} ({:.1}%)",
+                counts.miss,
+                pct(counts.miss, total)
+            ),
+            STAGGER_MS * 11.0,
+        ),
         (format!("Total     {total}"), STAGGER_MS * 12.0),
         (String::new(), STAGGER_MS * 13.0),
         ("ESC / ENTER → Song Select".to_string(), STAGGER_MS * 14.0),
@@ -189,6 +238,8 @@ fn save_result_then_despawn(
     combo: Res<Combo>,
     counts: Res<JudgmentCounts>,
     chart: Res<ActiveChart>,
+    scoring: Res<DrumScoring>,
+    outcome: Res<LastStageOutcome>,
     mut store: ResMut<ScoreStoreResource>,
     query: Query<Entity, With<ResultEntity>>,
 ) {
@@ -204,13 +255,8 @@ fn save_result_then_despawn(
         .artist
         .clone()
         .unwrap_or_else(|| "Unknown".into());
-    let total = counts.total();
-    let pct = if total == 0 {
-        0.0
-    } else {
-        counts.perfect as f32 / total as f32 * 100.0
-    };
-    let rank = Rank::from_perfect_pct(pct);
+    let total = scoring.total_notes;
+    let rank = result_rank(&counts, combo.max, total);
 
     let chart_hash = chart
         .source_path
@@ -265,9 +311,7 @@ fn save_result_then_despawn(
             bgm_adjust,
             date_time: dtx_scoring::score_ini::format_datetime(played_at),
         };
-        // Cleared when the player reached the end with any judged chips and
-        // did not fail — approximated here as "produced a rank with chips".
-        let cleared = total > 0;
+        let cleared = outcome.cleared && total > 0;
         if let Err(e) = dtx_scoring::score_ini::write_result(&ini_path, &record, cleared) {
             warn!("game-results: score.ini write failed: {e}");
         }
@@ -278,16 +322,22 @@ fn save_result_then_despawn(
 
 #[cfg(test)]
 mod tests {
-    use dtx_scoring::Rank;
+    use super::*;
 
     #[test]
-    fn rank_s_at_95_plus() {
-        assert_eq!(Rank::from_perfect_pct(100.0), Rank::S);
-        assert_eq!(Rank::from_perfect_pct(95.0), Rank::S);
+    fn result_rank_uses_bocud_xg_formula() {
+        let counts = JudgmentCounts {
+            perfect: 90,
+            great: 10,
+            good: 0,
+            ok: 0,
+            miss: 0,
+        };
+        assert_eq!(result_rank(&counts, 100, 100), Rank::SS);
     }
 
     #[test]
-    fn rank_e_below_25() {
-        assert_eq!(Rank::from_perfect_pct(0.0), Rank::E);
+    fn pct_zero_total_is_zero() {
+        assert_eq!(pct(1, 0), 0.0);
     }
 }

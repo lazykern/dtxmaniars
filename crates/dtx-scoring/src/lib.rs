@@ -58,15 +58,20 @@ pub fn classify(delta_ms: i32) -> JudgmentKind {
     JudgmentKind::Miss
 }
 
-/// Rank letter computed from perfect percentage (0..100).
+/// DTXManiaNX result rank.
 ///
-/// Thresholds match DTXManiaNX ConfigIni defaults:
-/// S ≥ 95, A ≥ 85, B ≥ 70, C ≥ 50, D ≥ 25, else E.
+/// XG rank formula is `P%*0.85 + G%*0.35 + combo%*0.15` with thresholds
+/// SS/S/A/B/C/D/E = 95/80/73/63/53/45/0.
+/// Reference: `CScoreIni.cs:1307-1327`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum Rank {
+    /// No judgeable total.
+    Unknown,
     /// Best.
-    S,
+    SS,
     /// Excellent.
+    S,
+    /// Very good.
     A,
     /// Good.
     B,
@@ -79,7 +84,7 @@ pub enum Rank {
 }
 
 impl Rank {
-    /// Compute rank from perfect percentage.
+    /// Legacy perfect-only rank kept for older callers/tests.
     pub fn from_perfect_pct(pct: f32) -> Self {
         match pct {
             p if p >= 95.0 => Rank::S,
@@ -90,11 +95,45 @@ impl Rank {
             _ => Rank::E,
         }
     }
+
+    /// Compute DTXManiaNX XG rank from result counts.
+    pub fn from_bocud_counts(
+        total: u32,
+        perfect: u32,
+        great: u32,
+        good: u32,
+        poor: u32,
+        miss: u32,
+        max_combo: u32,
+    ) -> Self {
+        if total == 0 {
+            return Rank::Unknown;
+        }
+        let judged = perfect + great + good + poor + miss;
+        if judged == 0 {
+            return Rank::SS;
+        }
+        let denom = judged as f64;
+        let rate = 100.0 * perfect as f64 / denom * 0.85
+            + 100.0 * great as f64 / denom * 0.35
+            + 100.0 * max_combo as f64 / denom * 0.15;
+        match rate {
+            r if r >= 95.0 => Rank::SS,
+            r if r >= 80.0 => Rank::S,
+            r if r >= 73.0 => Rank::A,
+            r if r >= 63.0 => Rank::B,
+            r if r >= 53.0 => Rank::C,
+            r if r >= 45.0 => Rank::D,
+            _ => Rank::E,
+        }
+    }
 }
 
 impl std::fmt::Display for Rank {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let s = match self {
+            Rank::Unknown => "UNKNOWN",
+            Rank::SS => "SS",
             Rank::S => "S",
             Rank::A => "A",
             Rank::B => "B",
@@ -334,6 +373,21 @@ mod tests {
     fn rank_e_below_25() {
         assert_eq!(Rank::from_perfect_pct(24.9), Rank::E);
         assert_eq!(Rank::from_perfect_pct(0.0), Rank::E);
+    }
+
+    #[test]
+    fn bocud_rank_all_perfect_full_combo_is_ss() {
+        assert_eq!(Rank::from_bocud_counts(100, 100, 0, 0, 0, 0, 100), Rank::SS);
+    }
+
+    #[test]
+    fn bocud_rank_counts_great_and_combo() {
+        assert_eq!(Rank::from_bocud_counts(100, 80, 20, 0, 0, 0, 100), Rank::S);
+    }
+
+    #[test]
+    fn bocud_rank_zero_total_is_unknown() {
+        assert_eq!(Rank::from_bocud_counts(0, 0, 0, 0, 0, 0, 0), Rank::Unknown);
     }
 
     fn fake_entry(score: u32, chart_hash: &str) -> ScoreEntry {

@@ -190,7 +190,7 @@ impl JudgmentCounts {
 
 /// Running "Skills by Song" + max possible skill. Updated as judgments land.
 ///
-/// Computed via [`crate::skill::calculate_skill_new`] × chart_level × 0.33.
+/// Computed via [`crate::skill::calculate_skill_new`] × chart_level × 0.20.
 #[derive(Resource, Default, Debug, Clone, Copy)]
 pub struct SkillValue {
     pub current: f64,
@@ -563,7 +563,9 @@ pub struct AccuracyHistory {
 
 impl Default for AccuracyHistory {
     fn default() -> Self {
-        Self { samples: [None; 128] }
+        Self {
+            samples: [None; 128],
+        }
     }
 }
 

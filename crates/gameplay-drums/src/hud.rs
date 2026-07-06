@@ -21,7 +21,6 @@ use crate::lane_geometry;
 
 pub use crate::lane_map::LANE_COUNT;
 use crate::layout::{ref_hud_right_x, ref_phrase_x, PlayfieldLayout, STRIP_REF_CENTERED_LEFT};
-use crate::playfield_viz;
 use crate::resources::{
     AccuracyHistory, ActiveChart, Combo, FastSlowCount, GameplayClock, JudgmentCounts, Score,
     ScrollSettings, SkillValue,
@@ -183,7 +182,6 @@ fn spawn_hud(
         GRAPH_REF_H,
     );
 
-    playfield_viz::spawn_lane_receptors(&mut commands, root, &layout);
     keyboard_viz::spawn_key_caps(&mut commands, root, &layout, &t);
     judgment_popup::spawn_judgment_popup(&mut commands, root, &t);
 }

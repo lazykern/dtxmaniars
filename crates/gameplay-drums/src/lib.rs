@@ -40,7 +40,6 @@ pub mod pause;
 pub mod perf_hotkeys;
 pub mod stage_end;
 pub mod perf_common;
-pub mod playfield_viz;
 pub mod resources;
 pub mod score;
 pub mod scroll;
@@ -141,7 +140,6 @@ pub fn plugin(app: &mut App) {
         gauge::plugin,
         hud::plugin,
         keyboard_viz::plugin,
-        playfield_viz::plugin,
         orchestrator::plugin,
         autoplay::plugin,
         hit_sound::plugin,

@@ -1088,18 +1088,25 @@ fn update_left_cluster(
 fn render_difficulty_grid(
     grid: Res<DifficultyGridData>,
     theme: Res<ThemeResource>,
-    mut panels: Query<(
-        &DifficultySlotPanel,
-        &mut BorderColor,
-        &mut BoxShadow,
-        &mut BackgroundColor,
-    )>,
+    mut panels: Query<
+        (
+            &DifficultySlotPanel,
+            &mut BorderColor,
+            &mut BoxShadow,
+            &mut BackgroundColor,
+        ),
+        Without<DifficultySlotLabel>,
+    >,
     mut labels: Query<
-        (&DifficultySlotLabel, &mut Text),
-        (Without<DifficultySlotLevel>, Without<DifficultySlotScore>),
+        (&DifficultySlotLabel, &mut Text, &mut BackgroundColor),
+        (
+            Without<DifficultySlotLevel>,
+            Without<DifficultySlotScore>,
+            Without<DifficultySlotPanel>,
+        ),
     >,
     mut levels: Query<
-        (&DifficultySlotLevel, &mut Text),
+        (&DifficultySlotLevel, &mut Text, &mut TextColor),
         (Without<DifficultySlotLabel>, Without<DifficultySlotScore>),
     >,
     mut scores: Query<
@@ -1121,11 +1128,24 @@ fn render_difficulty_grid(
             t.stage_panel_bg.with_alpha(0.35)
         };
     }
-    for (label, mut text) in &mut labels {
-        *text = Text::new(grid.slots[label.0].label.clone());
+    for (label, mut text, mut bg) in &mut labels {
+        let slot = &grid.slots[label.0];
+        *text = Text::new(slot.label.clone());
+        let base = t.difficulty_color(label.0 as u8);
+        bg.0 = if slot.present {
+            base
+        } else {
+            base.with_alpha(0.3)
+        };
     }
-    for (level, mut text) in &mut levels {
-        *text = Text::new(level_text(grid.slots[level.0].level));
+    for (level, mut text, mut color) in &mut levels {
+        let slot = &grid.slots[level.0];
+        *text = Text::new(level_text(slot.level));
+        color.0 = if slot.present {
+            t.text_primary
+        } else {
+            t.text_primary.with_alpha(0.3)
+        };
     }
     for (score, mut text) in &mut scores {
         *text = Text::new(score_text(&grid.slots[score.0]));

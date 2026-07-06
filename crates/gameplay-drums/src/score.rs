@@ -13,8 +13,9 @@
 use bevy::prelude::*;
 
 use crate::components::LastJudgment;
+use crate::derived::ChartDerived;
 use crate::events::{JudgmentEvent, NoteMissed};
-use crate::resources::{Combo, DrumScoring, JudgmentCounts, Score};
+use crate::resources::{Combo, DrumScoring, FastSlowCount, JudgmentCounts, Score, SkillValue};
 use dtx_scoring::xg_score::xg_drum_score_delta;
 use dtx_scoring::JudgmentKind;
 
@@ -34,6 +35,9 @@ pub(crate) fn update_score_system(
     mut combo: ResMut<Combo>,
     mut counts: ResMut<JudgmentCounts>,
     mut last: ResMut<LastJudgment>,
+    mut fast_slow: ResMut<FastSlowCount>,
+    mut skill: ResMut<SkillValue>,
+    derived: Res<ChartDerived>,
 ) {
     for ev in events.read() {
         match ev.kind {
@@ -43,6 +47,12 @@ pub(crate) fn update_score_system(
             JudgmentKind::Poor => counts.ok += 1,
             JudgmentKind::Miss => counts.miss += 1,
         }
+        if ev.delta_ms < 0 {
+            fast_slow.fast += 1;
+        } else if ev.delta_ms > 0 {
+            fast_slow.slow += 1;
+        }
+
         // Combo: P/G/Good keep, Poor and Miss break (NX).
         if keeps_combo(ev.kind) {
             combo.current += 1;
@@ -64,19 +74,36 @@ pub(crate) fn update_score_system(
         scoring.accum += delta;
         score.0 = scoring.accum.round().max(0.0) as u64;
 
+        update_skill_value(
+            &mut skill,
+            &counts,
+            scoring.total_notes,
+            combo.max,
+            derived.chart_level,
+        );
         last.0 = Some(*ev);
     }
 }
 
 fn update_miss_system(
     mut missed: MessageReader<NoteMissed>,
+    scoring: Res<DrumScoring>,
     mut combo: ResMut<Combo>,
     mut counts: ResMut<JudgmentCounts>,
     mut last: ResMut<LastJudgment>,
+    mut skill: ResMut<SkillValue>,
+    derived: Res<ChartDerived>,
 ) {
     for ev in missed.read() {
         counts.miss += 1;
         combo.current = 0;
+        update_skill_value(
+            &mut skill,
+            &counts,
+            scoring.total_notes,
+            combo.max,
+            derived.chart_level,
+        );
         last.0 = Some(JudgmentEvent {
             lane: ev.lane,
             kind: JudgmentKind::Miss,
@@ -93,6 +120,26 @@ fn keeps_combo(kind: JudgmentKind) -> bool {
         kind,
         JudgmentKind::Perfect | JudgmentKind::Great | JudgmentKind::Good
     )
+}
+
+fn update_skill_value(
+    skill: &mut SkillValue,
+    counts: &JudgmentCounts,
+    total_notes: u32,
+    max_combo: u32,
+    chart_level: f64,
+) {
+    let skill_pct = crate::skill::calculate_skill_new(
+        counts.perfect,
+        counts.great,
+        counts.good,
+        counts.ok,
+        counts.miss,
+        total_notes,
+        max_combo,
+        false,
+    );
+    skill.current = crate::skill::game_skill(skill_pct, chart_level, false);
 }
 
 #[cfg(test)]

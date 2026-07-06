@@ -5,7 +5,7 @@
 //!
 //! New formula (skill% in 0-100):
 //! ```text
-//! skill% = perfect% * 0.85 + great% * 0.30 + combo% * 0.15
+//! skill% = perfect% * 0.85 + great% * 0.35 + combo% * 0.15
 //! ```
 //!
 //! Old formula (Drums rate, decimal 0-1):
@@ -16,7 +16,7 @@
 //!
 //! Game skill (final number shown in HUD):
 //! ```text
-//! skill% × song_level × 0.33
+//! skill% × song_level × 0.20
 //! ```
 
 /// New skill formula (BocuD `tCalculatePlayingSkill`).
@@ -41,14 +41,15 @@ pub fn calculate_skill_new(
     }
     let _ = good;
     let _ = poor;
+    let judged = perfect + great + good + poor + miss;
     let perfect_pct = 100.0 * perfect as f64 / total as f64;
     let great_pct = 100.0 * great as f64 / total as f64;
-    let combo_pct = if total == (total - (perfect + great + good + poor + miss)) {
+    let combo_pct = if judged == 0 {
         0.0
     } else {
         100.0 * max_combo as f64 / total as f64
     };
-    let ret = perfect_pct * 0.85 + great_pct * 0.30 + combo_pct * 0.15;
+    let ret = perfect_pct * 0.85 + great_pct * 0.35 + combo_pct * 0.15;
     if b_auto_play {
         ret * 0.5
     } else {
@@ -84,7 +85,7 @@ pub fn calculate_skill_old(
 /// `skill_pct` = result of [`calculate_skill_new`] (0-100).
 /// `db_level` = chart difficulty level (e.g., 8.20 for MASTER).
 pub fn game_skill(skill_pct: f64, db_level: f64, b_auto_play: bool) -> f64 {
-    let ret = db_level * skill_pct * 0.01 * 0.33;
+    let ret = db_level * skill_pct * 0.01 * 0.20;
     if b_auto_play {
         ret * 0.5
     } else {
@@ -111,9 +112,9 @@ mod tests {
     #[test]
     fn new_skill_mixed() {
         // 50P, 30G, 10GO, 5OK, 5Miss, max combo 95.
-        // 50*0.85 + 30*0.30 + 95*0.15 = 42.5 + 9 + 14.25 = 65.75.
+        // 50*0.85 + 30*0.35 + 95*0.15 = 42.5 + 10.5 + 14.25 = 67.25.
         let s = calculate_skill_new(50, 30, 10, 5, 5, 100, 95, false);
-        assert!((s - 65.75).abs() < 0.01);
+        assert!((s - 67.25).abs() < 0.01);
     }
 
     #[test]
@@ -142,7 +143,7 @@ mod tests {
 
     #[test]
     fn game_skill_formula() {
-        let s = game_skill(65.75, 8.20, false);
-        assert!((s - 1.778).abs() < 0.01);
+        let s = game_skill(67.25, 8.20, false);
+        assert!((s - 1.103).abs() < 0.01);
     }
 }

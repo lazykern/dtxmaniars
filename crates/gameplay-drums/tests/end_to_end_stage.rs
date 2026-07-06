@@ -67,6 +67,7 @@ fn build_app() -> App {
     .init_resource::<gameplay_drums::resources::ActiveDrumSounds>()
     .init_resource::<gameplay_drums::se_scheduler::PlayedSeChips>()
     .init_resource::<gameplay_drums::resources::FastSlowCount>()
+    .init_resource::<gameplay_drums::resources::SkillValue>()
     .init_resource::<gameplay_drums::derived::ChartDerived>()
     .add_message::<game_shell::TransitionRequest>()
     .add_systems(
