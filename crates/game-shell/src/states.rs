@@ -94,3 +94,10 @@ pub fn despawn_stage<T: Component>(mut commands: Commands, query: Query<Entity, 
         commands.entity(entity).despawn();
     }
 }
+
+/// Set by song select when the player chooses Practice instead of a
+/// normal play; read on Performance enter to insert the practice
+/// session. Lives in game-shell so game-menu doesn't need gameplay
+/// internals to request practice.
+#[derive(Resource, Debug, Clone, Copy, Default)]
+pub struct PracticeIntent(pub bool);
