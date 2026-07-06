@@ -15,7 +15,9 @@ autoplay gameplay, persisted to a single user layout file.
 
 **In (v1):**
 - Lane arrangement layer: runtime `EChannel → DisplayLane` mapping, presets
-  (Classic, XG variants), custom reorder / per-lane width / merge / split.
+  (Classic, XG variants), custom reorder / per-lane width / merge / split, and
+  NX-style **hit groups** (judgment-side pad grouping, e.g. CY+RD shared,
+  HH/HHO/LC modes, LP/LBD/BD modes).
 - Layout editor overlay for the **gameplay scene only**.
 - Per-widget: drag (position), 9-point anchor/origin with proximity snap,
   uniform scale, show/hide, z-order. Mouse-first; keyboard nudge as convenience.
@@ -131,7 +133,9 @@ pub struct DisplayLane {
 pub struct LaneArrangement {          // Resource
     pub preset: LanePreset,           // Classic | XgA | XgB | Custom
     pub lanes: Vec<DisplayLane>,      // display order, variable count
-    pub map: HashMap<EChannel, LaneId>, // all 12 channels mapped
+    pub map: HashMap<EChannel, LaneId>, // all 12 channels mapped (DISPLAY axis)
+    pub hit_groups: Vec<Vec<EChannel>>, // JUDGMENT axis: each group = shared hit
+                                        // pool; channels absent = separate
 }
 
 pub struct WidgetSpawnCtx<'a> {
@@ -173,6 +177,7 @@ order = ["LC","HH","HHO","LP","SD","HT","BD","LT","FT","CY","RD"]  # 11 = HHO sp
 widths = { SD = 64.0, BD = 72.0 }   # only overrides listed
 map = { HHO = "HHO" }               # channel→lane overrides; ids new to `order`
                                      # imply new lanes (label/color derived from channel)
+groups = [["HH","HHO"], ["CY","RD"]] # hit groups (judgment); absent = all separate
 ```
 
 **Rules:**
@@ -197,14 +202,47 @@ confirm.
 Replaces compile-time `COLUMNS` / `LANE_ORDER` / `column_of()` consts in
 `gameplay-drums/src/lane_geometry.rs`.
 
+Modeled after DTXMania NX, which has **two orthogonal axes** (verified in
+`references/DTXmaniaNX-BocuD` — `eLaneType`/`eRDPosition` vs
+`eHHGroup`/`eFTGroup`/`eCYGroup`/`eBDGroup`):
+
+**Axis 1 — display mapping** (`lanes` + `map`): which lane each channel's chips
+draw in.
 - **Merge** = several channels map to the same `LaneId` (today's HHO→HH, LBD→BD
-  become data).
+  become data; NX LaneType-B's shared pedal lane, ride+crash shared lane, etc.).
 - **Split** = give a channel its own lane entry (e.g. HHO separate → 11 columns).
   Falls out of the model; no special case.
-- **Judgment untouched** — stays per-channel. Only display x-position and input
-  viz change.
-- Presets = const tables in `dtx-layout`: `Classic` (current 10-col NX order),
-  `XgA`/`XgB` (GITADORA XG orders from research notes). Every preset maps all 12
+- Free reorder + widths is a superset of NX's fixed Type A–D and RDPosition
+  presets.
+
+**Axis 2 — hit groups** (`hit_groups`): judgment-side pad grouping, NX
+semantics: a pad press resolves against the **nearest un-hit chip across all
+channels in its group** (e.g. `[CY, RD]` grouped → hitting the crash pad scores
+ride chips too). When two candidates are simultaneous, both are consumed.
+Ungrouped channels stay strictly per-channel. Display is unaffected — grouped
+channels may still draw in separate lanes, and channels sharing a display lane
+may still judge separately.
+- Generalized `Vec<Vec<EChannel>>` instead of NX's four fixed enums — expresses
+  every NX combination (HH-0..3, BD-0..3, FT-0/1, CY-0/1) plus arbitrary ones.
+- Editor UI curates it NX-style: dropdowns/toggles for the common families
+  (HH: LC/HH/HHO modes, Pedals: LP/LBD/BD modes, Toms: LT+FT, Cymbals: CY+RD)
+  writing into the generalized data.
+- **Per-song auto-relax (NX rule):** if the chart has zero chips of a channel
+  that a player's grouping splits out, the judge merges that channel into its
+  family group for this song (prevents dead pads on charts that never use the
+  split channel). Computed at chart load; never persisted.
+- **Scoring note:** grouping changes difficulty; score/replay records must
+  eventually store the active `hit_groups` (Phase 0 formats spec ties in here).
+  v1: scores save as today; flag recorded as a follow-up for Phase 0.
+
+**Rejected NX axis — destructive remap** (`eNumOfLanes` 10/9/6 rewrites chip
+channels at song load): our display-merge + hit-group combination reproduces
+the same player-facing result non-destructively, so we deliberately do not
+mutate chart data. NX's 9/6-lane modes become ordinary presets here.
+
+- Presets = const tables in `dtx-layout`: `Classic` (current 10-col NX order,
+  all separate), `XgA`/`XgB` (GITADORA XG orders from research notes), each
+  defining display order **and** default hit groups. Every preset maps all 12
   channels. Editing anything flips preset to `Custom`.
 
 **Refactor surface (gameplay-drums):**
@@ -216,6 +254,7 @@ Replaces compile-time `COLUMNS` / `LANE_ORDER` / `column_of()` consts in
 | `scroll.rs` | note x/w from const column | arrangement lookup |
 | `keyboard_viz.rs` | caps per const lane | iterate arrangement |
 | `lane_flush.rs`, pad chips, hit effects | const lookup | same arrangement lookup |
+| `judge.rs` | strictly per-channel nearest-chip | resolve across the pad's hit group: nearest un-hit chip over grouped channels, earliest wins, simultaneous ties consume both; per-song auto-relax |
 
 One system: `LaneArrangement` changed → recompute `PlayfieldLayout` → existing
 resize/reposition systems (notes already reposition on layout change) react.
@@ -345,7 +384,12 @@ confirm (save / discard / cancel).
 
 - **dtx-layout unit:** serde round-trip (full + minimal file); defaults merge;
   unknown-kind drop; migration chain; anchor math table (anchor × origin ×
-  space); clamps; preset completeness (every `EChannel` mapped in every preset).
+  space); clamps; preset completeness (every `EChannel` mapped in every preset;
+  hit-group entries reference valid channels, no channel in two groups).
+- **Judge + hit groups:** grouped pad hits other channel's chip; ungrouped pad
+  does not; earliest-of-two consumed; simultaneous pair both consumed; per-song
+  auto-relax merges chipless split channel; Classic preset (all separate)
+  byte-identical judgment to today's behavior.
 - **gameplay-drums integration:** spawn HUD from registry with a custom layout →
   assert node positions; mutate instance at runtime → node follows;
   `LaneArrangement` change → `PlayfieldLayout` recomputed and playfield-space
@@ -385,3 +429,8 @@ confirm (save / discard / cancel).
   survives future widget needs.
 - Editor gating via `LayoutEditorState` + `run_if` (we own input systems);
   hit-testing via bevy_picking UI backend.
+- Lane management = two axes per NX research: display mapping + hit groups
+  (generalized `Vec<Vec<EChannel>>`, NX-style curated UI). NX's destructive
+  `eNumOfLanes` chip-remap rejected — reproduced non-destructively.
+- Hit groups affect score comparability → record them with scores in Phase 0
+  formats spec (v1 saves scores as today).
