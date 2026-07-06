@@ -45,6 +45,7 @@ pub mod score;
 pub mod scroll;
 pub mod se_scheduler;
 pub mod sound_bank;
+pub mod timeline;
 
 use std::time::Duration;
 
@@ -99,10 +100,15 @@ pub fn plugin(app: &mut App) {
     .init_resource::<lane_map::LaneMap>()
     .init_resource::<hud_cache::HudDisplayCache>()
     .init_resource::<dtx_input::midi::VirtualSource>()
+    .init_resource::<timeline::ChipTimeline>()
     .add_systems(Startup, (load_scroll_settings, load_drum_audio_settings))
     .add_systems(
         OnEnter(game_shell::AppState::Performance),
         apply_config_on_enter.before(orchestrator::DrumsEnterSet),
+    )
+    .add_systems(
+        OnEnter(game_shell::AppState::Performance),
+        timeline::build_chip_timeline.after(orchestrator::DrumsEnterSet),
     )
     .add_message::<events::LaneHit>()
     .add_message::<events::JudgmentEvent>()
