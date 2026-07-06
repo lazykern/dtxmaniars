@@ -40,6 +40,7 @@ pub mod pause;
 pub mod perf_hotkeys;
 pub mod stage_end;
 pub mod perf_common;
+pub mod practice;
 pub mod resources;
 pub mod score;
 pub mod scroll;
@@ -176,6 +177,7 @@ pub fn plugin(app: &mut App) {
         pause::plugin,
         perf_hotkeys::plugin,
         stage_end::plugin,
+        practice::plugin,
     ));
 }
 

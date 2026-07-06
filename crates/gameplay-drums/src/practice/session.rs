@@ -1,0 +1,264 @@
+//! Practice session state: loop region, rate, snap, pre-roll, attempts.
+
+use bevy::prelude::*;
+
+use crate::resources::JudgmentCounts;
+use crate::timeline::{ChipTimeline, SnapDivisor};
+
+pub const RATE_MIN: f32 = 0.5;
+pub const RATE_MAX: f32 = 1.5;
+pub const RATE_STEP: f32 = 0.05;
+pub const MAX_ATTEMPT_HISTORY: usize = 20;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct LoopRegion {
+    pub start_ms: i64,
+    pub end_ms: i64,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum PrerollSetting {
+    OneBar,
+    Seconds(f32),
+    Off,
+}
+
+impl PrerollSetting {
+    pub fn label(self) -> String {
+        match self {
+            PrerollSetting::OneBar => "1 bar".into(),
+            PrerollSetting::Seconds(s) => format!("{s:.0}s"),
+            PrerollSetting::Off => "off".into(),
+        }
+    }
+
+    pub fn next(self) -> Self {
+        match self {
+            PrerollSetting::OneBar => PrerollSetting::Seconds(2.0),
+            PrerollSetting::Seconds(_) => PrerollSetting::Off,
+            PrerollSetting::Off => PrerollSetting::OneBar,
+        }
+    }
+}
+
+/// Resolve the actual seek target for an intended attempt start:
+/// back off by the configured pre-roll so the drummer gets ready-time.
+pub fn preroll_target(
+    timeline: &ChipTimeline,
+    preroll: PrerollSetting,
+    intent_ms: i64,
+) -> i64 {
+    match preroll {
+        PrerollSetting::Off => intent_ms,
+        PrerollSetting::Seconds(s) => (intent_ms - (s * 1000.0) as i64).max(0),
+        PrerollSetting::OneBar => {
+            timeline.bar_start_before((intent_ms - 1).max(0))
+        }
+    }
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct AttemptStats {
+    /// Attempt span start (the intent, not the pre-roll point). Chips
+    /// judged before this are pre-roll and excluded.
+    pub start_ms: i64,
+    pub counts: JudgmentCounts,
+    pub combo: u32,
+    pub max_combo: u32,
+    pub error_sum_ms: i64,
+    pub error_count: u32,
+}
+
+impl AttemptStats {
+    pub fn accuracy_pct(&self) -> f32 {
+        self.counts.achievement_pct()
+    }
+
+    pub fn mean_error_ms(&self) -> f32 {
+        if self.error_count == 0 {
+            0.0
+        } else {
+            self.error_sum_ms as f32 / self.error_count as f32
+        }
+    }
+
+    pub fn has_data(&self) -> bool {
+        self.counts.total() > 0
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct AttemptRecord {
+    pub start_ms: i64,
+    pub end_ms: i64,
+    pub rate: f32,
+    pub counts: JudgmentCounts,
+    pub max_combo: u32,
+    pub accuracy_pct: f32,
+    pub mean_error_ms: f32,
+}
+
+/// Present only while the stage runs in practice mode. Absence = normal
+/// play with zero behavior change.
+#[derive(Resource, Debug, Clone)]
+pub struct PracticeSession {
+    pub loop_region: Option<LoopRegion>,
+    pub rate: f32,
+    pub snap: SnapDivisor,
+    pub preroll: PrerollSetting,
+    pub current_attempt: AttemptStats,
+    pub attempt_history: Vec<AttemptRecord>,
+    /// Scrub cursor while paused (chart ms). None = cursor at playhead.
+    pub scrub_cursor_ms: Option<i64>,
+}
+
+impl Default for PracticeSession {
+    fn default() -> Self {
+        Self {
+            loop_region: None,
+            rate: 1.0,
+            snap: SnapDivisor::Bar,
+            preroll: PrerollSetting::OneBar,
+            current_attempt: AttemptStats::default(),
+            attempt_history: Vec::new(),
+            scrub_cursor_ms: None,
+        }
+    }
+}
+
+impl PracticeSession {
+    /// Step the rate by `dir` in RATE_STEP increments, clamped and
+    /// quantized so repeated stepping never accumulates float error.
+    pub fn step_rate(&mut self, dir: i8) {
+        let steps = (self.rate / RATE_STEP).round() as i32 + dir as i32;
+        self.rate = (steps as f32 * RATE_STEP).clamp(RATE_MIN, RATE_MAX);
+    }
+
+    /// Finalize the running attempt into history (skipped when it saw no
+    /// judgements) and start a fresh one at `next_start_ms`.
+    pub fn roll_attempt(&mut self, end_ms: i64, next_start_ms: i64) {
+        if self.current_attempt.has_data() {
+            let a = &self.current_attempt;
+            self.attempt_history.push(AttemptRecord {
+                start_ms: a.start_ms,
+                end_ms,
+                rate: self.rate,
+                counts: a.counts,
+                max_combo: a.max_combo,
+                accuracy_pct: a.accuracy_pct(),
+                mean_error_ms: a.mean_error_ms(),
+            });
+            if self.attempt_history.len() > MAX_ATTEMPT_HISTORY {
+                self.attempt_history.remove(0);
+            }
+        }
+        self.current_attempt = AttemptStats {
+            start_ms: next_start_ms,
+            ..Default::default()
+        };
+    }
+
+    /// Set the A marker; keeps the region valid (swap, min length is
+    /// enforced by the caller against bar data).
+    pub fn set_loop_start(&mut self, ms: i64) {
+        let end = self.loop_region.map(|r| r.end_ms);
+        self.loop_region = Some(match end {
+            Some(e) if e > ms => LoopRegion { start_ms: ms, end_ms: e },
+            _ => LoopRegion { start_ms: ms, end_ms: i64::MAX },
+        });
+    }
+
+    pub fn set_loop_end(&mut self, ms: i64) {
+        let start = self.loop_region.map(|r| r.start_ms).unwrap_or(0);
+        self.loop_region = Some(if ms > start {
+            LoopRegion { start_ms: start, end_ms: ms }
+        } else {
+            // B placed before A: swap.
+            LoopRegion { start_ms: ms, end_ms: start.max(ms + 1) }
+        });
+    }
+
+    /// True when a bounded loop region is armed.
+    pub fn loop_armed(&self) -> bool {
+        self.loop_region.is_some_and(|r| r.end_ms != i64::MAX)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn rate_step_quantized_and_clamped() {
+        let mut s = PracticeSession::default();
+        s.step_rate(-1);
+        assert!((s.rate - 0.95).abs() < 1e-6);
+        for _ in 0..40 {
+            s.step_rate(-1);
+        }
+        assert!((s.rate - RATE_MIN).abs() < 1e-6);
+        for _ in 0..40 {
+            s.step_rate(1);
+        }
+        assert!((s.rate - RATE_MAX).abs() < 1e-6);
+    }
+
+    #[test]
+    fn roll_attempt_records_history_and_resets() {
+        let mut s = PracticeSession::default();
+        s.current_attempt.start_ms = 4_000;
+        s.current_attempt.counts.perfect = 10;
+        s.current_attempt.max_combo = 10;
+        s.roll_attempt(8_000, 4_000);
+        assert_eq!(s.attempt_history.len(), 1);
+        assert_eq!(s.attempt_history[0].start_ms, 4_000);
+        assert_eq!(s.attempt_history[0].end_ms, 8_000);
+        assert!(!s.current_attempt.has_data());
+        assert_eq!(s.current_attempt.start_ms, 4_000);
+    }
+
+    #[test]
+    fn empty_attempt_not_recorded() {
+        let mut s = PracticeSession::default();
+        s.roll_attempt(1_000, 2_000);
+        assert!(s.attempt_history.is_empty());
+    }
+
+    #[test]
+    fn history_capped() {
+        let mut s = PracticeSession::default();
+        for i in 0..(MAX_ATTEMPT_HISTORY + 5) {
+            s.current_attempt.counts.perfect = 1;
+            s.roll_attempt(i as i64, 0);
+        }
+        assert_eq!(s.attempt_history.len(), MAX_ATTEMPT_HISTORY);
+    }
+
+    #[test]
+    fn loop_markers_swap_when_inverted() {
+        let mut s = PracticeSession::default();
+        s.set_loop_start(4_000);
+        s.set_loop_end(2_000);
+        let r = s.loop_region.unwrap();
+        assert!(r.start_ms < r.end_ms);
+        assert_eq!(r.start_ms, 2_000);
+    }
+
+    #[test]
+    fn loop_not_armed_until_both_markers() {
+        let mut s = PracticeSession::default();
+        assert!(!s.loop_armed());
+        s.set_loop_start(2_000);
+        assert!(!s.loop_armed());
+        s.set_loop_end(4_000);
+        assert!(s.loop_armed());
+    }
+
+    #[test]
+    fn mean_error_signed() {
+        let mut a = AttemptStats::default();
+        a.error_sum_ms = -30;
+        a.error_count = 10;
+        assert!((a.mean_error_ms() + 3.0).abs() < 1e-6);
+    }
+}
