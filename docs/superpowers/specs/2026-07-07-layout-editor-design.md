@@ -131,7 +131,7 @@ pub struct DisplayLane {
 }
 
 pub struct LaneArrangement {          // Resource
-    pub preset: LanePreset,           // Classic | XgA | XgB | Custom
+    pub preset: LanePreset,           // Classic | NxTypeB | NxTypeD | Custom
     pub lanes: Vec<DisplayLane>,      // display order, variable count
     pub map: HashMap<EChannel, LaneId>, // all 12 channels mapped (DISPLAY axis)
 }
@@ -242,10 +242,11 @@ channels at song load): our display-merge + hit-group combination reproduces
 the same player-facing result non-destructively, so we deliberately do not
 mutate chart data. NX's 9/6-lane modes become ordinary presets here.
 
-- Presets = const tables in `dtx-layout`: `Classic` (current 10-col NX order,
-  all separate), `XgA`/`XgB` (GITADORA XG orders from research notes), each
-  defining display order **and** default hit groups. Every preset maps all 12
-  channels. Editing anything flips preset to `Custom`.
+- Presets = tables in `dtx-layout`: `Classic` (current 10-col NX Type-A order),
+  `NxTypeB` (pedals share a lane, from the NX Type-B x-table), `NxTypeD`
+  (symmetric pedals-center, NX Type-D). Every preset maps all 12 channels.
+  Editing anything flips preset to `Custom`. (Free reorder covers the RDPosition
+  swap and any GITADORA-style order without dedicated presets.)
 
 **Refactor surface (gameplay-drums):**
 
