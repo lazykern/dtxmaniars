@@ -137,3 +137,42 @@ fn cleared_loop_region_restores_end_of_stage() {
         "practice without a loop region ends the stage normally"
     );
 }
+
+#[test]
+fn loop_watcher_seeks_back_to_region_start() {
+    let mut app = build_app();
+    // Register the watcher in front of the seek system.
+    app.add_systems(
+        Update,
+        gameplay_drums::practice::ab_loop::loop_watcher
+            .before(gameplay_drums::seek::apply_seek_system)
+            .run_if(in_state(AppState::Performance))
+            .run_if(resource_exists::<PracticeSession>),
+    );
+    enter_performance(&mut app, chart_with_measures(8));
+    app.world_mut().insert_resource(PracticeSession {
+        loop_region: Some(LoopRegion {
+            start_ms: 2_000,
+            end_ms: 6_000,
+        }),
+        preroll: gameplay_drums::practice::session::PrerollSetting::Off,
+        ..Default::default()
+    });
+    {
+        let mut clock = app.world_mut().resource_mut::<GameplayClock>();
+        clock.start();
+        clock.sync(Some(6_100));
+    }
+    app.update();
+    let clock = app.world().resource::<GameplayClock>();
+    assert_eq!(
+        clock.current_ms, 2_000,
+        "past region end the clock must land back on A"
+    );
+    // Chip timing here lands exactly on measure boundaries (`chip_target_ms`
+    // is unclamped): chip 0 sits exactly at A (2000ms), chip 2 exactly at B
+    // (6000ms) — neither is strictly before A, so both stay live post-seek.
+    let judged = &app.world().resource::<JudgedChips>().0;
+    assert!(!judged.contains(&0), "chip at A (2000ms) is live, not seeded");
+    assert!(!judged.contains(&2), "chip at B (6000ms) is live, not seeded");
+}
