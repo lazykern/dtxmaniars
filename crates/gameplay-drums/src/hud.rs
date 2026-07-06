@@ -17,10 +17,9 @@ use crate::components::LastJudgment;
 use crate::derived::ChartDerived;
 use crate::hud_cache::{set_text_if_changed, HudDisplayCache};
 use crate::keyboard_viz;
-use crate::lane_geometry;
 
 pub use crate::lane_map::LANE_COUNT;
-use crate::layout::{ref_hud_right_x, ref_phrase_x, PlayfieldLayout, STRIP_REF_CENTERED_LEFT};
+use crate::layout::PlayfieldLayout;
 use crate::resources::{
     AccuracyHistory, ActiveChart, Combo, FastSlowCount, GameplayClock, JudgmentCounts, Score,
     ScrollSettings, SkillValue,
@@ -149,25 +148,25 @@ fn spawn_hud(
         root,
         &t,
         s,
-        STRIP_REF_CENTERED_LEFT,
-        STRIP_REF_CENTERED_LEFT + lane_geometry::STRIP_REF_WIDTH,
+        layout.ref_strip_left(),
+        layout.ref_strip_left() + layout.ref_strip_width(),
     );
     score_detailed::spawn_score_detailed_panel(&mut commands, root, &t, s);
-    phrase_meter::spawn_phrase_meter(&mut commands, root, &t, s, ref_phrase_x());
+    phrase_meter::spawn_phrase_meter(&mut commands, root, &t, s, layout.ref_phrase_x());
     song_progress::spawn_song_progress(
         &mut commands,
         root,
         &t,
         s,
-        crate::layout::STRIP_REF_CENTERED_LEFT,
-        lane_geometry::STRIP_REF_WIDTH,
+        layout.ref_strip_left(),
+        layout.ref_strip_width(),
     );
     // SPEED lives in the left OPTIONS area (was clipping the CY/RD pads).
     playfield_speed::spawn_playfield_speed(&mut commands, root, &t, s, 24.0, 470.0);
-    let hud_right = ref_hud_right_x();
+    let hud_right = layout.ref_hud_right_x();
     now_playing::spawn_now_playing(&mut commands, root, &t, s, hud_right);
     // Combo centered on the recentered lane strip (was pinned to the right column).
-    let combo_ref_x = STRIP_REF_CENTERED_LEFT + lane_geometry::STRIP_REF_WIDTH / 2.0 - 180.0;
+    let combo_ref_x = layout.ref_strip_left() + layout.ref_strip_width() / 2.0 - 180.0;
     perf_combo::spawn_perf_combo(&mut commands, root, &t, s, combo_ref_x, 150.0);
     // Live accuracy graph fills the right column below the song card.
     let graph_x = hud_right + 40.0;

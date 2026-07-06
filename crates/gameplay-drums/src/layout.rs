@@ -214,17 +214,6 @@ fn sync_playfield_layout(
     *dirty = false;
 }
 
-/// TEMPORARY (removed in a later task): legacy free-fn shims for unmigrated callers.
-pub const STRIP_REF_CENTERED_LEFT: f32 = (REF_WIDTH - 558.0) / 2.0;
-
-pub fn ref_phrase_x() -> f32 {
-    STRIP_REF_CENTERED_LEFT + 558.0 + 15.0
-}
-
-pub fn ref_hud_right_x() -> f32 {
-    STRIP_REF_CENTERED_LEFT + 558.0 + 24.0
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;

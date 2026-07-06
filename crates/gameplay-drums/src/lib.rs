@@ -31,7 +31,6 @@ pub mod judge;
 pub mod keyboard_viz;
 pub mod phrase;
 pub mod skill;
-pub mod lane_geometry;
 pub mod lane_map;
 pub mod lanes;
 pub mod layout;

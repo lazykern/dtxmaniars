@@ -127,7 +127,7 @@ impl Theme {
     }
 
     /// Density-graph display lanes (LC HH LP SD HT BD LT FT CY), GITADORA order
-    /// (matches gameplay-drums lane_geometry::COLUMNS: HT before BD).
+    /// (matches gameplay-drums lanes.rs / dtx-layout classic(): HT before BD).
     pub fn lane_colors(&self) -> [Color; 9] {
         [
             Color::srgb(0.8, 0.2, 1.0),     // LC purple
