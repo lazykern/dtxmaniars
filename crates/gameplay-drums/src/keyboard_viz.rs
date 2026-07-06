@@ -5,7 +5,7 @@ use dtx_ui::theme::Theme;
 use game_shell::AppState;
 
 use crate::events::{JudgmentEvent, LaneHit};
-use crate::lane_geometry::{column_color, column_of, COLUMNS, COLUMN_COUNT};
+use crate::lanes::Lanes;
 use crate::lane_map::lane_channel;
 use crate::layout::PlayfieldLayout;
 
@@ -22,10 +22,29 @@ pub(super) fn plugin(app: &mut App) {
         Update,
         (
             flash_key_caps_on_hit,
+            respawn_key_caps_on_lanes_change.run_if(resource_changed::<crate::lanes::Lanes>),
             apply_key_cap_layout.run_if(resource_changed::<PlayfieldLayout>),
         )
             .run_if(in_state(AppState::Performance)),
     );
+}
+
+/// Lane count/order can change at runtime (layout editor); rebuild the row.
+fn respawn_key_caps_on_lanes_change(
+    mut commands: Commands,
+    lanes: Res<crate::lanes::Lanes>,
+    layout: Res<PlayfieldLayout>,
+    theme: Res<dtx_ui::theme::ThemeResource>,
+    caps: Query<Entity, With<KeyCap>>,
+    hud_root: Query<Entity, With<crate::hud::HudRoot>>,
+) {
+    let Ok(root) = hud_root.single() else {
+        return;
+    };
+    for e in &caps {
+        commands.entity(e).despawn();
+    }
+    spawn_key_caps(&mut commands, root, &layout, &lanes, &theme.0);
 }
 
 /// GITADORA-style pad: strong half-circle dome on top, near-flat base. A large
@@ -44,11 +63,12 @@ pub fn spawn_key_caps(
     commands: &mut Commands,
     parent: Entity,
     layout: &PlayfieldLayout,
+    lanes: &Lanes,
     theme: &dtx_ui::theme::Theme,
 ) {
     let cap_h = layout.key_cap_height();
-    for col in 0..COLUMN_COUNT {
-        let rim = column_color(col);
+    for col in 0..lanes.count() {
+        let rim = lanes.column_color(col);
         commands.entity(parent).with_children(|row| {
             row.spawn((
                 KeyCap { col: col as u8 },
@@ -67,7 +87,7 @@ pub fn spawn_key_caps(
                 BackgroundColor(Color::srgb(0.11, 0.11, 0.13)),
                 BorderColor::all(rim),
                 children![(
-                    Text::new(COLUMNS[col].label),
+                    Text::new(lanes.label(col).to_string()),
                     Theme::font(13.0 * layout.scale),
                     TextColor(theme.text_primary),
                 )],
@@ -79,6 +99,9 @@ pub fn spawn_key_caps(
 fn apply_key_cap_layout(layout: Res<PlayfieldLayout>, mut caps: Query<(&KeyCap, &mut Node)>) {
     for (cap, mut node) in &mut caps {
         let col = cap.col as usize;
+        if col >= layout.col_count() {
+            continue;
+        }
         node.left = Val::Px(layout.col_left(col));
         node.top = Val::Px(layout.key_viz_top());
         node.width = Val::Px(layout.col_width(col));
@@ -92,8 +115,9 @@ fn flash_key_caps_on_hit(
     mut lane_hits: MessageReader<LaneHit>,
     mut events: MessageReader<JudgmentEvent>,
     mut caps: Query<(&KeyCap, &mut BackgroundColor)>,
+    lanes: Res<Lanes>,
 ) {
-    let to_col = |lane: u8| lane_channel(lane).and_then(column_of);
+    let to_col = |lane: u8| lane_channel(lane).and_then(|ch| lanes.col_of(ch));
     // Immediate feedback on key press (input lane), mapped to its visual column.
     for hit in lane_hits.read() {
         let Some(col) = to_col(hit.lane) else {
@@ -114,7 +138,7 @@ fn flash_key_caps_on_hit(
         };
         for (cap, mut bg) in &mut caps {
             if cap.col as usize == col {
-                bg.0 = column_color(col).with_alpha(0.85);
+                bg.0 = lanes.column_color(col).with_alpha(0.85);
             }
         }
     }

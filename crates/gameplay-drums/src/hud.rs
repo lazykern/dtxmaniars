@@ -95,6 +95,7 @@ fn spawn_hud(
     mode: Res<EGameMode>,
     theme: Res<ThemeResource>,
     layout: Res<PlayfieldLayout>,
+    lanes: Res<crate::lanes::Lanes>,
     mut history: ResMut<AccuracyHistory>,
 ) {
     if *mode != EGameMode::Drums {
@@ -182,7 +183,7 @@ fn spawn_hud(
         GRAPH_REF_H,
     );
 
-    keyboard_viz::spawn_key_caps(&mut commands, root, &layout, &t);
+    keyboard_viz::spawn_key_caps(&mut commands, root, &layout, &lanes, &t);
     judgment_popup::spawn_judgment_popup(&mut commands, root, &t);
 }
 
