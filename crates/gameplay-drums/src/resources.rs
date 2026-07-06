@@ -553,6 +553,21 @@ impl GameplayClock {
             self.audio_synced = true;
         }
     }
+
+    /// Jump the clock to `ms` and keep running. Re-arms the first-audio
+    /// snap (`audio_synced = false`) so the next measured BGM position —
+    /// from the restarted stream — snaps the clock instead of being
+    /// dragged in by the bounded drift corrector.
+    pub fn seek(&mut self, ms: i64) {
+        if !self.started {
+            return;
+        }
+        self.current_ms = ms;
+        self.audio_ms = ms as f64;
+        self.visual_ms = ms as f64;
+        self.prev_visual_ms = ms as f64;
+        self.audio_synced = false;
+    }
 }
 
 /// Per-slot accuracy history for the live graph (128 song-position buckets).
@@ -737,6 +752,45 @@ mod tests {
         }
         // visual clock stays close to the judgement clock.
         assert!((clock.visual_ms() - clock.current_ms as f64).abs() < 25.0);
+    }
+
+    #[test]
+    fn seek_snaps_all_clock_fields() {
+        let mut clock = GameplayClock::default();
+        clock.start_wall_clock();
+        clock.tick(1.0 / 60.0, Some(0));
+        for _ in 0..30 {
+            clock.tick(1.0 / 60.0, None);
+        }
+
+        clock.seek(42_000);
+
+        assert_eq!(clock.current_ms, 42_000);
+        assert!((clock.visual_ms() - 42_000.0).abs() < f64::EPSILON);
+        assert!((clock.prev_visual_ms() - 42_000.0).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn seek_rearms_first_audio_snap() {
+        let mut clock = GameplayClock::default();
+        clock.start_audio_required();
+        clock.tick(1.0 / 60.0, Some(10_000));
+        assert!(!clock.is_waiting_for_audio());
+
+        clock.seek(42_000);
+
+        // Next measured position snaps the clock (no bounded drift fight),
+        // exactly like the first observation after stage start.
+        clock.tick(1.0 / 60.0, Some(42_180));
+        assert_eq!(clock.current_ms, 42_180);
+    }
+
+    #[test]
+    fn seek_on_unstarted_clock_is_noop() {
+        let mut clock = GameplayClock::default();
+        clock.seek(5_000);
+        assert_eq!(clock.current_ms, 0);
+        assert!(!clock.is_started());
     }
 
     #[test]
