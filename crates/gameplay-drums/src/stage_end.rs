@@ -56,11 +56,20 @@ fn reset_stage_outcome(mut outcome: ResMut<LastStageOutcome>) {
 }
 
 /// While playing, a drained gauge sends us to the failure banner immediately.
+/// Practice runs freeze the gauge every FixedUpdate tick
+/// (`practice::freeze_gauge_in_practice`), but this system reads it in
+/// `Update`, ungated — a damage system could set `failed` within the same
+/// tick before the freeze runs. Gate on practice explicitly so that race
+/// can never fail a practice run.
 fn detect_stage_failure(
     gauge: Res<StageGauge>,
     mut completion: ResMut<DrumsStageCompletion>,
     mut requests: MessageWriter<TransitionRequest>,
+    practice: Option<Res<crate::practice::PracticeSession>>,
 ) {
+    if practice.is_some() {
+        return;
+    }
     if completion.end_requested {
         return;
     }
