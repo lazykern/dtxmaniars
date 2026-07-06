@@ -344,4 +344,19 @@ mod tests {
             parse_with_migrations("version = 999\n[lanes]\npreset = \"nx-type-b\"\n");
         assert_eq!(loaded.lanes.preset, crate::presets::LanePreset::NxTypeB);
     }
+
+    #[test]
+    fn layout_file_round_trips_lanes_and_scene() {
+        let mut scene = crate::scene::SceneSection::default().resolve();
+        scene.get_mut(&crate::WidgetKind::Combo).unwrap().offset = (7.0, 8.0);
+        let file = LayoutFile {
+            version: LATEST_VERSION,
+            lanes: LanesSection::from_arrangement(&crate::presets::nx_type_b()),
+            scene: crate::scene::SceneSection::from_map(&scene),
+        };
+        let s = toml::to_string_pretty(&file).unwrap();
+        let back: LayoutFile = toml::from_str(&s).unwrap();
+        assert_eq!(back, file);
+        assert_eq!(back.scene.resolve()[&crate::WidgetKind::Combo].offset, (7.0, 8.0));
+    }
 }

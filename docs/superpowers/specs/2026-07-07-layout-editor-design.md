@@ -2,9 +2,9 @@
 
 Date: 2026-07-07
 Status: approved
-Progress: plan 1 (lane arrangement — dtx-layout crate, Lanes resource,
-layout.toml `[lanes]`) implemented. Plans 2 (widget registry) and 3 (editor
-overlay) pending.
+Progress: plans 1 (lane arrangement) and 2 (widget registry + [scene.gameplay]
+placement, container-at-origin technique) implemented. Plan 3 (editor overlay)
+pending.
 Pillar: 2 (Layout Editor), absorbs §2.1 (Lane arrangement) + §5 (HUD editor) from
 `docs/notes/2026-07-06-feature-ideas-research.md`.
 
