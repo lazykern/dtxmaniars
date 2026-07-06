@@ -10,6 +10,7 @@ use thiserror::Error;
 pub mod file;
 pub mod lanes;
 pub mod presets;
+pub mod widgets;
 
 pub use file::{parse_with_migrations, LanesSection, LayoutFile, LATEST_VERSION};
 pub use lanes::{
@@ -17,6 +18,10 @@ pub use lanes::{
     DRUM_CHANNELS, MAX_LANE_WIDTH, MIN_LANE_WIDTH,
 };
 pub use presets::{arrangement_for, classic, nx_type_b, nx_type_d, LanePreset};
+pub use widgets::{
+    resolve_top_left, Anchor9, AnchorSpace, WidgetInstance, WidgetKind, MAX_WIDGET_SCALE,
+    MIN_WIDGET_SCALE,
+};
 
 #[derive(Debug, Error)]
 pub enum LayoutError {
