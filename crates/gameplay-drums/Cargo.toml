@@ -25,3 +25,4 @@ game-shell = { path = "../game-shell" }
 
 [dev-dependencies]
 dtx-core = { workspace = true }
+toml = "0.8"

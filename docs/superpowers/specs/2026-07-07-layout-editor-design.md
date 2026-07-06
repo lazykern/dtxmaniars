@@ -2,9 +2,11 @@
 
 Date: 2026-07-07
 Status: approved
-Progress: plans 1 (lane arrangement) and 2 (widget registry + [scene.gameplay]
-placement, container-at-origin technique) implemented. Plan 3 (editor overlay)
-pending.
+Progress: all three plans implemented — 1 (lane arrangement), 2 (widget
+registry + [scene.gameplay]), 3 (editor overlay v1: toggle over autoplay,
+sidebar select + mouse-drag move, lane preset cycle, undo/redo, save/reset).
+Deferred to a v2: on-canvas click-select, scale/rotate handles, anchor-snap UI,
+hit-group dropdowns, lane drag-resize, playfield move, song-select launch.
 Pillar: 2 (Layout Editor), absorbs §2.1 (Lane arrangement) + §5 (HUD editor) from
 `docs/notes/2026-07-06-feature-ideas-research.md`.
 

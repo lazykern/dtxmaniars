@@ -3128,6 +3128,7 @@ dependencies = [
  "dtx-timing",
  "dtx-ui",
  "game-shell",
+ "toml",
 ]
 
 [[package]]
