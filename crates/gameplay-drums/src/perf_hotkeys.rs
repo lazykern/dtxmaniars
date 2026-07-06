@@ -111,7 +111,10 @@ pub(super) fn plugin(app: &mut App) {
                 .chain()
                 .run_if(in_state(AppState::Performance))
                 .run_if(in_state(PauseState::Running))
-                .run_if(drums_mode_active),
+                .run_if(drums_mode_active)
+                // Editor arrow-nudge shares these keys; don't let it mutate/persist
+                // scroll speed + offsets while the layout editor is open.
+                .run_if(crate::editor::editor_closed),
         );
 }
 

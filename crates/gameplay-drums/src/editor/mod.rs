@@ -30,7 +30,22 @@ pub fn plugin(app: &mut App) {
             Update,
             toggle_editor.run_if(in_state(AppState::Performance)),
         )
+        .add_systems(OnExit(AppState::Performance), close_editor_on_exit)
         .add_plugins((drag::plugin, undo::plugin, save::plugin, ui::plugin));
+}
+
+/// Leaving Performance with the editor still open (e.g. the song ended mid-edit)
+/// must restore autoplay and clear `EditorOpen`, else the next song starts with
+/// drum input + pause dead and no sidebar (the sidebar despawn is in ui.rs).
+fn close_editor_on_exit(
+    mut open: ResMut<EditorOpen>,
+    prev: Res<PrevAutoplay>,
+    mut autoplay: ResMut<crate::autoplay::AutoplayEnabled>,
+) {
+    if open.0 {
+        autoplay.0 = prev.0;
+        open.0 = false;
+    }
 }
 
 /// Ctrl+Shift+E toggles the editor while in Performance.

@@ -32,7 +32,16 @@ pub fn plugin(app: &mut App) {
             close_on_escape.run_if(super::editor_open),
         )
             .run_if(in_state(game_shell::AppState::Performance)),
-    );
+    )
+    .add_systems(OnExit(game_shell::AppState::Performance), despawn_editor_ui);
+}
+
+/// Despawn the sidebar when leaving Performance (covers the song-ended-mid-edit
+/// path; `close_editor_on_exit` in mod.rs clears the editor state alongside).
+fn despawn_editor_ui(mut commands: Commands, existing: Query<Entity, With<EditorUiRoot>>) {
+    for e in &existing {
+        commands.entity(e).despawn();
+    }
 }
 
 /// Spawn the sidebar when the editor opens; despawn when it closes.
