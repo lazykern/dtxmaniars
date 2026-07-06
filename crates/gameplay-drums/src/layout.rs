@@ -5,7 +5,7 @@ use bevy::window::{PrimaryWindow, WindowResized};
 use dtx_ui::theme::{REF_HEIGHT, REF_WIDTH};
 use game_shell::AppState;
 
-use crate::lane_geometry::{COLUMNS, STRIP_REF_LEFT, STRIP_REF_WIDTH};
+use crate::lanes::Lanes;
 
 pub const REF_JUDGE_Y: f32 = 620.0;
 pub const REF_BACKBOARD_PAD: f32 = 12.0;
@@ -17,55 +17,60 @@ pub const REF_KEY_CAP_H: f32 = 60.0;
 /// Pads sit flush under the judge line (GITADORA-style, no black band).
 pub const REF_KEY_VIZ_OFFSET: f32 = 5.0;
 
-/// Centered strip left edge at ref resolution (redesign: symmetric panels).
-pub const STRIP_REF_CENTERED_LEFT: f32 = (REF_WIDTH - STRIP_REF_WIDTH) / 2.0;
-
-/// A column's left edge in ref px, translated from NX absolute into the
-/// centered strip (columns keep their NX proportional widths + gaps).
-#[inline]
-pub fn col_ref_x(col: usize) -> f32 {
-    STRIP_REF_CENTERED_LEFT + (COLUMNS[col].ref_x - STRIP_REF_LEFT)
-}
-
-/// Phrase meter sits just right of the lane strip, clear of the side pillar.
-#[inline]
-pub fn ref_phrase_x() -> f32 {
-    STRIP_REF_CENTERED_LEFT + STRIP_REF_WIDTH + 15.0
-}
-
-/// Right HUD column (song info, combo, gauge) anchor, just right of the strip.
-#[inline]
-pub fn ref_hud_right_x() -> f32 {
-    STRIP_REF_CENTERED_LEFT + STRIP_REF_WIDTH + 24.0
-}
-
 pub const REF_COMBO_Y: f32 = 72.0;
 
-#[derive(Resource, Clone, Copy, Debug)]
+#[derive(Resource, Clone, Debug)]
 pub struct PlayfieldLayout {
     pub scale: f32,
     pub width: f32,
     pub height: f32,
+    strip_ref_width: f32,
+    cols: Vec<(f32, f32)>,
 }
 
 impl Default for PlayfieldLayout {
     fn default() -> Self {
-        Self::from_size(REF_WIDTH, REF_HEIGHT)
+        Self::from_size(REF_WIDTH, REF_HEIGHT, &Lanes::default())
     }
 }
 
 impl PlayfieldLayout {
-    pub fn from_window(window: &Window) -> Self {
-        Self::from_size(window.width(), window.height())
+    pub fn from_window(window: &Window, lanes: &Lanes) -> Self {
+        Self::from_size(window.width(), window.height(), lanes)
     }
 
-    pub fn from_size(width: f32, height: f32) -> Self {
+    pub fn from_size(width: f32, height: f32, lanes: &Lanes) -> Self {
         let scale = (width / REF_WIDTH).min(height / REF_HEIGHT);
+        let cols = (0..lanes.count())
+            .map(|i| (lanes.ref_offset(i), lanes.ref_width(i)))
+            .collect();
         Self {
             scale,
             width,
             height,
+            strip_ref_width: lanes.strip_ref_width(),
+            cols,
         }
+    }
+
+    pub fn ref_strip_left(&self) -> f32 {
+        (REF_WIDTH - self.strip_ref_width) / 2.0
+    }
+
+    pub fn ref_strip_width(&self) -> f32 {
+        self.strip_ref_width
+    }
+
+    pub fn ref_phrase_x(&self) -> f32 {
+        self.ref_strip_left() + self.strip_ref_width + 15.0
+    }
+
+    pub fn ref_hud_right_x(&self) -> f32 {
+        self.ref_strip_left() + self.strip_ref_width + 24.0
+    }
+
+    pub fn col_count(&self) -> usize {
+        self.cols.len()
     }
 
     pub fn judge_y(&self) -> f32 {
@@ -81,19 +86,19 @@ impl PlayfieldLayout {
     }
 
     pub fn col_left(&self, col: usize) -> f32 {
-        col_ref_x(col) * self.scale
+        (self.ref_strip_left() + self.cols[col].0) * self.scale
     }
 
     pub fn col_width(&self, col: usize) -> f32 {
-        COLUMNS[col].ref_w * self.scale
+        self.cols[col].1 * self.scale
     }
 
     pub fn strip_left(&self) -> f32 {
-        STRIP_REF_CENTERED_LEFT * self.scale
+        self.ref_strip_left() * self.scale
     }
 
     pub fn strip_width(&self) -> f32 {
-        STRIP_REF_WIDTH * self.scale
+        self.strip_ref_width * self.scale
     }
 
     /// NX prints measure# just right of the strip (`CStagePerfDrumsScreen.cs:3588`).
@@ -130,7 +135,7 @@ impl PlayfieldLayout {
     }
 
     pub fn phrase_x(&self) -> f32 {
-        ref_phrase_x() * self.scale
+        self.ref_phrase_x() * self.scale
     }
 
     pub fn progress_bar_left(&self) -> f32 {
@@ -146,7 +151,7 @@ impl PlayfieldLayout {
     }
 
     pub fn ref_hud_right(&self) -> f32 {
-        ref_hud_right_x() * self.scale
+        self.ref_hud_right_x() * self.scale
     }
 
     pub fn px(&self, ref_px: f32) -> f32 {
@@ -178,47 +183,67 @@ pub(super) fn plugin(app: &mut App) {
 
 fn init_playfield_layout(
     mut layout: ResMut<PlayfieldLayout>,
+    lanes: Res<Lanes>,
     windows: Query<&Window, With<PrimaryWindow>>,
 ) {
     if let Ok(window) = windows.single() {
-        *layout = PlayfieldLayout::from_window(window);
+        *layout = PlayfieldLayout::from_window(window, &lanes);
     }
 }
 
 fn sync_playfield_layout(
     mut resize_events: MessageReader<WindowResized>,
     windows: Query<&Window, With<PrimaryWindow>>,
+    lanes: Res<Lanes>,
     mut layout: ResMut<PlayfieldLayout>,
     mut dirty: Local<bool>,
 ) {
-    if resize_events.read().next().is_some() {
+    if resize_events.read().next().is_some() || lanes.is_changed() {
         *dirty = true;
     }
     let Ok(window) = windows.single() else {
         return;
     };
-    let next = PlayfieldLayout::from_window(window);
-    if *dirty || next.scale != layout.scale || next.width != layout.width {
-        *layout = next;
-        *dirty = false;
+    if !*dirty {
+        let next_scale = (window.width() / REF_WIDTH).min(window.height() / REF_HEIGHT);
+        if next_scale == layout.scale && window.width() == layout.width {
+            return;
+        }
     }
+    *layout = PlayfieldLayout::from_window(window, &lanes);
+    *dirty = false;
+}
+
+/// TEMPORARY (removed in a later task): legacy free-fn shims for unmigrated callers.
+pub const STRIP_REF_CENTERED_LEFT: f32 = (REF_WIDTH - 558.0) / 2.0;
+
+pub fn ref_phrase_x() -> f32 {
+    STRIP_REF_CENTERED_LEFT + 558.0 + 15.0
+}
+
+pub fn ref_hud_right_x() -> f32 {
+    STRIP_REF_CENTERED_LEFT + 558.0 + 24.0
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::lane_geometry::{COLUMN_COUNT, STRIP_REF_WIDTH};
+    use crate::lanes::Lanes;
     use dtx_ui::theme::REF_WIDTH;
+
+    fn classic_layout() -> PlayfieldLayout {
+        PlayfieldLayout::from_size(REF_WIDTH, REF_HEIGHT, &Lanes::default())
+    }
 
     #[test]
     fn judge_below_lane_top() {
-        let layout = PlayfieldLayout::default();
+        let layout = classic_layout();
         assert!(layout.judge_y() > layout.lane_top());
     }
 
     #[test]
     fn lane_height_spans_to_judge() {
-        let layout = PlayfieldLayout::default();
+        let layout = classic_layout();
         assert!(
             (layout.lane_top() + layout.lane_height() - layout.judge_y()).abs() < 1.0,
             "lane bottom should align with judge line"
@@ -227,15 +252,13 @@ mod tests {
 
     #[test]
     fn strip_centered_at_default_scale() {
-        let layout = PlayfieldLayout::default(); // scale 1.0 at 1280x720
-        let expected_left = (REF_WIDTH - STRIP_REF_WIDTH) / 2.0; // 361.0
+        let layout = classic_layout();
+        let expected_left = (REF_WIDTH - 558.0) / 2.0;
         assert!((layout.strip_left() - expected_left).abs() < 0.01);
         assert!((layout.col_left(0) - expected_left).abs() < 0.01);
-        let last = COLUMN_COUNT - 1;
+        let last = layout.col_count() - 1;
         assert!(
-            (layout.col_left(last) + layout.col_width(last)
-                - (expected_left + STRIP_REF_WIDTH))
-                .abs()
+            (layout.col_left(last) + layout.col_width(last) - (expected_left + 558.0)).abs()
                 < 0.5,
             "strip right edge should be centered"
         );
@@ -243,15 +266,36 @@ mod tests {
 
     #[test]
     fn columns_monotonic() {
-        let layout = PlayfieldLayout::default();
-        for c in 1..COLUMN_COUNT {
+        let layout = classic_layout();
+        for c in 1..layout.col_count() {
             assert!(layout.col_left(c) > layout.col_left(c - 1));
         }
     }
 
     #[test]
     fn strip_width_matches_ref() {
-        let layout = PlayfieldLayout::default();
-        assert!((layout.strip_width() - STRIP_REF_WIDTH).abs() < 0.5);
+        let layout = classic_layout();
+        assert!((layout.strip_width() - 558.0).abs() < 0.5);
+    }
+
+    #[test]
+    fn wider_arrangement_widens_and_recenters_strip() {
+        let section = dtx_layout::LanesSection {
+            preset: dtx_layout::LanePreset::Custom,
+            order: Some(
+                ["LC", "HH", "HHO", "LP", "SD", "HT", "BD", "LT", "FT", "CY", "RD"]
+                    .iter()
+                    .map(|s| s.to_string())
+                    .collect(),
+            ),
+            map: Some([("HHO".to_string(), "HHO".to_string())].into()),
+            ..Default::default()
+        };
+        let lanes = Lanes(section.resolve());
+        let layout = PlayfieldLayout::from_size(REF_WIDTH, REF_HEIGHT, &lanes);
+        assert_eq!(layout.col_count(), 11);
+        assert!((layout.strip_width() - (558.0 + 49.0)).abs() < 0.01);
+        let expected_left = (REF_WIDTH - (558.0 + 49.0)) / 2.0;
+        assert!((layout.strip_left() - expected_left).abs() < 0.01);
     }
 }
