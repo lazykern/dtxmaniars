@@ -13,7 +13,10 @@ use dtx_ui::{
 };
 use game_shell::{AppState, EGameMode};
 
+use dtx_layout::WidgetKind;
+
 use crate::components::LastJudgment;
+use crate::widget_layout::WidgetContainer;
 use crate::derived::ChartDerived;
 use crate::hud_cache::{set_text_if_changed, HudDisplayCache};
 use crate::keyboard_viz;
@@ -38,6 +41,29 @@ struct PlayfieldBackboard;
 
 #[derive(Component)]
 struct HitLine;
+
+/// Spawn a per-widget container under `root` (absolute, ref-origin 0,0,
+/// full-size) that `apply_widget_layout` positions. Returns the container
+/// entity to parent the widget's children to.
+fn spawn_widget_container(commands: &mut Commands, root: Entity, kind: WidgetKind) -> Entity {
+    let container = commands
+        .spawn((
+            WidgetContainer(kind),
+            Node {
+                position_type: PositionType::Absolute,
+                left: Val::Px(0.0),
+                top: Val::Px(0.0),
+                width: Val::Percent(100.0),
+                height: Val::Percent(100.0),
+                ..default()
+            },
+            ZIndex(0),
+            Visibility::Inherited,
+        ))
+        .id();
+    commands.entity(root).add_child(container);
+    container
+}
 
 pub fn plugin(app: &mut App) {
     app.add_systems(
@@ -143,37 +169,45 @@ fn spawn_hud(
         ));
     });
 
+    let c_frame = spawn_widget_container(&mut commands, root, WidgetKind::FrameChrome);
     frame_chrome::spawn_frame_chrome(
         &mut commands,
-        root,
+        c_frame,
         &t,
         s,
         layout.ref_strip_left(),
         layout.ref_strip_left() + layout.ref_strip_width(),
     );
-    score_detailed::spawn_score_detailed_panel(&mut commands, root, &t, s);
-    phrase_meter::spawn_phrase_meter(&mut commands, root, &t, s, layout.ref_phrase_x());
+    let c_score = spawn_widget_container(&mut commands, root, WidgetKind::ScorePanel);
+    score_detailed::spawn_score_detailed_panel(&mut commands, c_score, &t, s);
+    let c_phrase = spawn_widget_container(&mut commands, root, WidgetKind::PhraseMeter);
+    phrase_meter::spawn_phrase_meter(&mut commands, c_phrase, &t, s, layout.ref_phrase_x());
+    let c_progress = spawn_widget_container(&mut commands, root, WidgetKind::SongProgress);
     song_progress::spawn_song_progress(
         &mut commands,
-        root,
+        c_progress,
         &t,
         s,
         layout.ref_strip_left(),
         layout.ref_strip_width(),
     );
     // SPEED lives in the left OPTIONS area (was clipping the CY/RD pads).
-    playfield_speed::spawn_playfield_speed(&mut commands, root, &t, s, 24.0, 470.0);
+    let c_speed = spawn_widget_container(&mut commands, root, WidgetKind::SpeedReadout);
+    playfield_speed::spawn_playfield_speed(&mut commands, c_speed, &t, s, 24.0, 470.0);
     let hud_right = layout.ref_hud_right_x();
-    now_playing::spawn_now_playing(&mut commands, root, &t, s, hud_right);
+    let c_now_playing = spawn_widget_container(&mut commands, root, WidgetKind::NowPlaying);
+    now_playing::spawn_now_playing(&mut commands, c_now_playing, &t, s, hud_right);
     // Combo centered on the recentered lane strip (was pinned to the right column).
     let combo_ref_x = layout.ref_strip_left() + layout.ref_strip_width() / 2.0 - 180.0;
-    perf_combo::spawn_perf_combo(&mut commands, root, &t, s, combo_ref_x, 150.0);
+    let c_combo = spawn_widget_container(&mut commands, root, WidgetKind::Combo);
+    perf_combo::spawn_perf_combo(&mut commands, c_combo, &t, s, combo_ref_x, 150.0);
     // Live accuracy graph fills the right column below the song card.
     let graph_x = hud_right + 40.0;
     let graph_w = REF_WIDTH - graph_x - 12.0;
+    let c_live_graph = spawn_widget_container(&mut commands, root, WidgetKind::LiveGraph);
     live_graph::spawn_live_graph(
         &mut commands,
-        root,
+        c_live_graph,
         &t,
         s,
         graph_x,
@@ -183,7 +217,8 @@ fn spawn_hud(
     );
 
     keyboard_viz::spawn_key_caps(&mut commands, root, &layout, &lanes, &t);
-    judgment_popup::spawn_judgment_popup(&mut commands, root, &t);
+    let c_judgment = spawn_widget_container(&mut commands, root, WidgetKind::JudgmentPopup);
+    judgment_popup::spawn_judgment_popup(&mut commands, c_judgment, &t);
 }
 
 fn apply_backboard_layout(
