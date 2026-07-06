@@ -1,7 +1,10 @@
 # Layout Editor + Lane Arrangement — Design
 
 Date: 2026-07-07
-Status: approved pending user review
+Status: approved
+Progress: plan 1 (lane arrangement — dtx-layout crate, Lanes resource,
+layout.toml `[lanes]`) implemented. Plans 2 (widget registry) and 3 (editor
+overlay) pending.
 Pillar: 2 (Layout Editor), absorbs §2.1 (Lane arrangement) + §5 (HUD editor) from
 `docs/notes/2026-07-06-feature-ideas-research.md`.
 
