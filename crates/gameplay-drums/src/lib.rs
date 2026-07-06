@@ -48,6 +48,7 @@ pub mod se_scheduler;
 pub mod seek;
 pub mod sound_bank;
 pub mod timeline;
+pub mod widget_layout;
 
 use std::time::Duration;
 
@@ -173,6 +174,7 @@ pub fn plugin(app: &mut App) {
         miss::plugin,
         gauge::plugin,
         hud::plugin,
+        widget_layout::plugin,
         keyboard_viz::plugin,
         orchestrator::plugin,
         autoplay::plugin,
