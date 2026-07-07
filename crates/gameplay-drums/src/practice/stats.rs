@@ -76,9 +76,15 @@ pub fn track_attempt_stats(
         }
         apply_judgment(&mut session.current_attempt, ev.kind, ev.delta_ms);
     }
-    for _ in missed.read() {
-        // NoteMissed carries no chip index; pre-roll chips are seeded as
-        // judged by the seek, so any miss here belongs to the attempt.
+    for m in missed.read() {
+        let judge_ms = timeline
+            .judge_ms_by_idx
+            .get(m.chip_idx)
+            .copied()
+            .unwrap_or(i64::MIN);
+        if judge_ms < session.current_attempt.start_ms {
+            continue; // pre-roll chip: audible feedback only
+        }
         session.current_attempt.counts.miss += 1;
         session.current_attempt.combo = 0;
     }

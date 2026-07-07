@@ -427,6 +427,7 @@ fn finish_loop_pass(app: &mut App, perfect_hits: u32) {
             .write(NoteMissed {
                 lane: 3,
                 audio_ms: 5_000,
+                chip_idx: 1, // value=1.0 -> end of measure 1 == 4000ms, inside the 2000-6000 loop
             });
     }
     {
@@ -506,8 +507,7 @@ fn toggle_ramp_without_loop_is_a_noop_error_toast() {
     let mut app = build_app();
     add_ramp_wiring(&mut app);
     enter_performance(&mut app, chart_with_measures(8));
-    app.world_mut()
-        .insert_resource(PracticeSession::default());
+    app.world_mut().insert_resource(PracticeSession::default());
     send_practice_action(&mut app, PracticeAction::ToggleRamp);
     app.update();
     let session = app.world().resource::<PracticeSession>();
@@ -515,7 +515,9 @@ fn toggle_ramp_without_loop_is_a_noop_error_toast() {
         !session.ramp.armed,
         "arming without an A/B loop must be a no-op"
     );
-    let toasts = app.world().resource::<gameplay_drums::practice::toast::ToastQueue>();
+    let toasts = app
+        .world()
+        .resource::<gameplay_drums::practice::toast::ToastQueue>();
     assert!(
         !toasts.0.is_empty(),
         "arming without a loop must push an error toast"
@@ -539,4 +541,40 @@ fn toggle_ramp_with_loop_arms() {
     app.update();
     let session = app.world().resource::<PracticeSession>();
     assert!(session.ramp.armed, "arming with an A/B loop must succeed");
+}
+
+#[test]
+fn pre_roll_miss_is_excluded_from_attempt() {
+    let mut app = build_app();
+    add_ramp_wiring(&mut app);
+    enter_performance(&mut app, chart_with_measures(8));
+    // Attempt starts at 4000ms; chip 0 (at 2000ms) is pre-roll.
+    let mut s = PracticeSession::default();
+    s.current_attempt.start_ms = 4_000;
+    app.world_mut().insert_resource(s);
+    {
+        let mut clock = app.world_mut().resource_mut::<GameplayClock>();
+        clock.start();
+        clock.sync(Some(4_500));
+    }
+    app.world_mut()
+        .resource_mut::<Messages<NoteMissed>>()
+        .write(NoteMissed {
+            lane: 3,
+            audio_ms: 2_300,
+            chip_idx: 0, // value=1.0 -> end of measure 0 == 2000ms < attempt start 4000 → pre-roll
+        });
+    app.world_mut()
+        .resource_mut::<Messages<NoteMissed>>()
+        .write(NoteMissed {
+            lane: 3,
+            audio_ms: 4_300,
+            chip_idx: 1, // value=1.0 -> end of measure 1 == 4000ms >= 4000 → counts
+        });
+    app.update();
+    let session = app.world().resource::<PracticeSession>();
+    assert_eq!(
+        session.current_attempt.counts.miss, 1,
+        "pre-roll miss must not count against the attempt"
+    );
 }

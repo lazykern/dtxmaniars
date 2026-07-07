@@ -29,6 +29,8 @@ pub struct JudgmentEvent {
 pub struct NoteMissed {
     pub lane: LaneId,
     pub audio_ms: i64,
+    /// Index into `ActiveChart.chart.chips` for the missed chip.
+    pub chip_idx: usize,
 }
 
 /// Pad press with no chip in the judgment window (empty hit / whiff).
@@ -68,8 +70,9 @@ mod tests {
         let m = NoteMissed {
             lane: 1,
             audio_ms: 99999,
+            chip_idx: 7,
         };
         assert_eq!(m.lane, 1);
-        assert_eq!(m.audio_ms, 99999);
+        assert_eq!(m.chip_idx, 7);
     }
 }
