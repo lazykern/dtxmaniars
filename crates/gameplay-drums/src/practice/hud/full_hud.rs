@@ -557,7 +557,7 @@ pub fn full_hud_input(
                 }
                 session.set_loop_end(ms);
             }
-            RailItem::ClearLoop => session.transport.loop_region = None,
+            RailItem::ClearLoop => session.clear_loop(),
             RailItem::Rate | RailItem::Snap | RailItem::Preroll => {}
             RailItem::RampArm => {
                 practice_actions.write(crate::practice::actions::PracticeAction::ToggleRamp);

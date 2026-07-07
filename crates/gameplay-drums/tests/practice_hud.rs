@@ -189,6 +189,63 @@ fn quick_tier_entities_spawn_on_entering_performance() {
     assert_eq!(chips, 1, "status chip must spawn on entering Performance");
 }
 
+use gameplay_drums::practice::hud::full_hud::{full_hud_input, ExitArmed, RailItem};
+use gameplay_drums::practice::session::{LoopRegion, PracticeTransport};
+
+#[test]
+fn rail_clear_loop_disarms_the_ramp() {
+    // Regression: the rail "Clear loop" row must go through
+    // `session.clear_loop()` (which disarms) — a raw `loop_region = None`
+    // would leave the ramp armed against a now-different span.
+    let mut app = App::new();
+    app.add_plugins((MinimalPlugins, bevy::state::app::StatesPlugin))
+        .init_state::<AppState>()
+        .init_state::<PauseState>()
+        .add_message::<game_shell::TransitionRequest>()
+        .add_message::<gameplay_drums::seek::SeekToChartTime>()
+        .add_message::<gameplay_drums::practice::actions::PracticeAction>()
+        .init_resource::<ButtonInput<KeyCode>>()
+        .init_resource::<GameplayClock>()
+        .init_resource::<ChipTimeline>()
+        .init_resource::<RailSelection>()
+        .init_resource::<ExitArmed>()
+        .add_systems(Update, full_hud_input);
+
+    let mut session = PracticeSession {
+        transport: PracticeTransport {
+            loop_region: Some(LoopRegion {
+                start_ms: 2_000,
+                end_ms: 6_000,
+            }),
+            ..Default::default()
+        },
+        ..Default::default()
+    };
+    session.trainer.ramp.armed = true;
+    app.world_mut().insert_resource(session);
+
+    // Point the rail selection at the Clear-loop row and press Enter.
+    let idx = RailItem::ORDER
+        .iter()
+        .position(|i| *i == RailItem::ClearLoop)
+        .expect("ClearLoop is a rail row");
+    app.world_mut().resource_mut::<RailSelection>().0 = idx;
+    app.world_mut()
+        .resource_mut::<ButtonInput<KeyCode>>()
+        .press(KeyCode::Enter);
+    app.update();
+
+    let session = app.world().resource::<PracticeSession>();
+    assert!(
+        session.transport.loop_region.is_none(),
+        "rail Clear loop clears the region"
+    );
+    assert!(
+        !session.trainer.ramp.armed,
+        "rail Clear loop must disarm the ramp"
+    );
+}
+
 use gameplay_drums::practice::hud::full_hud::{transport_buttons, TransportButton};
 
 #[test]
