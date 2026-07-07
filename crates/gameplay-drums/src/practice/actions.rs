@@ -49,11 +49,7 @@ impl Default for PracticeBindings {
 
 /// Pure: the action bound to `key`, if any.
 pub fn action_for(bindings: &PracticeBindings, key: KeyCode) -> Option<PracticeAction> {
-    bindings
-        .0
-        .iter()
-        .find(|(k, _)| *k == key)
-        .map(|(_, a)| *a)
+    bindings.0.iter().find(|(k, _)| *k == key).map(|(_, a)| *a)
 }
 
 /// Quick tier only (Running): translate just-pressed keys into actions.
@@ -91,7 +87,7 @@ pub fn apply_practice_actions(
             PracticeAction::SetLoopEnd => {
                 let mut ms = timeline.bar_start_before(clock.current_ms);
                 // Min region: one bar. B on/before A pushes one bar past A.
-                if let Some(r) = session.loop_region {
+                if let Some(r) = session.transport.loop_region {
                     if ms <= r.start_ms {
                         ms = timeline.snap_neighbor(r.start_ms, SnapDivisor::Bar, 1);
                     }
@@ -100,24 +96,25 @@ pub fn apply_practice_actions(
                 toasts.push(format!("B set @ bar {}", bar_number(&timeline.bar_ms, ms)));
             }
             PracticeAction::ClearLoop => {
-                session.loop_region = None;
+                session.transport.loop_region = None;
                 toasts.push("loop cleared");
             }
             PracticeAction::RateDown => {
-                session.step_rate(-1);
-                toasts.push(format!("rate → {:.2}×", session.rate));
+                session.step_user_tempo(-1);
+                toasts.push(format!("rate → {:.2}×", session.transport.user_tempo));
             }
             PracticeAction::RateUp => {
-                session.step_rate(1);
-                toasts.push(format!("rate → {:.2}×", session.rate));
+                session.step_user_tempo(1);
+                toasts.push(format!("rate → {:.2}×", session.transport.user_tempo));
             }
             PracticeAction::RestartLoop => {
                 let intent = session
+                    .transport
                     .loop_region
                     .map(|r| r.start_ms)
                     .unwrap_or(session.current_attempt.start_ms);
                 seeks.write(SeekToChartTime {
-                    target_ms: preroll_target(&timeline, session.preroll, intent),
+                    target_ms: preroll_target(&timeline, session.transport.preroll, intent),
                     snap: None,
                     attempt_start_ms: Some(intent),
                 });
@@ -149,14 +146,23 @@ mod tests {
             action_for(&b, KeyCode::Backspace),
             Some(PracticeAction::ClearLoop)
         );
-        assert_eq!(action_for(&b, KeyCode::Minus), Some(PracticeAction::RateDown));
+        assert_eq!(
+            action_for(&b, KeyCode::Minus),
+            Some(PracticeAction::RateDown)
+        );
         assert_eq!(action_for(&b, KeyCode::Equal), Some(PracticeAction::RateUp));
         assert_eq!(
             action_for(&b, KeyCode::KeyR),
             Some(PracticeAction::RestartLoop)
         );
-        assert_eq!(action_for(&b, KeyCode::KeyT), Some(PracticeAction::ToggleRamp));
-        assert_eq!(action_for(&b, KeyCode::Tab), Some(PracticeAction::OpenFullHud));
+        assert_eq!(
+            action_for(&b, KeyCode::KeyT),
+            Some(PracticeAction::ToggleRamp)
+        );
+        assert_eq!(
+            action_for(&b, KeyCode::Tab),
+            Some(PracticeAction::OpenFullHud)
+        );
         assert_eq!(action_for(&b, KeyCode::KeyQ), None);
     }
 }

@@ -11,7 +11,7 @@ use gameplay_drums::orchestrator::{
     detect_end_of_stage, enter_derive_from_chart, enter_reset_run_state, enter_seed_bgm_state,
     DrumsStageCompletion,
 };
-use gameplay_drums::practice::session::{LoopRegion, PracticeSession};
+use gameplay_drums::practice::session::{LoopRegion, PracticeSession, PracticeTransport};
 use gameplay_drums::resources::{
     ActiveChart, BgmAdjustState, Combo, GameStartMs, GameplayClock, JudgmentCounts, Score,
 };
@@ -105,10 +105,13 @@ fn active_loop_region_suppresses_end_of_stage() {
     let mut app = build_app();
     enter_performance(&mut app, chart_with_measures(2));
     app.world_mut().insert_resource(PracticeSession {
-        loop_region: Some(LoopRegion {
-            start_ms: 0,
-            end_ms: 2_000,
-        }),
+        transport: PracticeTransport {
+            loop_region: Some(LoopRegion {
+                start_ms: 0,
+                end_ms: 2_000,
+            }),
+            ..Default::default()
+        },
         ..Default::default()
     });
     {
@@ -132,10 +135,13 @@ fn a_only_loop_region_does_not_suppress_end_of_stage() {
     let mut app = build_app();
     enter_performance(&mut app, chart_with_measures(2));
     app.world_mut().insert_resource(PracticeSession {
-        loop_region: Some(LoopRegion {
-            start_ms: 0,
-            end_ms: i64::MAX,
-        }),
+        transport: PracticeTransport {
+            loop_region: Some(LoopRegion {
+                start_ms: 0,
+                end_ms: i64::MAX,
+            }),
+            ..Default::default()
+        },
         ..Default::default()
     });
     {
@@ -182,11 +188,14 @@ fn loop_watcher_seeks_back_to_region_start() {
     );
     enter_performance(&mut app, chart_with_measures(8));
     app.world_mut().insert_resource(PracticeSession {
-        loop_region: Some(LoopRegion {
-            start_ms: 2_000,
-            end_ms: 6_000,
-        }),
-        preroll: gameplay_drums::practice::session::PrerollSetting::Off,
+        transport: PracticeTransport {
+            loop_region: Some(LoopRegion {
+                start_ms: 2_000,
+                end_ms: 6_000,
+            }),
+            preroll: gameplay_drums::practice::session::PrerollSetting::Off,
+            ..Default::default()
+        },
         ..Default::default()
     });
     {
@@ -318,7 +327,7 @@ fn bracket_key_sets_loop_start_snapped_to_bar() {
         .press(KeyCode::BracketLeft);
     app.update();
     let session = app.world().resource::<PracticeSession>();
-    let region = session.loop_region.expect("A marker set");
+    let region = session.transport.loop_region.expect("A marker set");
     assert_eq!(region.start_ms, 4_000, "A snaps down to the bar start");
 }
 
@@ -328,11 +337,14 @@ fn restart_key_seeks_to_loop_start() {
     add_action_wiring(&mut app);
     enter_performance(&mut app, chart_with_measures(8));
     app.world_mut().insert_resource(PracticeSession {
-        loop_region: Some(LoopRegion {
-            start_ms: 2_000,
-            end_ms: 6_000,
-        }),
-        preroll: gameplay_drums::practice::session::PrerollSetting::Off,
+        transport: PracticeTransport {
+            loop_region: Some(LoopRegion {
+                start_ms: 2_000,
+                end_ms: 6_000,
+            }),
+            preroll: gameplay_drums::practice::session::PrerollSetting::Off,
+            ..Default::default()
+        },
         ..Default::default()
     });
     {
@@ -396,16 +408,19 @@ fn send_practice_action(app: &mut App, action: PracticeAction) {
 
 fn looped_session(rate: f32) -> PracticeSession {
     let mut s = PracticeSession {
-        loop_region: Some(LoopRegion {
-            start_ms: 2_000,
-            end_ms: 6_000,
-        }),
-        preroll: gameplay_drums::practice::session::PrerollSetting::Off,
-        rate,
+        transport: PracticeTransport {
+            loop_region: Some(LoopRegion {
+                start_ms: 2_000,
+                end_ms: 6_000,
+            }),
+            preroll: gameplay_drums::practice::session::PrerollSetting::Off,
+            user_tempo: rate,
+            ..Default::default()
+        },
         ..Default::default()
     };
-    s.ramp.armed = true;
-    s.ramp.current_rate = rate;
+    s.trainer.ramp.armed = true;
+    s.trainer.ramp.current_rate = rate;
     s.current_attempt.start_ms = 2_000;
     s
 }
@@ -452,11 +467,11 @@ fn ramp_steps_rate_up_after_clean_pass() {
     finish_loop_pass(&mut app, 4);
     let session = app.world().resource::<PracticeSession>();
     assert!(
-        (session.rate - 0.75).abs() < 1e-6,
+        (session.transport.user_tempo - 0.75).abs() < 1e-6,
         "clean pass steps 0.70 → 0.75, got {}",
-        session.rate
+        session.transport.user_tempo
     );
-    assert!(session.ramp.armed);
+    assert!(session.trainer.ramp.armed);
 }
 
 #[test]
@@ -471,13 +486,21 @@ fn two_failed_passes_step_rate_down() {
         clock.sync(Some(3_000));
     }
     finish_loop_pass(&mut app, 0); // fail #1 → hold
-    assert!((app.world().resource::<PracticeSession>().rate - 0.80).abs() < 1e-6);
+    assert!(
+        (app.world()
+            .resource::<PracticeSession>()
+            .transport
+            .user_tempo
+            - 0.80)
+            .abs()
+            < 1e-6
+    );
     finish_loop_pass(&mut app, 0); // fail #2 → step down
     let session = app.world().resource::<PracticeSession>();
     assert!(
-        (session.rate - 0.75).abs() < 1e-6,
+        (session.transport.user_tempo - 0.75).abs() < 1e-6,
         "second fail steps 0.80 → 0.75, got {}",
-        session.rate
+        session.transport.user_tempo
     );
 }
 
@@ -487,7 +510,7 @@ fn skip_next_roll_ignores_the_stale_pre_arm_attempt() {
     add_ramp_wiring(&mut app);
     enter_performance(&mut app, chart_with_measures(8));
     let mut s = looped_session(0.70);
-    s.ramp.skip_next_roll = true;
+    s.trainer.ramp.skip_next_roll = true;
     app.world_mut().insert_resource(s);
     {
         let mut clock = app.world_mut().resource_mut::<GameplayClock>();
@@ -497,10 +520,10 @@ fn skip_next_roll_ignores_the_stale_pre_arm_attempt() {
     finish_loop_pass(&mut app, 4);
     let session = app.world().resource::<PracticeSession>();
     assert!(
-        (session.rate - 0.70).abs() < 1e-6,
+        (session.transport.user_tempo - 0.70).abs() < 1e-6,
         "the roll right after arming must not step the ramp"
     );
-    assert!(!session.ramp.skip_next_roll, "flag consumed");
+    assert!(!session.trainer.ramp.skip_next_roll, "flag consumed");
 }
 
 #[test]
@@ -513,7 +536,7 @@ fn toggle_ramp_without_loop_is_a_noop_error_toast() {
     app.update();
     let session = app.world().resource::<PracticeSession>();
     assert!(
-        !session.ramp.armed,
+        !session.trainer.ramp.armed,
         "arming without an A/B loop must be a no-op"
     );
     let toasts = app
@@ -531,17 +554,23 @@ fn toggle_ramp_with_loop_arms() {
     add_ramp_wiring(&mut app);
     enter_performance(&mut app, chart_with_measures(8));
     app.world_mut().insert_resource(PracticeSession {
-        loop_region: Some(LoopRegion {
-            start_ms: 2_000,
-            end_ms: 6_000,
-        }),
-        preroll: gameplay_drums::practice::session::PrerollSetting::Off,
+        transport: PracticeTransport {
+            loop_region: Some(LoopRegion {
+                start_ms: 2_000,
+                end_ms: 6_000,
+            }),
+            preroll: gameplay_drums::practice::session::PrerollSetting::Off,
+            ..Default::default()
+        },
         ..Default::default()
     });
     send_practice_action(&mut app, PracticeAction::ToggleRamp);
     app.update();
     let session = app.world().resource::<PracticeSession>();
-    assert!(session.ramp.armed, "arming with an A/B loop must succeed");
+    assert!(
+        session.trainer.ramp.armed,
+        "arming with an A/B loop must succeed"
+    );
 }
 
 #[test]

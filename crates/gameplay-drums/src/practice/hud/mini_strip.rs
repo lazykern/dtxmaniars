@@ -84,7 +84,11 @@ pub fn update_mini_strip(
         node.left = Val::Percent(time_to_pct(clock.current_ms, end));
     }
     if let Ok((mut node, mut vis)) = markers.p1().single_mut() {
-        match session.loop_region.filter(|r| r.end_ms != i64::MAX) {
+        match session
+            .transport
+            .loop_region
+            .filter(|r| r.end_ms != i64::MAX)
+        {
             Some(r) => {
                 let a = time_to_pct(r.start_ms, end);
                 let b = time_to_pct(r.end_ms, end);

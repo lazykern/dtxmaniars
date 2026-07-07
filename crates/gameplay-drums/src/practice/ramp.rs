@@ -10,12 +10,18 @@ use crate::seek::SeekToChartTime;
 /// Outcome of one finished loop pass while the ramp is armed.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum RampDecision {
-    StepUp { new_rate: f32 },
-    StepDown { new_rate: f32 },
+    StepUp {
+        new_rate: f32,
+    },
+    StepDown {
+        new_rate: f32,
+    },
     /// First fail at a step: keep the rate, remember the fail.
     Hold,
     /// Target reached: rate pinned to target, ramp disarms.
-    Complete { new_rate: f32 },
+    Complete {
+        new_rate: f32,
+    },
 }
 
 /// Pure ramp protocol. Pass (accuracy ≥ threshold) → step up, completing
@@ -52,7 +58,9 @@ pub fn ramp_step_index(cfg: &RampConfig, rate: f32) -> (u32, u32) {
     if cfg.step <= 0.0 {
         return (0, 0);
     }
-    let total = ((cfg.target_rate - cfg.start_rate) / cfg.step).round().max(0.0) as u32;
+    let total = ((cfg.target_rate - cfg.start_rate) / cfg.step)
+        .round()
+        .max(0.0) as u32;
     let cur = (((rate - cfg.start_rate) / cfg.step).round() as i64).clamp(0, total as i64) as u32;
     (cur, total)
 }
@@ -74,8 +82,8 @@ pub fn handle_toggle_ramp(
         if *action != super::actions::PracticeAction::ToggleRamp {
             continue;
         }
-        if session.ramp.armed {
-            session.ramp.armed = false;
+        if session.trainer.ramp.armed {
+            session.trainer.ramp.armed = false;
             toasts.push("ramp off");
             continue;
         }
@@ -83,17 +91,21 @@ pub fn handle_toggle_ramp(
             toasts.push("ramp needs an A/B loop");
             continue;
         }
-        let cfg = session.ramp_config;
-        session.ramp = RampState {
+        let cfg = session.trainer.ramp_config;
+        session.trainer.ramp = RampState {
             armed: true,
             current_rate: cfg.start_rate,
             consecutive_fails: 0,
             skip_next_roll: true,
         };
-        session.rate = cfg.start_rate;
-        let a_ms = session.loop_region.expect("loop_armed checked").start_ms;
+        session.transport.user_tempo = cfg.start_rate;
+        let a_ms = session
+            .transport
+            .loop_region
+            .expect("loop_armed checked")
+            .start_ms;
         seeks.write(SeekToChartTime {
-            target_ms: preroll_target(&timeline, session.preroll, a_ms),
+            target_ms: preroll_target(&timeline, session.transport.preroll, a_ms),
             snap: None,
             attempt_start_ms: Some(a_ms),
         });
@@ -103,7 +115,7 @@ pub fn handle_toggle_ramp(
 
 /// Apply one ramp decision per finished loop pass. Runs after
 /// `track_attempt_stats` (same tick as the loop's seek) so the finished
-/// attempt is already in history. Re-adopts `session.rate` as the
+/// attempt is already in history. Re-adopts `session.transport.user_tempo` as the
 /// current step first — a manual nudge simply moves the ramp.
 pub fn apply_ramp(
     mut seeks: MessageReader<SeekToChartTime>,
@@ -113,14 +125,18 @@ pub fn apply_ramp(
     if seeks.read().last().is_none() {
         return;
     }
-    if !session.ramp.armed {
+    if !session.trainer.ramp.armed {
         return;
     }
-    if session.ramp.skip_next_roll {
-        session.ramp.skip_next_roll = false;
+    if session.trainer.ramp.skip_next_roll {
+        session.trainer.ramp.skip_next_roll = false;
         return;
     }
-    let Some(region) = session.loop_region.filter(|r| r.end_ms != i64::MAX) else {
+    let Some(region) = session
+        .transport
+        .loop_region
+        .filter(|r| r.end_ms != i64::MAX)
+    else {
         return;
     };
     let Some(last) = session.attempt_history.last() else {
@@ -130,20 +146,20 @@ pub fn apply_ramp(
         return; // manual seek elsewhere, not a loop pass
     }
     let accuracy = last.accuracy_pct;
-    session.ramp.current_rate = session.rate;
-    let cfg = session.ramp_config;
-    match ramp_step(&cfg, &mut session.ramp, accuracy) {
+    session.trainer.ramp.current_rate = session.transport.user_tempo;
+    let cfg = session.trainer.ramp_config;
+    match ramp_step(&cfg, &mut session.trainer.ramp, accuracy) {
         RampDecision::StepUp { new_rate } => {
-            session.rate = new_rate;
+            session.transport.user_tempo = new_rate;
             toasts.push(format!("ramp: {new_rate:.2}×"));
         }
         RampDecision::StepDown { new_rate } => {
-            session.rate = new_rate;
+            session.transport.user_tempo = new_rate;
             toasts.push(format!("ramp: back to {new_rate:.2}×"));
         }
         RampDecision::Hold => toasts.push("ramp: one more fail steps down"),
         RampDecision::Complete { new_rate } => {
-            session.rate = new_rate;
+            session.transport.user_tempo = new_rate;
             toasts.push("ramp complete");
         }
     }

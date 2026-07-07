@@ -28,14 +28,14 @@ pub fn loop_watcher(
     if !clock.is_ready() {
         return;
     }
-    let Some(region) = session.loop_region else {
+    let Some(region) = session.transport.loop_region else {
         return;
     };
     if region.end_ms == i64::MAX {
         return; // only A set — not armed yet
     }
     if clock.current_ms >= region.end_ms {
-        let target = preroll_target(&timeline, session.preroll, region.start_ms);
+        let target = preroll_target(&timeline, session.transport.preroll, region.start_ms);
         seeks.write(SeekToChartTime {
             target_ms: target,
             snap: None,

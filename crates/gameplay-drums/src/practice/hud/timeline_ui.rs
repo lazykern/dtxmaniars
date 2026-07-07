@@ -180,16 +180,16 @@ pub fn timeline_mouse(
     match effect {
         GestureEffect::None => {}
         GestureEffect::Seek { target_ms } => {
-            let snapped = timeline.resolve_snap(target_ms, session.snap);
-            session.scrub_cursor_ms = Some(snapped);
+            let snapped = timeline.resolve_snap(target_ms, session.transport.snap);
+            session.transport.scrub_cursor_ms = Some(snapped);
             seeks.write(SeekToChartTime {
                 target_ms,
-                snap: Some(session.snap),
+                snap: Some(session.transport.snap),
                 attempt_start_ms: Some(snapped),
             });
         }
         GestureEffect::LoopPreview { anchor_ms } => {
-            session.loop_region = Some(drag_region(&timeline, anchor_ms, cursor_ms));
+            session.transport.loop_region = Some(drag_region(&timeline, anchor_ms, cursor_ms));
         }
     }
 }

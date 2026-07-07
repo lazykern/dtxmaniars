@@ -143,44 +143,55 @@ pub struct AttemptRecord {
     pub mean_error_ms: f32,
 }
 
-/// Present only while the stage runs in practice mode. Absence = normal
-/// play with zero behavior change.
-#[derive(Resource, Debug, Clone)]
-pub struct PracticeSession {
-    pub loop_region: Option<LoopRegion>,
-    pub rate: f32,
+/// Transport state: what/where/how-fast the player chose. Only user
+/// input mutates this.
+#[derive(Debug, Clone)]
+pub struct PracticeTransport {
+    /// The player's chosen tempo. The ramp never writes this except on
+    /// completion (graduation).
+    pub user_tempo: f32,
     pub snap: SnapDivisor,
     pub preroll: PrerollSetting,
-    pub current_attempt: AttemptStats,
-    pub attempt_history: Vec<AttemptRecord>,
+    pub loop_region: Option<LoopRegion>,
     /// Scrub cursor while paused (chart ms). None = cursor at playhead.
     pub scrub_cursor_ms: Option<i64>,
-    pub ramp_config: RampConfig,
-    pub ramp: RampState,
 }
 
-impl Default for PracticeSession {
+impl Default for PracticeTransport {
     fn default() -> Self {
         Self {
-            loop_region: None,
-            rate: 1.0,
+            user_tempo: 1.0,
             snap: SnapDivisor::Bar,
             preroll: PrerollSetting::OneBar,
-            current_attempt: AttemptStats::default(),
-            attempt_history: Vec::new(),
+            loop_region: None,
             scrub_cursor_ms: None,
-            ramp_config: RampConfig::default(),
-            ramp: RampState::default(),
         }
     }
 }
 
+/// Trainer state: the accuracy-gated ramp (future trainers live here).
+#[derive(Debug, Clone, Default)]
+pub struct PracticeTrainer {
+    pub ramp_config: RampConfig,
+    pub ramp: RampState,
+}
+
+/// Present only while the stage runs in practice mode. Absence = normal
+/// play with zero behavior change.
+#[derive(Resource, Debug, Clone, Default)]
+pub struct PracticeSession {
+    pub transport: PracticeTransport,
+    pub trainer: PracticeTrainer,
+    pub current_attempt: AttemptStats,
+    pub attempt_history: Vec<AttemptRecord>,
+}
+
 impl PracticeSession {
-    /// Step the rate by `dir` in RATE_STEP increments, clamped and
+    /// Step the user tempo by `dir` in RATE_STEP increments, clamped and
     /// quantized so repeated stepping never accumulates float error.
-    pub fn step_rate(&mut self, dir: i8) {
-        let steps = (self.rate / RATE_STEP).round() as i32 + dir as i32;
-        self.rate = (steps as f32 * RATE_STEP).clamp(RATE_MIN, RATE_MAX);
+    pub fn step_user_tempo(&mut self, dir: i8) {
+        let steps = (self.transport.user_tempo / RATE_STEP).round() as i32 + dir as i32;
+        self.transport.user_tempo = (steps as f32 * RATE_STEP).clamp(RATE_MIN, RATE_MAX);
     }
 
     /// Finalize the running attempt into history (skipped when it saw no
@@ -191,7 +202,7 @@ impl PracticeSession {
             self.attempt_history.push(AttemptRecord {
                 start_ms: a.start_ms,
                 end_ms,
-                rate: self.rate,
+                rate: self.transport.user_tempo,
                 counts: a.counts,
                 max_combo: a.max_combo,
                 overhits: a.overhits,
@@ -211,8 +222,8 @@ impl PracticeSession {
     /// Set the A marker; keeps the region valid (swap, min length is
     /// enforced by the caller against bar data).
     pub fn set_loop_start(&mut self, ms: i64) {
-        let end = self.loop_region.map(|r| r.end_ms);
-        self.loop_region = Some(match end {
+        let end = self.transport.loop_region.map(|r| r.end_ms);
+        self.transport.loop_region = Some(match end {
             Some(e) if e > ms => LoopRegion {
                 start_ms: ms,
                 end_ms: e,
@@ -225,8 +236,8 @@ impl PracticeSession {
     }
 
     pub fn set_loop_end(&mut self, ms: i64) {
-        let start = self.loop_region.map(|r| r.start_ms).unwrap_or(0);
-        self.loop_region = Some(if ms > start {
+        let start = self.transport.loop_region.map(|r| r.start_ms).unwrap_or(0);
+        self.transport.loop_region = Some(if ms > start {
             LoopRegion {
                 start_ms: start,
                 end_ms: ms,
@@ -242,7 +253,9 @@ impl PracticeSession {
 
     /// True when a bounded loop region is armed.
     pub fn loop_armed(&self) -> bool {
-        self.loop_region.is_some_and(|r| r.end_ms != i64::MAX)
+        self.transport
+            .loop_region
+            .is_some_and(|r| r.end_ms != i64::MAX)
     }
 }
 
@@ -253,16 +266,16 @@ mod tests {
     #[test]
     fn rate_step_quantized_and_clamped() {
         let mut s = PracticeSession::default();
-        s.step_rate(-1);
-        assert!((s.rate - 0.95).abs() < 1e-6);
+        s.step_user_tempo(-1);
+        assert!((s.transport.user_tempo - 0.95).abs() < 1e-6);
         for _ in 0..40 {
-            s.step_rate(-1);
+            s.step_user_tempo(-1);
         }
-        assert!((s.rate - RATE_MIN).abs() < 1e-6);
+        assert!((s.transport.user_tempo - RATE_MIN).abs() < 1e-6);
         for _ in 0..40 {
-            s.step_rate(1);
+            s.step_user_tempo(1);
         }
-        assert!((s.rate - RATE_MAX).abs() < 1e-6);
+        assert!((s.transport.user_tempo - RATE_MAX).abs() < 1e-6);
     }
 
     #[test]
@@ -301,7 +314,7 @@ mod tests {
         let mut s = PracticeSession::default();
         s.set_loop_start(4_000);
         s.set_loop_end(2_000);
-        let r = s.loop_region.unwrap();
+        let r = s.transport.loop_region.unwrap();
         assert!(r.start_ms < r.end_ms);
         assert_eq!(r.start_ms, 2_000);
     }

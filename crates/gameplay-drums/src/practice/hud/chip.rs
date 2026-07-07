@@ -13,13 +13,19 @@ pub struct StatusChip;
 
 /// Pure: chip contents from session state. `bar_ms` from `ChipTimeline`.
 pub fn chip_text(session: &PracticeSession, bar_ms: &[i64]) -> String {
-    let mut parts = vec![format!("{:.2}×", session.rate)];
-    if session.ramp.armed {
-        let (cur, total) =
-            crate::practice::ramp::ramp_step_index(&session.ramp_config, session.rate);
+    let mut parts = vec![format!("{:.2}×", session.transport.user_tempo)];
+    if session.trainer.ramp.armed {
+        let (cur, total) = crate::practice::ramp::ramp_step_index(
+            &session.trainer.ramp_config,
+            session.transport.user_tempo,
+        );
         parts.push(format!("RAMP {cur}/{total}"));
     }
-    if let Some(r) = session.loop_region.filter(|r| r.end_ms != i64::MAX) {
+    if let Some(r) = session
+        .transport
+        .loop_region
+        .filter(|r| r.end_ms != i64::MAX)
+    {
         parts.push(format!(
             "loop {}–{}",
             bar_number(bar_ms, r.start_ms),
@@ -99,8 +105,8 @@ mod tests {
         let bar_ms = vec![0, 2_000, 4_000, 6_000, 8_000];
         assert_eq!(chip_text(&s, &bar_ms), "1.00×");
 
-        s.rate = 0.85;
-        s.loop_region = Some(LoopRegion {
+        s.transport.user_tempo = 0.85;
+        s.transport.loop_region = Some(LoopRegion {
             start_ms: 2_000,
             end_ms: 6_000,
         });
@@ -120,8 +126,8 @@ mod tests {
     #[test]
     fn chip_text_shows_ramp_segment_when_armed() {
         let mut s = PracticeSession::default();
-        s.rate = 0.85;
-        s.ramp.armed = true;
+        s.transport.user_tempo = 0.85;
+        s.trainer.ramp.armed = true;
         let bar_ms = vec![0, 2_000];
         assert_eq!(chip_text(&s, &bar_ms), "0.85× · RAMP 3/6");
     }
