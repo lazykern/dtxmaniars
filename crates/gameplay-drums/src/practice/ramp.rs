@@ -81,9 +81,10 @@ pub fn ramp_step_index(cfg: &RampConfig, tempo: f32) -> (u32, u32) {
 use crate::timeline::ChipTimeline;
 
 /// Arm/disarm from `PracticeAction::ToggleRamp` (own reader; the quick
-/// applier deliberately ignores this variant). Arming without an armed
-/// A/B loop is an error toast + no-op. Arming resets the rate to the
-/// configured start and restarts the loop so the first pass is clean.
+/// applier deliberately ignores this variant). Arming works with or
+/// without an explicit A/B loop — with none set it arms over the
+/// implicit whole-song region. Arming resets the rate to the configured
+/// start and restarts the loop so the first pass is clean.
 pub fn handle_toggle_ramp(
     mut actions: MessageReader<super::actions::PracticeAction>,
     mut session: ResMut<PracticeSession>,
@@ -103,10 +104,8 @@ pub fn handle_toggle_ramp(
             ));
             continue;
         }
-        if !session.loop_armed() {
-            toasts.push("ramp needs an A/B loop");
-            continue;
-        }
+        // Arm — an explicit A/B region if set, else the implicit whole
+        // song.
         let cfg = session.trainer.ramp_config;
         session.trainer.ramp = RampState {
             armed: true,
@@ -117,8 +116,9 @@ pub fn handle_toggle_ramp(
         let a_ms = session
             .transport
             .loop_region
-            .expect("loop_armed checked")
-            .start_ms;
+            .filter(|r| r.end_ms != i64::MAX)
+            .map(|r| r.start_ms)
+            .unwrap_or(0);
         seeks.write(SeekToChartTime {
             target_ms: preroll_target(&timeline, session.transport.preroll, a_ms),
             snap: None,
@@ -128,35 +128,30 @@ pub fn handle_toggle_ramp(
     }
 }
 
-/// Apply one ramp decision per finished loop pass. Runs after
-/// `track_attempt_stats` (same tick as the loop's seek) so the finished
-/// attempt is already in history. The ramp owns `step_tempo` while
-/// armed; only `Complete` graduates it into `session.transport.user_tempo`.
+/// Apply one ramp decision per completed loop pass. Runs after
+/// `track_attempt_stats` (same tick as the wrap's seek) so
+/// `LastFinalizedAttempt` holds this pass's attempt. Manual seeks and
+/// restarts emit no `PracticeLoopCompleted`, so they can never step the
+/// ramp; an empty pass finalizes no attempt and is skipped.
 pub fn apply_ramp(
-    mut seeks: MessageReader<SeekToChartTime>,
+    mut completions: MessageReader<super::ab_loop::PracticeLoopCompleted>,
+    finalized: Res<super::stats::LastFinalizedAttempt>,
     mut session: ResMut<PracticeSession>,
     mut toasts: ResMut<ToastQueue>,
 ) {
-    if seeks.read().last().is_none() {
+    let Some(done) = completions.read().last().copied() else {
         return;
-    }
+    };
     if !session.trainer.ramp.armed {
         return;
     }
-    let Some(region) = session
-        .transport
-        .loop_region
-        .filter(|r| r.end_ms != i64::MAX)
-    else {
-        return;
+    let Some(att) = finalized.0.as_ref() else {
+        return; // empty pass: nothing judged, no decision
     };
-    let Some(last) = session.attempt_history.last() else {
-        return;
-    };
-    if last.start_ms != region.start_ms {
-        return; // manual seek elsewhere, not a loop pass
+    if att.start_ms != done.region_start_ms {
+        return; // attempt belongs to a different span
     }
-    let accuracy = last.accuracy_pct;
+    let accuracy = att.accuracy_pct;
     let cfg = session.trainer.ramp_config;
     match ramp_step(&cfg, &mut session.trainer.ramp, accuracy) {
         RampDecision::StepUp { new_tempo } => toasts.push(format!("ramp: {new_tempo:.2}×")),

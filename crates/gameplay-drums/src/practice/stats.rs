@@ -23,7 +23,7 @@ use crate::seek::SeekToChartTime;
 use crate::timeline::ChipTimeline;
 
 pub(super) fn plugin(app: &mut App) {
-    app.add_systems(
+    app.init_resource::<LastFinalizedAttempt>().add_systems(
         FixedUpdate,
         track_attempt_stats
             .after(crate::judge::judge_lane_hit_system)
@@ -31,6 +31,12 @@ pub(super) fn plugin(app: &mut App) {
             .run_if(resource_exists::<PracticeSession>),
     );
 }
+
+/// The attempt finalized by the most recent seek this tick: `Some` when
+/// it had data and was pushed to history, `None` when it was empty.
+/// Read by `apply_ramp` (and later the wrap report) in the same tick.
+#[derive(Resource, Debug, Default, Clone)]
+pub struct LastFinalizedAttempt(pub Option<crate::practice::session::AttemptRecord>);
 
 /// Fold one judgement into the attempt (pure; unit-tested).
 pub fn apply_judgment(
@@ -65,6 +71,7 @@ pub fn track_attempt_stats(
     mut last_seek_from: ResMut<crate::seek::LastSeekFrom>,
     mut session: ResMut<PracticeSession>,
     mut combo: ResMut<Combo>,
+    mut finalized: ResMut<LastFinalizedAttempt>,
 ) {
     for ev in judgments.read() {
         let judge_ms = timeline
@@ -96,7 +103,7 @@ pub fn track_attempt_stats(
         // Pre-seek clock, captured by apply_seek_system earlier this tick.
         let end_ms = last_seek_from.0.take().unwrap_or(clock.current_ms);
         let next_start = seek.attempt_start_ms.unwrap_or(seek.target_ms);
-        session.roll_attempt(end_ms, next_start);
+        finalized.0 = session.roll_attempt(end_ms, next_start);
         // Fresh attempt = fresh visible combo.
         combo.current = 0;
     }

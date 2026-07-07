@@ -179,13 +179,14 @@ fn cleared_loop_region_restores_end_of_stage() {
 fn loop_watcher_seeks_back_to_region_start() {
     let mut app = build_app();
     // Register the watcher in front of the seek system.
-    app.add_systems(
-        Update,
-        gameplay_drums::practice::ab_loop::loop_watcher
-            .before(gameplay_drums::seek::apply_seek_system)
-            .run_if(in_state(AppState::Performance))
-            .run_if(resource_exists::<PracticeSession>),
-    );
+    app.add_message::<gameplay_drums::practice::ab_loop::PracticeLoopCompleted>()
+        .add_systems(
+            Update,
+            gameplay_drums::practice::ab_loop::loop_watcher
+                .before(gameplay_drums::seek::apply_seek_system)
+                .run_if(in_state(AppState::Performance))
+                .run_if(resource_exists::<PracticeSession>),
+        );
     enter_performance(&mut app, chart_with_measures(8));
     app.world_mut().insert_resource(PracticeSession {
         transport: PracticeTransport {
@@ -372,6 +373,8 @@ fn add_ramp_wiring(app: &mut App) {
     app.add_message::<JudgmentEvent>()
         .add_message::<NoteMissed>()
         .add_message::<EmptyHit>()
+        .add_message::<gameplay_drums::practice::ab_loop::PracticeLoopCompleted>()
+        .init_resource::<gameplay_drums::practice::stats::LastFinalizedAttempt>()
         .init_resource::<gameplay_drums::practice::toast::ToastQueue>()
         .add_systems(
             Update,
@@ -497,7 +500,7 @@ fn two_failed_passes_step_rate_down() {
 }
 
 #[test]
-fn toggle_ramp_without_loop_is_a_noop_error_toast() {
+fn toggle_ramp_without_loop_arms_over_whole_song() {
     let mut app = build_app();
     add_ramp_wiring(&mut app);
     enter_performance(&mut app, chart_with_measures(8));
@@ -506,16 +509,10 @@ fn toggle_ramp_without_loop_is_a_noop_error_toast() {
     app.update();
     let session = app.world().resource::<PracticeSession>();
     assert!(
-        !session.trainer.ramp.armed,
-        "arming without an A/B loop must be a no-op"
+        session.trainer.ramp.armed,
+        "arming with no loop uses the whole song"
     );
-    let toasts = app
-        .world()
-        .resource::<gameplay_drums::practice::toast::ToastQueue>();
-    assert!(
-        !toasts.0.is_empty(),
-        "arming without a loop must push an error toast"
-    );
+    assert!((session.effective_tempo() - 0.70).abs() < 1e-6);
 }
 
 #[test]
@@ -638,4 +635,97 @@ fn empty_hits_accumulate_as_overhits() {
     app.update();
     let session = app.world().resource::<PracticeSession>();
     assert_eq!(session.current_attempt.overhits, 2);
+}
+
+#[test]
+fn manual_restart_does_not_step_the_ramp() {
+    let mut app = build_app();
+    add_action_wiring(&mut app);
+    add_ramp_wiring(&mut app);
+    enter_performance(&mut app, chart_with_measures(8));
+    app.world_mut().insert_resource(looped_session(0.70));
+    {
+        let mut clock = app.world_mut().resource_mut::<GameplayClock>();
+        clock.start();
+        clock.sync(Some(3_000));
+    }
+    // A clean partial attempt, then a manual restart (R) — NOT a wrap.
+    app.world_mut()
+        .resource_mut::<Messages<JudgmentEvent>>()
+        .write(JudgmentEvent {
+            lane: 3,
+            kind: dtx_scoring::JudgmentKind::Perfect,
+            delta_ms: 0,
+            chip_idx: 0,
+        });
+    app.world_mut()
+        .resource_mut::<ButtonInput<KeyCode>>()
+        .press(KeyCode::KeyR);
+    app.update();
+    let session = app.world().resource::<PracticeSession>();
+    assert!(
+        (session.effective_tempo() - 0.70).abs() < 1e-6,
+        "manual restart must never count as a ramp pass"
+    );
+}
+
+#[test]
+fn empty_loop_pass_makes_no_ramp_decision() {
+    let mut app = build_app();
+    add_ramp_wiring(&mut app);
+    enter_performance(&mut app, chart_with_measures(8));
+    // A previous clean pass already sits in history at this loop's start,
+    // so the OLD stale-attempt bug would re-read it and step up.
+    let mut s = looped_session(0.70);
+    s.attempt_history
+        .push(gameplay_drums::practice::session::AttemptRecord {
+            start_ms: 2_000,
+            end_ms: 6_000,
+            tempo: 0.70,
+            counts: Default::default(),
+            overhits: 0,
+            max_combo: 4,
+            accuracy_pct: 100.0,
+            mean_error_ms: 0.0,
+        });
+    app.world_mut().insert_resource(s);
+    {
+        let mut clock = app.world_mut().resource_mut::<GameplayClock>();
+        clock.start();
+        clock.sync(Some(3_000));
+    }
+    // Wrap with ZERO judgments (current_attempt has no data → not recorded).
+    {
+        let mut clock = app.world_mut().resource_mut::<GameplayClock>();
+        clock.sync(Some(6_100));
+    }
+    app.update();
+    let session = app.world().resource::<PracticeSession>();
+    assert!(
+        (session.effective_tempo() - 0.70).abs() < 1e-6,
+        "an empty pass must not re-apply the previous attempt's accuracy"
+    );
+}
+
+#[test]
+fn no_loop_set_wraps_at_chart_end_as_implicit_loop() {
+    let mut app = build_app();
+    add_ramp_wiring(&mut app);
+    enter_performance(&mut app, chart_with_measures(4)); // chart end ≈ 8000-10000ms
+    app.world_mut().insert_resource(PracticeSession::default());
+    let end = app
+        .world()
+        .resource::<gameplay_drums::timeline::ChipTimeline>()
+        .end_ms;
+    {
+        let mut clock = app.world_mut().resource_mut::<GameplayClock>();
+        clock.start();
+        clock.sync(Some(end + 1_000)); // past chart end
+    }
+    app.update();
+    let now = app.world().resource::<GameplayClock>().current_ms;
+    assert!(
+        now < end,
+        "reaching chart end in practice wraps to the start (implicit loop): now={now} end={end}"
+    );
 }

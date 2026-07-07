@@ -214,11 +214,12 @@ impl PracticeSession {
     }
 
     /// Finalize the running attempt into history (skipped when it saw no
-    /// judgements) and start a fresh one at `next_start_ms`.
-    pub fn roll_attempt(&mut self, end_ms: i64, next_start_ms: i64) {
-        if self.current_attempt.has_data() {
+    /// judgements) and start a fresh one at `next_start_ms`. Returns the
+    /// finalized record when it had data, `None` when the pass was empty.
+    pub fn roll_attempt(&mut self, end_ms: i64, next_start_ms: i64) -> Option<AttemptRecord> {
+        let record = if self.current_attempt.has_data() {
             let a = &self.current_attempt;
-            self.attempt_history.push(AttemptRecord {
+            let record = AttemptRecord {
                 start_ms: a.start_ms,
                 end_ms,
                 tempo: self.effective_tempo(),
@@ -227,15 +228,20 @@ impl PracticeSession {
                 overhits: a.overhits,
                 accuracy_pct: a.accuracy_pct(),
                 mean_error_ms: a.mean_error_ms(),
-            });
+            };
+            self.attempt_history.push(record.clone());
             if self.attempt_history.len() > MAX_ATTEMPT_HISTORY {
                 self.attempt_history.remove(0);
             }
-        }
+            Some(record)
+        } else {
+            None
+        };
         self.current_attempt = AttemptStats {
             start_ms: next_start_ms,
             ..Default::default()
         };
+        record
     }
 
     /// Set the A marker; keeps the region valid (swap, min length is
