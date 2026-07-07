@@ -25,7 +25,8 @@ use crate::timeline::ChipTimeline;
 pub(super) fn plugin(app: &mut App) {
     app.init_resource::<LastFinalizedAttempt>().add_systems(
         FixedUpdate,
-        track_attempt_stats
+        (track_attempt_stats, wrap_micro_report)
+            .chain()
             .after(crate::judge::judge_lane_hit_system)
             .run_if(in_state(AppState::Performance))
             .run_if(resource_exists::<PracticeSession>),
@@ -107,6 +108,35 @@ pub fn track_attempt_stats(
         // Fresh attempt = fresh visible combo.
         combo.current = 0;
     }
+}
+
+/// One-line feedback at each loop wrap: `pass 5 · 93.8% · 3 miss · +18ms`
+/// (`+` = late, `−` = early). Pass count = attempts on this span in
+/// history. Feedback lands at the loop boundary, never mid-play.
+pub fn wrap_micro_report(
+    mut completions: MessageReader<super::ab_loop::PracticeLoopCompleted>,
+    finalized: Res<LastFinalizedAttempt>,
+    session: Res<PracticeSession>,
+    mut toasts: ResMut<super::toast::ToastQueue>,
+) {
+    let Some(done) = completions.read().last().copied() else {
+        return;
+    };
+    let Some(att) = finalized.0.as_ref() else {
+        return;
+    };
+    if att.start_ms != done.region_start_ms {
+        return;
+    }
+    let n = session
+        .attempt_history
+        .iter()
+        .filter(|a| a.start_ms == done.region_start_ms)
+        .count();
+    toasts.push(format!(
+        "pass {n} · {:.1}% · {} miss · {:+.0}ms",
+        att.accuracy_pct, att.counts.miss, att.mean_error_ms
+    ));
 }
 
 #[cfg(test)]

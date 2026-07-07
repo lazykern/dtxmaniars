@@ -353,6 +353,7 @@ fn add_ramp_wiring(app: &mut App) {
             Update,
             (
                 gameplay_drums::practice::stats::track_attempt_stats,
+                gameplay_drums::practice::stats::wrap_micro_report,
                 gameplay_drums::practice::ramp::apply_ramp,
             )
                 .chain()
@@ -686,5 +687,39 @@ fn no_loop_set_wraps_at_chart_end_as_implicit_loop() {
     assert!(
         now < end,
         "reaching chart end in practice wraps to the start (implicit loop): now={now} end={end}"
+    );
+}
+
+#[test]
+fn loop_wrap_pushes_a_micro_report_toast() {
+    let mut app = build_app();
+    add_ramp_wiring(&mut app);
+    enter_performance(&mut app, chart_with_measures(8));
+    let mut s = looped_session(0.70);
+    s.trainer.ramp.armed = false; // report fires with or without ramp
+    app.world_mut().insert_resource(s);
+    {
+        let mut clock = app.world_mut().resource_mut::<GameplayClock>();
+        clock.start();
+        clock.sync(Some(3_000));
+    }
+    finish_loop_pass(&mut app, 4);
+    let toasts = app
+        .world()
+        .resource::<gameplay_drums::practice::toast::ToastQueue>();
+    let report = toasts
+        .0
+        .iter()
+        .find(|t| t.text.starts_with("pass "))
+        .expect("wrap must push a micro-report toast");
+    assert!(
+        report.text.contains('%'),
+        "report shows accuracy: {}",
+        report.text
+    );
+    assert!(
+        report.text.contains("ms"),
+        "report shows mean error: {}",
+        report.text
     );
 }
