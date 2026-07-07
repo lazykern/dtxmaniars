@@ -2,6 +2,7 @@
 //! play, full HUD (timeline + right rail) while paused. Fixed overlay —
 //! deliberately NOT a dtx-layout widget (no editor-pillar dependency).
 
+pub mod chip;
 pub mod full_hud;
 pub mod mini_strip;
 pub mod timeline_ui;
@@ -20,6 +21,7 @@ pub fn format_chart_time(ms: i64) -> String {
 pub(super) fn plugin(app: &mut App) {
     use game_shell::{AppState, PauseState};
     mini_strip::plugin(app);
+    chip::plugin(app);
     app.init_resource::<full_hud::RailSelection>()
         .init_resource::<full_hud::ExitArmed>()
         .init_resource::<timeline_ui::TimelineGesture>()
