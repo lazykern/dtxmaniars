@@ -213,6 +213,9 @@ pub struct GameplayConfig {
     /// Lane background + timing line visibility (`nLaneDisp.Drums`).
     #[serde(default)]
     pub lane_display: LaneDisplay,
+    /// Path of the last song entered in normal play (editor session uses it).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_played: Option<PathBuf>,
 }
 
 impl Default for GameplayConfig {
@@ -229,6 +232,7 @@ impl Default for GameplayConfig {
             play_speed: default_play_speed(),
             damage_level: default_damage_level(),
             lane_display: LaneDisplay::default(),
+            last_played: None,
         }
     }
 }
@@ -372,6 +376,16 @@ mod tests {
         assert!((back.gameplay.scroll_speed - 1.5).abs() < 0.001);
         assert!((back.audio.bgm_volume - 0.42).abs() < 0.001);
         let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn last_played_round_trips_and_defaults_none() {
+        let mut cfg = Config::default();
+        assert_eq!(cfg.gameplay.last_played, None);
+        cfg.gameplay.last_played = Some(std::path::PathBuf::from("/tmp/x.dtx"));
+        let s = toml::to_string_pretty(&cfg).unwrap();
+        let back: Config = toml::from_str(&s).unwrap();
+        assert_eq!(back.gameplay.last_played, cfg.gameplay.last_played);
     }
 
     #[test]

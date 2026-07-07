@@ -101,3 +101,9 @@ pub fn despawn_stage<T: Component>(mut commands: Commands, query: Query<Entity, 
 /// internals to request practice.
 #[derive(Resource, Debug, Clone, Copy, Default)]
 pub struct PracticeIntent(pub bool);
+
+/// True while the layout-editor session (title → F2) is active: Performance
+/// runs on autoplay in a seamless loop with the editor open; Esc exits to
+/// Title instead of Results.
+#[derive(Resource, Debug, Default, Clone, Copy, PartialEq, Eq)]
+pub struct EditorSession(pub bool);
