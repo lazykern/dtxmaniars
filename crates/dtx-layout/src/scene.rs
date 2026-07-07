@@ -5,7 +5,7 @@ use std::collections::HashMap;
 use serde::{Deserialize, Serialize};
 
 use crate::widgets::{
-    Anchor9, AnchorSpace, WidgetInstance, WidgetKind, MAX_WIDGET_SCALE, MIN_WIDGET_SCALE,
+    Anchor9, AnchorSpace, Placement, WidgetInstance, WidgetKind, MAX_WIDGET_SCALE, MIN_WIDGET_SCALE,
 };
 
 /// Default instance for a kind (offset 0 ⇒ today's on-screen position via the
@@ -22,6 +22,7 @@ pub fn default_instance(kind: WidgetKind) -> WidgetInstance {
     WidgetInstance {
         kind,
         space: AnchorSpace::Screen,
+        placement: Placement::Natural,
         anchor: Anchor9::TopLeft,
         origin: Anchor9::TopLeft,
         offset: (0.0, 0.0),
@@ -38,6 +39,8 @@ pub struct WidgetEntry {
     pub kind: WidgetKind,
     #[serde(default = "default_space")]
     pub space: AnchorSpace,
+    #[serde(default, skip_serializing_if = "placement_is_natural")]
+    pub placement: Placement,
     #[serde(default = "default_anchor")]
     pub anchor: Anchor9,
     #[serde(default = "default_anchor")]
@@ -66,12 +69,16 @@ fn default_scale() -> f32 {
 fn default_true() -> bool {
     true
 }
+fn placement_is_natural(p: &Placement) -> bool {
+    *p == Placement::Natural
+}
 
 impl WidgetEntry {
     fn to_instance(&self) -> WidgetInstance {
         WidgetInstance {
             kind: self.kind,
             space: self.space,
+            placement: self.placement,
             anchor: self.anchor,
             origin: self.origin,
             offset: (self.offset[0], self.offset[1]),
@@ -86,6 +93,7 @@ impl WidgetEntry {
         Self {
             kind: i.kind,
             space: i.space,
+            placement: i.placement,
             anchor: i.anchor,
             origin: i.origin,
             offset: [i.offset.0, i.offset.1],
@@ -171,6 +179,7 @@ mod tests {
             widgets: vec![WidgetEntry {
                 kind: WidgetKind::Combo,
                 space: AnchorSpace::Screen,
+                placement: Placement::Natural,
                 anchor: Anchor9::TopLeft,
                 origin: Anchor9::TopLeft,
                 offset: [40.0, -20.0],
@@ -195,6 +204,7 @@ mod tests {
             widgets: vec![WidgetEntry {
                 kind: WidgetKind::Combo,
                 space: AnchorSpace::Screen,
+                placement: Placement::Natural,
                 anchor: Anchor9::TopLeft,
                 origin: Anchor9::TopLeft,
                 offset: [0.0, 0.0],
@@ -215,6 +225,7 @@ mod tests {
         let mk = |offx: f32| WidgetEntry {
             kind: WidgetKind::Combo,
             space: AnchorSpace::Screen,
+            placement: Placement::Natural,
             anchor: Anchor9::TopLeft,
             origin: Anchor9::TopLeft,
             offset: [offx, 0.0],
