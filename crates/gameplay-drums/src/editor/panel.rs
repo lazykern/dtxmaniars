@@ -77,6 +77,9 @@ pub fn plugin(app: &mut App) {
                 apply_anchor_cells,
                 handle_reset,
                 refresh_panel_values,
+                handle_lane_buttons,
+                apply_lane_width_sliders,
+                refresh_lane_panel_values,
             )
                 .run_if(super::editor_open),
         )
@@ -612,6 +615,134 @@ fn refresh_panel_values(
             if b.0 != w {
                 b.0 = w;
             }
+        }
+    }
+}
+
+/// Preset cycle order for the < > buttons (named presets only; any manual
+/// edit lands on Custom via the transforms).
+const PRESET_ORDER: [dtx_layout::LanePreset; 3] = [
+    dtx_layout::LanePreset::Classic,
+    dtx_layout::LanePreset::NxTypeB,
+    dtx_layout::LanePreset::NxTypeD,
+];
+
+fn handle_lane_buttons(
+    reorders: Query<(&LaneReorderBtn, &Interaction), Changed<Interaction>>,
+    merges: Query<(&LaneMergeBtn, &Interaction), Changed<Interaction>>,
+    splits: Query<(&ChipSplitBtn, &Interaction), Changed<Interaction>>,
+    presets: Query<(&PresetCycleBtn, &Interaction), Changed<Interaction>>,
+    mut lanes: ResMut<Lanes>,
+    layouts: Res<WidgetLayouts>,
+    mut undo: ResMut<super::undo::UndoStack>,
+) {
+    let mut mutate: Option<Box<dyn FnOnce(&mut dtx_layout::LaneArrangement) -> bool>> = None;
+    for (btn, i) in &reorders {
+        if *i == Interaction::Pressed {
+            let (index, dir) = (btn.index, btn.dir);
+            mutate = Some(Box::new(move |arr| dtx_layout::reorder_lane(arr, index, dir)));
+        }
+    }
+    for (btn, i) in &merges {
+        if *i == Interaction::Pressed {
+            let index = btn.0;
+            mutate = Some(Box::new(move |arr| dtx_layout::merge_lane(arr, index)));
+        }
+    }
+    for (btn, i) in &splits {
+        if *i == Interaction::Pressed {
+            let ch = btn.0;
+            mutate = Some(Box::new(move |arr| dtx_layout::split_channel(arr, ch)));
+        }
+    }
+    for (btn, i) in &presets {
+        if *i == Interaction::Pressed {
+            let dir = btn.0;
+            mutate = Some(Box::new(move |arr| {
+                let cur = PRESET_ORDER.iter().position(|p| *p == arr.preset);
+                let next = match cur {
+                    Some(idx) => {
+                        let n = PRESET_ORDER.len() as i32;
+                        PRESET_ORDER[((idx as i32 + dir).rem_euclid(n)) as usize]
+                    }
+                    // From Custom: either direction lands on Classic.
+                    None => dtx_layout::LanePreset::Classic,
+                };
+                *arr = dtx_layout::arrangement_for(next);
+                true
+            }));
+        }
+    }
+    if let Some(f) = mutate {
+        // Snapshot BEFORE mutating; drop the snapshot if the op was a no-op.
+        let before = super::undo::Snapshot {
+            layouts: layouts.clone(),
+            lanes: lanes.clone(),
+        };
+        if f(&mut lanes.0) {
+            undo.push_snapshot(before);
+        }
+    }
+}
+
+/// Width slider → Lanes. One undo snapshot per mouse-hold.
+fn apply_lane_width_sliders(
+    buttons: Res<ButtonInput<MouseButton>>,
+    sliders: Query<(&LaneWidthSlider, &ControlValue), Changed<ControlValue>>,
+    mut lanes: ResMut<Lanes>,
+    layouts: Res<WidgetLayouts>,
+    mut undo: ResMut<super::undo::UndoStack>,
+    mut snapped_this_hold: Local<bool>,
+) {
+    if !buttons.pressed(MouseButton::Left) {
+        *snapped_this_hold = false;
+    }
+    let mut pending: Vec<(usize, f32)> = Vec::new();
+    for (slider, value) in &sliders {
+        let idx = slider.0;
+        let differs = lanes
+            .0
+            .lanes
+            .get(idx)
+            .map(|l| (l.width - value.0).abs() > 0.01)
+            .unwrap_or(false);
+        if differs {
+            pending.push((idx, value.0));
+        }
+    }
+    if pending.is_empty() {
+        return;
+    }
+    if !*snapped_this_hold {
+        undo.push(&layouts, &lanes);
+        *snapped_this_hold = true;
+    }
+    for (idx, w) in pending {
+        dtx_layout::set_lane_width(&mut lanes.0, idx, w);
+    }
+}
+
+/// External Lanes changes (undo, preset) → refresh slider values + preset
+/// label. Equality-guarded to terminate the write-back loop.
+fn refresh_lane_panel_values(
+    lanes: Res<Lanes>,
+    mut sliders: Query<(&LaneWidthSlider, &mut ControlValue)>,
+    mut preset_label: Query<&mut Text, With<PresetLabel>>,
+) {
+    if !lanes.is_changed() {
+        return;
+    }
+    for (slider, mut value) in &mut sliders {
+        if let Some(lane) = lanes.0.lanes.get(slider.0) {
+            if (value.0 - lane.width).abs() > 0.01 {
+                value.0 = lane.width;
+            }
+        }
+    }
+    if let Ok(mut text) = preset_label.single_mut() {
+        let want = preset_name(lanes.0.preset);
+        if text.0 != want {
+            text.0 = want.to_string();
         }
     }
 }
