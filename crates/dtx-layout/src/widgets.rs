@@ -91,12 +91,11 @@ pub enum WidgetKind {
     LiveGraph,
     SpeedReadout,
     FrameChrome,
-    PracticeTransport,
     Playfield,
 }
 
 impl WidgetKind {
-    pub const ALL: [WidgetKind; 11] = [
+    pub const ALL: [WidgetKind; 10] = [
         WidgetKind::ScorePanel,
         WidgetKind::Combo,
         WidgetKind::JudgmentPopup,
@@ -106,7 +105,6 @@ impl WidgetKind {
         WidgetKind::LiveGraph,
         WidgetKind::SpeedReadout,
         WidgetKind::FrameChrome,
-        WidgetKind::PracticeTransport,
         WidgetKind::Playfield,
     ];
 
@@ -122,7 +120,6 @@ impl WidgetKind {
             WidgetKind::LiveGraph => "Live Graph",
             WidgetKind::SpeedReadout => "Speed Readout",
             WidgetKind::FrameChrome => "Frame Chrome",
-            WidgetKind::PracticeTransport => "Practice Transport",
             WidgetKind::Playfield => "Playfield",
         }
     }
@@ -297,10 +294,13 @@ mod tests {
         let parent = (100.0, 50.0, 800.0, 600.0);
         for anchor in Anchor9::ALL {
             for origin in Anchor9::ALL {
-                let offset = offset_for_top_left(anchor, origin, (120.0, 40.0), 1.5, (300.0, 200.0), parent);
+                let offset =
+                    offset_for_top_left(anchor, origin, (120.0, 40.0), 1.5, (300.0, 200.0), parent);
                 let tl = resolve_top_left(anchor, origin, (120.0, 40.0), 1.5, offset, parent);
-                assert!((tl.0 - 300.0).abs() < 0.001 && (tl.1 - 200.0).abs() < 0.001,
-                    "{anchor:?}/{origin:?}");
+                assert!(
+                    (tl.0 - 300.0).abs() < 0.001 && (tl.1 - 200.0).abs() < 0.001,
+                    "{anchor:?}/{origin:?}"
+                );
             }
         }
     }

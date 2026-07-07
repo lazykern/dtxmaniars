@@ -13,10 +13,13 @@ use crate::widgets::{
 /// stacking collapses to spawn/tree order — byte-identical to the pre-registry
 /// paint order, keeping runtime chips/beat-lines (z 0 on HudRoot) in front of
 /// the text widgets exactly as before. The editor sets non-zero z only when the
-/// user reorders. Practice widgets are hidden in play.
+/// user reorders. Score-centric widgets are hidden in practice by default.
 pub fn default_instance(kind: WidgetKind) -> WidgetInstance {
     let (vis_play, vis_practice) = match kind {
-        WidgetKind::PracticeTransport => (false, true),
+        WidgetKind::ScorePanel
+        | WidgetKind::PhraseMeter
+        | WidgetKind::LiveGraph
+        | WidgetKind::SongProgress => (true, false),
         _ => (true, true),
     };
     WidgetInstance {
@@ -34,10 +37,20 @@ pub fn default_instance(kind: WidgetKind) -> WidgetInstance {
     }
 }
 
+/// Widget kind as serialized: tolerates kinds this build doesn't know
+/// (e.g. layouts saved by another version) — unknown entries are skipped
+/// with a warning instead of failing the whole file.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum WidgetKindField {
+    Known(WidgetKind),
+    Unknown(String),
+}
+
 /// One serialized widget entry ([[scene.gameplay.widgets]]).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct WidgetEntry {
-    pub kind: WidgetKind,
+    pub kind: WidgetKindField,
     #[serde(default = "default_space")]
     pub space: AnchorSpace,
     #[serde(default, skip_serializing_if = "placement_is_natural")]
@@ -80,9 +93,9 @@ fn placement_is_natural(p: &Placement) -> bool {
 }
 
 impl WidgetEntry {
-    fn to_instance(&self) -> WidgetInstance {
+    fn to_instance(&self, kind: WidgetKind) -> WidgetInstance {
         WidgetInstance {
-            kind: self.kind,
+            kind,
             space: self.space,
             placement: self.placement,
             anchor: self.anchor,
@@ -98,7 +111,7 @@ impl WidgetEntry {
 
     fn from_instance(i: &WidgetInstance) -> Self {
         Self {
-            kind: i.kind,
+            kind: WidgetKindField::Known(i.kind),
             space: i.space,
             placement: i.placement,
             anchor: i.anchor,
@@ -130,14 +143,21 @@ impl SceneSection {
             .collect();
         let mut seen = std::collections::HashSet::new();
         for entry in &self.widgets {
-            if !seen.insert(entry.kind) {
+            let kind = match &entry.kind {
+                WidgetKindField::Known(k) => *k,
+                WidgetKindField::Unknown(s) => {
+                    eprintln!("dtx-layout: unknown widget kind '{s}' in [scene.gameplay], skipped");
+                    continue;
+                }
+            };
+            if !seen.insert(kind) {
                 eprintln!(
                     "dtx-layout: duplicate widget {:?} in [scene.gameplay], extra dropped",
-                    entry.kind
+                    kind
                 );
                 continue;
             }
-            map.insert(entry.kind, entry.to_instance());
+            map.insert(kind, entry.to_instance(kind));
         }
         map
     }
@@ -175,17 +195,42 @@ mod tests {
     }
 
     #[test]
-    fn practice_transport_hidden_in_play_by_default() {
-        let d = default_instance(WidgetKind::PracticeTransport);
-        assert!(!d.visible_play);
-        assert!(d.visible_practice);
+    fn score_widgets_hidden_in_practice_by_default() {
+        for kind in [
+            WidgetKind::ScorePanel,
+            WidgetKind::PhraseMeter,
+            WidgetKind::LiveGraph,
+            WidgetKind::SongProgress,
+        ] {
+            let d = default_instance(kind);
+            assert!(d.visible_play, "{kind:?} visible in play");
+            assert!(!d.visible_practice, "{kind:?} hidden in practice");
+        }
+        let combo = default_instance(WidgetKind::Combo);
+        assert!(combo.visible_play && combo.visible_practice);
+    }
+
+    #[test]
+    fn unknown_widget_kind_in_toml_is_skipped_not_fatal() {
+        let toml = r#"
+[[widgets]]
+kind = "practice-transport"
+
+[[widgets]]
+kind = "combo"
+offset = [10.0, 0.0]
+"#;
+        let section: SceneSection = toml::from_str(toml).expect("unknown kind must not fail parse");
+        let map = section.resolve();
+        assert_eq!(map.len(), WidgetKind::ALL.len());
+        assert_eq!(map[&WidgetKind::Combo].offset, (10.0, 0.0));
     }
 
     #[test]
     fn file_entry_overrides_default() {
         let section = SceneSection {
             widgets: vec![WidgetEntry {
-                kind: WidgetKind::Combo,
+                kind: WidgetKindField::Known(WidgetKind::Combo),
                 space: AnchorSpace::Screen,
                 placement: Placement::Natural,
                 anchor: Anchor9::TopLeft,
@@ -211,7 +256,7 @@ mod tests {
     fn scale_clamped_on_resolve() {
         let section = SceneSection {
             widgets: vec![WidgetEntry {
-                kind: WidgetKind::Combo,
+                kind: WidgetKindField::Known(WidgetKind::Combo),
                 space: AnchorSpace::Screen,
                 placement: Placement::Natural,
                 anchor: Anchor9::TopLeft,
@@ -233,7 +278,7 @@ mod tests {
     #[test]
     fn duplicate_kind_first_wins() {
         let mk = |offx: f32| WidgetEntry {
-            kind: WidgetKind::Combo,
+            kind: WidgetKindField::Known(WidgetKind::Combo),
             space: AnchorSpace::Screen,
             placement: Placement::Natural,
             anchor: Anchor9::TopLeft,
@@ -257,7 +302,10 @@ mod tests {
         map.get_mut(&WidgetKind::Combo).unwrap().offset = (5.0, 5.0);
         let section = SceneSection::from_map(&map);
         assert_eq!(section.widgets.len(), 1);
-        assert_eq!(section.widgets[0].kind, WidgetKind::Combo);
+        assert_eq!(
+            section.widgets[0].kind,
+            WidgetKindField::Known(WidgetKind::Combo)
+        );
     }
 
     #[test]
