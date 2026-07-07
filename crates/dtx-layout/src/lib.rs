@@ -8,12 +8,16 @@ use std::path::{Path, PathBuf};
 use thiserror::Error;
 
 pub mod file;
+pub mod lane_edit;
 pub mod lanes;
 pub mod presets;
 pub mod scene;
 pub mod widgets;
 
 pub use file::{parse_with_migrations, LanesSection, LayoutFile, LATEST_VERSION};
+pub use lane_edit::{
+    lane_chips, merge_lane, reorder_lane, set_lane_width, split_channel, structure_signature,
+};
 pub use scene::{default_instance, SceneSection, WidgetEntry};
 pub use lanes::{
     channel_from_short, channel_short_name, default_lane_width, DisplayLane, LaneArrangement,
