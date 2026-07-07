@@ -23,6 +23,12 @@ pub struct WidgetAabbs(pub HashMap<WidgetKind, Rect>);
 #[derive(Resource, Debug, Default, Clone, Copy, PartialEq)]
 pub struct Hovered(pub Option<WidgetKind>);
 
+/// Widgets hidden in the current preview mode. They keep an AABB (so a
+/// sidebar-selected hidden widget still gets a dimmed selection box) but are
+/// excluded from canvas hover/click so you can't grab an invisible widget.
+#[derive(Resource, Debug, Default)]
+pub struct CanvasHidden(pub std::collections::HashSet<WidgetKind>);
+
 /// True while the cursor is over editor chrome (sidebar/panel) — canvas
 /// hover/click are masked.
 #[derive(Resource, Debug, Default, Clone, Copy)]
@@ -83,6 +89,7 @@ pub(crate) fn node_rect(node: &ComputedNode, gt: &GlobalTransform) -> Rect {
 pub fn plugin(app: &mut App) {
     app.init_resource::<WidgetAabbs>()
         .init_resource::<Hovered>()
+        .init_resource::<CanvasHidden>()
         .init_resource::<CursorOverChrome>()
         .add_systems(
             Update,
@@ -95,11 +102,13 @@ pub fn plugin(app: &mut App) {
 }
 
 /// Union of each widget container's descendant node rects (skipping the
-/// full-screen container itself). Hidden-in-mode widgets are removed so they
-/// aren't hit-testable; empty unions keep their previous entry (falling back
-/// to a MIN_GRAB box at the container's offset if never seen).
+/// full-screen container itself). Hidden-in-mode widgets keep their AABB (the
+/// node still participates in layout while `Visibility::Hidden`) but are added
+/// to `CanvasHidden` so the hit-test skips them; empty unions keep their
+/// previous entry (falling back to a MIN_GRAB box if never seen).
 fn collect_widget_aabbs(
     mut aabbs: ResMut<WidgetAabbs>,
+    mut hidden: ResMut<CanvasHidden>,
     layouts: Res<WidgetLayouts>,
     practice: Option<Res<crate::practice::PracticeSession>>,
     pfl: Res<PlayfieldLayout>,
@@ -108,14 +117,14 @@ fn collect_widget_aabbs(
     nodes: Query<(&ComputedNode, &GlobalTransform)>,
 ) {
     let is_practice = practice.is_some();
+    hidden.0.clear();
     for (entity, container, cnode) in &containers {
         let kind = container.0;
         if kind == WidgetKind::Playfield {
             continue;
         }
         if !widget_visible(layouts.get(kind), is_practice) {
-            aabbs.0.remove(&kind);
-            continue;
+            hidden.0.insert(kind);
         }
         let mut union: Option<Rect> = None;
         let mut stack: Vec<Entity> = children_q
@@ -185,6 +194,7 @@ fn update_hover(
     over_chrome: Res<CursorOverChrome>,
     gesture: Res<super::drag::ActiveGesture>,
     aabbs: Res<WidgetAabbs>,
+    hidden: Res<CanvasHidden>,
     layouts: Res<WidgetLayouts>,
     windows: Query<&Window>,
 ) {
@@ -197,7 +207,9 @@ fn update_hover(
         hovered.0 = None;
         return;
     };
-    hovered.0 = pick_topmost(&aabbs.0, |k| layouts.get(k).z, pos);
+    hovered.0 = candidates_at(&aabbs.0, |k| layouts.get(k).z, pos)
+        .into_iter()
+        .find(|k| !hidden.0.contains(k));
 }
 
 #[cfg(test)]

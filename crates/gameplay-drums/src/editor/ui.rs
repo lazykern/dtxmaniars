@@ -184,6 +184,7 @@ fn handle_buttons(
                     EditorButton::Close => {
                         open.0 = false;
                         autoplay.0 = prev.0;
+                        selection.0 = None;
                     }
                 }
             }

@@ -25,6 +25,9 @@ pub enum Gesture {
     Scale {
         start_dist: f32,
         start_scale: f32,
+        /// AABB center captured at press. Fixed for the whole gesture so the
+        /// reference distance can't drift as scaling moves the live center.
+        start_center: Vec2,
     },
 }
 
@@ -67,6 +70,7 @@ fn begin_gesture(
     windows: Query<&Window>,
     over_chrome: Res<super::picking::CursorOverChrome>,
     aabbs: Res<super::picking::WidgetAabbs>,
+    hidden: Res<super::picking::CanvasHidden>,
     handles: Query<(&super::selection_box::ScaleHandle, &ComputedNode, &GlobalTransform)>,
     mut selection: ResMut<Selection>,
     mut gesture: ResMut<ActiveGesture>,
@@ -89,10 +93,15 @@ fn begin_gesture(
                 let r = Rect::from_center_size(r.center(), r.size() + Vec2::splat(6.0));
                 if r.contains(pos) {
                     if let Some(aabb) = aabbs.0.get(&kind) {
-                        let start_dist = (pos - aabb.center()).length().max(1.0);
+                        let start_center = aabb.center();
+                        let start_dist = (pos - start_center).length().max(1.0);
                         let start_scale = layouts.get(kind).scale;
                         undo.push(&layouts, &lanes);
-                        gesture.0 = Gesture::Scale { start_dist, start_scale };
+                        gesture.0 = Gesture::Scale {
+                            start_dist,
+                            start_scale,
+                            start_center,
+                        };
                         return;
                     }
                 }
@@ -100,9 +109,11 @@ fn begin_gesture(
         }
     }
 
-    // 2. Canvas widgets.
+    // 2. Canvas widgets (hidden-in-mode widgets are unpickable on canvas —
+    // they're only selectable from the sidebar list).
     let alt = keys.pressed(KeyCode::AltLeft) || keys.pressed(KeyCode::AltRight);
-    let cands = super::picking::candidates_at(&aabbs.0, |k| layouts.get(k).z, pos);
+    let mut cands = super::picking::candidates_at(&aabbs.0, |k| layouts.get(k).z, pos);
+    cands.retain(|k| !hidden.0.contains(k));
     let picked = if alt {
         super::picking::cycle_pick(&cands, selection.0)
     } else {
@@ -122,7 +133,6 @@ fn update_gesture(
     buttons: Res<ButtonInput<MouseButton>>,
     windows: Query<&Window>,
     selection: Res<Selection>,
-    aabbs: Res<super::picking::WidgetAabbs>,
     pfl: Res<crate::layout::PlayfieldLayout>,
     mut gesture: ResMut<ActiveGesture>,
     mut layouts: ResMut<WidgetLayouts>,
@@ -148,11 +158,18 @@ fn update_gesture(
             }
             gesture.0 = Gesture::Move { last_cursor: pos };
         }
-        Gesture::Scale { start_dist, start_scale } => {
-            if let Some(aabb) = aabbs.0.get(&kind) {
-                let dist = (pos - aabb.center()).length().max(1.0);
-                if let Some(inst) = layouts.0.get_mut(&kind) {
-                    inst.scale = clamp_scale(start_scale * dist / start_dist);
+        Gesture::Scale {
+            start_dist,
+            start_scale,
+            start_center,
+        } => {
+            // Fixed reference center (captured at press) — never the live AABB,
+            // which scaling would move and feed back into the distance.
+            let dist = (pos - start_center).length().max(1.0);
+            let next = clamp_scale(start_scale * dist / start_dist);
+            if let Some(inst) = layouts.0.get_mut(&kind) {
+                if (inst.scale - next).abs() > f32::EPSILON {
+                    inst.scale = next;
                 }
             }
         }

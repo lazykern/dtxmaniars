@@ -63,6 +63,7 @@ fn close_editor_on_exit(
     mut autoplay: ResMut<crate::autoplay::AutoplayEnabled>,
     mut gesture: ResMut<drag::ActiveGesture>,
     mut hovered: ResMut<picking::Hovered>,
+    mut selection: ResMut<drag::Selection>,
 ) {
     if open.0 {
         autoplay.0 = prev.0;
@@ -70,6 +71,7 @@ fn close_editor_on_exit(
     }
     gesture.0 = drag::Gesture::None;
     hovered.0 = None;
+    selection.0 = None;
 }
 
 /// Ctrl+Shift+E toggles the editor while in Performance.
@@ -78,6 +80,7 @@ fn toggle_editor(
     mut open: ResMut<EditorOpen>,
     mut prev: ResMut<PrevAutoplay>,
     mut autoplay: ResMut<crate::autoplay::AutoplayEnabled>,
+    mut selection: ResMut<drag::Selection>,
 ) {
     let ctrl = keys.pressed(KeyCode::ControlLeft) || keys.pressed(KeyCode::ControlRight);
     let shift = keys.pressed(KeyCode::ShiftLeft) || keys.pressed(KeyCode::ShiftRight);
@@ -88,6 +91,7 @@ fn toggle_editor(
             autoplay.0 = true;
         } else {
             autoplay.0 = prev.0;
+            selection.0 = None;
         }
     }
 }
