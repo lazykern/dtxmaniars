@@ -25,6 +25,7 @@ pub fn default_instance(kind: WidgetKind) -> WidgetInstance {
         placement: Placement::Natural,
         anchor: Anchor9::TopLeft,
         origin: Anchor9::TopLeft,
+        anchor_auto: true,
         offset: (0.0, 0.0),
         scale: 1.0,
         z: 0,
@@ -45,6 +46,8 @@ pub struct WidgetEntry {
     pub anchor: Anchor9,
     #[serde(default = "default_anchor")]
     pub origin: Anchor9,
+    #[serde(default = "default_true", skip_serializing_if = "is_true")]
+    pub anchor_auto: bool,
     #[serde(default)]
     pub offset: [f32; 2],
     #[serde(default = "default_scale")]
@@ -69,6 +72,9 @@ fn default_scale() -> f32 {
 fn default_true() -> bool {
     true
 }
+fn is_true(b: &bool) -> bool {
+    *b
+}
 fn placement_is_natural(p: &Placement) -> bool {
     *p == Placement::Natural
 }
@@ -81,6 +87,7 @@ impl WidgetEntry {
             placement: self.placement,
             anchor: self.anchor,
             origin: self.origin,
+            anchor_auto: self.anchor_auto,
             offset: (self.offset[0], self.offset[1]),
             scale: self.scale.clamp(MIN_WIDGET_SCALE, MAX_WIDGET_SCALE),
             z: self.z,
@@ -96,6 +103,7 @@ impl WidgetEntry {
             placement: i.placement,
             anchor: i.anchor,
             origin: i.origin,
+            anchor_auto: i.anchor_auto,
             offset: [i.offset.0, i.offset.1],
             scale: i.scale,
             z: i.z,
@@ -182,6 +190,7 @@ mod tests {
                 placement: Placement::Natural,
                 anchor: Anchor9::TopLeft,
                 origin: Anchor9::TopLeft,
+                anchor_auto: true,
                 offset: [40.0, -20.0],
                 scale: 1.5,
                 z: 12,
@@ -207,6 +216,7 @@ mod tests {
                 placement: Placement::Natural,
                 anchor: Anchor9::TopLeft,
                 origin: Anchor9::TopLeft,
+                anchor_auto: true,
                 offset: [0.0, 0.0],
                 scale: 99.0,
                 z: 0,
@@ -228,6 +238,7 @@ mod tests {
             placement: Placement::Natural,
             anchor: Anchor9::TopLeft,
             origin: Anchor9::TopLeft,
+            anchor_auto: true,
             offset: [offx, 0.0],
             scale: 1.0,
             z: 0,

@@ -25,8 +25,8 @@ pub use lanes::{
 };
 pub use presets::{arrangement_for, classic, nx_type_b, nx_type_d, LanePreset};
 pub use widgets::{
-    offset_for_top_left, resolve_top_left, Anchor9, AnchorSpace, Placement, WidgetInstance,
-    WidgetKind, MAX_WIDGET_SCALE, MIN_WIDGET_SCALE,
+    nearest_anchor, offset_for_top_left, resolve_top_left, Anchor9, AnchorSpace, Placement,
+    WidgetInstance, WidgetKind, MAX_WIDGET_SCALE, MIN_WIDGET_SCALE,
 };
 
 #[derive(Debug, Error)]

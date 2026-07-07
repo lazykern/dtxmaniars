@@ -139,6 +139,9 @@ pub struct WidgetInstance {
     pub placement: Placement,
     pub anchor: Anchor9,
     pub origin: Anchor9,
+    /// When true (default) the anchor auto-follows the widget's center across
+    /// the parent's thirds during a drag; a manual anchor pick pins it (false).
+    pub anchor_auto: bool,
     /// Ref-px offset from the anchored/origin-aligned base position.
     pub offset: (f32, f32),
     /// Uniform scale, clamped [MIN_WIDGET_SCALE, MAX_WIDGET_SCALE].
@@ -189,6 +192,26 @@ pub fn offset_for_top_left(
         top_left.0 - (px + af_x * pw) + of_x * size.0 * scale,
         top_left.1 - (py + af_y * ph) + of_y * size.1 * scale,
     )
+}
+
+/// Nearest ninth for a fractional position within the parent (thirds rule:
+/// <1/3 → start, 1/3..=2/3 → center, >2/3 → end, per axis).
+pub fn nearest_anchor(frac_x: f32, frac_y: f32) -> Anchor9 {
+    let col = if frac_x < 1.0 / 3.0 {
+        0
+    } else if frac_x <= 2.0 / 3.0 {
+        1
+    } else {
+        2
+    };
+    let row = if frac_y < 1.0 / 3.0 {
+        0
+    } else if frac_y <= 2.0 / 3.0 {
+        1
+    } else {
+        2
+    };
+    Anchor9::ALL[row * 3 + col]
 }
 
 #[cfg(test)]
@@ -285,6 +308,19 @@ mod tests {
     #[test]
     fn placement_default_is_natural() {
         assert_eq!(Placement::default(), Placement::Natural);
+    }
+
+    #[test]
+    fn nearest_anchor_nine_regions() {
+        assert_eq!(nearest_anchor(0.1, 0.1), Anchor9::TopLeft);
+        assert_eq!(nearest_anchor(0.5, 0.1), Anchor9::TopCenter);
+        assert_eq!(nearest_anchor(0.9, 0.1), Anchor9::TopRight);
+        assert_eq!(nearest_anchor(0.1, 0.5), Anchor9::CenterLeft);
+        assert_eq!(nearest_anchor(0.5, 0.5), Anchor9::Center);
+        assert_eq!(nearest_anchor(0.9, 0.5), Anchor9::CenterRight);
+        assert_eq!(nearest_anchor(0.1, 0.9), Anchor9::BottomLeft);
+        assert_eq!(nearest_anchor(0.5, 0.9), Anchor9::BottomCenter);
+        assert_eq!(nearest_anchor(0.9, 0.9), Anchor9::BottomRight);
     }
 
     #[test]
