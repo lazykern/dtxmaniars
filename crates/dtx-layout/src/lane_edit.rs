@@ -108,7 +108,13 @@ pub fn lane_chips(arr: &LaneArrangement, index: usize) -> Vec<EChannel> {
 /// by the editor to know when to rebuild the panel vs just refresh values).
 pub fn structure_signature(arr: &LaneArrangement) -> String {
     use std::fmt::Write;
-    let mut s = format!("{:?}|", arr.preset);
+    // Deliberately excludes `preset`: any lane edit flips the preset to Custom,
+    // and if that flip changed the signature the editor panel would rebuild
+    // mid-width-drag and despawn the slider. Preset-cycle still changes this
+    // signature (the built-in presets have distinct lane-id ORDERS), and the
+    // preset label updates reactively, so nothing that needs a rebuild rides on
+    // `preset` alone.
+    let mut s = String::new();
     for (i, lane) in arr.lanes.iter().enumerate() {
         let _ = write!(s, "{};", lane.id);
         for ch in lane_chips(arr, i) {
@@ -228,16 +234,30 @@ mod tests {
     #[test]
     fn signature_changes_on_structure_not_width() {
         let mut arr = classic();
+        // Signature captured on the NAMED preset, BEFORE any edit — a width
+        // change (which flips Classic→Custom) must NOT change it, or the panel
+        // rebuilds mid-drag. Only structural edits (split/reorder/merge) do.
         let sig0 = structure_signature(&arr);
         set_lane_width(&mut arr, 0, 100.0);
-        // Width change flips preset → signature changes once (Custom), then
-        // further width edits keep it stable.
-        let sig1 = structure_signature(&arr);
-        assert_ne!(sig0, sig1);
+        assert_eq!(arr.preset, LanePreset::Custom, "width edit flips preset");
+        assert_eq!(sig0, structure_signature(&arr), "width edit keeps signature");
         set_lane_width(&mut arr, 0, 120.0);
-        assert_eq!(sig1, structure_signature(&arr));
+        assert_eq!(sig0, structure_signature(&arr));
         split_channel(&mut arr, EChannel::HiHatOpen);
-        assert_ne!(sig1, structure_signature(&arr));
+        assert_ne!(sig0, structure_signature(&arr), "split is structural");
+    }
+
+    #[test]
+    fn signature_distinguishes_named_presets() {
+        // The panel-rebuild fix drops `preset` from the signature and relies on
+        // the built-in presets having distinct lane-id orders so a preset cycle
+        // still triggers a rebuild.
+        let c = structure_signature(&classic());
+        let b = structure_signature(&crate::presets::nx_type_b());
+        let d = structure_signature(&crate::presets::nx_type_d());
+        assert_ne!(c, b);
+        assert_ne!(c, d);
+        assert_ne!(b, d);
     }
 
     #[test]

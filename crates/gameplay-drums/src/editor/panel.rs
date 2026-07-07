@@ -71,7 +71,14 @@ pub fn plugin(app: &mut App) {
     app.add_systems(
         Update,
         (
-            rebuild_panel,
+            // Only when a rebuild trigger actually changed — avoids allocating
+            // a fresh signature string every idle frame. The Local guard inside
+            // still debounces width-only Lanes changes (no rebuild mid-drag).
+            rebuild_panel.run_if(
+                resource_changed::<Selection>
+                    .or_else(resource_changed::<EditorOpen>)
+                    .or_else(resource_changed::<Lanes>),
+            ),
             (
                 apply_panel_controls,
                 apply_anchor_cells,
