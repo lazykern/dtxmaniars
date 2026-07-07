@@ -12,15 +12,16 @@
 //! Reference: `references/DTXmaniaNX-BocuD/DTXMania/Stage/06.Performance/DrumsScreen/*`
 //! Lane order: LC, HH, SD, BD, HT, LT, FT, CY, LP, RD, HHO (BocuD CActPerfDrumsLaneFlushD.cs).
 
-pub mod beat_lines;
 pub mod autoplay;
+pub mod beat_lines;
 pub mod bgm_scheduler;
+pub mod bindings;
 pub mod components;
 pub mod damage_level;
 pub mod derived;
 pub mod drum_groups;
-pub mod editor;
 pub mod drums_perf;
+pub mod editor;
 pub mod events;
 pub mod gauge;
 pub mod hit_sound;
@@ -30,24 +31,24 @@ pub mod input;
 pub mod interp;
 pub mod judge;
 pub mod keyboard_viz;
-pub mod phrase;
-pub mod skill;
 pub mod lane_map;
 pub mod lanes;
 pub mod layout;
 pub mod miss;
 pub mod orchestrator;
 pub mod pause;
-pub mod perf_hotkeys;
-pub mod stage_end;
 pub mod perf_common;
+pub mod perf_hotkeys;
+pub mod phrase;
 pub mod practice;
 pub mod resources;
 pub mod score;
 pub mod scroll;
 pub mod se_scheduler;
 pub mod seek;
+pub mod skill;
 pub mod sound_bank;
+pub mod stage_end;
 pub mod timeline;
 pub mod widget_layout;
 
@@ -102,7 +103,6 @@ pub fn plugin(app: &mut App) {
     .init_resource::<phrase::PhraseMeter>()
     .init_resource::<derived::ChartDerived>()
     .init_resource::<dtx_audio::DrumPolyphony>()
-    .init_resource::<lane_map::LaneMap>()
     .init_resource::<lanes::Lanes>()
     .init_resource::<hud_cache::HudDisplayCache>()
     .init_resource::<dtx_input::midi::VirtualSource>()
@@ -184,6 +184,7 @@ pub fn plugin(app: &mut App) {
         interp::plugin,
     ))
     .add_plugins((
+        bindings::plugin,
         beat_lines::plugin,
         se_scheduler::plugin,
         midi_consumer::plugin,
@@ -210,8 +211,8 @@ fn load_scroll_settings(mut settings: ResMut<resources::ScrollSettings>) {
 /// Map the persisted `dtx_config::DamageLevel` onto the gameplay
 /// `dtx_core::constants::DamageLevel` used by the gauge.
 fn map_damage_level(level: dtx_config::DamageLevel) -> dtx_core::constants::DamageLevel {
-    use dtx_core::constants::DamageLevel as Core;
     use dtx_config::DamageLevel as Cfg;
+    use dtx_core::constants::DamageLevel as Core;
     match level {
         Cfg::None => Core::None,
         Cfg::Small => Core::Small,
@@ -250,9 +251,7 @@ fn apply_config_on_enter(
     bgm_adjust.song_ms = chart
         .source_path
         .as_ref()
-        .map(|p| {
-            dtx_scoring::score_ini::read_bgm_adjust(dtx_scoring::score_ini::score_ini_path(p))
-        })
+        .map(|p| dtx_scoring::score_ini::read_bgm_adjust(dtx_scoring::score_ini::score_ini_path(p)))
         .unwrap_or(0);
 }
 
@@ -307,6 +306,7 @@ mod midi_consumer {
 
     fn poll_midi(
         mut source: ResMut<VirtualSource>,
+        resolver: Res<crate::bindings::BindResolver>,
         chart: Res<ActiveChart>,
         clock: Res<GameplayClock>,
         mut hits: MessageWriter<LaneHit>,
@@ -320,13 +320,28 @@ mod midi_consumer {
         if !clock.is_ready() {
             return;
         }
-        let mut buf: Vec<dtx_input::LaneHit> = Vec::new();
+        let mut buf: Vec<dtx_input::midi::MidiEvent> = Vec::new();
         (*source).poll(&mut buf);
-        for h in buf {
+        for ev in buf {
+            // NoteOff / CC ignored (HH pedal CC handling is v2).
+            let dtx_input::midi::MidiEvent::NoteOn {
+                note,
+                velocity,
+                audio_ms,
+            } = ev
+            else {
+                continue;
+            };
+            if velocity == 0 || velocity <= resolver.velocity_threshold {
+                continue;
+            }
+            let Some(lane) = resolver.lane_for_note(note) else {
+                continue;
+            };
             hits.write(LaneHit {
-                lane: h.lane,
-                audio_ms: if h.audio_ms != 0 {
-                    h.audio_ms
+                lane,
+                audio_ms: if audio_ms != 0 {
+                    audio_ms
                 } else {
                     clock.current_ms
                 },

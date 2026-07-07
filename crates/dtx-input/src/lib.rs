@@ -8,7 +8,6 @@
 //! - [`events`] — `LaneHit`, `LaneHitKind` (moved here from gameplay-drums)
 //! - [`keyboard`] — keyboard → LaneHit system (BEVY_SYSTEM)
 //! - [`midi`] — `MidiSource` trait + `VirtualSource` + (optional) real-device impl
-//! - [`mapping`] — note/byte → LaneId helpers
 //!
 //! ## LaneId is opaque
 //!
@@ -22,7 +21,6 @@ use bevy::prelude::*;
 
 pub mod events;
 pub mod keyboard;
-pub mod mapping;
 pub mod midi;
 pub mod pad;
 
