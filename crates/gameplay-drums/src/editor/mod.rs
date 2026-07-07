@@ -16,6 +16,7 @@ pub mod selection_box;
 pub mod session;
 pub mod settings_data;
 pub mod snap;
+pub mod tabs;
 pub mod ui;
 pub mod undo;
 
@@ -57,6 +58,7 @@ pub fn plugin(app: &mut App) {
             panel::plugin,
             snap::plugin,
             session::plugin,
+            tabs::plugin,
         ));
 }
 
