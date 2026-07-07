@@ -69,6 +69,43 @@ Define as first-class concepts before more UI:
 - `normal_score_valid = performance && tempo==100% && full_song &&
   no assists && no autoplay` — the record-validity rule.
 
+## Interaction story (second research doc, same day)
+
+Core principle: player never "configures practice mode" — they move
+between play / inspect / repeat / slow down / prove mastery.
+"A/B loop is implementation language; players think in sections,
+bars, fills, and problems."
+
+The outer loop to build eventually (all parked on analyzer +
+segments + persistence):
+
+```
+Play song → Result: "Weak spots detected" → [Practice Weakest Section]
+  → one-card intent confirm (Start default) → lead-in → loop
+  → loop feedback → auto-ramp → SECTION MASTERED prompt
+    → [Practice Next Weak Spot] / [Return to Full Song]
+  → exit: practice summary (best-per-tempo table, main issue,
+    recommendation), never the normal result screen
+```
+
+- `PracticeSuggestion { segment, reason, recommended_tempo,
+  recommended_focus, recommended_goal }` from post-run analysis.
+- `PracticeIntent` gains segment/tempo/focus/source
+  (Manual|WeakSpot|Favorite|LastFailed|FullSong).
+- Lane focus matrix: judged / visible / audible / autoplay per lane;
+  presets hide the matrix (Kick Only = all visible, kick judged,
+  rest ghosted). Phase judged-lane filtering first.
+- Mastered = pass condition met at target tempo repeatedly (not one
+  lucky FC); prompt offers next action instead of "success".
+- UX hierarchy: L1 one-button useful action → L2 tempo/restart/
+  section → L3 trainer config (pause menu) → L4 deep analysis
+  (post-loop/session only).
+- Anti-traps list confirmed v3 decisions: no config wall, ramp only
+  on completed loops, pre-roll unjudged, no perf scoring as primary
+  feedback, visible practice entry, in-stage adjustability.
+- v3 addition sourced from this doc: loop-region change while ramp
+  armed disarms the ramp (section changed = claim invalidated).
+
 ## Reference links
 
 - Rocksmith+ phrases/sections: ubisoft.com/en-gb/game/rocksmith/plus/

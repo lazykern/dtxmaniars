@@ -92,6 +92,10 @@ Rules while armed:
   pulls the step up with it; lowering target below it pulls it down —
   it still must *pass at* target to complete, §3).
 - Editing step/threshold/streak affects future decisions only.
+- **Any loop-region change while armed disarms the ramp** (drag a new
+  region, Set A/B, Clear loop): toast `ramp off (loop changed)`,
+  playback returns to `user_tempo`. A ramp is a claim about one
+  specific section; changing the section invalidates it.
 
 User-facing label is **Tempo** everywhere (rail rows, toasts); "rate"
 remains an internal identifier only where renaming is churn without
