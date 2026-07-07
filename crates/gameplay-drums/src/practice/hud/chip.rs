@@ -79,6 +79,7 @@ pub(crate) fn plugin(app: &mut App) {
         Update,
         update_chip
             .run_if(in_state(AppState::Performance))
+            .run_if(in_state(game_shell::PauseState::Running))
             .run_if(resource_exists::<PracticeSession>),
     );
 }

@@ -353,9 +353,19 @@ fn restart_key_seeks_to_loop_start() {
 use gameplay_drums::events::{JudgmentEvent, NoteMissed};
 
 fn add_ramp_wiring(app: &mut App) {
+    if !app.world().contains_resource::<Messages<PracticeAction>>() {
+        app.add_message::<PracticeAction>();
+    }
     app.add_message::<JudgmentEvent>()
         .add_message::<NoteMissed>()
         .init_resource::<gameplay_drums::practice::toast::ToastQueue>()
+        .add_systems(
+            Update,
+            gameplay_drums::practice::ramp::handle_toggle_ramp
+                .before(gameplay_drums::seek::apply_seek_system)
+                .run_if(in_state(AppState::Performance))
+                .run_if(resource_exists::<PracticeSession>),
+        )
         .add_systems(
             Update,
             gameplay_drums::practice::ab_loop::loop_watcher
@@ -374,6 +384,12 @@ fn add_ramp_wiring(app: &mut App) {
                 .run_if(in_state(AppState::Performance))
                 .run_if(resource_exists::<PracticeSession>),
         );
+}
+
+fn send_practice_action(app: &mut App, action: PracticeAction) {
+    app.world_mut()
+        .resource_mut::<Messages<PracticeAction>>()
+        .write(action);
 }
 
 fn looped_session(rate: f32) -> PracticeSession {
@@ -482,4 +498,44 @@ fn skip_next_roll_ignores_the_stale_pre_arm_attempt() {
         "the roll right after arming must not step the ramp"
     );
     assert!(!session.ramp.skip_next_roll, "flag consumed");
+}
+
+#[test]
+fn toggle_ramp_without_loop_is_a_noop_error_toast() {
+    let mut app = build_app();
+    add_ramp_wiring(&mut app);
+    enter_performance(&mut app, chart_with_measures(8));
+    app.world_mut()
+        .insert_resource(PracticeSession::default());
+    send_practice_action(&mut app, PracticeAction::ToggleRamp);
+    app.update();
+    let session = app.world().resource::<PracticeSession>();
+    assert!(
+        !session.ramp.armed,
+        "arming without an A/B loop must be a no-op"
+    );
+    let toasts = app.world().resource::<gameplay_drums::practice::toast::ToastQueue>();
+    assert!(
+        !toasts.0.is_empty(),
+        "arming without a loop must push an error toast"
+    );
+}
+
+#[test]
+fn toggle_ramp_with_loop_arms() {
+    let mut app = build_app();
+    add_ramp_wiring(&mut app);
+    enter_performance(&mut app, chart_with_measures(8));
+    app.world_mut().insert_resource(PracticeSession {
+        loop_region: Some(LoopRegion {
+            start_ms: 2_000,
+            end_ms: 6_000,
+        }),
+        preroll: gameplay_drums::practice::session::PrerollSetting::Off,
+        ..Default::default()
+    });
+    send_practice_action(&mut app, PracticeAction::ToggleRamp);
+    app.update();
+    let session = app.world().resource::<PracticeSession>();
+    assert!(session.ramp.armed, "arming with an A/B loop must succeed");
 }

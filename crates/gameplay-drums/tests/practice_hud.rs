@@ -139,6 +139,50 @@ fn real_hud_plugin_schedule_builds_headlessly() {
     assert_eq!(huds, 1, "real plugin schedule spawned the full HUD");
 }
 
+#[test]
+fn quick_tier_entities_spawn_on_entering_performance() {
+    // Spec: mini strip + status chip must exist while playing (Running),
+    // independent of the full HUD which is pause-gated. Wire the real
+    // hud::plugin (mini_strip + chip + full_hud) headlessly and drive
+    // OnEnter(Performance) only — no pause.
+    let mut app = App::new();
+    app.add_plugins((
+        MinimalPlugins,
+        bevy::state::app::StatesPlugin,
+        bevy::input::InputPlugin,
+    ))
+    .init_state::<AppState>()
+    .init_state::<PauseState>()
+    .add_message::<game_shell::TransitionRequest>()
+    .add_message::<gameplay_drums::seek::SeekToChartTime>()
+    .add_message::<gameplay_drums::practice::actions::PracticeAction>()
+    .init_resource::<GameplayClock>()
+    .init_resource::<ChipTimeline>()
+    .world_mut()
+    .insert_resource(PracticeSession::default());
+
+    gameplay_drums::practice::hud::plugin(&mut app);
+
+    app.world_mut()
+        .resource_mut::<NextState<AppState>>()
+        .set(AppState::Performance);
+    app.update();
+
+    let mini_strips = app
+        .world_mut()
+        .query::<&gameplay_drums::practice::hud::mini_strip::MiniStripRoot>()
+        .iter(app.world())
+        .count();
+    assert_eq!(mini_strips, 1, "mini strip must spawn on entering Performance");
+
+    let chips = app
+        .world_mut()
+        .query::<&gameplay_drums::practice::hud::chip::StatusChip>()
+        .iter(app.world())
+        .count();
+    assert_eq!(chips, 1, "status chip must spawn on entering Performance");
+}
+
 use gameplay_drums::practice::hud::full_hud::{transport_buttons, TransportButton};
 
 #[test]
