@@ -120,10 +120,13 @@ use crate::seek::SeekToChartTime;
 
 /// Logical-px rect of the timeline strip node (same math as
 /// editor/picking.rs `node_rect`; duplicated to avoid coupling the
-/// practice pillar to editor files).
-fn strip_rect(node: &ComputedNode, gt: &GlobalTransform) -> Rect {
+/// practice pillar to editor files). UI nodes carry `UiGlobalTransform`
+/// (an `Affine2`, not the 3D `GlobalTransform`); its `translation` is the
+/// node center in physical px. Querying `&GlobalTransform` on a UI node
+/// silently matches nothing — no panic, green tests, dead mouse.
+fn strip_rect(node: &ComputedNode, gt: &bevy::ui::UiGlobalTransform) -> Rect {
     let inv = node.inverse_scale_factor();
-    let center = gt.translation().truncate() * inv;
+    let center = gt.translation * inv;
     let size = node.size() * inv;
     Rect::from_center_size(center, size)
 }
@@ -134,7 +137,10 @@ fn strip_rect(node: &ComputedNode, gt: &GlobalTransform) -> Rect {
 pub fn timeline_mouse(
     windows: Query<&Window>,
     buttons: Res<ButtonInput<MouseButton>>,
-    strips: Query<(&ComputedNode, &GlobalTransform), With<super::full_hud::FullHudTimelineStrip>>,
+    strips: Query<
+        (&ComputedNode, &bevy::ui::UiGlobalTransform),
+        With<super::full_hud::FullHudTimelineStrip>,
+    >,
     mut gesture: ResMut<TimelineGesture>,
     mut session: ResMut<PracticeSession>,
     timeline: Res<ChipTimeline>,
