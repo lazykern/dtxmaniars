@@ -1,8 +1,9 @@
 //! dtx-config — persisted user configuration (TOML).
 //!
 //! Port of `references/DTXmaniaNX-BocuD/DTXMania/Core/CConfigIni.cs` (baseline sections).
-//! Full CConfigIni (KeyAssign, Drums tables) is ported. Skin / ChangeSkin /
-//! Guitar/Bass tables dropped — no skin browser per roadmap refresh.
+//! Baseline CConfigIni (Drums tables) is ported. KeyAssign now lives in
+//! `bindings`; Skin / ChangeSkin / Guitar/Bass tables dropped — no skin
+//! browser per roadmap refresh.
 //!
 //! ## Sections ported
 //! - `System` — nBGAlpha, nMovieAlpha, bAVIEnabled, bBGAEnabled, bVerticalSyncWait (subset)
@@ -21,14 +22,12 @@ use thiserror::Error;
 
 pub mod bindings;
 pub mod drums;
-pub mod key_assign;
 
 pub use bindings::{
     default_bindings_path, load_bindings, save_bindings, BindSource, BindingsFile, InputBindings,
     MidiDeviceConfig, BINDABLE_CHANNELS,
 };
 pub use drums::{BdGroup, CyGroup, DrumsConfig, FtGroup, HhGroup, HitSoundPriority};
-pub use key_assign::{KeyAssignPad, KeyAssignPart, KeyAssignTable, STKeyAssign};
 
 /// Top-level persisted configuration. Each BocuD section becomes a sub-struct.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

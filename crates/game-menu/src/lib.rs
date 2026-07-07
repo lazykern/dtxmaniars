@@ -9,7 +9,6 @@ use bevy::prelude::*;
 
 pub mod chart_stats;
 pub mod config;
-pub mod config_key_assign;
 pub mod end;
 pub mod song_loading;
 pub mod song_select;
@@ -30,7 +29,6 @@ impl Plugin for GameMenuPlugin {
             song_select::plugin,
             chart_stats::plugin,
             config::plugin,
-            config_key_assign::plugin,
             song_loading::plugin,
             end::plugin,
         ));
