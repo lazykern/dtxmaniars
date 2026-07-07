@@ -61,6 +61,7 @@ fn spawn_ui_on_open(
     let root = commands
         .spawn((
             EditorUiRoot,
+            super::picking::EditorChrome,
             Node {
                 position_type: PositionType::Absolute,
                 left: Val::Px(0.0),

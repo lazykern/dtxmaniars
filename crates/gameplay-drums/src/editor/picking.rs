@@ -72,6 +72,134 @@ pub fn cycle_pick(candidates: &[WidgetKind], current: Option<WidgetKind>) -> Opt
     }
 }
 
+/// Logical-px rect of a laid-out UI node (GlobalTransform = center, physical).
+pub(crate) fn node_rect(node: &ComputedNode, gt: &GlobalTransform) -> Rect {
+    let inv = node.inverse_scale_factor();
+    let center = gt.translation().truncate() * inv;
+    let size = node.size() * inv;
+    Rect::from_center_size(center, size)
+}
+
+pub fn plugin(app: &mut App) {
+    app.init_resource::<WidgetAabbs>()
+        .init_resource::<Hovered>()
+        .init_resource::<CursorOverChrome>()
+        .add_systems(
+            Update,
+            (collect_widget_aabbs, update_cursor_over_chrome, update_hover)
+                .chain()
+                .in_set(super::EditorPickSet)
+                .run_if(super::editor_open)
+                .run_if(in_state(game_shell::AppState::Performance)),
+        );
+}
+
+/// Union of each widget container's descendant node rects (skipping the
+/// full-screen container itself). Hidden-in-mode widgets are removed so they
+/// aren't hit-testable; empty unions keep their previous entry (falling back
+/// to a MIN_GRAB box at the container's offset if never seen).
+fn collect_widget_aabbs(
+    mut aabbs: ResMut<WidgetAabbs>,
+    layouts: Res<WidgetLayouts>,
+    practice: Option<Res<crate::practice::PracticeSession>>,
+    pfl: Res<PlayfieldLayout>,
+    containers: Query<(Entity, &WidgetContainer, &Node)>,
+    children_q: Query<&Children>,
+    nodes: Query<(&ComputedNode, &GlobalTransform)>,
+) {
+    let is_practice = practice.is_some();
+    for (entity, container, cnode) in &containers {
+        let kind = container.0;
+        if kind == WidgetKind::Playfield {
+            continue;
+        }
+        if !widget_visible(layouts.get(kind), is_practice) {
+            aabbs.0.remove(&kind);
+            continue;
+        }
+        let mut union: Option<Rect> = None;
+        let mut stack: Vec<Entity> = children_q
+            .get(entity)
+            .map(|c| c.iter().collect())
+            .unwrap_or_default();
+        while let Some(e) = stack.pop() {
+            if let Ok((cn, gt)) = nodes.get(e) {
+                if cn.size().x > 0.0 && cn.size().y > 0.0 {
+                    let r = node_rect(cn, gt);
+                    union = Some(union.map_or(r, |u| u.union(r)));
+                }
+            }
+            if let Ok(c) = children_q.get(e) {
+                stack.extend(c.iter());
+            }
+        }
+        match union {
+            Some(r) if r.width() >= 1.0 && r.height() >= 1.0 => {
+                let min_sized = Rect::from_center_size(
+                    r.center(),
+                    r.size().max(Vec2::splat(MIN_GRAB)),
+                );
+                aabbs.0.insert(kind, min_sized);
+            }
+            _ => {
+                aabbs.0.entry(kind).or_insert_with(|| {
+                    let (l, t) = match (&cnode.left, &cnode.top) {
+                        (Val::Px(l), Val::Px(t)) => (*l, *t),
+                        _ => (0.0, 0.0),
+                    };
+                    Rect::new(l, t, l + MIN_GRAB, t + MIN_GRAB)
+                });
+            }
+        }
+    }
+    // Playfield AABB straight from layout geometry (backboard incl. pad).
+    aabbs.0.insert(
+        WidgetKind::Playfield,
+        Rect::new(
+            pfl.backboard_left(),
+            pfl.backboard_top(),
+            pfl.backboard_left() + pfl.backboard_width(),
+            pfl.backboard_top() + pfl.backboard_height(),
+        ),
+    );
+}
+
+fn update_cursor_over_chrome(
+    mut over: ResMut<CursorOverChrome>,
+    windows: Query<&Window>,
+    chrome: Query<(&ComputedNode, &GlobalTransform), With<EditorChrome>>,
+) {
+    over.0 = false;
+    let Ok(window) = windows.single() else { return };
+    let Some(pos) = window.cursor_position() else { return };
+    for (cn, gt) in &chrome {
+        if node_rect(cn, gt).contains(pos) {
+            over.0 = true;
+            return;
+        }
+    }
+}
+
+fn update_hover(
+    mut hovered: ResMut<Hovered>,
+    over_chrome: Res<CursorOverChrome>,
+    gesture: Res<super::drag::ActiveGesture>,
+    aabbs: Res<WidgetAabbs>,
+    layouts: Res<WidgetLayouts>,
+    windows: Query<&Window>,
+) {
+    if over_chrome.0 || !matches!(gesture.0, super::drag::Gesture::None) {
+        hovered.0 = None;
+        return;
+    }
+    let Ok(window) = windows.single() else { return };
+    let Some(pos) = window.cursor_position() else {
+        hovered.0 = None;
+        return;
+    };
+    hovered.0 = pick_topmost(&aabbs.0, |k| layouts.get(k).z, pos);
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

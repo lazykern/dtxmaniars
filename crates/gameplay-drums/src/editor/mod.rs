@@ -11,6 +11,7 @@ use game_shell::AppState;
 pub mod drag;
 pub mod picking;
 pub mod save;
+pub mod selection_box;
 pub mod ui;
 pub mod undo;
 
@@ -22,6 +23,13 @@ pub struct EditorOpen(pub bool);
 #[derive(Resource, Debug, Default, Clone, Copy)]
 pub struct PrevAutoplay(pub bool);
 
+/// Ordering: picking (AABBs/hover) → gestures (drag) → overlay sync.
+#[derive(SystemSet, Debug, Clone, PartialEq, Eq, Hash)]
+pub struct EditorPickSet;
+
+#[derive(SystemSet, Debug, Clone, PartialEq, Eq, Hash)]
+pub struct EditorGestureSet;
+
 pub fn plugin(app: &mut App) {
     app.init_resource::<EditorOpen>()
         .init_resource::<PrevAutoplay>()
@@ -32,7 +40,11 @@ pub fn plugin(app: &mut App) {
             toggle_editor.run_if(in_state(AppState::Performance)),
         )
         .add_systems(OnExit(AppState::Performance), close_editor_on_exit)
-        .add_plugins((drag::plugin, undo::plugin, save::plugin, ui::plugin));
+        .configure_sets(
+            Update,
+            (EditorPickSet, EditorGestureSet).chain(),
+        )
+        .add_plugins((drag::plugin, undo::plugin, save::plugin, ui::plugin, picking::plugin));
 }
 
 /// Leaving Performance with the editor still open (e.g. the song ended mid-edit)
@@ -42,11 +54,15 @@ fn close_editor_on_exit(
     mut open: ResMut<EditorOpen>,
     prev: Res<PrevAutoplay>,
     mut autoplay: ResMut<crate::autoplay::AutoplayEnabled>,
+    mut gesture: ResMut<drag::ActiveGesture>,
+    mut hovered: ResMut<picking::Hovered>,
 ) {
     if open.0 {
         autoplay.0 = prev.0;
         open.0 = false;
     }
+    gesture.0 = drag::Gesture::None;
+    hovered.0 = None;
 }
 
 /// Ctrl+Shift+E toggles the editor while in Performance.

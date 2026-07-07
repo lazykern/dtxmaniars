@@ -1,8 +1,9 @@
 //! Widget selection + mouse-drag / keyboard-nudge movement.
 //!
-//! Selection is by `WidgetKind` (chosen from the sidebar list). Dragging adds
-//! the cursor delta (in screen px, converted to ref px by ÷scale) to the
-//! selected widget's offset. Direct on-canvas click-select is a v2 refinement.
+//! Selection is on-canvas (click a widget) or from the sidebar list. A single
+//! `ActiveGesture` state machine arbitrates body move-drags vs corner scale-handle
+//! drags. Dragging adds the cursor delta (in screen px, converted to ref px by
+//! ÷scale) to the selected widget's offset.
 
 use bevy::prelude::*;
 use dtx_layout::{WidgetKind, MAX_WIDGET_SCALE, MIN_WIDGET_SCALE};
@@ -13,9 +14,22 @@ use crate::widget_layout::WidgetLayouts;
 #[derive(Resource, Debug, Default, Clone, Copy)]
 pub struct Selection(pub Option<WidgetKind>);
 
-/// Cursor position on the previous frame, for delta computation while dragging.
+/// Active mouse gesture. Scale carries drag-start reference data.
+#[derive(Debug, Default, Clone, Copy, PartialEq)]
+pub enum Gesture {
+    #[default]
+    None,
+    Move {
+        last_cursor: Vec2,
+    },
+    Scale {
+        start_dist: f32,
+        start_scale: f32,
+    },
+}
+
 #[derive(Resource, Debug, Default, Clone, Copy)]
-pub struct DragCursor(pub Option<Vec2>);
+pub struct ActiveGesture(pub Gesture);
 
 /// Pure: new ref-px offset after moving by a screen-px delta at `scale`.
 pub fn apply_drag(offset: (f32, f32), screen_delta: Vec2, scale: f32) -> (f32, f32) {
@@ -34,59 +48,115 @@ pub fn clamp_scale(s: f32) -> f32 {
 }
 
 pub fn plugin(app: &mut App) {
-    app.init_resource::<DragCursor>().add_systems(
+    app.init_resource::<ActiveGesture>().add_systems(
         Update,
-        (drag_selected_widget, nudge_selected_widget)
+        (begin_gesture, update_gesture, nudge_selected_widget)
+            .chain()
+            .in_set(super::EditorGestureSet)
             .run_if(super::editor_open)
             .run_if(in_state(game_shell::AppState::Performance)),
     );
 }
 
-/// While the left mouse is held with a widget selected, translate its offset by
-/// the cursor delta ÷ scale. Pushes one undo snapshot per completed drag.
-fn drag_selected_widget(
+/// Left-press routing (canvas only; chrome masked): scale handle → Scale
+/// gesture; widget under cursor → select + Move gesture (Alt cycles stacked
+/// candidates); empty canvas → deselect. Playfield selects but never moves.
+fn begin_gesture(
     buttons: Res<ButtonInput<MouseButton>>,
+    keys: Res<ButtonInput<KeyCode>>,
     windows: Query<&Window>,
-    selection: Res<Selection>,
-    pfl: Res<crate::layout::PlayfieldLayout>,
-    mut cursor: ResMut<DragCursor>,
-    mut layouts: ResMut<WidgetLayouts>,
-    mut undo: ResMut<super::undo::UndoStack>,
+    over_chrome: Res<super::picking::CursorOverChrome>,
+    aabbs: Res<super::picking::WidgetAabbs>,
+    handles: Query<(&super::selection_box::ScaleHandle, &ComputedNode, &GlobalTransform)>,
+    mut selection: ResMut<Selection>,
+    mut gesture: ResMut<ActiveGesture>,
+    layouts: Res<WidgetLayouts>,
     lanes: Res<crate::lanes::Lanes>,
-    mut dragging: Local<bool>,
+    mut undo: ResMut<super::undo::UndoStack>,
 ) {
-    let Some(kind) = selection.0 else {
-        cursor.0 = None;
-        return;
-    };
-    let Ok(window) = windows.single() else {
-        return;
-    };
-    let Some(pos) = window.cursor_position() else {
-        return;
-    };
-
-    if !buttons.pressed(MouseButton::Left) {
-        *dragging = false;
-        cursor.0 = None;
+    if !buttons.just_pressed(MouseButton::Left) || over_chrome.0 {
         return;
     }
+    let Ok(window) = windows.single() else { return };
+    let Some(pos) = window.cursor_position() else { return };
 
-    if !*dragging {
-        // Drag just started: snapshot BEFORE the move so undo restores pre-drag.
-        *dragging = true;
-        undo.push(&layouts, &lanes);
-    }
-
-    if let Some(prev) = cursor.0 {
-        let delta = pos - prev;
-        if delta != Vec2::ZERO {
-            if let Some(inst) = layouts.0.get_mut(&kind) {
-                inst.offset = apply_drag(inst.offset, delta, pfl.scale);
+    // 1. Scale handles first (they can overhang neighboring widgets).
+    if let Some(kind) = selection.0 {
+        if kind != dtx_layout::WidgetKind::Playfield {
+            for (_, cn, gt) in &handles {
+                let r = super::picking::node_rect(cn, gt);
+                // Inflate for easier grabbing.
+                let r = Rect::from_center_size(r.center(), r.size() + Vec2::splat(6.0));
+                if r.contains(pos) {
+                    if let Some(aabb) = aabbs.0.get(&kind) {
+                        let start_dist = (pos - aabb.center()).length().max(1.0);
+                        let start_scale = layouts.get(kind).scale;
+                        undo.push(&layouts, &lanes);
+                        gesture.0 = Gesture::Scale { start_dist, start_scale };
+                        return;
+                    }
+                }
             }
         }
     }
-    cursor.0 = Some(pos);
+
+    // 2. Canvas widgets.
+    let alt = keys.pressed(KeyCode::AltLeft) || keys.pressed(KeyCode::AltRight);
+    let cands = super::picking::candidates_at(&aabbs.0, |k| layouts.get(k).z, pos);
+    let picked = if alt {
+        super::picking::cycle_pick(&cands, selection.0)
+    } else {
+        cands.first().copied()
+    };
+    selection.0 = picked;
+    if let Some(kind) = picked {
+        if kind != dtx_layout::WidgetKind::Playfield {
+            undo.push(&layouts, &lanes);
+            gesture.0 = Gesture::Move { last_cursor: pos };
+        }
+    }
+}
+
+/// Advance the active gesture each frame; release ends it.
+fn update_gesture(
+    buttons: Res<ButtonInput<MouseButton>>,
+    windows: Query<&Window>,
+    selection: Res<Selection>,
+    aabbs: Res<super::picking::WidgetAabbs>,
+    pfl: Res<crate::layout::PlayfieldLayout>,
+    mut gesture: ResMut<ActiveGesture>,
+    mut layouts: ResMut<WidgetLayouts>,
+) {
+    if !buttons.pressed(MouseButton::Left) {
+        gesture.0 = Gesture::None;
+        return;
+    }
+    let Some(kind) = selection.0 else {
+        gesture.0 = Gesture::None;
+        return;
+    };
+    let Ok(window) = windows.single() else { return };
+    let Some(pos) = window.cursor_position() else { return };
+    match gesture.0 {
+        Gesture::None => {}
+        Gesture::Move { last_cursor } => {
+            let delta = pos - last_cursor;
+            if delta != Vec2::ZERO {
+                if let Some(inst) = layouts.0.get_mut(&kind) {
+                    inst.offset = apply_drag(inst.offset, delta, pfl.scale);
+                }
+            }
+            gesture.0 = Gesture::Move { last_cursor: pos };
+        }
+        Gesture::Scale { start_dist, start_scale } => {
+            if let Some(aabb) = aabbs.0.get(&kind) {
+                let dist = (pos - aabb.center()).length().max(1.0);
+                if let Some(inst) = layouts.0.get_mut(&kind) {
+                    inst.scale = clamp_scale(start_scale * dist / start_dist);
+                }
+            }
+        }
+    }
 }
 
 /// Arrow keys nudge the selected widget (1 ref-px; Shift = 8).
