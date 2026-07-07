@@ -14,6 +14,7 @@ pub mod picking;
 pub mod save;
 pub mod selection_box;
 pub mod session;
+pub mod settings_data;
 pub mod snap;
 pub mod ui;
 pub mod undo;
@@ -45,10 +46,7 @@ pub fn plugin(app: &mut App) {
                 .run_if(|s: Res<game_shell::EditorSession>| !s.0),
         )
         .add_systems(OnExit(AppState::Performance), close_editor_on_exit)
-        .configure_sets(
-            Update,
-            (EditorPickSet, EditorGestureSet).chain(),
-        )
+        .configure_sets(Update, (EditorPickSet, EditorGestureSet).chain())
         .add_plugins((
             drag::plugin,
             undo::plugin,
