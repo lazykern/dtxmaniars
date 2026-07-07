@@ -2,6 +2,7 @@
 
 pub mod album_art;
 pub mod combo_display;
+pub mod controls;
 pub mod density_graph;
 pub mod density_strip;
 pub mod difficulty_grid;
