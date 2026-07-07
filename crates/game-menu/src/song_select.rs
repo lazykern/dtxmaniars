@@ -1388,6 +1388,11 @@ fn bgm_preview_on_change(
         "SongSelect preview: selected folder={} difficulty={} chart_idx={} title={}",
         selection.folder, selection.difficulty, chart_idx, song.title
     );
+    let cfg = dtx_config::load(&dtx_config::default_path());
+    if !cfg.audio.bgm_enabled {
+        player.stop(&mut instances, 0);
+        return;
+    }
     let Some(preview_path) = song.preview_path.clone() else {
         // No preview for this song: stop whatever's currently
         // playing so we don't leak a stale preview from a prior
@@ -1414,6 +1419,7 @@ fn bgm_preview_on_change(
     // Loop flag follows the source: #PREVIEW: file loops (short
     // clip), fallback to full BGM plays through. (ADR-0015 Q1.)
     player.set_looping(song.preview_is_loopable);
+    player.set_volume(cfg.audio.master_volume * cfg.audio.bgm_volume);
 
     // Direction uses the folder index, not the absolute chart index.
     let direction = match player.previous_index {

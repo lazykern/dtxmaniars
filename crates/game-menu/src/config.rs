@@ -229,12 +229,26 @@ static AUDIO_ITEMS: LazyLock<Vec<ConfigItem>> = LazyLock::new(|| {
             desc: "Overall output volume.",
         },
         ConfigItem {
+            label: "BGM Volume",
+            value: |c| format!("{}%", (c.audio.bgm_volume * 100.0).round() as i32),
+            adjust: |c, d| {
+                c.audio.bgm_volume = (c.audio.bgm_volume + 0.05 * d as f32).clamp(0.0, 1.0);
+            },
+            desc: "Chart BGM and song preview volume.",
+        },
+        ConfigItem {
             label: "Drum Volume",
             value: |c| format!("{}%", (c.audio.drum_volume * 100.0).round() as i32),
             adjust: |c, d| {
                 c.audio.drum_volume = (c.audio.drum_volume + 0.05 * d as f32).clamp(0.0, 1.0);
             },
             desc: "Drum hit sound volume.",
+        },
+        ConfigItem {
+            label: "BGM Sound",
+            value: |c| bool_label(c.audio.bgm_enabled).to_string(),
+            adjust: |c, _| c.audio.bgm_enabled ^= true,
+            desc: "Play chart BGM and song previews.",
         },
     ]
 });
@@ -915,10 +929,12 @@ mod tests {
 
     #[test]
     fn audio_tab_covers_all_fields() {
-        assert_eq!(AUDIO_ITEMS.len(), 3);
+        assert_eq!(AUDIO_ITEMS.len(), 5);
         let labels: Vec<_> = AUDIO_ITEMS.iter().map(|i| i.label).collect();
         assert!(labels.contains(&"Master Volume"));
+        assert!(labels.contains(&"BGM Volume"));
         assert!(labels.contains(&"Drum Volume"));
+        assert!(labels.contains(&"BGM Sound"));
         assert!(labels.contains(&"Drum Hit Sound"));
     }
 
@@ -1020,6 +1036,14 @@ mod tests {
     }
 
     #[test]
+    fn bgm_volume_clamps_zero_to_one() {
+        let cfg = adjust_tab(ConfigTab::Audio, 2, 100);
+        assert!((cfg.audio.bgm_volume - 1.0).abs() < f32::EPSILON);
+        let cfg = adjust_tab(ConfigTab::Audio, 2, -100);
+        assert!((cfg.audio.bgm_volume - 0.0).abs() < f32::EPSILON);
+    }
+
+    #[test]
     fn damage_level_cycles() {
         let mut d = draft();
         d.0.gameplay.damage_level = dtx_config::DamageLevel::None;
@@ -1071,6 +1095,14 @@ mod tests {
     }
 
     #[test]
+    fn bgm_volume_value_renders_percent() {
+        let mut d = draft();
+        d.0.audio.bgm_volume = 0.5;
+        let items = ConfigTab::Audio.items();
+        assert_eq!((items[2].value)(&d.0), "50%");
+    }
+
+    #[test]
     fn scroll_speed_value_renders_x() {
         let mut d = draft();
         d.0.gameplay.scroll_speed = 1.5;
@@ -1102,10 +1134,10 @@ mod tests {
 
     #[test]
     fn every_schema_field_has_a_ui_row() {
-        // 3 + 6 + 3 + 10 = 22 rows.
+        // 3 + 6 + 5 + 10 = 24 rows.
         assert_eq!(
             SYSTEM_ITEMS.len() + GAMEPLAY_ITEMS.len() + AUDIO_ITEMS.len() + DRUMS_ITEMS.len(),
-            22
+            24
         );
     }
 }

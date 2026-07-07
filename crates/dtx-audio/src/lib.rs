@@ -273,7 +273,21 @@ pub fn play_bgm(
     path: &str,
     fade_in_ms: u32,
 ) -> Handle<AudioInstance> {
-    play_bgm_from_seconds(audio, asset_server, bgm, instances, path, 0.0, fade_in_ms)
+    play_bgm_with_volume(audio, asset_server, bgm, instances, path, fade_in_ms, 1.0)
+}
+
+pub fn play_bgm_with_volume(
+    audio: &Audio,
+    asset_server: &AssetServer,
+    bgm: &mut BgmHandle,
+    instances: &mut Assets<AudioInstance>,
+    path: &str,
+    fade_in_ms: u32,
+    volume: f32,
+) -> Handle<AudioInstance> {
+    play_bgm_from_seconds_with_volume(
+        audio, asset_server, bgm, instances, path, 0.0, fade_in_ms, volume,
+    )
 }
 
 /// Play a BGM file from a stream-local offset in seconds.
@@ -288,19 +302,41 @@ pub fn play_bgm_from_seconds(
     start_seconds: f64,
     fade_in_ms: u32,
 ) -> Handle<AudioInstance> {
+    play_bgm_from_seconds_with_volume(
+        audio,
+        asset_server,
+        bgm,
+        instances,
+        path,
+        start_seconds,
+        fade_in_ms,
+        1.0,
+    )
+}
+
+pub fn play_bgm_from_seconds_with_volume(
+    audio: &Audio,
+    asset_server: &AssetServer,
+    bgm: &mut BgmHandle,
+    instances: &mut Assets<AudioInstance>,
+    path: &str,
+    start_seconds: f64,
+    fade_in_ms: u32,
+    volume: f32,
+) -> Handle<AudioInstance> {
     stop_bgm(audio, bgm, instances);
     let source = asset_server
         .load_builder()
         .override_unapproved()
         .load(path.to_owned());
+    let db = linear_gain_to_db(volume.clamp(0.0, 1.0));
     let handle = if fade_in_ms > 0 {
-        // kira fade_in tweens a silence→identity multiplier; `with_volume`
-        // is the post-fade target level, not the starting level.
+        // kira fade_in tweens silence→with_volume target.
         audio
             .play(source)
             .looped()
             .start_from(start_seconds.max(0.0))
-            .with_volume(0.0)
+            .with_volume(db)
             .fade_in(AudioTween::new(
                 Duration::from_millis(fade_in_ms as u64),
                 AudioEasing::Linear,
@@ -311,6 +347,7 @@ pub fn play_bgm_from_seconds(
             .play(source)
             .looped()
             .start_from(start_seconds.max(0.0))
+            .with_volume(db)
             .handle()
     };
     bgm.instance = Some(handle.clone());

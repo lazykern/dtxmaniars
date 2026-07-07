@@ -52,8 +52,8 @@ use crate::derived::ChartDerived;
 use crate::drums_perf::{DrumsDangerState, DrumsFillingEffect, DrumsPadState};
 use crate::judge::{BarLengthChangeList, BpmChangeList, JudgedChips};
 use crate::resources::{
-    ActiveChart, ActiveDrumSounds, BgmAdjustState, Combo, DrumGameplaySettings, DrumScoring,
-    FastSlowCount, GameStartMs, GameplayClock, JudgmentCounts, Score, SkillValue,
+    ActiveChart, ActiveDrumSounds, BgmAdjustState, Combo, DrumAudioSettings, DrumGameplaySettings,
+    DrumScoring, FastSlowCount, GameStartMs, GameplayClock, JudgmentCounts, Score, SkillValue,
 };
 use dtx_timing::math::ChartTiming;
 
@@ -287,10 +287,11 @@ fn start_bgm_on_enter(
     chart: Res<ActiveChart>,
     audio: Res<Audio>,
     asset_server: Res<AssetServer>,
+    settings: Res<DrumAudioSettings>,
     mut bgm: ResMut<BgmHandle>,
     mut instances: ResMut<Assets<AudioInstance>>,
 ) {
-    if crate::bgm_scheduler::chart_has_bgm_chips(&chart.chart) {
+    if crate::bgm_scheduler::chart_has_bgm_chips(&chart.chart) || !settings.bgm_enabled {
         return;
     }
     let Some(source_path) = chart.source_path.as_ref() else {
@@ -300,13 +301,14 @@ fn start_bgm_on_enter(
     if let Some(bgm_path) = dtx_core::resolve_bgm_path(source_path, &chart.chart) {
         let path_str = bgm_path.to_string_lossy().to_string();
         info!("Performance: starting BGM (no chips) from {path_str}");
-        dtx_audio::play_bgm(
+        dtx_audio::play_bgm_with_volume(
             &audio,
             &asset_server,
             &mut bgm,
             &mut instances,
             &path_str,
             dtx_ui::SCREEN_TRANSITION_MS as u32,
+            settings.master_volume * settings.bgm_volume,
         );
     } else {
         warn!(

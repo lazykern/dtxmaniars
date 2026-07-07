@@ -239,7 +239,9 @@ fn apply_config_on_enter(
     *scroll = resources::ScrollSettings::from_scroll_speed(cfg.gameplay.scroll_speed);
     scroll.play_speed = play_speed_multiplier(cfg.gameplay.play_speed);
     audio.enabled = cfg.audio.drum_sound_enabled;
+    audio.bgm_enabled = cfg.audio.bgm_enabled;
     audio.master_volume = cfg.audio.master_volume;
+    audio.bgm_volume = cfg.audio.bgm_volume;
     audio.drum_volume = cfg.audio.drum_volume;
     gauge.damage_level = map_damage_level(cfg.gameplay.damage_level);
     input_offset.0 = cfg.gameplay.input_offset_ms;
@@ -265,7 +267,9 @@ fn load_drum_audio_settings(
     let cfg = load(&default_path());
     *settings = resources::DrumAudioSettings {
         enabled: cfg.audio.drum_sound_enabled,
+        bgm_enabled: cfg.audio.bgm_enabled,
         master_volume: cfg.audio.master_volume,
+        bgm_volume: cfg.audio.bgm_volume,
         drum_volume: cfg.audio.drum_volume,
     };
     drum_cfg.config = cfg.drums.clone();

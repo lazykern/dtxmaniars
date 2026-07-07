@@ -268,7 +268,9 @@ impl Default for AudioRate {
 #[derive(Resource, Debug, Clone, Copy)]
 pub struct DrumAudioSettings {
     pub enabled: bool,
+    pub bgm_enabled: bool,
     pub master_volume: f32,
+    pub bgm_volume: f32,
     pub drum_volume: f32,
 }
 
@@ -276,7 +278,9 @@ impl Default for DrumAudioSettings {
     fn default() -> Self {
         Self {
             enabled: true,
+            bgm_enabled: true,
             master_volume: 0.8,
+            bgm_volume: 0.7,
             drum_volume: 0.8,
         }
     }

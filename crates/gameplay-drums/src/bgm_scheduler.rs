@@ -45,8 +45,13 @@ pub fn bootstrap_primary_bgm_chip(
     bgm: &mut dtx_audio::BgmHandle,
     instances: &mut Assets<AudioInstance>,
     sound_bank: &dtx_audio::ChartSoundBank,
+    bgm_enabled: bool,
     master_volume: f32,
+    bgm_volume: f32,
 ) -> bool {
+    if !bgm_enabled {
+        return true;
+    }
     if bgm.instance.is_some() {
         return true;
     }
@@ -70,20 +75,21 @@ pub fn bootstrap_primary_bgm_chip(
             &sound.path.to_string_lossy(),
             sound.volume,
             sound.pan,
-            master_volume,
+            master_volume * bgm_volume,
             // Bootstrap is called from OnEnter(Performance) → start_bgm_on_enter;
             // pass the screen-fade duration so the BGM fades in aligned
             // with the visual fade-in (matches osu's seamless feel).
             dtx_ui::SCREEN_TRANSITION_MS as u32,
         );
     } else {
-        dtx_audio::play_bgm(
+        dtx_audio::play_bgm_with_volume(
             audio,
             asset_server,
             bgm,
             instances,
             &path,
             dtx_ui::SCREEN_TRANSITION_MS as u32,
+            master_volume * bgm_volume,
         );
     }
     true
@@ -195,6 +201,10 @@ fn schedule_bgm_chips(
         if now < target_ms {
             continue;
         }
+        if !settings.bgm_enabled {
+            played.0.insert(idx);
+            continue;
+        }
         let Some(path) = chip_wav_path(&chart.chart, idx, source_dir) else {
             continue;
         };
@@ -217,12 +227,20 @@ fn schedule_bgm_chips(
                     &sound.path.to_string_lossy(),
                     sound.volume,
                     sound.pan,
-                    settings.master_volume,
+                    settings.master_volume * settings.bgm_volume,
                     // Subsequent chip swaps: no fade-in (already in Performance).
                     0,
                 );
             } else {
-                dtx_audio::play_bgm(&audio, &asset_server, &mut bgm, &mut instances, &path, 0);
+                dtx_audio::play_bgm_with_volume(
+                    &audio,
+                    &asset_server,
+                    &mut bgm,
+                    &mut instances,
+                    &path,
+                    0,
+                    settings.master_volume * settings.bgm_volume,
+                );
             }
         } else {
             let vol = chart.chart.assets.wav.volume(chip.wav_slot);
@@ -234,7 +252,7 @@ fn schedule_bgm_chips(
                     sound.volume,
                     sound.pan,
                     settings.master_volume,
-                    1.0,
+                    settings.bgm_volume,
                 )
             } else {
                 dtx_audio::play_sfx_path(
@@ -244,7 +262,7 @@ fn schedule_bgm_chips(
                     vol,
                     pan,
                     settings.master_volume,
-                    1.0,
+                    settings.bgm_volume,
                 )
             };
             active.track_layer_bgm(handle);
@@ -269,7 +287,7 @@ fn recover_primary_bgm(
     sound_bank: Res<dtx_audio::ChartSoundBank>,
     mut recovery: ResMut<BgmRecoveryState>,
 ) {
-    if completion.end_requested || !gameplay_clock.is_ready() {
+    if completion.end_requested || !gameplay_clock.is_ready() || !settings.bgm_enabled {
         return;
     }
     let Some(handle) = bgm.instance.as_ref() else {
@@ -314,13 +332,13 @@ fn recover_primary_bgm(
             &sound.path.to_string_lossy(),
             sound.volume,
             sound.pan,
-            settings.master_volume,
+            settings.master_volume * settings.bgm_volume,
             start_seconds,
             // Recovery restart mid-performance: no fade-in.
             0,
         );
     } else {
-        dtx_audio::play_bgm_from_seconds(
+        dtx_audio::play_bgm_from_seconds_with_volume(
             &audio,
             &asset_server,
             &mut bgm,
@@ -328,6 +346,7 @@ fn recover_primary_bgm(
             &path,
             start_seconds,
             0,
+            settings.master_volume * settings.bgm_volume,
         );
     }
     recovery.attempts += 1;

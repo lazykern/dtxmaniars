@@ -91,9 +91,19 @@ pub fn start_fade_in_with_delay(
     fade_ms: u32,
     delay_ms: u32,
 ) {
+    start_fade_in_with_delay_to_db(instances, handle, fade_ms, delay_ms, 0.0);
+}
+
+pub fn start_fade_in_with_delay_to_db(
+    instances: &mut Assets<AudioInstance>,
+    handle: &Handle<AudioInstance>,
+    fade_ms: u32,
+    delay_ms: u32,
+    target_db: f32,
+) {
     if let Some(mut instance) = instances.get_mut(handle) {
         let total = Duration::from_millis(delay_ms as u64 + fade_ms as u64);
-        instance.set_decibels(0.0, AudioTween::linear(total));
+        instance.set_decibels(target_db, AudioTween::linear(total));
     }
 }
 

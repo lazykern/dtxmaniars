@@ -535,15 +535,19 @@ fn play_nowloading(
     if !path.is_file() {
         return;
     }
-    // Reuse the BGM slot for the nowloading jingle so `stop_bgm` on exit
-    // cleans it up. Volume 0.6 — soft, doesn't fight the BGMLoadingSound.
-    let _ = dtx_audio::play_bgm(
+    let cfg = dtx_config::load(&dtx_config::default_path());
+    if !cfg.audio.bgm_enabled {
+        return;
+    }
+    // Reuse the BGM slot for the nowloading jingle so `stop_bgm` on exit cleans it up.
+    let _ = dtx_audio::play_bgm_with_volume(
         audio,
         asset_server,
         bgm,
         instances,
         &path.to_string_lossy(),
         0,
+        cfg.audio.master_volume * cfg.audio.bgm_volume,
     );
 }
 

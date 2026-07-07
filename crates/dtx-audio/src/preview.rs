@@ -20,8 +20,8 @@ use bevy_kira_audio::AudioInstance;
 use bevy_kira_audio::AudioSource as KiraAudioSource;
 
 use crate::crossfade::{
-    mute, start_fade_in_with_delay, stop_with_fade, PREVIEW_FADE_DELAY_MS, PREVIEW_FADE_IN_MS,
-    PREVIEW_FADE_OUT_MS,
+    mute, start_fade_in_with_delay_to_db, stop_with_fade, PREVIEW_FADE_DELAY_MS,
+    PREVIEW_FADE_IN_MS, PREVIEW_FADE_OUT_MS,
 };
 
 // =====================================================================
@@ -138,7 +138,7 @@ pub enum ScreenFadeTransition {
 ///   handle to fade out). `new` is fading in (or has just started).
 ///   `fade_in_started` flips once the pre-roll delay elapses and the
 ///   fade-in tween is kicked off.
-#[derive(Resource, Debug, Default, Clone)]
+#[derive(Resource, Debug, Clone)]
 pub struct PreviewPlayer {
     pub state: PreviewState,
     /// Whether the preview loops. Per-screen: `true` on song select,
@@ -161,6 +161,20 @@ pub struct PreviewPlayer {
     /// arrow reaches the audio engine even when mashed faster than
     /// the 250 ms crossfade window.
     pub pending_path: Option<PathBuf>,
+    pub volume: f32,
+}
+
+impl Default for PreviewPlayer {
+    fn default() -> Self {
+        Self {
+            state: PreviewState::Idle,
+            looping: false,
+            previous_index: None,
+            current_path: None,
+            pending_path: None,
+            volume: 1.0,
+        }
+    }
 }
 
 #[derive(Debug, Default, Clone)]
@@ -175,6 +189,7 @@ pub enum PreviewState {
         new: Handle<AudioInstance>,
         elapsed_ms: u32,
         fade_in_started: bool,
+        target_db: f32,
     },
 }
 
@@ -250,15 +265,17 @@ pub fn preview_tick_system(
             new,
             elapsed_ms,
             fade_in_started,
+            target_db,
         } => {
             *elapsed_ms = elapsed_ms.saturating_add(delta_ms);
 
             if !*fade_in_started && *elapsed_ms >= PREVIEW_FADE_DELAY_MS {
-                start_fade_in_with_delay(
+                start_fade_in_with_delay_to_db(
                     &mut instances,
                     new,
                     PREVIEW_FADE_IN_MS,
                     /* delay = */ 0,
+                    *target_db,
                 );
                 *fade_in_started = true;
             }
@@ -286,6 +303,10 @@ impl PreviewPlayer {
     /// preview — call `stop()` first or wait for the next swap.
     pub fn set_looping(&mut self, looping: bool) {
         self.looping = looping;
+    }
+
+    pub fn set_volume(&mut self, volume: f32) {
+        self.volume = volume.clamp(0.0, 1.0);
     }
 
     /// Fade the currently-playing preview to silence over `ms`
@@ -412,6 +433,7 @@ impl PreviewPlayer {
             new: new_handle,
             elapsed_ms: 0,
             fade_in_started: false,
+            target_db: crate::linear_gain_to_db(self.volume),
         };
         events.write(PreviewSwapEvent {
             old_path: old_path_for_event,
@@ -593,6 +615,7 @@ mod tests {
             new: Handle::<AudioInstance>::default(),
             elapsed_ms: 0,
             fade_in_started: false,
+            target_db: 0.0,
         };
         assert!(state.is_busy());
         // The "new" handle is reported as current even mid-crossfade.
@@ -607,6 +630,7 @@ mod tests {
             new: Handle::<AudioInstance>::default(),
             elapsed_ms: 0,
             fade_in_started: false,
+            target_db: 0.0,
         };
         assert!(state.is_busy());
         // The "new" handle is the audible one.
