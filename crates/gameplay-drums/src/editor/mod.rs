@@ -9,6 +9,7 @@ use bevy::prelude::*;
 use game_shell::AppState;
 
 pub mod drag;
+pub mod picking;
 pub mod save;
 pub mod ui;
 pub mod undo;
