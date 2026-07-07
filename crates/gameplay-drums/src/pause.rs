@@ -16,9 +16,10 @@ use game_shell::{request_transition, AppState, PauseState, TransitionRequest};
 
 use crate::resources::ActiveDrumSounds;
 
-/// Root marker for the pause overlay UI.
+/// Root marker for the normal pause overlay (practice suppresses it; the
+/// practice full HUD owns PauseState::Paused — see practice/hud/full_hud.rs).
 #[derive(Component)]
-struct PauseOverlay;
+pub struct PauseOverlay;
 
 /// One selectable menu row.
 #[derive(Component, Clone, Copy, PartialEq, Eq)]
@@ -42,7 +43,7 @@ impl PauseItem {
 
 /// Currently highlighted pause-menu row.
 #[derive(Resource, Default)]
-struct PauseSelection(usize);
+pub struct PauseSelection(pub usize);
 
 pub(super) fn plugin(app: &mut App) {
     app.init_resource::<PauseSelection>()
@@ -106,7 +107,7 @@ fn resume_chart_audio(
     active.resume_all(&mut instances);
 }
 
-fn spawn_overlay(
+pub fn spawn_overlay(
     mut commands: Commands,
     mut selection: ResMut<PauseSelection>,
     practice: Option<Res<crate::practice::PracticeSession>>,
