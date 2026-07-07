@@ -394,14 +394,15 @@ impl PreviewPlayer {
             self.stop(instances, 0);
         }
 
+        let target_db = crate::linear_gain_to_db(self.volume);
         let new_handle = if self.looping {
-            audio.play(source).looped().handle()
+            audio.play(source).looped().with_volume(-60.0).handle()
         } else {
-            audio.play(source).handle()
+            audio.play(source).with_volume(-60.0).handle()
         };
 
-        // Mute the new instance immediately so the fade-in drives its
-        // audible onset (matches osu's `queuedTrack.Volume.Value = 0`).
+        // Set initial silence on the play command. Muting by handle can miss
+        // the first frame before AudioInstance exists, causing full-volume blips.
         mute(instances, &new_handle);
 
         let old_handle = match &self.state {
@@ -433,7 +434,7 @@ impl PreviewPlayer {
             new: new_handle,
             elapsed_ms: 0,
             fade_in_started: false,
-            target_db: crate::linear_gain_to_db(self.volume),
+            target_db,
         };
         events.write(PreviewSwapEvent {
             old_path: old_path_for_event,
