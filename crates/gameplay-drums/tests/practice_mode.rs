@@ -101,78 +101,37 @@ fn enter_performance(app: &mut App, chart: Chart) {
 }
 
 #[test]
-fn active_loop_region_suppresses_end_of_stage() {
-    let mut app = build_app();
-    enter_performance(&mut app, chart_with_measures(2));
-    app.world_mut().insert_resource(PracticeSession {
-        transport: PracticeTransport {
-            loop_region: Some(LoopRegion {
-                start_ms: 0,
-                end_ms: 2_000,
-            }),
-            ..Default::default()
-        },
-        ..Default::default()
-    });
-    {
-        let mut clock = app.world_mut().resource_mut::<GameplayClock>();
-        clock.start();
-        clock.sync(Some(50_000));
+fn practice_never_requests_end_of_stage() {
+    // v3: practice is a room — the implicit whole-song loop wraps
+    // instead; detect_end_of_stage must never fire while a
+    // PracticeSession exists, loop or no loop.
+    for region in [
+        None,
+        Some(LoopRegion {
+            start_ms: 0,
+            end_ms: i64::MAX,
+        }), // A-only
+        Some(LoopRegion {
+            start_ms: 0,
+            end_ms: 2_000,
+        }), // armed
+    ] {
+        let mut app = build_app();
+        enter_performance(&mut app, chart_with_measures(2));
+        let mut s = PracticeSession::default();
+        s.transport.loop_region = region;
+        app.world_mut().insert_resource(s);
+        {
+            let mut clock = app.world_mut().resource_mut::<GameplayClock>();
+            clock.start();
+            clock.sync(Some(50_000));
+        }
+        app.update();
+        assert!(
+            !app.world().resource::<DrumsStageCompletion>().end_requested,
+            "practice must never end the stage (region: {region:?})"
+        );
     }
-    app.update();
-    let completion = app.world().resource::<DrumsStageCompletion>();
-    assert!(
-        !completion.end_requested,
-        "active A/B loop must suppress end-of-stage"
-    );
-}
-
-#[test]
-fn a_only_loop_region_does_not_suppress_end_of_stage() {
-    // Regression: an A marker with no B (end_ms == i64::MAX, not armed)
-    // must not suppress end-of-stage — the loop watcher only seeks back
-    // once armed, so suppressing here would softlock the stage.
-    let mut app = build_app();
-    enter_performance(&mut app, chart_with_measures(2));
-    app.world_mut().insert_resource(PracticeSession {
-        transport: PracticeTransport {
-            loop_region: Some(LoopRegion {
-                start_ms: 0,
-                end_ms: i64::MAX,
-            }),
-            ..Default::default()
-        },
-        ..Default::default()
-    });
-    {
-        let mut clock = app.world_mut().resource_mut::<GameplayClock>();
-        clock.start();
-        clock.sync(Some(50_000));
-    }
-    app.update();
-    let completion = app.world().resource::<DrumsStageCompletion>();
-    assert!(
-        completion.end_requested,
-        "an A-only (unarmed) loop must not suppress end-of-stage"
-    );
-}
-
-#[test]
-fn cleared_loop_region_restores_end_of_stage() {
-    let mut app = build_app();
-    enter_performance(&mut app, chart_with_measures(2));
-    app.world_mut().insert_resource(PracticeSession::default());
-    {
-        let mut clock = app.world_mut().resource_mut::<GameplayClock>();
-        clock.start();
-        clock.sync(Some(50_000));
-    }
-    app.update();
-    let completion = app.world().resource::<DrumsStageCompletion>();
-    assert!(
-        completion.end_requested,
-        "practice without a loop region ends the stage normally"
-    );
 }
 
 #[test]
