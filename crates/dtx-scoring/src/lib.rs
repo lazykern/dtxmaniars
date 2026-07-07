@@ -14,6 +14,7 @@
 
 pub mod gauge;
 pub mod hit_ranges;
+pub mod identity;
 pub mod score_ini;
 pub mod xg_score;
 
