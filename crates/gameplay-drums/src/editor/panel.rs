@@ -34,15 +34,44 @@ pub struct AnchorCell(pub Anchor9);
 #[derive(Component)]
 pub struct PanelResetWidget;
 
+/// Lane panel controls (Playfield selected).
+#[derive(Component, Debug, Clone, Copy)]
+pub struct LaneReorderBtn {
+    pub index: usize,
+    pub dir: i32,
+}
+
+#[derive(Component, Debug, Clone, Copy)]
+pub struct LaneMergeBtn(pub usize);
+
+#[derive(Component, Debug, Clone, Copy)]
+pub struct ChipSplitBtn(pub dtx_core::EChannel);
+
+#[derive(Component, Debug, Clone, Copy)]
+pub struct LaneWidthSlider(pub usize);
+
+#[derive(Component, Debug, Clone, Copy)]
+pub struct PresetCycleBtn(pub i32);
+
+#[derive(Component)]
+pub struct PresetLabel;
+
+fn preset_name(p: dtx_layout::LanePreset) -> &'static str {
+    match p {
+        dtx_layout::LanePreset::Classic => "classic",
+        dtx_layout::LanePreset::NxTypeB => "nx type-b",
+        dtx_layout::LanePreset::NxTypeD => "nx type-d",
+        dtx_layout::LanePreset::Custom => "custom",
+    }
+}
+
 pub const PANEL_WIDTH: f32 = 240.0;
 
 pub fn plugin(app: &mut App) {
     app.add_systems(
         Update,
         (
-            rebuild_panel.run_if(
-                resource_changed::<Selection>.or_else(resource_changed::<super::EditorOpen>),
-            ),
+            rebuild_panel,
             (
                 apply_panel_controls,
                 apply_anchor_cells,
@@ -67,9 +96,20 @@ fn rebuild_panel(
     open: Res<EditorOpen>,
     selection: Res<Selection>,
     layouts: Res<WidgetLayouts>,
+    lanes: Res<Lanes>,
     theme: Res<dtx_ui::ThemeResource>,
     existing: Query<Entity, With<PanelRoot>>,
+    mut last_sig: Local<Option<(Option<WidgetKind>, bool, String)>>,
 ) {
+    let sig = (
+        selection.0,
+        open.0,
+        dtx_layout::structure_signature(&lanes.0),
+    );
+    if last_sig.as_ref() == Some(&sig) {
+        return;
+    }
+    *last_sig = Some(sig);
     for e in &existing {
         commands.entity(e).despawn();
     }
@@ -77,11 +117,7 @@ fn rebuild_panel(
         return;
     }
     let Some(kind) = selection.0 else { return };
-    if kind == WidgetKind::Playfield {
-        return; // plan 3 adds the lane panel here
-    }
     let t = theme.0;
-    let inst = layouts.get(kind).clone();
     let root = commands
         .spawn((
             PanelRoot,
@@ -103,6 +139,11 @@ fn rebuild_panel(
         .id();
 
     commands.entity(root).with_children(|p| {
+        if kind == WidgetKind::Playfield {
+            spawn_lane_block(p, &t, &lanes);
+            return;
+        }
+        let inst = layouts.get(kind).clone();
         p.spawn((
             Text::new(format!("Settings ({})", kind.display_name())),
             dtx_ui::theme::Theme::font(13.0),
@@ -212,6 +253,141 @@ fn rebuild_panel(
             )],
         ));
     });
+}
+
+fn spawn_lane_block(p: &mut ChildSpawnerCommands, t: &dtx_ui::theme::Theme, lanes: &Lanes) {
+    p.spawn((
+        Text::new("Lanes"),
+        dtx_ui::theme::Theme::font(13.0),
+        TextColor(t.text_primary),
+    ));
+
+    // Preset row: < name >
+    p.spawn(Node {
+        flex_direction: FlexDirection::Row,
+        align_items: AlignItems::Center,
+        column_gap: Val::Px(6.0),
+        ..default()
+    })
+    .with_children(|r| {
+        r.spawn((
+            PresetCycleBtn(-1),
+            Button,
+            Node { padding: UiRect::axes(Val::Px(6.0), Val::Px(1.0)), ..default() },
+            BackgroundColor(Color::srgb(0.14, 0.14, 0.18)),
+            children![(Text::new("<"), dtx_ui::theme::Theme::font(12.0), TextColor(t.text_primary))],
+        ));
+        r.spawn((
+            PresetLabel,
+            Text::new(preset_name(lanes.0.preset).to_string()),
+            dtx_ui::theme::Theme::font(12.0),
+            TextColor(t.text_primary),
+            Node { min_width: Val::Px(70.0), ..default() },
+        ));
+        r.spawn((
+            PresetCycleBtn(1),
+            Button,
+            Node { padding: UiRect::axes(Val::Px(6.0), Val::Px(1.0)), ..default() },
+            BackgroundColor(Color::srgb(0.14, 0.14, 0.18)),
+            children![(Text::new(">"), dtx_ui::theme::Theme::font(12.0), TextColor(t.text_primary))],
+        ));
+    });
+
+    // One row per lane: [^][v] ID (chips…) width-slider [x]
+    let last = lanes.0.lanes.len().saturating_sub(1);
+    for (i, lane) in lanes.0.lanes.iter().enumerate() {
+        let chips = dtx_layout::lane_chips(&lanes.0, i);
+        let can_merge = lanes.0.lanes.len() > 1;
+        let width = lane.width;
+        p.spawn(Node {
+            flex_direction: FlexDirection::Column,
+            row_gap: Val::Px(2.0),
+            padding: UiRect::vertical(Val::Px(2.0)),
+            ..default()
+        })
+        .with_children(|lane_col| {
+            lane_col
+                .spawn(Node {
+                    flex_direction: FlexDirection::Row,
+                    align_items: AlignItems::Center,
+                    column_gap: Val::Px(4.0),
+                    ..default()
+                })
+                .with_children(|r| {
+                    for (dir, sym, enabled) in [(-1, "^", i > 0), (1, "v", i < last)] {
+                        if enabled {
+                            r.spawn((
+                                LaneReorderBtn { index: i, dir },
+                                Button,
+                                Node { padding: UiRect::axes(Val::Px(4.0), Val::Px(1.0)), ..default() },
+                                BackgroundColor(Color::srgb(0.14, 0.14, 0.18)),
+                                children![(Text::new(sym), dtx_ui::theme::Theme::font(11.0), TextColor(t.text_primary))],
+                            ));
+                        } else {
+                            r.spawn((
+                                Node { padding: UiRect::axes(Val::Px(4.0), Val::Px(1.0)), ..default() },
+                                children![(Text::new(sym), dtx_ui::theme::Theme::font(11.0), TextColor(t.text_secondary))],
+                            ));
+                        }
+                    }
+                    r.spawn((
+                        Text::new(lane.id.clone()),
+                        dtx_ui::theme::Theme::font(12.0),
+                        TextColor(t.text_primary),
+                        Node { min_width: Val::Px(34.0), ..default() },
+                    ));
+                    // Chips: primary shown flat; secondaries are split buttons.
+                    for ch in &chips {
+                        let name = dtx_layout::channel_short_name(*ch).unwrap_or("?");
+                        if *ch == lane.primary {
+                            r.spawn((
+                                Text::new(name),
+                                dtx_ui::theme::Theme::font(10.0),
+                                TextColor(t.text_secondary),
+                            ));
+                        } else {
+                            r.spawn((
+                                ChipSplitBtn(*ch),
+                                Button,
+                                Node { padding: UiRect::axes(Val::Px(3.0), Val::Px(0.0)), ..default() },
+                                BackgroundColor(Color::srgb(0.18, 0.22, 0.28)),
+                                children![(
+                                    Text::new(format!("{name} x")),
+                                    dtx_ui::theme::Theme::font(10.0),
+                                    TextColor(t.text_primary),
+                                )],
+                            ));
+                        }
+                    }
+                    if can_merge {
+                        r.spawn((
+                            LaneMergeBtn(i),
+                            Button,
+                            Node { padding: UiRect::axes(Val::Px(4.0), Val::Px(1.0)), ..default() },
+                            BackgroundColor(Color::srgb(0.3, 0.14, 0.14)),
+                            children![(Text::new("x"), dtx_ui::theme::Theme::font(11.0), TextColor(t.text_primary))],
+                        ));
+                    }
+                });
+            lane_col
+                .spawn(Node {
+                    flex_direction: FlexDirection::Row,
+                    align_items: AlignItems::Center,
+                    column_gap: Val::Px(4.0),
+                    margin: UiRect::left(Val::Px(20.0)),
+                    ..default()
+                })
+                .with_children(|r| {
+                    let e = controls::spawn_slider(
+                        r,
+                        t,
+                        Slider { min: dtx_layout::MIN_LANE_WIDTH, max: dtx_layout::MAX_LANE_WIDTH },
+                        width,
+                    );
+                    r.commands_mut().entity(e).insert(LaneWidthSlider(i));
+                });
+        });
+    }
 }
 
 fn row(
