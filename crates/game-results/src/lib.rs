@@ -1,7 +1,8 @@
 //! CStageResult — animated stat reveals (ADR-0014).
 
 use bevy::prelude::*;
-use dtx_scoring::{compute_chart_hash, Rank, ScoreEntry, ScoreStore};
+use dtx_scoring::identity::{canonical_chart_hash, raw_file_sha256, ChartIdentity};
+use dtx_scoring::{JudgmentTotals, Rank, ScoreEntry, ScoreSource, ScoreStore};
 use dtx_ui::{theme::Theme, ThemeResource};
 use game_shell::{despawn_stage, request_transition, AppState, TransitionRequest};
 use gameplay_drums::resources::{ActiveChart, Combo, DrumScoring, JudgmentCounts, Score};
@@ -66,6 +67,46 @@ fn result_rank(counts: &JudgmentCounts, max_combo: u32, total: u32) -> Rank {
         counts.miss,
         max_combo,
     )
+}
+
+fn chart_identity(chart: &ActiveChart) -> ChartIdentity {
+    let canonical = canonical_chart_hash(&chart.chart);
+    let raw = chart
+        .source_path
+        .as_ref()
+        .and_then(|path| raw_file_sha256(path).ok());
+    ChartIdentity::new(canonical, raw, chart.source_path.clone())
+}
+
+fn native_score_entry(
+    chart: ChartIdentity,
+    title: String,
+    artist: String,
+    score: u32,
+    max_combo: u32,
+    counts: &JudgmentCounts,
+    rank: Rank,
+    played_at: u64,
+) -> ScoreEntry {
+    ScoreEntry {
+        id: format!("native:{}:{score}:{played_at}", chart.canonical_hash),
+        chart,
+        title,
+        artist,
+        score,
+        max_combo,
+        judgments: JudgmentTotals {
+            perfect: counts.perfect,
+            great: counts.great,
+            good: counts.good,
+            poor: counts.ok,
+            miss: counts.miss,
+        },
+        rank,
+        played_at,
+        source: ScoreSource::Native,
+        replay_ref: None,
+    }
 }
 
 fn spawn_result(
@@ -264,30 +305,21 @@ fn save_result_then_despawn(
         .unwrap_or_else(|| "Unknown".into());
     let total = scoring.total_notes;
     let rank = result_rank(&counts, combo.max, total);
+    let played_at = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
 
-    let chart_hash = chart
-        .source_path
-        .as_ref()
-        .map(|p| compute_chart_hash(p))
-        .unwrap_or_else(|| "unknown".into());
-
-    let entry = ScoreEntry {
-        chart_hash,
+    let entry = native_score_entry(
+        chart_identity(&chart),
         title,
         artist,
-        score: score.0 as u32,
-        max_combo: combo.max,
-        perfect: counts.perfect,
-        great: counts.great,
-        good: counts.good,
-        ok: counts.ok,
-        miss: counts.miss,
+        score.0 as u32,
+        combo.max,
+        &counts,
         rank,
-        played_at: std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .map(|d| d.as_secs())
-            .unwrap_or(0),
-    };
+        played_at,
+    );
 
     store.add(entry);
     if let Err(e) = store.save() {
@@ -297,10 +329,6 @@ fn save_result_then_despawn(
     // Also write a BocuD-compatible <chart>.score.ini next to the chart so
     // song select (and DTXManiaNX itself) can read the best score.
     if let Some(chart_path) = chart.source_path.as_ref() {
-        let played_at = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .map(|d| d.as_secs())
-            .unwrap_or(0);
         let ini_path = dtx_scoring::score_ini::score_ini_path(chart_path);
         let bgm_adjust = dtx_scoring::score_ini::read_bgm_adjust(&ini_path);
         let record = dtx_scoring::score_ini::DrumScoreIni {
@@ -346,5 +374,34 @@ mod tests {
     #[test]
     fn pct_zero_total_is_zero() {
         assert_eq!(pct(1, 0), 0.0);
+    }
+
+    #[test]
+    fn native_score_entry_uses_chart_identity_and_poor_counts() {
+        let chart_identity =
+            dtx_scoring::identity::ChartIdentity::new("dtx1:test".into(), Some("raw".into()), None);
+        let counts = JudgmentCounts {
+            perfect: 3,
+            great: 2,
+            good: 1,
+            ok: 4,
+            miss: 5,
+        };
+
+        let entry = native_score_entry(
+            chart_identity,
+            "Title".into(),
+            "Artist".into(),
+            12345,
+            9,
+            &counts,
+            Rank::A,
+            42,
+        );
+
+        assert_eq!(entry.chart.canonical_hash, "dtx1:test");
+        assert_eq!(entry.chart.raw_sha256.as_deref(), Some("raw"));
+        assert_eq!(entry.judgments.poor, 4);
+        assert_eq!(entry.source, dtx_scoring::ScoreSource::Native);
     }
 }
