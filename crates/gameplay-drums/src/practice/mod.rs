@@ -11,6 +11,7 @@ pub mod hud;
 pub mod rate;
 pub mod session;
 pub mod stats;
+pub mod toast;
 pub mod ui;
 
 use bevy::prelude::*;
@@ -31,6 +32,12 @@ pub(super) fn plugin(app: &mut App) {
                 .run_if(in_state(game_shell::PauseState::Running))
                 .run_if(resource_exists::<PracticeSession>),
         );
+    app.init_resource::<toast::ToastQueue>().add_systems(
+        Update,
+        toast::toast_ui
+            .run_if(in_state(AppState::Performance))
+            .run_if(resource_exists::<PracticeSession>),
+    );
     app.add_systems(
         OnEnter(AppState::Performance),
         enter_practice_session.before(crate::orchestrator::DrumsEnterSet),

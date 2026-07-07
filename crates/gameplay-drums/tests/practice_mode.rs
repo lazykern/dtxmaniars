@@ -289,6 +289,7 @@ use gameplay_drums::practice::actions::{
 fn add_action_wiring(app: &mut App) {
     app.init_resource::<ButtonInput<KeyCode>>()
         .init_resource::<PracticeBindings>()
+        .init_resource::<gameplay_drums::practice::toast::ToastQueue>()
         .init_state::<game_shell::PauseState>()
         .add_message::<PracticeAction>()
         .add_systems(

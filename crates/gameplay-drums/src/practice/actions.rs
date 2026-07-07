@@ -6,7 +6,9 @@
 use bevy::prelude::*;
 use game_shell::PauseState;
 
+use super::hud::timeline_ui::bar_number;
 use super::session::{preroll_target, PracticeSession};
+use super::toast::ToastQueue;
 use crate::resources::GameplayClock;
 use crate::seek::SeekToChartTime;
 use crate::timeline::{ChipTimeline, SnapDivisor};
@@ -77,12 +79,14 @@ pub fn apply_practice_actions(
     clock: Res<GameplayClock>,
     mut seeks: MessageWriter<SeekToChartTime>,
     mut next_pause: ResMut<NextState<PauseState>>,
+    mut toasts: ResMut<ToastQueue>,
 ) {
     for action in actions.read() {
         match action {
             PracticeAction::SetLoopStart => {
                 let ms = timeline.bar_start_before(clock.current_ms);
                 session.set_loop_start(ms);
+                toasts.push(format!("A set @ bar {}", bar_number(&timeline.bar_ms, ms)));
             }
             PracticeAction::SetLoopEnd => {
                 let mut ms = timeline.bar_start_before(clock.current_ms);
@@ -93,10 +97,20 @@ pub fn apply_practice_actions(
                     }
                 }
                 session.set_loop_end(ms);
+                toasts.push(format!("B set @ bar {}", bar_number(&timeline.bar_ms, ms)));
             }
-            PracticeAction::ClearLoop => session.loop_region = None,
-            PracticeAction::RateDown => session.step_rate(-1),
-            PracticeAction::RateUp => session.step_rate(1),
+            PracticeAction::ClearLoop => {
+                session.loop_region = None;
+                toasts.push("loop cleared");
+            }
+            PracticeAction::RateDown => {
+                session.step_rate(-1);
+                toasts.push(format!("rate → {:.2}×", session.rate));
+            }
+            PracticeAction::RateUp => {
+                session.step_rate(1);
+                toasts.push(format!("rate → {:.2}×", session.rate));
+            }
             PracticeAction::RestartLoop => {
                 let intent = session
                     .loop_region
@@ -107,6 +121,7 @@ pub fn apply_practice_actions(
                     snap: None,
                     attempt_start_ms: Some(intent),
                 });
+                toasts.push("restart");
             }
             PracticeAction::OpenFullHud => next_pause.set(PauseState::Paused),
             PracticeAction::ToggleRamp => {}
