@@ -10,7 +10,8 @@ mod performance;
 mod transition;
 
 pub use states::{
-    AppState, EGameMode, EditorSession, PauseState, PracticeIntent, StageEntity, despawn_stage,
+    despawn_stage, AppState, CustomizeTab, EGameMode, EditorSession, PauseState,
+    PendingCustomizeTab, PracticeIntent, StageEntity,
 };
 pub use transition::{request_transition, TransitionRequest};
 
@@ -23,6 +24,7 @@ impl Plugin for GameShellPlugin {
             .init_state::<PauseState>()
             .init_resource::<states::PracticeIntent>()
             .init_resource::<states::EditorSession>()
+            .init_resource::<states::PendingCustomizeTab>()
             .add_plugins((dtx_ui::plugin, transition::plugin, performance::plugin));
     }
 }
