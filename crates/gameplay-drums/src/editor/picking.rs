@@ -11,7 +11,7 @@ use bevy::prelude::*;
 use dtx_layout::WidgetKind;
 
 use crate::layout::PlayfieldLayout;
-use crate::widget_layout::{widget_visible, WidgetContainer, WidgetLayouts};
+use crate::widget_layout::{widget_visible, WidgetLayouts};
 
 /// Logical-px AABB per widget, rebuilt each frame while the editor is open.
 /// Entries persist across frames (last non-empty wins) so widgets that render
@@ -101,65 +101,48 @@ pub fn plugin(app: &mut App) {
         );
 }
 
-/// Union of each widget container's descendant node rects (skipping the
-/// full-screen container itself). Hidden-in-mode widgets keep their AABB (the
-/// node still participates in layout while `Visibility::Hidden`) but are added
-/// to `CanvasHidden` so the hit-test skips them; empty unions keep their
-/// previous entry (falling back to a MIN_GRAB box if never seen).
+/// Visual AABB = unscaled geom pushed through the applied transform. The
+/// traversal lives in `widget_layout::measure_widget_geoms` (always-on); the
+/// editor just derives hit rects from it. Hidden-in-mode widgets keep their
+/// AABB (so a sidebar-selected hidden widget still gets a dimmed selection box)
+/// but are recorded in `CanvasHidden` so canvas hover/click skip them.
 fn collect_widget_aabbs(
     mut aabbs: ResMut<WidgetAabbs>,
     mut hidden: ResMut<CanvasHidden>,
+    geoms: Res<crate::widget_layout::WidgetGeoms>,
     layouts: Res<WidgetLayouts>,
     practice: Option<Res<crate::practice::PracticeSession>>,
     pfl: Res<PlayfieldLayout>,
-    containers: Query<(Entity, &WidgetContainer, &Node)>,
-    children_q: Query<&Children>,
-    nodes: Query<(&ComputedNode, &GlobalTransform)>,
+    windows: Query<&Window, With<bevy::window::PrimaryWindow>>,
 ) {
+    let Ok(window) = windows.single() else { return };
+    let sc = Vec2::new(window.width() / 2.0, window.height() / 2.0);
     let is_practice = practice.is_some();
     hidden.0.clear();
-    for (entity, container, cnode) in &containers {
-        let kind = container.0;
-        if kind == WidgetKind::Playfield {
+    for kind in dtx_layout::WidgetKind::ALL {
+        if kind == dtx_layout::WidgetKind::Playfield {
             continue;
         }
         if !widget_visible(layouts.get(kind), is_practice) {
             hidden.0.insert(kind);
         }
-        let mut union: Option<Rect> = None;
-        let mut stack: Vec<Entity> = children_q
-            .get(entity)
-            .map(|c| c.iter().collect())
-            .unwrap_or_default();
-        while let Some(e) = stack.pop() {
-            if let Ok((cn, gt)) = nodes.get(e) {
-                if cn.size().x > 0.0 && cn.size().y > 0.0 {
-                    let r = node_rect(cn, gt);
-                    union = Some(union.map_or(r, |u| u.union(r)));
-                }
-            }
-            if let Ok(c) = children_q.get(e) {
-                stack.extend(c.iter());
-            }
-        }
-        match union {
-            Some(r) if r.width() >= 1.0 && r.height() >= 1.0 => {
-                let min_sized = Rect::from_center_size(
-                    r.center(),
-                    r.size().max(Vec2::splat(MIN_GRAB)),
-                );
-                aabbs.0.insert(kind, min_sized);
-            }
-            _ => {
-                aabbs.0.entry(kind).or_insert_with(|| {
-                    let (l, t) = match (&cnode.left, &cnode.top) {
-                        (Val::Px(l), Val::Px(t)) => (*l, *t),
-                        _ => (0.0, 0.0),
-                    };
-                    Rect::new(l, t, l + MIN_GRAB, t + MIN_GRAB)
-                });
-            }
-        }
+        let Some(g) = geoms.0.get(&kind) else { continue };
+        let vis = Rect::from_corners(
+            crate::widget_layout::transform_point(
+                g.unscaled.min,
+                sc,
+                g.applied_translation,
+                g.applied_scale,
+            ),
+            crate::widget_layout::transform_point(
+                g.unscaled.max,
+                sc,
+                g.applied_translation,
+                g.applied_scale,
+            ),
+        );
+        let vis = Rect::from_center_size(vis.center(), vis.size().max(Vec2::splat(MIN_GRAB)));
+        aabbs.0.insert(kind, vis);
     }
     // Playfield AABB straight from layout geometry (backboard incl. pad).
     aabbs.0.insert(
