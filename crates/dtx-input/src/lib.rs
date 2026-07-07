@@ -28,6 +28,10 @@ pub mod pad;
 
 pub use events::{LaneHit, LaneHitKind, LaneId};
 
+/// Re-export for config crates that serialize key bindings without a direct
+/// bevy dependency.
+pub use bevy::input::keyboard::KeyCode;
+
 /// Plugin assembly: registers LaneHit message. The keyboard-to-LaneHit
 /// system lives in each gameplay crate (which owns the concrete LaneMap).
 pub struct InputPlugin;
