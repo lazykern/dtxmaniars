@@ -109,6 +109,50 @@ pub fn attempt_history_text(session: &PracticeSession) -> String {
     lines.join("\n")
 }
 
+/// Clickable transport-row button.
+#[derive(Component, Clone, Copy, PartialEq, Eq)]
+pub enum TransportButton {
+    PrevBar,
+    Resume,
+    NextBar,
+}
+
+impl TransportButton {
+    fn label(self) -> &'static str {
+        match self {
+            TransportButton::PrevBar => "|◀ bar",
+            TransportButton::Resume => "▶ resume",
+            TransportButton::NextBar => "bar ▶|",
+        }
+    }
+}
+
+pub fn transport_buttons(
+    interactions: Query<(&Interaction, &TransportButton), Changed<Interaction>>,
+    mut session: ResMut<PracticeSession>,
+    timeline: Res<ChipTimeline>,
+    clock: Res<GameplayClock>,
+    mut next_pause: ResMut<NextState<PauseState>>,
+) {
+    for (interaction, button) in &interactions {
+        if *interaction != Interaction::Pressed {
+            continue;
+        }
+        match button {
+            TransportButton::PrevBar | TransportButton::NextBar => {
+                let dir: i8 = if *button == TransportButton::NextBar { 1 } else { -1 };
+                let cur = session.scrub_cursor_ms.unwrap_or(clock.current_ms);
+                session.scrub_cursor_ms = Some(timeline.snap_neighbor(
+                    cur,
+                    crate::timeline::SnapDivisor::Bar,
+                    dir,
+                ));
+            }
+            TransportButton::Resume => next_pause.set(PauseState::Running),
+        }
+    }
+}
+
 pub fn spawn_full_hud(
     mut commands: Commands,
     mut selection: ResMut<RailSelection>,
@@ -197,6 +241,28 @@ pub fn spawn_full_hud(
                 BackgroundColor(Color::srgba(0.0, 0.0, 0.0, 0.75)),
             ))
             .with_children(|row| {
+                for button in [
+                    TransportButton::PrevBar,
+                    TransportButton::Resume,
+                    TransportButton::NextBar,
+                ] {
+                    row.spawn((
+                        button,
+                        Button,
+                        Node {
+                            padding: UiRect::axes(Val::Px(10.0), Val::Px(4.0)),
+                            ..default()
+                        },
+                        BackgroundColor(Color::srgba(1.0, 1.0, 1.0, 0.08)),
+                    ))
+                    .with_children(|b| {
+                        b.spawn((
+                            Text::new(button.label()),
+                            Theme::label_font(),
+                            TextColor(theme.text_primary),
+                        ));
+                    });
+                }
                 row.spawn((
                     HudTimeText,
                     Text::new(format_chart_time(clock.current_ms)),

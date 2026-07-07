@@ -85,3 +85,43 @@ fn normal_pause_overlay_suppressed_in_practice() {
         .count();
     assert_eq!(overlays, 0, "practice suppresses the normal pause overlay");
 }
+
+use gameplay_drums::practice::hud::full_hud::{transport_buttons, TransportButton};
+
+#[test]
+fn next_bar_button_moves_scrub_cursor() {
+    let mut app = build_app();
+    app.add_systems(Update, transport_buttons);
+    // 2 bars @ 120 BPM: bar starts at 0 and 2000.
+    let chart = dtx_core::chart::Chart {
+        metadata: dtx_core::chart::Metadata {
+            bpm: Some(120.0),
+            ..Default::default()
+        },
+        chips: vec![dtx_core::chart::Chip::new(
+            0,
+            dtx_core::channel::EChannel::BassDrum,
+            0.0,
+        )],
+        ..Default::default()
+    };
+    let bpm = gameplay_drums::judge::BpmChangeList::from_chart(&chart);
+    let bar = gameplay_drums::judge::BarLengthChangeList::from_chart(&chart);
+    app.world_mut().insert_resource(ChipTimeline::from_chart(
+        &chart, &bpm, &bar, 0, 4_000,
+    ));
+    app.world_mut().insert_resource(PracticeSession {
+        scrub_cursor_ms: Some(0),
+        ..Default::default()
+    });
+    app.world_mut()
+        .spawn((Interaction::Pressed, TransportButton::NextBar));
+    app.update();
+    assert_eq!(
+        app.world()
+            .resource::<PracticeSession>()
+            .scrub_cursor_ms,
+        Some(2_000),
+        "next-bar button advances the scrub cursor one bar"
+    );
+}
