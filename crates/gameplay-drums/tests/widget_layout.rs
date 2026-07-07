@@ -34,6 +34,7 @@ fn custom_offset_flows_through_resolve() {
         widgets: vec![dtx_layout::WidgetEntry {
             kind: WidgetKind::Combo,
             space: dtx_layout::AnchorSpace::Screen,
+            placement: dtx_layout::Placement::Natural,
             anchor: dtx_layout::Anchor9::TopLeft,
             origin: dtx_layout::Anchor9::TopLeft,
             offset: [50.0, -30.0],
