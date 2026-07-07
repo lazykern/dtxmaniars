@@ -13,11 +13,11 @@ pub struct StatusChip;
 
 /// Pure: chip contents from session state. `bar_ms` from `ChipTimeline`.
 pub fn chip_text(session: &PracticeSession, bar_ms: &[i64]) -> String {
-    let mut parts = vec![format!("{:.2}×", session.transport.user_tempo)];
+    let mut parts = vec![format!("{:.2}×", session.effective_tempo())];
     if session.trainer.ramp.armed {
         let (cur, total) = crate::practice::ramp::ramp_step_index(
             &session.trainer.ramp_config,
-            session.transport.user_tempo,
+            session.effective_tempo(),
         );
         parts.push(format!("RAMP {cur}/{total}"));
     }
@@ -113,7 +113,7 @@ mod tests {
         s.attempt_history.push(AttemptRecord {
             start_ms: 2_000,
             end_ms: 6_000,
-            rate: 0.85,
+            tempo: 0.85,
             counts: Default::default(),
             max_combo: 12,
             overhits: 0,
@@ -126,8 +126,9 @@ mod tests {
     #[test]
     fn chip_text_shows_ramp_segment_when_armed() {
         let mut s = PracticeSession::default();
-        s.transport.user_tempo = 0.85;
+        s.transport.user_tempo = 1.0;
         s.trainer.ramp.armed = true;
+        s.trainer.ramp.step_tempo = 0.85;
         let bar_ms = vec![0, 2_000];
         assert_eq!(chip_text(&s, &bar_ms), "0.85× · RAMP 3/6");
     }

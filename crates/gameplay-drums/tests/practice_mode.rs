@@ -414,7 +414,7 @@ fn looped_session(rate: f32) -> PracticeSession {
                 end_ms: 6_000,
             }),
             preroll: gameplay_drums::practice::session::PrerollSetting::Off,
-            user_tempo: rate,
+            user_tempo: 1.0,
             ..Default::default()
         },
         ..Default::default()
@@ -467,9 +467,9 @@ fn ramp_steps_rate_up_after_clean_pass() {
     finish_loop_pass(&mut app, 4);
     let session = app.world().resource::<PracticeSession>();
     assert!(
-        (session.transport.user_tempo - 0.75).abs() < 1e-6,
+        (session.effective_tempo() - 0.75).abs() < 1e-6,
         "clean pass steps 0.70 → 0.75, got {}",
-        session.transport.user_tempo
+        session.effective_tempo()
     );
     assert!(session.trainer.ramp.armed);
 }
@@ -486,21 +486,13 @@ fn two_failed_passes_step_rate_down() {
         clock.sync(Some(3_000));
     }
     finish_loop_pass(&mut app, 0); // fail #1 → hold
-    assert!(
-        (app.world()
-            .resource::<PracticeSession>()
-            .transport
-            .user_tempo
-            - 0.80)
-            .abs()
-            < 1e-6
-    );
+    assert!((app.world().resource::<PracticeSession>().effective_tempo() - 0.80).abs() < 1e-6);
     finish_loop_pass(&mut app, 0); // fail #2 → step down
     let session = app.world().resource::<PracticeSession>();
     assert!(
-        (session.transport.user_tempo - 0.75).abs() < 1e-6,
+        (session.effective_tempo() - 0.75).abs() < 1e-6,
         "second fail steps 0.80 → 0.75, got {}",
-        session.transport.user_tempo
+        session.effective_tempo()
     );
 }
 
@@ -548,6 +540,39 @@ fn toggle_ramp_with_loop_arms() {
     assert!(
         session.trainer.ramp.armed,
         "arming with an A/B loop must succeed"
+    );
+    assert!(
+        (session.effective_tempo() - 0.70).abs() < 1e-6,
+        "armed ramp starts at the configured start tempo"
+    );
+    assert!(
+        (session.transport.user_tempo - 1.0).abs() < 1e-6,
+        "arming must not touch the user's chosen tempo"
+    );
+}
+
+#[test]
+fn tempo_nudge_while_armed_disarms_and_nudges_user_tempo() {
+    let mut app = build_app();
+    add_action_wiring(&mut app);
+    enter_performance(&mut app, chart_with_measures(8));
+    let mut s = looped_session(0.70);
+    s.transport.user_tempo = 1.0;
+    app.world_mut().insert_resource(s);
+    {
+        let mut clock = app.world_mut().resource_mut::<GameplayClock>();
+        clock.start();
+        clock.sync(Some(3_000));
+    }
+    app.world_mut()
+        .resource_mut::<ButtonInput<KeyCode>>()
+        .press(KeyCode::Minus);
+    app.update();
+    let session = app.world().resource::<PracticeSession>();
+    assert!(!session.trainer.ramp.armed, "manual nudge disarms the ramp");
+    assert!(
+        (session.transport.user_tempo - 0.95).abs() < 1e-6,
+        "nudge applies to the user tempo (1.00 → 0.95)"
     );
 }
 

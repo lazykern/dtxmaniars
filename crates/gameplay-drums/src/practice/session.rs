@@ -137,7 +137,7 @@ impl AttemptStats {
 pub struct AttemptRecord {
     pub start_ms: i64,
     pub end_ms: i64,
-    pub rate: f32,
+    pub tempo: f32,
     pub counts: JudgmentCounts,
     pub max_combo: u32,
     pub overhits: u32,
@@ -189,6 +189,23 @@ pub struct PracticeSession {
 }
 
 impl PracticeSession {
+    /// The tempo playback actually runs at: the ramp's step while armed,
+    /// the player's chosen tempo otherwise.
+    pub fn effective_tempo(&self) -> f32 {
+        if self.trainer.ramp.armed {
+            self.trainer.ramp.step_tempo
+        } else {
+            self.transport.user_tempo
+        }
+    }
+
+    /// Clear the A/B loop (disarms the ramp — the ramp is a claim about
+    /// one specific section).
+    pub fn clear_loop(&mut self) {
+        self.transport.loop_region = None;
+        self.trainer.ramp.armed = false;
+    }
+
     /// Step the user tempo by `dir` in RATE_STEP increments, clamped and
     /// quantized so repeated stepping never accumulates float error.
     pub fn step_user_tempo(&mut self, dir: i8) {
@@ -204,7 +221,7 @@ impl PracticeSession {
             self.attempt_history.push(AttemptRecord {
                 start_ms: a.start_ms,
                 end_ms,
-                rate: self.transport.user_tempo,
+                tempo: self.effective_tempo(),
                 counts: a.counts,
                 max_combo: a.max_combo,
                 overhits: a.overhits,
@@ -224,6 +241,7 @@ impl PracticeSession {
     /// Set the A marker; keeps the region valid (swap, min length is
     /// enforced by the caller against bar data).
     pub fn set_loop_start(&mut self, ms: i64) {
+        self.trainer.ramp.armed = false;
         let end = self.transport.loop_region.map(|r| r.end_ms);
         self.transport.loop_region = Some(match end {
             Some(e) if e > ms => LoopRegion {
@@ -238,6 +256,7 @@ impl PracticeSession {
     }
 
     pub fn set_loop_end(&mut self, ms: i64) {
+        self.trainer.ramp.armed = false;
         let start = self.transport.loop_region.map(|r| r.start_ms).unwrap_or(0);
         self.transport.loop_region = Some(if ms > start {
             LoopRegion {
@@ -337,5 +356,33 @@ mod tests {
         a.error_sum_ms = -30;
         a.error_count = 10;
         assert!((a.mean_error_ms() + 3.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn effective_tempo_layers_ramp_over_user() {
+        let mut s = PracticeSession::default();
+        s.transport.user_tempo = 1.0;
+        assert!((s.effective_tempo() - 1.0).abs() < 1e-6);
+        s.trainer.ramp.armed = true;
+        s.trainer.ramp.step_tempo = 0.70;
+        assert!((s.effective_tempo() - 0.70).abs() < 1e-6);
+        s.trainer.ramp.armed = false;
+        assert!(
+            (s.effective_tempo() - 1.0).abs() < 1e-6,
+            "disarm restores the user's tempo untouched"
+        );
+    }
+
+    #[test]
+    fn loop_mutation_disarms_ramp() {
+        let mut s = PracticeSession::default();
+        s.set_loop_start(2_000);
+        s.set_loop_end(4_000);
+        s.trainer.ramp.armed = true;
+        s.set_loop_start(6_000);
+        assert!(!s.trainer.ramp.armed, "changing A disarms");
+        s.trainer.ramp.armed = true;
+        s.clear_loop();
+        assert!(!s.trainer.ramp.armed, "clearing the loop disarms");
     }
 }

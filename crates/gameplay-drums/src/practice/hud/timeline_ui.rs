@@ -158,6 +158,7 @@ pub fn timeline_mouse(
     mut session: ResMut<PracticeSession>,
     timeline: Res<ChipTimeline>,
     mut seeks: MessageWriter<SeekToChartTime>,
+    mut toasts: ResMut<crate::practice::toast::ToastQueue>,
 ) {
     let Ok(window) = windows.single() else { return };
     let Some(pos) = window.cursor_position() else {
@@ -189,6 +190,10 @@ pub fn timeline_mouse(
             });
         }
         GestureEffect::LoopPreview { anchor_ms } => {
+            if session.trainer.ramp.armed {
+                session.trainer.ramp.armed = false;
+                toasts.push("ramp off (loop changed)");
+            }
             session.transport.loop_region = Some(drag_region(&timeline, anchor_ms, cursor_ms));
         }
     }

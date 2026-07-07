@@ -139,7 +139,7 @@ pub fn attempt_history_text(session: &PracticeSession) -> String {
             i + 1,
             a.accuracy_pct,
             a.mean_error_ms,
-            a.rate
+            a.tempo
         ));
     }
     lines.join("\n")
@@ -430,11 +430,15 @@ pub fn full_hud_input(
                 let c = &mut session.trainer.ramp_config;
                 c.start_tempo =
                     (c.start_tempo + dir as f32 * 0.05).clamp(0.5, c.target_tempo - 0.05);
+                let cfg = session.trainer.ramp_config;
+                crate::practice::ramp::clamp_to_config(&cfg, &mut session.trainer.ramp);
             }
             RailItem::RampTarget => {
                 let c = &mut session.trainer.ramp_config;
                 c.target_tempo =
                     (c.target_tempo + dir as f32 * 0.05).clamp(c.start_tempo + 0.05, 1.5);
+                let cfg = session.trainer.ramp_config;
+                crate::practice::ramp::clamp_to_config(&cfg, &mut session.trainer.ramp);
             }
             RailItem::RampStep => {
                 let c = &mut session.trainer.ramp_config;

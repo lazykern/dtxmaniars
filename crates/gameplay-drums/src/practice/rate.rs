@@ -26,7 +26,7 @@ fn apply_practice_rate(
     mut instances: ResMut<Assets<AudioInstance>>,
     mut applied: Local<f64>,
 ) {
-    let target = session.transport.user_tempo as f64;
+    let target = session.effective_tempo() as f64;
     // Local starts at 0.0, so the first run always applies (incl. 1.0).
     if (*applied - target).abs() < 1e-9 {
         return;

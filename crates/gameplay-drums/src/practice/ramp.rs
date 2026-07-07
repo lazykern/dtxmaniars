@@ -97,7 +97,10 @@ pub fn handle_toggle_ramp(
         }
         if session.trainer.ramp.armed {
             session.trainer.ramp.armed = false;
-            toasts.push("ramp off");
+            toasts.push(format!(
+                "ramp off — tempo {:.2}×",
+                session.transport.user_tempo
+            ));
             continue;
         }
         if !session.loop_armed() {
@@ -111,7 +114,6 @@ pub fn handle_toggle_ramp(
             success_streak: 0,
             fail_streak: 0,
         };
-        session.transport.user_tempo = cfg.start_tempo;
         let a_ms = session
             .transport
             .loop_region
@@ -128,8 +130,8 @@ pub fn handle_toggle_ramp(
 
 /// Apply one ramp decision per finished loop pass. Runs after
 /// `track_attempt_stats` (same tick as the loop's seek) so the finished
-/// attempt is already in history. Re-adopts `session.transport.user_tempo` as the
-/// current step first — a manual nudge simply moves the ramp.
+/// attempt is already in history. The ramp owns `step_tempo` while
+/// armed; only `Complete` graduates it into `session.transport.user_tempo`.
 pub fn apply_ramp(
     mut seeks: MessageReader<SeekToChartTime>,
     mut session: ResMut<PracticeSession>,
@@ -155,16 +157,11 @@ pub fn apply_ramp(
         return; // manual seek elsewhere, not a loop pass
     }
     let accuracy = last.accuracy_pct;
-    session.trainer.ramp.step_tempo = session.transport.user_tempo;
     let cfg = session.trainer.ramp_config;
     match ramp_step(&cfg, &mut session.trainer.ramp, accuracy) {
-        RampDecision::StepUp { new_tempo } => {
-            session.transport.user_tempo = new_tempo;
-            toasts.push(format!("ramp: {new_tempo:.2}×"));
-        }
+        RampDecision::StepUp { new_tempo } => toasts.push(format!("ramp: {new_tempo:.2}×")),
         RampDecision::StepDown { new_tempo } => {
-            session.transport.user_tempo = new_tempo;
-            toasts.push(format!("ramp: back to {new_tempo:.2}×"));
+            toasts.push(format!("ramp: back to {new_tempo:.2}×"))
         }
         RampDecision::Hold => toasts.push("ramp: one more fail steps down"),
         RampDecision::Complete { new_tempo } => {
