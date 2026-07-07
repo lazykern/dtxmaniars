@@ -85,7 +85,7 @@ Full-window live autoplay session (existing `EditorSession` infra: force-autopla
 │┌rail──┐┌panel(348)─┐                                                  │
 ││SETTIN││ tab title  │        stage = FULL WINDOW game screen          │
 ││ Gamep││ RESET TAB  │        (transformed per tab preset, below)      │
-││ Audio││ [search /] │                                       ┌inspect┐ │
+││ Audio││ rows…      │                                       ┌inspect┐ │
 ││ Drums││ rows…      │                                       │widget │ │
 ││ Syste││            │                                       │knobs  │ │
 ││KIT   ││            │                                       │(kit)  │ │
@@ -115,10 +115,9 @@ Equivalent of osu `ScalingContainer.SetCustomRect` (`SkinEditorOverlay.cs:226`, 
 
 ### 4.4 Chrome behaviors (AAA baseline)
 
-- **Footer**: full-width; left = 1–2 line description of hovered/focused row; right = key legend (`↑↓` row, `←→` adjust, `/` search, `Tab` peek, `Ctrl+S` save, `Esc` close).
-- **Search**: box at panel top, `/` focuses; filters rows (and binding channels) within the active tab in v1; cross-tab jump is a v2 nice-to-have.
+- **Footer**: full-width; left = 1–2 line description of hovered/focused row; right = key legend (`↑↓` row, `←→` adjust, `Tab` peek, `Ctrl+S` save, `Esc` close).
 - **Modified indicators**: amber dot on any row whose value ≠ default; per-tab `RESET TAB` with confirm.
-- **Keyboard navigability**: every row reachable with arrows; `←→` adjusts; Enter activates (capture on binding rows).
+- **Keyboard navigability**: every row reachable with arrows; `←→` adjusts; Enter activates (capture on binding rows). (No search box — dropped from scope.)
 - **Live-apply everything**; no Apply button. Display-mode changes (vsync etc.) may apply-with-revert later.
 
 ### 4.5 Entries / exits
@@ -183,7 +182,7 @@ All three share the versioned-TOML + migrations pattern. Undo/redo history cover
 - Hi-hat pedal CC#4 open/close derivation (v1 relies on distinct notes per TD-style kits).
 - Per-device MIDI bindings (`BindSource::Midi { device }`).
 - Joypad/mouse binding UI.
-- Cross-tab search jump; settings undo; apply-with-revert for display modes.
+- Settings undo; apply-with-revert for display modes.
 - Reflection-style auto-generated settings controls (osu `[SettingSource]` pattern) — current explicit `PanelField`/`ConfigItem` enums are fine at this scale.
 
 ## 10. Implementation anchors
