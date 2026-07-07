@@ -59,8 +59,7 @@ impl ChartIdentity {
 
     /// True when any raw hash slot matches `raw`.
     pub fn matches_raw(&self, raw: &str) -> bool {
-        self.raw_sha256.as_deref() == Some(raw)
-            || self.raw_sha256_aliases.iter().any(|h| h == raw)
+        self.raw_sha256.as_deref() == Some(raw) || self.raw_sha256_aliases.iter().any(|h| h == raw)
     }
 }
 
@@ -106,18 +105,12 @@ fn canonical_payload(chart: &Chart) -> String {
 
     let mut chips = chart.chips.clone();
     chips.sort_by(|a, b| {
-        (
-            a.measure,
-            a.channel as u8,
-            stable_f32(a.value),
-            a.wav_slot,
-        )
-            .cmp(&(
-                b.measure,
-                b.channel as u8,
-                stable_f32(b.value),
-                b.wav_slot,
-            ))
+        (a.measure, a.channel as u8, stable_f32(a.value), a.wav_slot).cmp(&(
+            b.measure,
+            b.channel as u8,
+            stable_f32(b.value),
+            b.wav_slot,
+        ))
     });
 
     for chip in chips {

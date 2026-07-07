@@ -393,10 +393,7 @@ fn parse_file_section(section: Option<&HashMap<String, String>>) -> ScoreIniFile
     }
 }
 
-fn parse_drum_section(
-    drums: &HashMap<String, String>,
-    file: &ScoreIniFileSection,
-) -> DrumScoreIni {
+fn parse_drum_section(drums: &HashMap<String, String>, file: &ScoreIniFileSection) -> DrumScoreIni {
     DrumScoreIni {
         score: get_u32(drums, "Score"),
         perfect: get_u32(drums, "Perfect"),
