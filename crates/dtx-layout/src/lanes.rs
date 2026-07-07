@@ -27,29 +27,14 @@ pub const DRUM_CHANNELS: [EChannel; 12] = [
     EChannel::RideCymbal,
 ];
 
-/// Canonical short name for a drum channel (used as lane ids + TOML keys).
+/// Short name for a drum channel (delegates to dtx-core).
 pub fn channel_short_name(ch: EChannel) -> Option<&'static str> {
-    Some(match ch {
-        EChannel::LeftCymbal => "LC",
-        EChannel::HiHatClose => "HH",
-        EChannel::HiHatOpen => "HHO",
-        EChannel::LeftPedal => "LP",
-        EChannel::LeftBassDrum => "LBD",
-        EChannel::Snare => "SD",
-        EChannel::HighTom => "HT",
-        EChannel::BassDrum => "BD",
-        EChannel::LowTom => "LT",
-        EChannel::FloorTom => "FT",
-        EChannel::Cymbal => "CY",
-        EChannel::RideCymbal => "RD",
-        _ => return None,
-    })
+    ch.short_name()
 }
 
+/// Inverse lookup (delegates to dtx-core).
 pub fn channel_from_short(name: &str) -> Option<EChannel> {
-    DRUM_CHANNELS
-        .into_iter()
-        .find(|&ch| channel_short_name(ch) == Some(name))
+    EChannel::from_short_name(name)
 }
 
 /// Default ref-px width when a channel gets its own lane (ported from the

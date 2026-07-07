@@ -132,6 +132,45 @@ impl EChannel {
         })
     }
 
+    /// Short display/config name for drum channels ("HH", "HHO", …).
+    /// None for non-drum channels. Matches dtx-layout lane ids.
+    pub const fn short_name(self) -> Option<&'static str> {
+        Some(match self {
+            Self::HiHatClose => "HH",
+            Self::Snare => "SD",
+            Self::BassDrum => "BD",
+            Self::HighTom => "HT",
+            Self::LowTom => "LT",
+            Self::Cymbal => "CY",
+            Self::FloorTom => "FT",
+            Self::HiHatOpen => "HHO",
+            Self::RideCymbal => "RD",
+            Self::LeftCymbal => "LC",
+            Self::LeftPedal => "LP",
+            Self::LeftBassDrum => "LBD",
+            _ => return None,
+        })
+    }
+
+    /// Inverse of [`short_name`].
+    pub fn from_short_name(name: &str) -> Option<Self> {
+        Some(match name {
+            "HH" => Self::HiHatClose,
+            "SD" => Self::Snare,
+            "BD" => Self::BassDrum,
+            "HT" => Self::HighTom,
+            "LT" => Self::LowTom,
+            "CY" => Self::Cymbal,
+            "FT" => Self::FloorTom,
+            "HHO" => Self::HiHatOpen,
+            "RD" => Self::RideCymbal,
+            "LC" => Self::LeftCymbal,
+            "LP" => Self::LeftPedal,
+            "LBD" => Self::LeftBassDrum,
+            _ => return None,
+        })
+    }
+
     pub const fn is_drum(self) -> bool {
         matches!(
             self,
@@ -201,5 +240,40 @@ mod tests {
         assert!(EChannel::BassDrum.is_drum());
         assert!(!EChannel::BGM.is_drum());
         assert!(!EChannel::GuitarOpen.is_drum());
+    }
+
+    #[test]
+    fn drum_short_names_round_trip() {
+        use EChannel::*;
+        for ch in [
+            HiHatClose,
+            Snare,
+            BassDrum,
+            HighTom,
+            LowTom,
+            Cymbal,
+            FloorTom,
+            HiHatOpen,
+            RideCymbal,
+            LeftCymbal,
+            LeftPedal,
+            LeftBassDrum,
+        ] {
+            let name = ch.short_name().expect("drum channel has short name");
+            assert_eq!(EChannel::from_short_name(name), Some(ch));
+        }
+    }
+
+    #[test]
+    fn short_name_values_match_layout_convention() {
+        assert_eq!(EChannel::HiHatClose.short_name(), Some("HH"));
+        assert_eq!(EChannel::HiHatOpen.short_name(), Some("HHO"));
+        assert_eq!(EChannel::LeftBassDrum.short_name(), Some("LBD"));
+    }
+
+    #[test]
+    fn non_drum_channel_has_no_short_name() {
+        assert_eq!(EChannel::BGM.short_name(), None);
+        assert_eq!(EChannel::from_short_name("NOPE"), None);
     }
 }
