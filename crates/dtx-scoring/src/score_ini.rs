@@ -53,6 +53,40 @@ pub struct DrumScoreIni {
     pub date_time: String,
 }
 
+/// Parsed `[File]` metadata from DTXManiaNX `.score.ini`.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct ScoreIniFileSection {
+    /// Title field.
+    pub title: String,
+    /// Name field.
+    pub name: String,
+    /// Hash field when present.
+    pub hash: String,
+    /// Drums play count.
+    pub play_count_drums: u32,
+    /// Drums clear count.
+    pub clear_count_drums: u32,
+    /// Best rank code for drums.
+    pub best_rank_drums: i32,
+    /// Number of history entries reported by NX.
+    pub history_count: u32,
+    /// History0..History4 values.
+    pub history: Vec<String>,
+    /// BGM adjust.
+    pub bgm_adjust: i32,
+}
+
+/// Parsed drums-focused `.score.ini`.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct ParsedScoreIni {
+    /// File section.
+    pub file: ScoreIniFileSection,
+    /// HiScore.Drums section.
+    pub hi_score_drums: Option<DrumScoreIni>,
+    /// LastPlay.Drums section.
+    pub last_play_drums: Option<DrumScoreIni>,
+}
+
 impl DrumScoreIni {
     /// Perfect+Great accuracy (0..100).
     pub fn accuracy(&self) -> f32 {
@@ -230,6 +264,23 @@ pub fn read_best(path: impl AsRef<Path>) -> Option<DrumScoreIni> {
     parse_best(&text)
 }
 
+/// Parse drums-focused DTXManiaNX score.ini text.
+pub fn parse_score_ini_text(text: &str) -> Option<ParsedScoreIni> {
+    let sections = parse_sections(text);
+    let file = parse_file_section(sections.get("File"));
+    let hi_score_drums = sections
+        .get("HiScore.Drums")
+        .map(|section| parse_drum_section(section, &file));
+    let last_play_drums = sections
+        .get("LastPlay.Drums")
+        .map(|section| parse_drum_section(section, &file));
+    Some(ParsedScoreIni {
+        file,
+        hi_score_drums,
+        last_play_drums,
+    })
+}
+
 /// Merge `result` into the existing `.score.ini` at `path` (best-of + play/clear
 /// counts) and write it back. `cleared` bumps the clear counter.
 pub fn write_result(
@@ -268,14 +319,28 @@ pub fn write_result(
 /// Render `[File]` + drums hi-score/last-play sections. Non-drums sections are
 /// emitted empty for BocuD compatibility.
 fn render(best: &DrumScoreIni, last: &DrumScoreIni) -> String {
+    render_internal(best, last, &[])
+}
+
+/// Render `[File]` + drums sections with preserved history lines.
+pub fn render_with_history(best: &DrumScoreIni, last: &DrumScoreIni, history: &[String]) -> String {
+    render_internal(best, last, history)
+}
+
+fn render_internal(best: &DrumScoreIni, last: &DrumScoreIni, history: &[String]) -> String {
     let rank = rank_code(&best.rank);
     let mut text = format!(
-        "[File]\nTitle=\nName=\nPlayCountDrums={play}\nPlayCountGuitars=0\nPlayCountBass=0\nClearCountDrums={clear}\nClearCountGuitars=0\nClearCountBass=0\nBestRankDrums={rank}\nBestRankGuitar=99\nBestRankBass=99\nHistoryCount=0\nBGMAdjust={bgm}\n\n",
+        "[File]\nTitle=\nName=\nPlayCountDrums={play}\nPlayCountGuitars=0\nPlayCountBass=0\nClearCountDrums={clear}\nClearCountGuitars=0\nClearCountBass=0\nBestRankDrums={rank}\nBestRankGuitar=99\nBestRankBass=99\nHistoryCount={history_count}\n",
         play = best.play_count,
         clear = best.clear_count,
         rank = rank,
-        bgm = best.bgm_adjust,
+        history_count = history.len().min(5),
     );
+    for idx in 0..5 {
+        let value = history.get(idx).map(String::as_str).unwrap_or("");
+        text.push_str(&format!("History{idx}={value}\n"));
+    }
+    text.push_str(&format!("BGMAdjust={}\n\n", best.bgm_adjust));
     render_section(&mut text, "HiScore.Drums", best);
     render_section(&mut text, "HiSkill.Drums", best);
     render_section(&mut text, "LastPlay.Drums", last);
@@ -298,10 +363,41 @@ fn render_section(text: &mut String, section: &str, s: &DrumScoreIni) {
 }
 
 fn parse_best(text: &str) -> Option<DrumScoreIni> {
-    let sections = parse_sections(text);
-    let drums = sections.get("HiScore.Drums")?;
-    let file = sections.get("File");
-    Some(DrumScoreIni {
+    parse_score_ini_text(text)?.hi_score_drums
+}
+
+fn parse_file_section(section: Option<&HashMap<String, String>>) -> ScoreIniFileSection {
+    let Some(section) = section else {
+        return ScoreIniFileSection::default();
+    };
+    let history_count = get_u32(section, "HistoryCount");
+    let mut history = Vec::new();
+    for idx in 0..5 {
+        let key = format!("History{idx}");
+        if let Some(value) = section.get(&key) {
+            if !value.is_empty() {
+                history.push(value.clone());
+            }
+        }
+    }
+    ScoreIniFileSection {
+        title: section.get("Title").cloned().unwrap_or_default(),
+        name: section.get("Name").cloned().unwrap_or_default(),
+        hash: section.get("Hash").cloned().unwrap_or_default(),
+        play_count_drums: get_u32(section, "PlayCountDrums"),
+        clear_count_drums: get_u32(section, "ClearCountDrums"),
+        best_rank_drums: get_i32(section, "BestRankDrums", 99),
+        history_count,
+        history,
+        bgm_adjust: get_i32(section, "BGMAdjust", 0),
+    }
+}
+
+fn parse_drum_section(
+    drums: &HashMap<String, String>,
+    file: &ScoreIniFileSection,
+) -> DrumScoreIni {
+    DrumScoreIni {
         score: get_u32(drums, "Score"),
         perfect: get_u32(drums, "Perfect"),
         great: get_u32(drums, "Great"),
@@ -310,14 +406,12 @@ fn parse_best(text: &str) -> Option<DrumScoreIni> {
         miss: get_u32(drums, "Miss"),
         max_combo: get_u32(drums, "MaxCombo"),
         total_chips: get_u32(drums, "TotalChips"),
-        rank: file
-            .map(|f| rank_name(get_i32(f, "BestRankDrums", 99)).to_string())
-            .unwrap_or_else(|| "UNKNOWN".into()),
-        play_count: file.map(|f| get_u32(f, "PlayCountDrums")).unwrap_or(0),
-        clear_count: file.map(|f| get_u32(f, "ClearCountDrums")).unwrap_or(0),
-        bgm_adjust: file.map(|f| get_i32(f, "BGMAdjust", 0)).unwrap_or(0),
+        rank: rank_name(file.best_rank_drums).to_string(),
+        play_count: file.play_count_drums,
+        clear_count: file.clear_count_drums,
+        bgm_adjust: file.bgm_adjust,
         date_time: drums.get("DateTime").cloned().unwrap_or_default(),
-    })
+    }
 }
 
 fn parse_sections(text: &str) -> HashMap<String, HashMap<String, String>> {
