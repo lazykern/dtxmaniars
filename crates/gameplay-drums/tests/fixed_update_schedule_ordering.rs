@@ -13,10 +13,11 @@
 //! the real FixedUpdate graph from `gameplay_drums::plugin`.
 //!
 //! This mirrors the ordering from `gameplay-drums/src/lib.rs`
-//! (`DrumsSets` + FixedUpdate wiring) and
+//! (`DrumsSets` + FixedUpdate wiring),
 //! `gameplay-drums/src/practice/stats.rs` (`track_attempt_stats`
-//! ordering) with dummy stand-in systems. If that wiring changes, update
-//! the mirror here too.
+//! ordering), and `practice/ramp.rs` (`apply_ramp`: FixedUpdate,
+//! `.after(track_attempt_stats)`) with dummy stand-in systems. If that
+//! wiring changes, update the mirror here too.
 
 use bevy::prelude::*;
 use gameplay_drums::DrumsSets;
@@ -26,6 +27,7 @@ fn sync_gameplay_clock_stub() {}
 fn apply_seek_stub() {}
 fn judge_stub() {}
 fn track_attempt_stub() {}
+fn ramp_apply_stub() {}
 
 /// Build an `App` with the FixedUpdate ordering graph mirrored from
 /// `lib.rs` + `practice/stats.rs`. `cyclic` reproduces the pre-fix wiring
@@ -65,7 +67,13 @@ fn build_app(cyclic: bool) -> App {
                 .before(apply_seek_stub),
         );
     } else {
-        app.add_systems(FixedUpdate, track_attempt_stub.after(judge_stub));
+        app.add_systems(
+            FixedUpdate,
+            (
+                track_attempt_stub.after(judge_stub),
+                ramp_apply_stub.after(track_attempt_stub),
+            ),
+        );
     }
 
     app

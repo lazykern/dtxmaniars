@@ -349,3 +349,137 @@ fn restart_key_seeks_to_loop_start() {
         "R restarts the loop at A"
     );
 }
+
+use gameplay_drums::events::{JudgmentEvent, NoteMissed};
+
+fn add_ramp_wiring(app: &mut App) {
+    app.add_message::<JudgmentEvent>()
+        .add_message::<NoteMissed>()
+        .init_resource::<gameplay_drums::practice::toast::ToastQueue>()
+        .add_systems(
+            Update,
+            gameplay_drums::practice::ab_loop::loop_watcher
+                .before(gameplay_drums::seek::apply_seek_system)
+                .run_if(in_state(AppState::Performance))
+                .run_if(resource_exists::<PracticeSession>),
+        )
+        .add_systems(
+            Update,
+            (
+                gameplay_drums::practice::stats::track_attempt_stats,
+                gameplay_drums::practice::ramp::apply_ramp,
+            )
+                .chain()
+                .after(gameplay_drums::seek::apply_seek_system)
+                .run_if(in_state(AppState::Performance))
+                .run_if(resource_exists::<PracticeSession>),
+        );
+}
+
+fn looped_session(rate: f32) -> PracticeSession {
+    let mut s = PracticeSession {
+        loop_region: Some(LoopRegion {
+            start_ms: 2_000,
+            end_ms: 6_000,
+        }),
+        preroll: gameplay_drums::practice::session::PrerollSetting::Off,
+        rate,
+        ..Default::default()
+    };
+    s.ramp.armed = true;
+    s.ramp.current_rate = rate;
+    s.current_attempt.start_ms = 2_000;
+    s
+}
+
+/// Run the clock past B so the loop watcher rolls one attempt.
+fn finish_loop_pass(app: &mut App, perfect_hits: u32) {
+    for _ in 0..perfect_hits {
+        app.world_mut()
+            .resource_mut::<Messages<JudgmentEvent>>()
+            .write(JudgmentEvent {
+                lane: 3,
+                kind: dtx_scoring::JudgmentKind::Perfect,
+                delta_ms: 0,
+                chip_idx: 0, // chip 0 sits at 2000ms — inside the loop
+            });
+    }
+    if perfect_hits == 0 {
+        app.world_mut()
+            .resource_mut::<Messages<NoteMissed>>()
+            .write(NoteMissed {
+                lane: 3,
+                audio_ms: 5_000,
+            });
+    }
+    {
+        let mut clock = app.world_mut().resource_mut::<GameplayClock>();
+        clock.sync(Some(6_100));
+    }
+    app.update();
+}
+
+#[test]
+fn ramp_steps_rate_up_after_clean_pass() {
+    let mut app = build_app();
+    add_ramp_wiring(&mut app);
+    enter_performance(&mut app, chart_with_measures(8));
+    app.world_mut().insert_resource(looped_session(0.70));
+    {
+        let mut clock = app.world_mut().resource_mut::<GameplayClock>();
+        clock.start();
+        clock.sync(Some(3_000));
+    }
+    finish_loop_pass(&mut app, 4);
+    let session = app.world().resource::<PracticeSession>();
+    assert!(
+        (session.rate - 0.75).abs() < 1e-6,
+        "clean pass steps 0.70 → 0.75, got {}",
+        session.rate
+    );
+    assert!(session.ramp.armed);
+}
+
+#[test]
+fn two_failed_passes_step_rate_down() {
+    let mut app = build_app();
+    add_ramp_wiring(&mut app);
+    enter_performance(&mut app, chart_with_measures(8));
+    app.world_mut().insert_resource(looped_session(0.80));
+    {
+        let mut clock = app.world_mut().resource_mut::<GameplayClock>();
+        clock.start();
+        clock.sync(Some(3_000));
+    }
+    finish_loop_pass(&mut app, 0); // fail #1 → hold
+    assert!((app.world().resource::<PracticeSession>().rate - 0.80).abs() < 1e-6);
+    finish_loop_pass(&mut app, 0); // fail #2 → step down
+    let session = app.world().resource::<PracticeSession>();
+    assert!(
+        (session.rate - 0.75).abs() < 1e-6,
+        "second fail steps 0.80 → 0.75, got {}",
+        session.rate
+    );
+}
+
+#[test]
+fn skip_next_roll_ignores_the_stale_pre_arm_attempt() {
+    let mut app = build_app();
+    add_ramp_wiring(&mut app);
+    enter_performance(&mut app, chart_with_measures(8));
+    let mut s = looped_session(0.70);
+    s.ramp.skip_next_roll = true;
+    app.world_mut().insert_resource(s);
+    {
+        let mut clock = app.world_mut().resource_mut::<GameplayClock>();
+        clock.start();
+        clock.sync(Some(3_000));
+    }
+    finish_loop_pass(&mut app, 4);
+    let session = app.world().resource::<PracticeSession>();
+    assert!(
+        (session.rate - 0.70).abs() < 1e-6,
+        "the roll right after arming must not step the ramp"
+    );
+    assert!(!session.ramp.skip_next_roll, "flag consumed");
+}

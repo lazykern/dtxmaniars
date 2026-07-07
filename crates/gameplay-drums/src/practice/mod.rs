@@ -49,7 +49,7 @@ pub(super) fn plugin(app: &mut App) {
             .run_if(in_state(AppState::Performance))
             .run_if(resource_exists::<PracticeSession>),
     )
-    .add_plugins((ab_loop::plugin, hud::plugin, rate::plugin, stats::plugin));
+    .add_plugins((ab_loop::plugin, hud::plugin, ramp::plugin, rate::plugin, stats::plugin));
 }
 
 fn enter_practice_session(intent: Res<PracticeIntent>, mut commands: Commands) {
