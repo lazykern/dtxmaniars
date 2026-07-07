@@ -9,6 +9,7 @@ use bevy::prelude::*;
 use game_shell::AppState;
 
 pub mod drag;
+pub mod panel;
 pub mod picking;
 pub mod save;
 pub mod selection_box;
@@ -51,6 +52,7 @@ pub fn plugin(app: &mut App) {
             ui::plugin,
             picking::plugin,
             selection_box::plugin,
+            panel::plugin,
         ));
 }
 

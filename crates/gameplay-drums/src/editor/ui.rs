@@ -14,9 +14,7 @@ struct EditorUiRoot;
 #[derive(Component, Clone, Copy)]
 enum EditorButton {
     Select(WidgetKind),
-    ResetWidget,
     ResetAll,
-    NextPreset,
     Save,
     Undo,
     Redo,
@@ -85,9 +83,7 @@ fn spawn_ui_on_open(
             spawn_button(p, &t, EditorButton::Select(kind), kind.display_name());
         }
         spawn_label(p, &t, "- actions -");
-        spawn_button(p, &t, EditorButton::ResetWidget, "Reset Widget");
         spawn_button(p, &t, EditorButton::ResetAll, "Reset All");
-        spawn_button(p, &t, EditorButton::NextPreset, "Next Lane Preset");
         spawn_button(p, &t, EditorButton::Undo, "Undo (Ctrl+Z)");
         spawn_button(p, &t, EditorButton::Redo, "Redo (Ctrl+Y)");
         spawn_button(p, &t, EditorButton::Save, "Save (Ctrl+S)");
@@ -149,19 +145,9 @@ fn handle_buttons(
                 };
                 match *button {
                     EditorButton::Select(kind) => selection.0 = Some(kind),
-                    EditorButton::ResetWidget => {
-                        if let Some(kind) = selection.0 {
-                            stack.push(&layouts, &lanes);
-                            save::reset_widget(&mut layouts, kind);
-                        }
-                    }
                     EditorButton::ResetAll => {
                         stack.push(&layouts, &lanes);
                         save::reset_all_widgets(&mut layouts);
-                    }
-                    EditorButton::NextPreset => {
-                        stack.push(&layouts, &lanes);
-                        save::next_lane_preset(&mut lanes);
                     }
                     EditorButton::Undo => {
                         if let Some(s) = stack.undo(snap) {
