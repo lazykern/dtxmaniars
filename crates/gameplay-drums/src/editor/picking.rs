@@ -78,10 +78,12 @@ pub fn cycle_pick(candidates: &[WidgetKind], current: Option<WidgetKind>) -> Opt
     }
 }
 
-/// Logical-px rect of a laid-out UI node (GlobalTransform = center, physical).
-pub(crate) fn node_rect(node: &ComputedNode, gt: &GlobalTransform) -> Rect {
+/// Logical-px rect of a laid-out UI node. UI nodes carry `UiGlobalTransform`
+/// (an `Affine2`, not the 3D `GlobalTransform`); its `translation` is the node
+/// center in physical px.
+pub(crate) fn node_rect(node: &ComputedNode, gt: &bevy::ui::UiGlobalTransform) -> Rect {
     let inv = node.inverse_scale_factor();
-    let center = gt.translation().truncate() * inv;
+    let center = gt.translation * inv;
     let size = node.size() * inv;
     Rect::from_center_size(center, size)
 }
@@ -159,7 +161,7 @@ fn collect_widget_aabbs(
 fn update_cursor_over_chrome(
     mut over: ResMut<CursorOverChrome>,
     windows: Query<&Window>,
-    chrome: Query<(&ComputedNode, &GlobalTransform), With<EditorChrome>>,
+    chrome: Query<(&ComputedNode, &bevy::ui::UiGlobalTransform), With<EditorChrome>>,
 ) {
     over.0 = false;
     let Ok(window) = windows.single() else { return };

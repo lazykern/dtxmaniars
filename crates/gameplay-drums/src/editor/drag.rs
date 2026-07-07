@@ -99,7 +99,11 @@ fn begin_gesture(
     over_chrome: Res<super::picking::CursorOverChrome>,
     aabbs: Res<super::picking::WidgetAabbs>,
     hidden: Res<super::picking::CanvasHidden>,
-    handles: Query<(&super::selection_box::ScaleHandle, &ComputedNode, &GlobalTransform)>,
+    handles: Query<(
+        &super::selection_box::ScaleHandle,
+        &ComputedNode,
+        &bevy::ui::UiGlobalTransform,
+    )>,
     mut selection: ResMut<Selection>,
     mut gesture: ResMut<ActiveGesture>,
     mut layouts: ResMut<WidgetLayouts>,

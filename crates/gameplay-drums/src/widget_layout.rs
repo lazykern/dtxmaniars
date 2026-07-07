@@ -145,7 +145,7 @@ fn measure_widget_geoms(
     windows: Query<&Window, With<bevy::window::PrimaryWindow>>,
     containers: Query<(Entity, &WidgetContainer, &UiTransform)>,
     children_q: Query<&Children>,
-    nodes: Query<(&ComputedNode, &GlobalTransform)>,
+    nodes: Query<(&ComputedNode, &bevy::ui::UiGlobalTransform)>,
 ) {
     let Ok(window) = windows.single() else {
         return;
@@ -156,17 +156,23 @@ fn measure_widget_geoms(
         if kind == WidgetKind::Playfield {
             continue;
         }
+        let (t, s) = applied_of(ui_tf);
         let mut union: Option<Rect> = None;
         let mut stack: Vec<Entity> = children_q
             .get(entity)
             .map(|c| c.iter().collect())
             .unwrap_or_default();
         while let Some(e) = stack.pop() {
+            // UI nodes carry `UiGlobalTransform` (not `GlobalTransform`); its
+            // translation is the node center in physical px and already
+            // includes the container's applied UiTransform. Rendered size is
+            // the layout size times the accumulated scale `s`, so form the
+            // VISUAL rect here and let `untransform_rect` recover unscaled.
             if let Ok((cn, gt)) = nodes.get(e) {
                 if cn.size().x > 0.0 && cn.size().y > 0.0 {
                     let inv = cn.inverse_scale_factor();
-                    let center = gt.translation().truncate() * inv;
-                    let size = cn.size() * inv;
+                    let center = gt.translation * inv;
+                    let size = cn.size() * inv * s;
                     let r = Rect::from_center_size(center, size);
                     union = Some(union.map_or(r, |u| u.union(r)));
                 }
@@ -175,7 +181,6 @@ fn measure_widget_geoms(
                 stack.extend(c.iter());
             }
         }
-        let (t, s) = applied_of(ui_tf);
         if let Some(measured) = union.filter(|r| r.width() >= 1.0 && r.height() >= 1.0) {
             let unscaled = untransform_rect(measured, sc, t, s);
             geoms.0.insert(

@@ -297,11 +297,12 @@ fn apply_panel_controls(
 
     for (field, val, boolean) in &values {
         let Some(inst) = layouts.0.get_mut(&kind) else { continue };
-        // Position/scale edits require Anchored; visibility/z don't.
-        let needs_anchor = matches!(
-            field,
-            PanelField::OffsetX | PanelField::OffsetY | PanelField::Scale
-        );
+        // Only Scale forces Anchored placement (Natural renders scale as 1).
+        // Offset works in BOTH modes — it's the ref-px delta — so an offset
+        // stepper must NOT convert; converting first rewrites `inst.offset`
+        // into the anchored frame, then the stale (Natural-frame) control
+        // value clobbers it and the widget teleports.
+        let needs_anchor = matches!(field, PanelField::Scale);
         if needs_anchor {
             if let Some(g) = geoms.0.get(&kind).copied() {
                 let sc = wsize / 2.0;

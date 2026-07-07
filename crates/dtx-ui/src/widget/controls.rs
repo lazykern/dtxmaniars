@@ -200,7 +200,7 @@ fn drive_sliders(
         &mut ControlValue,
         &Interaction,
         &ComputedNode,
-        &GlobalTransform,
+        &bevy::ui::UiGlobalTransform,
     )>,
 ) {
     if !buttons.pressed(MouseButton::Left) {
@@ -218,7 +218,7 @@ fn drive_sliders(
     let Some(cursor) = window.cursor_position() else { return };
     if let Ok((_, spec, mut value, _, cn, gt)) = sliders.get_mut(active_e) {
         let inv = cn.inverse_scale_factor();
-        let center = gt.translation().truncate() * inv;
+        let center = gt.translation * inv;
         let size = cn.size() * inv;
         let left = center.x - size.x / 2.0;
         let next = slider_value_at(spec.min, spec.max, left, size.x, cursor.x);
