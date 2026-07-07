@@ -20,6 +20,16 @@ pub use session::PracticeSession;
 use crate::gauge::StageGauge;
 
 pub(super) fn plugin(app: &mut App) {
+    app.init_resource::<actions::PracticeBindings>()
+        .add_message::<actions::PracticeAction>()
+        .add_systems(
+            Update,
+            (actions::emit_practice_actions, actions::apply_practice_actions)
+                .chain()
+                .run_if(in_state(AppState::Performance))
+                .run_if(in_state(game_shell::PauseState::Running))
+                .run_if(resource_exists::<PracticeSession>),
+        );
     app.add_systems(
         OnEnter(AppState::Performance),
         enter_practice_session.before(crate::orchestrator::DrumsEnterSet),

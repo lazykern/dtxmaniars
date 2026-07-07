@@ -67,6 +67,53 @@ pub fn emit_practice_actions(
     }
 }
 
+/// Apply quick-tier actions. `ToggleRamp` is intentionally not handled
+/// here: `ramp::handle_toggle_ramp` consumes the same message stream
+/// with its own `MessageReader` (multiple readers are independent).
+pub fn apply_practice_actions(
+    mut actions: MessageReader<PracticeAction>,
+    mut session: ResMut<PracticeSession>,
+    timeline: Res<ChipTimeline>,
+    clock: Res<GameplayClock>,
+    mut seeks: MessageWriter<SeekToChartTime>,
+    mut next_pause: ResMut<NextState<PauseState>>,
+) {
+    for action in actions.read() {
+        match action {
+            PracticeAction::SetLoopStart => {
+                let ms = timeline.bar_start_before(clock.current_ms);
+                session.set_loop_start(ms);
+            }
+            PracticeAction::SetLoopEnd => {
+                let mut ms = timeline.bar_start_before(clock.current_ms);
+                // Min region: one bar. B on/before A pushes one bar past A.
+                if let Some(r) = session.loop_region {
+                    if ms <= r.start_ms {
+                        ms = timeline.snap_neighbor(r.start_ms, SnapDivisor::Bar, 1);
+                    }
+                }
+                session.set_loop_end(ms);
+            }
+            PracticeAction::ClearLoop => session.loop_region = None,
+            PracticeAction::RateDown => session.step_rate(-1),
+            PracticeAction::RateUp => session.step_rate(1),
+            PracticeAction::RestartLoop => {
+                let intent = session
+                    .loop_region
+                    .map(|r| r.start_ms)
+                    .unwrap_or(session.current_attempt.start_ms);
+                seeks.write(SeekToChartTime {
+                    target_ms: preroll_target(&timeline, session.preroll, intent),
+                    snap: None,
+                    attempt_start_ms: Some(intent),
+                });
+            }
+            PracticeAction::OpenFullHud => next_pause.set(PauseState::Paused),
+            PracticeAction::ToggleRamp => {}
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

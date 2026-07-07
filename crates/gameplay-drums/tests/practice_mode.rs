@@ -281,3 +281,70 @@ fn seek_is_inert_without_practice_in_normal_play() {
         "normal end-of-stage unchanged"
     );
 }
+
+use gameplay_drums::practice::actions::{
+    apply_practice_actions, emit_practice_actions, PracticeAction, PracticeBindings,
+};
+
+fn add_action_wiring(app: &mut App) {
+    app.init_resource::<ButtonInput<KeyCode>>()
+        .init_resource::<PracticeBindings>()
+        .init_state::<game_shell::PauseState>()
+        .add_message::<PracticeAction>()
+        .add_systems(
+            Update,
+            (emit_practice_actions, apply_practice_actions)
+                .chain()
+                .before(gameplay_drums::seek::apply_seek_system)
+                .run_if(resource_exists::<PracticeSession>),
+        );
+}
+
+#[test]
+fn bracket_key_sets_loop_start_snapped_to_bar() {
+    let mut app = build_app();
+    add_action_wiring(&mut app);
+    enter_performance(&mut app, chart_with_measures(8));
+    app.world_mut().insert_resource(PracticeSession::default());
+    {
+        let mut clock = app.world_mut().resource_mut::<GameplayClock>();
+        clock.start();
+        clock.sync(Some(4_700));
+    }
+    app.world_mut()
+        .resource_mut::<ButtonInput<KeyCode>>()
+        .press(KeyCode::BracketLeft);
+    app.update();
+    let session = app.world().resource::<PracticeSession>();
+    let region = session.loop_region.expect("A marker set");
+    assert_eq!(region.start_ms, 4_000, "A snaps down to the bar start");
+}
+
+#[test]
+fn restart_key_seeks_to_loop_start() {
+    let mut app = build_app();
+    add_action_wiring(&mut app);
+    enter_performance(&mut app, chart_with_measures(8));
+    app.world_mut().insert_resource(PracticeSession {
+        loop_region: Some(LoopRegion {
+            start_ms: 2_000,
+            end_ms: 6_000,
+        }),
+        preroll: gameplay_drums::practice::session::PrerollSetting::Off,
+        ..Default::default()
+    });
+    {
+        let mut clock = app.world_mut().resource_mut::<GameplayClock>();
+        clock.start();
+        clock.sync(Some(5_000));
+    }
+    app.world_mut()
+        .resource_mut::<ButtonInput<KeyCode>>()
+        .press(KeyCode::KeyR);
+    app.update();
+    assert_eq!(
+        app.world().resource::<GameplayClock>().current_ms,
+        2_000,
+        "R restarts the loop at A"
+    );
+}
