@@ -13,6 +13,7 @@ pub mod panel;
 pub mod picking;
 pub mod save;
 pub mod selection_box;
+pub mod session;
 pub mod snap;
 pub mod ui;
 pub mod undo;
@@ -39,7 +40,9 @@ pub fn plugin(app: &mut App) {
         .init_resource::<undo::UndoStack>()
         .add_systems(
             Update,
-            toggle_editor.run_if(in_state(AppState::Performance)),
+            toggle_editor
+                .run_if(in_state(AppState::Performance))
+                .run_if(|s: Res<game_shell::EditorSession>| !s.0),
         )
         .add_systems(OnExit(AppState::Performance), close_editor_on_exit)
         .configure_sets(
@@ -55,6 +58,7 @@ pub fn plugin(app: &mut App) {
             selection_box::plugin,
             panel::plugin,
             snap::plugin,
+            session::plugin,
         ));
 }
 
@@ -68,6 +72,7 @@ fn close_editor_on_exit(
     mut gesture: ResMut<drag::ActiveGesture>,
     mut hovered: ResMut<picking::Hovered>,
     mut selection: ResMut<drag::Selection>,
+    mut session: ResMut<game_shell::EditorSession>,
 ) {
     if open.0 {
         autoplay.0 = prev.0;
@@ -76,6 +81,9 @@ fn close_editor_on_exit(
     gesture.0 = drag::Gesture::None;
     hovered.0 = None;
     selection.0 = None;
+    // Covers non-Esc exits (song ended, forced transition): a stale session
+    // flag would make the next Performance force-open the editor.
+    session.0 = false;
 }
 
 /// Ctrl+Shift+E toggles the editor while in Performance.

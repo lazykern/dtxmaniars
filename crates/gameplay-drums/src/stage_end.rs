@@ -66,8 +66,12 @@ fn detect_stage_failure(
     mut completion: ResMut<DrumsStageCompletion>,
     mut requests: MessageWriter<TransitionRequest>,
     practice: Option<Res<crate::practice::PracticeSession>>,
+    session: Res<game_shell::EditorSession>,
 ) {
     if practice.is_some() {
+        return;
+    }
+    if session.0 {
         return;
     }
     if completion.end_requested {

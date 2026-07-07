@@ -392,10 +392,14 @@ pub fn detect_end_of_stage(
     counts: Res<JudgmentCounts>,
     _combo: Res<Combo>,
     practice: Option<Res<crate::practice::PracticeSession>>,
+    session: Res<game_shell::EditorSession>,
     mut requests: MessageWriter<TransitionRequest>,
 ) {
     if completion.end_requested {
         return;
+    }
+    if session.0 {
+        return; // editor session loops via session_loop_watcher instead
     }
     // An armed A/B loop owns the stage end: the loop watcher seeks back
     // before the chart end is ever reached "for real". An A-only region

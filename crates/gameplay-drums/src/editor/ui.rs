@@ -134,6 +134,8 @@ fn handle_buttons(
     mut stack: ResMut<UndoStack>,
     prev: Res<super::PrevAutoplay>,
     mut autoplay: ResMut<crate::autoplay::AutoplayEnabled>,
+    mut session: ResMut<game_shell::EditorSession>,
+    mut requests: MessageWriter<game_shell::TransitionRequest>,
 ) {
     for (interaction, button, mut bg) in &mut interactions {
         match *interaction {
@@ -171,6 +173,13 @@ fn handle_buttons(
                         open.0 = false;
                         autoplay.0 = prev.0;
                         selection.0 = None;
+                        if session.0 {
+                            session.0 = false;
+                            game_shell::request_transition(
+                                &mut requests,
+                                game_shell::AppState::Title,
+                            );
+                        }
                     }
                 }
             }
@@ -206,6 +215,8 @@ fn close_on_escape(
     mut open: ResMut<EditorOpen>,
     prev: Res<super::PrevAutoplay>,
     mut autoplay: ResMut<crate::autoplay::AutoplayEnabled>,
+    mut session: ResMut<game_shell::EditorSession>,
+    mut requests: MessageWriter<game_shell::TransitionRequest>,
 ) {
     if keys.just_pressed(KeyCode::Escape) {
         if selection.0.is_some() {
@@ -213,6 +224,10 @@ fn close_on_escape(
         } else {
             open.0 = false;
             autoplay.0 = prev.0;
+            if session.0 {
+                session.0 = false;
+                game_shell::request_transition(&mut requests, game_shell::AppState::Title);
+            }
         }
     }
 }
