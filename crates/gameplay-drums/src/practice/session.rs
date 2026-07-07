@@ -55,47 +55,49 @@ pub const RAMP_START_DEFAULT: f32 = 0.70;
 pub const RAMP_TARGET_DEFAULT: f32 = 1.00;
 pub const RAMP_STEP_DEFAULT: f32 = 0.05;
 pub const RAMP_THRESHOLD_DEFAULT: f32 = 90.0;
+pub const RAMP_STREAK_DEFAULT: u8 = 1;
 
-/// Accuracy-gated speed-ramp configuration (rail-editable).
+/// Accuracy-gated tempo-ramp configuration (rail-editable).
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct RampConfig {
-    pub start_rate: f32,
-    pub target_rate: f32,
+    pub start_tempo: f32,
+    pub target_tempo: f32,
     pub step: f32,
     pub threshold_pct: f32,
+    /// Consecutive passes required per promotion (and for completion).
+    pub required_successes: u8,
 }
 
 impl Default for RampConfig {
     fn default() -> Self {
         Self {
-            start_rate: RAMP_START_DEFAULT,
-            target_rate: RAMP_TARGET_DEFAULT,
+            start_tempo: RAMP_START_DEFAULT,
+            target_tempo: RAMP_TARGET_DEFAULT,
             step: RAMP_STEP_DEFAULT,
             threshold_pct: RAMP_THRESHOLD_DEFAULT,
+            required_successes: RAMP_STREAK_DEFAULT,
         }
     }
 }
 
-/// Live ramp state. `current_rate` mirrors `PracticeSession::rate` (the
-/// applier re-adopts it each pass, so a manual rate nudge simply becomes
-/// the ramp's current step).
+/// Live ramp state; meaningful only while `armed`.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct RampState {
     pub armed: bool,
-    pub current_rate: f32,
-    pub consecutive_fails: u8,
-    /// Arming mid-loop rolls a stale pre-arm attempt on the next seek;
-    /// the applier skips exactly one roll when this is set.
-    pub skip_next_roll: bool,
+    /// The ramp's current tempo step. Owns playback while armed
+    /// (`PracticeSession::effective_tempo`, added in a later task).
+    pub step_tempo: f32,
+    pub success_streak: u8,
+    pub fail_streak: u8,
 }
 
 impl Default for RampState {
     fn default() -> Self {
         Self {
             armed: false,
-            current_rate: RAMP_START_DEFAULT,
-            consecutive_fails: 0,
-            skip_next_roll: false,
+            step_tempo: RAMP_START_DEFAULT,
+            success_streak: 0,
+            fail_streak: 0,
         }
     }
 }

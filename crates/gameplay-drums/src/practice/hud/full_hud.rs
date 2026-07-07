@@ -108,11 +108,11 @@ pub fn rail_label(item: RailItem, session: &PracticeSession, exit_armed: bool) -
         }
         RailItem::RampStart => format!(
             "Ramp start  ◀ x{:.2} ▶",
-            session.trainer.ramp_config.start_rate
+            session.trainer.ramp_config.start_tempo
         ),
         RailItem::RampTarget => format!(
             "Ramp target  ◀ x{:.2} ▶",
-            session.trainer.ramp_config.target_rate
+            session.trainer.ramp_config.target_tempo
         ),
         RailItem::RampStep => format!("Ramp step  ◀ +{:.2} ▶", session.trainer.ramp_config.step),
         RailItem::RampThreshold => {
@@ -428,11 +428,13 @@ pub fn full_hud_input(
             RailItem::Preroll => session.transport.preroll = session.transport.preroll.next(),
             RailItem::RampStart => {
                 let c = &mut session.trainer.ramp_config;
-                c.start_rate = (c.start_rate + dir as f32 * 0.05).clamp(0.5, c.target_rate - 0.05);
+                c.start_tempo =
+                    (c.start_tempo + dir as f32 * 0.05).clamp(0.5, c.target_tempo - 0.05);
             }
             RailItem::RampTarget => {
                 let c = &mut session.trainer.ramp_config;
-                c.target_rate = (c.target_rate + dir as f32 * 0.05).clamp(c.start_rate + 0.05, 1.5);
+                c.target_tempo =
+                    (c.target_tempo + dir as f32 * 0.05).clamp(c.start_tempo + 0.05, 1.5);
             }
             RailItem::RampStep => {
                 let c = &mut session.trainer.ramp_config;

@@ -420,7 +420,7 @@ fn looped_session(rate: f32) -> PracticeSession {
         ..Default::default()
     };
     s.trainer.ramp.armed = true;
-    s.trainer.ramp.current_rate = rate;
+    s.trainer.ramp.step_tempo = rate;
     s.current_attempt.start_ms = 2_000;
     s
 }
@@ -502,28 +502,6 @@ fn two_failed_passes_step_rate_down() {
         "second fail steps 0.80 → 0.75, got {}",
         session.transport.user_tempo
     );
-}
-
-#[test]
-fn skip_next_roll_ignores_the_stale_pre_arm_attempt() {
-    let mut app = build_app();
-    add_ramp_wiring(&mut app);
-    enter_performance(&mut app, chart_with_measures(8));
-    let mut s = looped_session(0.70);
-    s.trainer.ramp.skip_next_roll = true;
-    app.world_mut().insert_resource(s);
-    {
-        let mut clock = app.world_mut().resource_mut::<GameplayClock>();
-        clock.start();
-        clock.sync(Some(3_000));
-    }
-    finish_loop_pass(&mut app, 4);
-    let session = app.world().resource::<PracticeSession>();
-    assert!(
-        (session.transport.user_tempo - 0.70).abs() < 1e-6,
-        "the roll right after arming must not step the ramp"
-    );
-    assert!(!session.trainer.ramp.skip_next_roll, "flag consumed");
 }
 
 #[test]
