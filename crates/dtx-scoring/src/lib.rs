@@ -15,14 +15,19 @@
 pub mod gauge;
 pub mod hit_ranges;
 pub mod identity;
+pub mod replay;
 pub mod score_ini;
+pub mod store;
 pub mod xg_score;
 
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
-use thiserror::Error;
+
+pub use store::{
+    JudgmentTotals, NxImportRecord, ScoreEntry, ScoreSource, ScoreStore, ScoreStoreError,
+};
 
 /// Judgment kind for a single hit. Maps to DTXmaniaNX timing windows.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -146,163 +151,6 @@ impl std::fmt::Display for Rank {
     }
 }
 
-/// One persisted result for one play of one chart.
-///
-/// Mirrors a subset of `CPerformanceEntry` (CScoreIni.cs:177-256): the fields
-/// needed to show "best score for this chart" in SongSelect + to reconstruct
-/// a Result screen for replay history.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub struct ScoreEntry {
-    /// SHA-256 (hex) of the DTX file contents, or path-derived fallback.
-    pub chart_hash: String,
-    /// Song title (from DTX `#TITLE`).
-    pub title: String,
-    /// Song artist (from DTX `#ARTIST`).
-    pub artist: String,
-    /// Cumulative score (from gameplay-drums Score resource).
-    pub score: u32,
-    /// Maximum combo achieved.
-    pub max_combo: u32,
-    /// Per-judgment counts.
-    pub perfect: u32,
-    /// Per-judgment counts.
-    pub great: u32,
-    /// Per-judgment counts.
-    pub good: u32,
-    /// Per-judgment counts.
-    pub ok: u32,
-    /// Per-judgment counts.
-    pub miss: u32,
-    /// Computed rank letter.
-    pub rank: Rank,
-    /// Unix seconds when the result was recorded.
-    pub played_at: u64,
-}
-
-impl ScoreEntry {
-    /// Total judgment count (sum of all 5 kinds).
-    pub fn total(&self) -> u32 {
-        self.perfect + self.great + self.good + self.ok + self.miss
-    }
-
-    /// Perfect percentage (0..100). 0 if total == 0.
-    pub fn perfect_pct(&self) -> f32 {
-        let t = self.total();
-        if t == 0 {
-            0.0
-        } else {
-            self.perfect as f32 / t as f32 * 100.0
-        }
-    }
-}
-
-/// Errors from loading or saving the score store.
-#[derive(Debug, Error)]
-pub enum ScoreStoreError {
-    /// I/O error (read/write).
-    #[error("io error: {0}")]
-    Io(#[from] std::io::Error),
-    /// JSON parse error.
-    #[error("json error: {0}")]
-    Json(#[from] serde_json::Error),
-}
-
-/// Persistent score history. One JSON file, all charts.
-///
-/// Reference: CScoreIni.cs manages 9 sections per chart (HiScore Drums/Guitar/Bass
-/// × Score/Skill + LastPlay). M6a flattens to one Vec<ScoreEntry>; full 9-section
-/// split is M6.1+ if needed.
-#[derive(Debug, Default, Clone, Serialize, Deserialize)]
-pub struct ScoreStore {
-    /// All recorded results, newest last.
-    pub entries: Vec<ScoreEntry>,
-    /// Where to load/save on disk. None = ephemeral (in-memory only).
-    pub path: Option<PathBuf>,
-}
-
-impl ScoreStore {
-    /// Construct a ScoreStore backed by `path`. File may not exist yet.
-    pub fn with_path(path: PathBuf) -> Self {
-        Self {
-            entries: Vec::new(),
-            path: Some(path),
-        }
-    }
-
-    /// Default location: `<cwd>/scores.json`. Caller may override via env
-    /// (`DTX_SCORES_PATH`) or `with_path`.
-    pub fn default_path() -> PathBuf {
-        if let Ok(p) = std::env::var("DTX_SCORES_PATH") {
-            return PathBuf::from(p);
-        }
-        PathBuf::from("scores.json")
-    }
-
-    /// Load entries from `self.path`. Missing file → empty (not an error).
-    pub fn load(&mut self) -> Result<(), ScoreStoreError> {
-        let Some(path) = &self.path else {
-            return Ok(());
-        };
-        if !path.exists() {
-            return Ok(());
-        }
-        let bytes = std::fs::read(path)?;
-        if bytes.is_empty() {
-            return Ok(());
-        }
-        let parsed: ScoreStore = serde_json::from_slice(&bytes)?;
-        self.entries = parsed.entries;
-        Ok(())
-    }
-
-    /// Save entries to `self.path`. Creates parent dirs. No-op if path is None.
-    pub fn save(&self) -> Result<(), ScoreStoreError> {
-        let Some(path) = &self.path else {
-            return Ok(());
-        };
-        if let Some(parent) = path.parent() {
-            if !parent.as_os_str().is_empty() {
-                std::fs::create_dir_all(parent)?;
-            }
-        }
-        let bytes = serde_json::to_vec_pretty(self)?;
-        std::fs::write(path, bytes)?;
-        Ok(())
-    }
-
-    /// Append an entry (does NOT auto-save).
-    pub fn add(&mut self, entry: ScoreEntry) {
-        self.entries.push(entry);
-    }
-
-    /// Find the highest-score entry for a chart hash, if any.
-    pub fn best_for(&self, chart_hash: &str) -> Option<&ScoreEntry> {
-        self.entries
-            .iter()
-            .filter(|e| e.chart_hash == chart_hash)
-            .max_by_key(|e| e.score)
-    }
-
-    /// Number of distinct charts in the store.
-    pub fn chart_count(&self) -> usize {
-        let mut seen = std::collections::HashSet::new();
-        for e in &self.entries {
-            seen.insert(e.chart_hash.clone());
-        }
-        seen.len()
-    }
-
-    /// Total entries (history depth).
-    pub fn len(&self) -> usize {
-        self.entries.len()
-    }
-
-    /// True if no entries.
-    pub fn is_empty(&self) -> bool {
-        self.entries.is_empty()
-    }
-}
-
 /// Compute a deterministic chart hash from file contents.
 ///
 /// SHA-256 (hex) of the file bytes. If the file cannot be read (e.g. missing
@@ -326,6 +174,7 @@ pub fn compute_chart_hash(path: &Path) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::path::PathBuf;
 
     #[test]
     fn perfect_window() {
@@ -393,18 +242,23 @@ mod tests {
 
     fn fake_entry(score: u32, chart_hash: &str) -> ScoreEntry {
         ScoreEntry {
-            chart_hash: chart_hash.to_string(),
+            id: format!("{chart_hash}:{score}"),
+            chart: identity::ChartIdentity::new(chart_hash.to_string(), None, None),
             title: "T".into(),
             artist: "A".into(),
             score,
             max_combo: 100,
-            perfect: 50,
-            great: 5,
-            good: 3,
-            ok: 1,
-            miss: 0,
+            judgments: JudgmentTotals {
+                perfect: 50,
+                great: 5,
+                good: 3,
+                poor: 1,
+                miss: 0,
+            },
             rank: Rank::S,
             played_at: 1700000000,
+            source: ScoreSource::Native,
+            replay_ref: None,
         }
     }
 
@@ -416,20 +270,8 @@ mod tests {
 
     #[test]
     fn score_entry_perfect_pct_zero_total() {
-        let e = ScoreEntry {
-            chart_hash: "h".into(),
-            title: "".into(),
-            artist: "".into(),
-            score: 0,
-            max_combo: 0,
-            perfect: 0,
-            great: 0,
-            good: 0,
-            ok: 0,
-            miss: 0,
-            rank: Rank::E,
-            played_at: 0,
-        };
+        let mut e = fake_entry(0, "h");
+        e.judgments = JudgmentTotals::default();
         assert_eq!(e.perfect_pct(), 0.0);
     }
 
@@ -523,20 +365,17 @@ mod tests {
 
     #[test]
     fn score_entry_serde_round_trip() {
-        let entry = ScoreEntry {
-            chart_hash: "abc123".into(),
-            title: "Round Trip".into(),
-            artist: "dtxmaniars".into(),
-            score: 9999,
-            max_combo: 100,
+        let mut entry = fake_entry(9999, "abc123");
+        entry.title = "Round Trip".into();
+        entry.artist = "dtxmaniars".into();
+        entry.judgments = JudgmentTotals {
             perfect: 50,
             great: 10,
             good: 5,
-            ok: 2,
+            poor: 2,
             miss: 1,
-            rank: Rank::S,
-            played_at: 1_700_000_000,
         };
+        entry.played_at = 1_700_000_000;
         let json = serde_json::to_string(&entry).unwrap();
         let back: ScoreEntry = serde_json::from_str(&json).unwrap();
         assert_eq!(entry.title, back.title);
@@ -546,20 +385,10 @@ mod tests {
 
     #[test]
     fn rank_serializes_as_letter() {
-        let entry = ScoreEntry {
-            chart_hash: "x".into(),
-            title: "y".into(),
-            artist: "z".into(),
-            score: 0,
-            max_combo: 0,
-            perfect: 0,
-            great: 0,
-            good: 0,
-            ok: 0,
-            miss: 0,
-            rank: Rank::A,
-            played_at: 0,
-        };
+        let mut entry = fake_entry(0, "x");
+        entry.title = "y".into();
+        entry.artist = "z".into();
+        entry.rank = Rank::A;
         let json = serde_json::to_string(&entry).unwrap();
         assert!(json.contains("\"A\""), "json={}", json);
     }
