@@ -18,7 +18,9 @@ pub fn format_chart_time(ms: i64) -> String {
     format!("{m}:{s:02}.{d}")
 }
 
-pub(super) fn plugin(app: &mut App) {
+/// Exposed `pub` (not `pub(super)`) so integration tests can build the real
+/// HUD plugin schedule headlessly; see `tests/practice_hud.rs`.
+pub fn plugin(app: &mut App) {
     use game_shell::{AppState, PauseState};
     mini_strip::plugin(app);
     chip::plugin(app);

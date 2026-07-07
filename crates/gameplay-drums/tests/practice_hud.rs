@@ -86,6 +86,59 @@ fn normal_pause_overlay_suppressed_in_practice() {
     assert_eq!(overlays, 0, "practice suppresses the normal pause overlay");
 }
 
+// The top-level `gameplay_drums::plugin` also wires `orchestrator`, `autoplay`,
+// `bgm_scheduler`, `editor`, etc., which pull in real audio/asset/config-file
+// I/O — too heavy for a headless schedule-build smoke test. Instead we build
+// the real `practice::hud::plugin` (promoted from `pub(super)` to `pub` for
+// this test) directly, wired with the minimum states/resources/messages it
+// declares dependencies on (game_shell's AppState/PauseState/TransitionRequest,
+// GameplayClock, ChipTimeline, PracticeSession, SeekToChartTime,
+// PracticeAction), and drive it through OnEnter(Performance) +
+// OnEnter(Paused) + a couple of `Update` ticks. This proves the run-condition
+// chains and system params in the real plugin fn actually resolve, closing
+// the gap where every other HUD test hand-wires a handful of systems instead
+// of the real plugin registration.
+#[test]
+fn real_hud_plugin_schedule_builds_headlessly() {
+    let mut app = App::new();
+    app.add_plugins((
+        MinimalPlugins,
+        bevy::state::app::StatesPlugin,
+        bevy::input::InputPlugin,
+    ))
+        .init_state::<AppState>()
+        .init_state::<PauseState>()
+        .add_message::<game_shell::TransitionRequest>()
+        .add_message::<gameplay_drums::seek::SeekToChartTime>()
+        .add_message::<gameplay_drums::practice::actions::PracticeAction>()
+        .init_resource::<GameplayClock>()
+        .init_resource::<ChipTimeline>()
+        .world_mut()
+        .insert_resource(PracticeSession::default());
+
+    gameplay_drums::practice::hud::plugin(&mut app);
+
+    // Drive Performance + Paused so every run_if-gated system in the plugin
+    // (spawn/despawn, mouse/input/transport/marker update chain) actually
+    // gets scheduled at least once.
+    app.world_mut()
+        .resource_mut::<NextState<AppState>>()
+        .set(AppState::Performance);
+    app.update();
+    app.world_mut()
+        .resource_mut::<NextState<PauseState>>()
+        .set(PauseState::Paused);
+    app.update();
+    app.update();
+
+    let huds = app
+        .world_mut()
+        .query::<&FullHudRoot>()
+        .iter(app.world())
+        .count();
+    assert_eq!(huds, 1, "real plugin schedule spawned the full HUD");
+}
+
 use gameplay_drums::practice::hud::full_hud::{transport_buttons, TransportButton};
 
 #[test]
