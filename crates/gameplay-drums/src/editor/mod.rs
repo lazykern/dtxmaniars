@@ -13,6 +13,7 @@ pub mod panel;
 pub mod picking;
 pub mod save;
 pub mod selection_box;
+pub mod snap;
 pub mod ui;
 pub mod undo;
 
@@ -53,6 +54,7 @@ pub fn plugin(app: &mut App) {
             picking::plugin,
             selection_box::plugin,
             panel::plugin,
+            snap::plugin,
         ));
 }
 

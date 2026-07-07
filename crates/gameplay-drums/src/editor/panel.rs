@@ -30,6 +30,11 @@ pub enum PanelField {
 #[derive(Component, Debug, Clone, Copy)]
 pub struct AnchorCell(pub Anchor9);
 
+/// "auto" cell below the anchor grid: toggles `anchor_auto` (closest-anchor
+/// snap while dragging).
+#[derive(Component)]
+pub struct AnchorAutoCell;
+
 /// Reset-this-widget button.
 #[derive(Component)]
 pub struct PanelResetWidget;
@@ -82,6 +87,7 @@ pub fn plugin(app: &mut App) {
             (
                 apply_panel_controls,
                 apply_anchor_cells,
+                handle_anchor_auto_cell,
                 handle_reset,
                 refresh_panel_values,
                 handle_lane_buttons,
@@ -199,6 +205,31 @@ fn rebuild_panel(
                     }
                 });
             }
+            grid.spawn(Node {
+                flex_direction: FlexDirection::Row,
+                margin: UiRect::top(Val::Px(2.0)),
+                ..default()
+            })
+            .with_children(|r| {
+                r.spawn((
+                    AnchorAutoCell,
+                    Button,
+                    Node {
+                        padding: UiRect::axes(Val::Px(6.0), Val::Px(1.0)),
+                        ..default()
+                    },
+                    BackgroundColor(if inst.anchor_auto {
+                        t.accent
+                    } else {
+                        Color::srgb(0.14, 0.14, 0.18)
+                    }),
+                    children![(
+                        Text::new("auto"),
+                        dtx_ui::theme::Theme::font(10.0),
+                        TextColor(t.text_primary),
+                    )],
+                ));
+            });
         });
 
         // Offset / scale / z rows.
@@ -526,6 +557,7 @@ fn apply_anchor_cells(
     pfl: Res<crate::layout::PlayfieldLayout>,
     windows: Query<&Window, With<bevy::window::PrimaryWindow>>,
     mut cell_bg: Query<(&AnchorCell, &mut BackgroundColor)>,
+    mut auto_bg: Query<&mut BackgroundColor, (With<AnchorAutoCell>, Without<AnchorCell>)>,
     theme: Res<dtx_ui::ThemeResource>,
 ) {
     let Some(kind) = selection.0 else { return };
@@ -552,6 +584,8 @@ fn apply_anchor_cells(
     super::drag::ensure_anchored(inst, visual_min, g.unscaled.size(), parent, pfl.scale);
     inst.anchor = new_anchor;
     inst.origin = new_anchor;
+    // A manual anchor pick pins the anchor (osu parity): auto-snap turns off.
+    inst.anchor_auto = false;
     let off_px = dtx_layout::offset_for_top_left(
         inst.anchor,
         inst.origin,
@@ -567,6 +601,37 @@ fn apply_anchor_cells(
         } else {
             Color::srgb(0.14, 0.14, 0.18)
         };
+    }
+    for mut bg in &mut auto_bg {
+        bg.0 = Color::srgb(0.14, 0.14, 0.18);
+    }
+}
+
+/// "auto" cell click: toggle `anchor_auto` for the selected widget.
+fn handle_anchor_auto_cell(
+    cells: Query<&Interaction, (With<AnchorAutoCell>, Changed<Interaction>)>,
+    selection: Res<Selection>,
+    mut layouts: ResMut<WidgetLayouts>,
+    lanes: Res<Lanes>,
+    mut undo: ResMut<super::undo::UndoStack>,
+    mut cell_bg: Query<&mut BackgroundColor, With<AnchorAutoCell>>,
+    theme: Res<dtx_ui::ThemeResource>,
+) {
+    for interaction in &cells {
+        if *interaction != Interaction::Pressed {
+            continue;
+        }
+        let Some(kind) = selection.0 else { continue };
+        undo.push(&layouts, &lanes);
+        let Some(inst) = layouts.0.get_mut(&kind) else { continue };
+        inst.anchor_auto = !inst.anchor_auto;
+        for mut bg in &mut cell_bg {
+            bg.0 = if inst.anchor_auto {
+                theme.0.accent
+            } else {
+                Color::srgb(0.14, 0.14, 0.18)
+            };
+        }
     }
 }
 
