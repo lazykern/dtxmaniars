@@ -211,15 +211,21 @@ fn highlight_selection(
     }
 }
 
-/// Esc closes the editor (pause is gated off while open).
+/// Esc: first press deselects; with nothing selected it closes the editor
+/// (pause is gated off while open).
 fn close_on_escape(
     keys: Res<ButtonInput<KeyCode>>,
+    mut selection: ResMut<Selection>,
     mut open: ResMut<EditorOpen>,
     prev: Res<super::PrevAutoplay>,
     mut autoplay: ResMut<crate::autoplay::AutoplayEnabled>,
 ) {
     if keys.just_pressed(KeyCode::Escape) {
-        open.0 = false;
-        autoplay.0 = prev.0;
+        if selection.0.is_some() {
+            selection.0 = None;
+        } else {
+            open.0 = false;
+            autoplay.0 = prev.0;
+        }
     }
 }
