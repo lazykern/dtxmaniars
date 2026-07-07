@@ -45,11 +45,16 @@ pub enum RailItem {
     Rate,
     Snap,
     Preroll,
+    RampArm,
+    RampStart,
+    RampTarget,
+    RampStep,
+    RampThreshold,
     ExitPractice,
 }
 
 impl RailItem {
-    pub const ORDER: [RailItem; 10] = [
+    pub const ORDER: [RailItem; 15] = [
         RailItem::Resume,
         RailItem::Scrub,
         RailItem::RestartSection,
@@ -59,6 +64,11 @@ impl RailItem {
         RailItem::Rate,
         RailItem::Snap,
         RailItem::Preroll,
+        RailItem::RampArm,
+        RailItem::RampStart,
+        RailItem::RampTarget,
+        RailItem::RampStep,
+        RailItem::RampThreshold,
         RailItem::ExitPractice,
     ];
 }
@@ -85,6 +95,23 @@ pub fn rail_label(item: RailItem, session: &PracticeSession, exit_armed: bool) -
         RailItem::Rate => format!("Rate  ◀ x{:.2} ▶", session.rate),
         RailItem::Snap => format!("Snap  ◀ {} ▶", session.snap.label()),
         RailItem::Preroll => format!("Pre-roll  ◀ {} ▶", session.preroll.label()),
+        RailItem::RampArm => {
+            if session.ramp.armed {
+                let (cur, total) = crate::practice::ramp::ramp_step_index(
+                    &session.ramp_config,
+                    session.rate,
+                );
+                format!("Ramp  ON  ({cur}/{total})")
+            } else {
+                "Ramp  off  (Enter: arm)".into()
+            }
+        }
+        RailItem::RampStart => format!("Ramp start  ◀ x{:.2} ▶", session.ramp_config.start_rate),
+        RailItem::RampTarget => format!("Ramp target  ◀ x{:.2} ▶", session.ramp_config.target_rate),
+        RailItem::RampStep => format!("Ramp step  ◀ +{:.2} ▶", session.ramp_config.step),
+        RailItem::RampThreshold => {
+            format!("Ramp pass  ◀ ≥{:.0}% ▶", session.ramp_config.threshold_pct)
+        }
         RailItem::ExitPractice => {
             if exit_armed {
                 "Exit practice — Enter again to confirm".into()
@@ -355,6 +382,7 @@ pub fn full_hud_input(
     mut next_pause: ResMut<NextState<PauseState>>,
     mut seeks: MessageWriter<SeekToChartTime>,
     mut requests: MessageWriter<TransitionRequest>,
+    mut practice_actions: MessageWriter<crate::practice::actions::PracticeAction>,
     mut rows: Query<(&RailItem, &mut Text, &mut TextColor)>,
     mut history: Query<&mut Text, (With<AttemptHistoryText>, Without<RailItem>)>,
 ) {
@@ -381,6 +409,24 @@ pub fn full_hud_input(
             RailItem::Rate => session.step_rate(dir),
             RailItem::Snap => session.snap = session.snap.next(),
             RailItem::Preroll => session.preroll = session.preroll.next(),
+            RailItem::RampStart => {
+                let c = &mut session.ramp_config;
+                c.start_rate =
+                    (c.start_rate + dir as f32 * 0.05).clamp(0.5, c.target_rate - 0.05);
+            }
+            RailItem::RampTarget => {
+                let c = &mut session.ramp_config;
+                c.target_rate =
+                    (c.target_rate + dir as f32 * 0.05).clamp(c.start_rate + 0.05, 1.5);
+            }
+            RailItem::RampStep => {
+                let c = &mut session.ramp_config;
+                c.step = (c.step + dir as f32 * 0.05).clamp(0.05, 0.25);
+            }
+            RailItem::RampThreshold => {
+                let c = &mut session.ramp_config;
+                c.threshold_pct = (c.threshold_pct + dir as f32 * 5.0).clamp(50.0, 100.0);
+            }
             _ => {}
         }
     }
@@ -430,6 +476,13 @@ pub fn full_hud_input(
             }
             RailItem::ClearLoop => session.loop_region = None,
             RailItem::Rate | RailItem::Snap | RailItem::Preroll => {}
+            RailItem::RampArm => {
+                practice_actions.write(crate::practice::actions::PracticeAction::ToggleRamp);
+            }
+            RailItem::RampStart
+            | RailItem::RampTarget
+            | RailItem::RampStep
+            | RailItem::RampThreshold => {}
             RailItem::ExitPractice => {
                 if exit_armed.0 {
                     next_pause.set(PauseState::Running);

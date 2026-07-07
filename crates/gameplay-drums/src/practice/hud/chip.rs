@@ -1,5 +1,4 @@
-//! Quick-tier status chip (top-right): rate, loop bars, last accuracy.
-//! The ramp segment is added by Task 12 once ramp state exists.
+//! Quick-tier status chip (top-right): rate, ramp step, loop bars, last accuracy.
 
 use bevy::prelude::*;
 use dtx_ui::theme::Theme;
@@ -15,6 +14,11 @@ pub struct StatusChip;
 /// Pure: chip contents from session state. `bar_ms` from `ChipTimeline`.
 pub fn chip_text(session: &PracticeSession, bar_ms: &[i64]) -> String {
     let mut parts = vec![format!("{:.2}×", session.rate)];
+    if session.ramp.armed {
+        let (cur, total) =
+            crate::practice::ramp::ramp_step_index(&session.ramp_config, session.rate);
+        parts.push(format!("RAMP {cur}/{total}"));
+    }
     if let Some(r) = session.loop_region.filter(|r| r.end_ms != i64::MAX) {
         parts.push(format!(
             "loop {}–{}",
@@ -105,5 +109,14 @@ mod tests {
             mean_error_ms: -3.0,
         });
         assert_eq!(chip_text(&s, &bar_ms), "0.85× · loop 2–4 · 94%");
+    }
+
+    #[test]
+    fn chip_text_shows_ramp_segment_when_armed() {
+        let mut s = PracticeSession::default();
+        s.rate = 0.85;
+        s.ramp.armed = true;
+        let bar_ms = vec![0, 2_000];
+        assert_eq!(chip_text(&s, &bar_ms), "0.85× · RAMP 3/6");
     }
 }
