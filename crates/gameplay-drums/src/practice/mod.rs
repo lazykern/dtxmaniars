@@ -6,6 +6,7 @@
 //! select (it must survive StageClear/Result so the save gate sees it).
 
 pub mod ab_loop;
+pub mod actions;
 pub mod rate;
 pub mod session;
 pub mod stats;
