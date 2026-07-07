@@ -44,7 +44,14 @@ pub fn plugin(app: &mut App) {
             Update,
             (EditorPickSet, EditorGestureSet).chain(),
         )
-        .add_plugins((drag::plugin, undo::plugin, save::plugin, ui::plugin, picking::plugin));
+        .add_plugins((
+            drag::plugin,
+            undo::plugin,
+            save::plugin,
+            ui::plugin,
+            picking::plugin,
+            selection_box::plugin,
+        ));
 }
 
 /// Leaving Performance with the editor still open (e.g. the song ended mid-edit)
