@@ -12,7 +12,6 @@ pub mod rate;
 pub mod session;
 pub mod stats;
 pub mod toast;
-pub mod ui;
 
 use bevy::prelude::*;
 use game_shell::{AppState, PracticeIntent};
@@ -49,7 +48,7 @@ pub(super) fn plugin(app: &mut App) {
             .run_if(in_state(AppState::Performance))
             .run_if(resource_exists::<PracticeSession>),
     )
-    .add_plugins((ab_loop::plugin, hud::plugin, rate::plugin, stats::plugin, ui::plugin));
+    .add_plugins((ab_loop::plugin, hud::plugin, rate::plugin, stats::plugin));
 }
 
 fn enter_practice_session(intent: Res<PracticeIntent>, mut commands: Commands) {

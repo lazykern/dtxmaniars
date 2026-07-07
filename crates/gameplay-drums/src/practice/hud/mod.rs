@@ -3,6 +3,7 @@
 //! deliberately NOT a dtx-layout widget (no editor-pillar dependency).
 
 pub mod full_hud;
+pub mod mini_strip;
 pub mod timeline_ui;
 
 use bevy::prelude::*;
@@ -18,6 +19,7 @@ pub fn format_chart_time(ms: i64) -> String {
 
 pub(super) fn plugin(app: &mut App) {
     use game_shell::{AppState, PauseState};
+    mini_strip::plugin(app);
     app.init_resource::<full_hud::RailSelection>()
         .init_resource::<full_hud::ExitArmed>()
         .init_resource::<timeline_ui::TimelineGesture>()
@@ -39,4 +41,16 @@ pub(super) fn plugin(app: &mut App) {
                 .run_if(in_state(PauseState::Paused))
                 .run_if(resource_exists::<crate::practice::PracticeSession>),
         );
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn chart_time_formats_minutes_seconds_tenths() {
+        assert_eq!(format_chart_time(0), "0:00.0");
+        assert_eq!(format_chart_time(83_450), "1:23.4");
+        assert_eq!(format_chart_time(-50), "0:00.0");
+    }
 }
