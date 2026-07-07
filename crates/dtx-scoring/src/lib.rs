@@ -15,6 +15,7 @@
 pub mod gauge;
 pub mod hit_ranges;
 pub mod identity;
+pub mod nx_import;
 pub mod replay;
 pub mod score_ini;
 pub mod store;
