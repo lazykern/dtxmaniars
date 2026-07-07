@@ -115,6 +115,66 @@ pub fn advance_gesture(g: TimelineGesture, i: GestureInput) -> (TimelineGesture,
     }
 }
 
+use crate::practice::session::PracticeSession;
+use crate::seek::SeekToChartTime;
+
+/// Logical-px rect of the timeline strip node (same math as
+/// editor/picking.rs `node_rect`; duplicated to avoid coupling the
+/// practice pillar to editor files).
+fn strip_rect(node: &ComputedNode, gt: &GlobalTransform) -> Rect {
+    let inv = node.inverse_scale_factor();
+    let center = gt.translation().truncate() * inv;
+    let size = node.size() * inv;
+    Rect::from_center_size(center, size)
+}
+
+/// Mouse on the full-HUD timeline: press+release = seek (snapped via the
+/// seek message's `snap` field), press+drag = select A/B region
+/// (bar-snapped, min one bar, committed live while dragging).
+pub fn timeline_mouse(
+    windows: Query<&Window>,
+    buttons: Res<ButtonInput<MouseButton>>,
+    strips: Query<(&ComputedNode, &GlobalTransform), With<super::full_hud::FullHudTimelineStrip>>,
+    mut gesture: ResMut<TimelineGesture>,
+    mut session: ResMut<PracticeSession>,
+    timeline: Res<ChipTimeline>,
+    mut seeks: MessageWriter<SeekToChartTime>,
+) {
+    let Ok(window) = windows.single() else { return };
+    let Some(pos) = window.cursor_position() else {
+        return;
+    };
+    let Ok((node, gt)) = strips.single() else {
+        return;
+    };
+    let rect = strip_rect(node, gt);
+    let cursor_ms = cursor_to_ms(pos.x, rect.min.x, rect.width(), timeline.end_ms);
+    let input = GestureInput {
+        just_pressed: buttons.just_pressed(MouseButton::Left),
+        pressed: buttons.pressed(MouseButton::Left),
+        inside_strip: rect.contains(pos),
+        cursor_x: pos.x,
+        cursor_ms,
+    };
+    let (next, effect) = advance_gesture(*gesture, input);
+    *gesture = next;
+    match effect {
+        GestureEffect::None => {}
+        GestureEffect::Seek { target_ms } => {
+            let snapped = timeline.resolve_snap(target_ms, session.snap);
+            session.scrub_cursor_ms = Some(snapped);
+            seeks.write(SeekToChartTime {
+                target_ms,
+                snap: Some(session.snap),
+                attempt_start_ms: None,
+            });
+        }
+        GestureEffect::LoopPreview { anchor_ms } => {
+            session.loop_region = Some(drag_region(&timeline, anchor_ms, cursor_ms));
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

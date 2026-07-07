@@ -20,6 +20,7 @@ pub(super) fn plugin(app: &mut App) {
     use game_shell::{AppState, PauseState};
     app.init_resource::<full_hud::RailSelection>()
         .init_resource::<full_hud::ExitArmed>()
+        .init_resource::<timeline_ui::TimelineGesture>()
         .add_systems(
             OnEnter(PauseState::Paused),
             full_hud::spawn_full_hud.run_if(resource_exists::<crate::practice::PracticeSession>),
@@ -27,7 +28,12 @@ pub(super) fn plugin(app: &mut App) {
         .add_systems(OnExit(PauseState::Paused), full_hud::despawn_full_hud)
         .add_systems(
             Update,
-            (full_hud::full_hud_input, full_hud::update_full_hud_markers)
+            (
+                timeline_ui::timeline_mouse,
+                full_hud::full_hud_input,
+                full_hud::update_full_hud_markers,
+            )
+                .chain()
                 .run_if(in_state(AppState::Performance))
                 .run_if(in_state(PauseState::Paused))
                 .run_if(resource_exists::<crate::practice::PracticeSession>),
