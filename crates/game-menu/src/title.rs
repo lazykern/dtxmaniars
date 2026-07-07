@@ -98,6 +98,11 @@ fn spawn_title(mut commands: Commands, theme: Res<ThemeResource>) {
                         TextColor(t.text_secondary),
                     ));
                     bar.spawn((
+                        Text::new("F2 LAYOUT EDITOR"),
+                        Theme::font(12.0),
+                        TextColor(t.text_secondary),
+                    ));
+                    bar.spawn((
                         Text::new("ESC QUIT"),
                         Theme::font(12.0),
                         TextColor(t.text_secondary),
@@ -106,12 +111,53 @@ fn spawn_title(mut commands: Commands, theme: Res<ThemeResource>) {
         });
 }
 
-fn title_input(keys: Res<ButtonInput<KeyCode>>, mut requests: MessageWriter<TransitionRequest>) {
+fn title_input(
+    keys: Res<ButtonInput<KeyCode>>,
+    mut requests: MessageWriter<TransitionRequest>,
+    mut session: ResMut<game_shell::EditorSession>,
+    mut selected: ResMut<crate::song_select::SelectedSong>,
+    mut db: ResMut<dtx_library::SongDb>,
+) {
     if keys.just_pressed(KeyCode::Enter) {
         request_transition(&mut requests, AppState::SongSelect);
+    } else if keys.just_pressed(KeyCode::F2) {
+        match pick_editor_song(&mut db) {
+            Some(path) => {
+                session.0 = true;
+                selected.0 = Some(path);
+                request_transition(&mut requests, AppState::SongLoading);
+            }
+            None => warn!("layout editor: no songs available (empty SongDb)"),
+        }
     } else if keys.just_pressed(KeyCode::Escape) {
         request_transition(&mut requests, AppState::End);
     }
+}
+
+/// Song for the editor session: config `last_played` when it still exists,
+/// else a random SongDb entry (lazy-scanning the default dir like song
+/// select does).
+fn pick_editor_song(db: &mut dtx_library::SongDb) -> Option<std::path::PathBuf> {
+    let cfg = dtx_config::load(&dtx_config::default_path());
+    if let Some(last) = cfg.gameplay.last_played {
+        if last.exists() {
+            return Some(last);
+        }
+    }
+    if db.is_empty() {
+        let dir = dtx_library::default_song_dir();
+        if let Err(e) = db.rescan(&dir) {
+            warn!("layout editor: song scan failed: {e}");
+        }
+    }
+    if db.is_empty() {
+        return None;
+    }
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.subsec_nanos() as usize)
+        .unwrap_or(0);
+    db.get(nanos % db.len()).map(|s| s.path.clone())
 }
 
 #[cfg(test)]
