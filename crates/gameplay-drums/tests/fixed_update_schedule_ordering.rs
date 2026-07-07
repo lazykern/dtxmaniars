@@ -14,10 +14,20 @@
 //!
 //! This mirrors the ordering from `gameplay-drums/src/lib.rs`
 //! (`DrumsSets` + FixedUpdate wiring),
-//! `gameplay-drums/src/practice/stats.rs` (`track_attempt_stats`
-//! ordering), and `practice/ramp.rs` (`apply_ramp`: FixedUpdate,
+//! `gameplay-drums/src/practice/stats.rs`
+//! (`(track_attempt_stats, wrap_micro_report).chain().after(judge)`),
+//! and `practice/ramp.rs` (`apply_ramp`: FixedUpdate,
 //! `.after(track_attempt_stats)`) with dummy stand-in systems. If that
 //! wiring changes, update the mirror here too.
+//!
+//! Note: the `wrap_micro_report` stand-in mirrors wiring *fidelity* to
+//! the real registration; it adds no new cycle-detection power over
+//! `track_attempt_stub` alone (it's a downstream reader, same as
+//! `ramp_apply_stub`, and can't participate in a cycle either way).
+//! This file's guarantee is scoped to the hand-mirrored graph above —
+//! it does NOT rebuild the real `practice::plugin` (that's `pub(super)`
+//! and heavier to construct headlessly; see `tests/practice_hud.rs`
+//! for the real-registration smoke coverage that exists instead).
 
 use bevy::prelude::*;
 use gameplay_drums::DrumsSets;
@@ -27,6 +37,7 @@ fn sync_gameplay_clock_stub() {}
 fn apply_seek_stub() {}
 fn judge_stub() {}
 fn track_attempt_stub() {}
+fn wrap_micro_report_stub() {}
 fn ramp_apply_stub() {}
 
 /// Build an `App` with the FixedUpdate ordering graph mirrored from
@@ -70,7 +81,9 @@ fn build_app(cyclic: bool) -> App {
         app.add_systems(
             FixedUpdate,
             (
-                track_attempt_stub.after(judge_stub),
+                (track_attempt_stub, wrap_micro_report_stub)
+                    .chain()
+                    .after(judge_stub),
                 ramp_apply_stub.after(track_attempt_stub),
             ),
         );
