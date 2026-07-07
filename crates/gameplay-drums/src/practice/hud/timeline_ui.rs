@@ -72,9 +72,13 @@ pub enum GestureEffect {
     None,
     /// Click released: seek (snap applied by the consumer via the seek
     /// message's `snap` field — SeekToChartTime shape is frozen).
-    Seek { target_ms: i64 },
+    Seek {
+        target_ms: i64,
+    },
     /// Drag in progress: preview/commit `drag_region(anchor, cursor)`.
-    LoopPreview { anchor_ms: i64 },
+    LoopPreview {
+        anchor_ms: i64,
+    },
 }
 
 /// Pure gesture step: previous state + frame input → next state + effect.
@@ -95,11 +99,20 @@ pub fn advance_gesture(g: TimelineGesture, i: GestureInput) -> (TimelineGesture,
         }
         TimelineGesture::Pending { press_x, press_ms } => {
             if !i.pressed {
-                (TimelineGesture::Idle, GestureEffect::Seek { target_ms: press_ms })
+                (
+                    TimelineGesture::Idle,
+                    GestureEffect::Seek {
+                        target_ms: press_ms,
+                    },
+                )
             } else if (i.cursor_x - press_x).abs() > CLICK_SLOP_PX {
                 (
-                    TimelineGesture::DragLoop { anchor_ms: press_ms },
-                    GestureEffect::LoopPreview { anchor_ms: press_ms },
+                    TimelineGesture::DragLoop {
+                        anchor_ms: press_ms,
+                    },
+                    GestureEffect::LoopPreview {
+                        anchor_ms: press_ms,
+                    },
                 )
             } else {
                 (g, GestureEffect::None)
@@ -145,6 +158,7 @@ pub fn timeline_mouse(
     mut session: ResMut<PracticeSession>,
     timeline: Res<ChipTimeline>,
     mut seeks: MessageWriter<SeekToChartTime>,
+    mut toasts: ResMut<crate::practice::toast::ToastQueue>,
 ) {
     let Ok(window) = windows.single() else { return };
     let Some(pos) = window.cursor_position() else {
@@ -167,16 +181,20 @@ pub fn timeline_mouse(
     match effect {
         GestureEffect::None => {}
         GestureEffect::Seek { target_ms } => {
-            let snapped = timeline.resolve_snap(target_ms, session.snap);
-            session.scrub_cursor_ms = Some(snapped);
+            let snapped = timeline.resolve_snap(target_ms, session.transport.snap);
+            session.transport.scrub_cursor_ms = Some(snapped);
             seeks.write(SeekToChartTime {
                 target_ms,
-                snap: Some(session.snap),
-                attempt_start_ms: None,
+                snap: Some(session.transport.snap),
+                attempt_start_ms: Some(snapped),
             });
         }
         GestureEffect::LoopPreview { anchor_ms } => {
-            session.loop_region = Some(drag_region(&timeline, anchor_ms, cursor_ms));
+            if session.trainer.ramp.armed {
+                session.trainer.ramp.armed = false;
+                toasts.push("ramp off (loop changed)");
+            }
+            session.transport.loop_region = Some(drag_region(&timeline, anchor_ms, cursor_ms));
         }
     }
 }

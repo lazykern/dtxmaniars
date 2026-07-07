@@ -11,7 +11,7 @@ use gameplay_drums::orchestrator::{
     detect_end_of_stage, enter_derive_from_chart, enter_reset_run_state, enter_seed_bgm_state,
     DrumsStageCompletion,
 };
-use gameplay_drums::practice::session::{LoopRegion, PracticeSession};
+use gameplay_drums::practice::session::{LoopRegion, PracticeSession, PracticeTransport};
 use gameplay_drums::resources::{
     ActiveChart, BgmAdjustState, Combo, GameStartMs, GameplayClock, JudgmentCounts, Score,
 };
@@ -101,92 +101,61 @@ fn enter_performance(app: &mut App, chart: Chart) {
 }
 
 #[test]
-fn active_loop_region_suppresses_end_of_stage() {
-    let mut app = build_app();
-    enter_performance(&mut app, chart_with_measures(2));
-    app.world_mut().insert_resource(PracticeSession {
-        loop_region: Some(LoopRegion {
-            start_ms: 0,
-            end_ms: 2_000,
-        }),
-        ..Default::default()
-    });
-    {
-        let mut clock = app.world_mut().resource_mut::<GameplayClock>();
-        clock.start();
-        clock.sync(Some(50_000));
-    }
-    app.update();
-    let completion = app.world().resource::<DrumsStageCompletion>();
-    assert!(
-        !completion.end_requested,
-        "active A/B loop must suppress end-of-stage"
-    );
-}
-
-#[test]
-fn a_only_loop_region_does_not_suppress_end_of_stage() {
-    // Regression: an A marker with no B (end_ms == i64::MAX, not armed)
-    // must not suppress end-of-stage — the loop watcher only seeks back
-    // once armed, so suppressing here would softlock the stage.
-    let mut app = build_app();
-    enter_performance(&mut app, chart_with_measures(2));
-    app.world_mut().insert_resource(PracticeSession {
-        loop_region: Some(LoopRegion {
+fn practice_never_requests_end_of_stage() {
+    // v3: practice is a room — the implicit whole-song loop wraps
+    // instead; detect_end_of_stage must never fire while a
+    // PracticeSession exists, loop or no loop.
+    for region in [
+        None,
+        Some(LoopRegion {
             start_ms: 0,
             end_ms: i64::MAX,
-        }),
-        ..Default::default()
-    });
-    {
-        let mut clock = app.world_mut().resource_mut::<GameplayClock>();
-        clock.start();
-        clock.sync(Some(50_000));
+        }), // A-only
+        Some(LoopRegion {
+            start_ms: 0,
+            end_ms: 2_000,
+        }), // armed
+    ] {
+        let mut app = build_app();
+        enter_performance(&mut app, chart_with_measures(2));
+        let mut s = PracticeSession::default();
+        s.transport.loop_region = region;
+        app.world_mut().insert_resource(s);
+        {
+            let mut clock = app.world_mut().resource_mut::<GameplayClock>();
+            clock.start();
+            clock.sync(Some(50_000));
+        }
+        app.update();
+        assert!(
+            !app.world().resource::<DrumsStageCompletion>().end_requested,
+            "practice must never end the stage (region: {region:?})"
+        );
     }
-    app.update();
-    let completion = app.world().resource::<DrumsStageCompletion>();
-    assert!(
-        completion.end_requested,
-        "an A-only (unarmed) loop must not suppress end-of-stage"
-    );
-}
-
-#[test]
-fn cleared_loop_region_restores_end_of_stage() {
-    let mut app = build_app();
-    enter_performance(&mut app, chart_with_measures(2));
-    app.world_mut().insert_resource(PracticeSession::default());
-    {
-        let mut clock = app.world_mut().resource_mut::<GameplayClock>();
-        clock.start();
-        clock.sync(Some(50_000));
-    }
-    app.update();
-    let completion = app.world().resource::<DrumsStageCompletion>();
-    assert!(
-        completion.end_requested,
-        "practice without a loop region ends the stage normally"
-    );
 }
 
 #[test]
 fn loop_watcher_seeks_back_to_region_start() {
     let mut app = build_app();
     // Register the watcher in front of the seek system.
-    app.add_systems(
-        Update,
-        gameplay_drums::practice::ab_loop::loop_watcher
-            .before(gameplay_drums::seek::apply_seek_system)
-            .run_if(in_state(AppState::Performance))
-            .run_if(resource_exists::<PracticeSession>),
-    );
+    app.add_message::<gameplay_drums::practice::ab_loop::PracticeLoopCompleted>()
+        .add_systems(
+            Update,
+            gameplay_drums::practice::ab_loop::loop_watcher
+                .before(gameplay_drums::seek::apply_seek_system)
+                .run_if(in_state(AppState::Performance))
+                .run_if(resource_exists::<PracticeSession>),
+        );
     enter_performance(&mut app, chart_with_measures(8));
     app.world_mut().insert_resource(PracticeSession {
-        loop_region: Some(LoopRegion {
-            start_ms: 2_000,
-            end_ms: 6_000,
-        }),
-        preroll: gameplay_drums::practice::session::PrerollSetting::Off,
+        transport: PracticeTransport {
+            loop_region: Some(LoopRegion {
+                start_ms: 2_000,
+                end_ms: 6_000,
+            }),
+            preroll: gameplay_drums::practice::session::PrerollSetting::Off,
+            ..Default::default()
+        },
         ..Default::default()
     });
     {
@@ -318,7 +287,7 @@ fn bracket_key_sets_loop_start_snapped_to_bar() {
         .press(KeyCode::BracketLeft);
     app.update();
     let session = app.world().resource::<PracticeSession>();
-    let region = session.loop_region.expect("A marker set");
+    let region = session.transport.loop_region.expect("A marker set");
     assert_eq!(region.start_ms, 4_000, "A snaps down to the bar start");
 }
 
@@ -328,11 +297,14 @@ fn restart_key_seeks_to_loop_start() {
     add_action_wiring(&mut app);
     enter_performance(&mut app, chart_with_measures(8));
     app.world_mut().insert_resource(PracticeSession {
-        loop_region: Some(LoopRegion {
-            start_ms: 2_000,
-            end_ms: 6_000,
-        }),
-        preroll: gameplay_drums::practice::session::PrerollSetting::Off,
+        transport: PracticeTransport {
+            loop_region: Some(LoopRegion {
+                start_ms: 2_000,
+                end_ms: 6_000,
+            }),
+            preroll: gameplay_drums::practice::session::PrerollSetting::Off,
+            ..Default::default()
+        },
         ..Default::default()
     });
     {
@@ -351,7 +323,7 @@ fn restart_key_seeks_to_loop_start() {
     );
 }
 
-use gameplay_drums::events::{JudgmentEvent, NoteMissed};
+use gameplay_drums::events::{EmptyHit, JudgmentEvent, NoteMissed};
 
 fn add_ramp_wiring(app: &mut App) {
     if !app.world().contains_resource::<Messages<PracticeAction>>() {
@@ -359,6 +331,9 @@ fn add_ramp_wiring(app: &mut App) {
     }
     app.add_message::<JudgmentEvent>()
         .add_message::<NoteMissed>()
+        .add_message::<EmptyHit>()
+        .add_message::<gameplay_drums::practice::ab_loop::PracticeLoopCompleted>()
+        .init_resource::<gameplay_drums::practice::stats::LastFinalizedAttempt>()
         .init_resource::<gameplay_drums::practice::toast::ToastQueue>()
         .add_systems(
             Update,
@@ -378,6 +353,7 @@ fn add_ramp_wiring(app: &mut App) {
             Update,
             (
                 gameplay_drums::practice::stats::track_attempt_stats,
+                gameplay_drums::practice::stats::wrap_micro_report,
                 gameplay_drums::practice::ramp::apply_ramp,
             )
                 .chain()
@@ -395,16 +371,19 @@ fn send_practice_action(app: &mut App, action: PracticeAction) {
 
 fn looped_session(rate: f32) -> PracticeSession {
     let mut s = PracticeSession {
-        loop_region: Some(LoopRegion {
-            start_ms: 2_000,
-            end_ms: 6_000,
-        }),
-        preroll: gameplay_drums::practice::session::PrerollSetting::Off,
-        rate,
+        transport: PracticeTransport {
+            loop_region: Some(LoopRegion {
+                start_ms: 2_000,
+                end_ms: 6_000,
+            }),
+            preroll: gameplay_drums::practice::session::PrerollSetting::Off,
+            user_tempo: 1.0,
+            ..Default::default()
+        },
         ..Default::default()
     };
-    s.ramp.armed = true;
-    s.ramp.current_rate = rate;
+    s.trainer.ramp.armed = true;
+    s.trainer.ramp.step_tempo = rate;
     s.current_attempt.start_ms = 2_000;
     s
 }
@@ -427,6 +406,7 @@ fn finish_loop_pass(app: &mut App, perfect_hits: u32) {
             .write(NoteMissed {
                 lane: 3,
                 audio_ms: 5_000,
+                chip_idx: 1, // value=1.0 -> end of measure 1 == 4000ms, inside the 2000-6000 loop
             });
     }
     {
@@ -450,11 +430,11 @@ fn ramp_steps_rate_up_after_clean_pass() {
     finish_loop_pass(&mut app, 4);
     let session = app.world().resource::<PracticeSession>();
     assert!(
-        (session.rate - 0.75).abs() < 1e-6,
+        (session.effective_tempo() - 0.75).abs() < 1e-6,
         "clean pass steps 0.70 → 0.75, got {}",
-        session.rate
+        session.effective_tempo()
     );
-    assert!(session.ramp.armed);
+    assert!(session.trainer.ramp.armed);
 }
 
 #[test]
@@ -469,57 +449,30 @@ fn two_failed_passes_step_rate_down() {
         clock.sync(Some(3_000));
     }
     finish_loop_pass(&mut app, 0); // fail #1 → hold
-    assert!((app.world().resource::<PracticeSession>().rate - 0.80).abs() < 1e-6);
+    assert!((app.world().resource::<PracticeSession>().effective_tempo() - 0.80).abs() < 1e-6);
     finish_loop_pass(&mut app, 0); // fail #2 → step down
     let session = app.world().resource::<PracticeSession>();
     assert!(
-        (session.rate - 0.75).abs() < 1e-6,
+        (session.effective_tempo() - 0.75).abs() < 1e-6,
         "second fail steps 0.80 → 0.75, got {}",
-        session.rate
+        session.effective_tempo()
     );
 }
 
 #[test]
-fn skip_next_roll_ignores_the_stale_pre_arm_attempt() {
+fn toggle_ramp_without_loop_arms_over_whole_song() {
     let mut app = build_app();
     add_ramp_wiring(&mut app);
     enter_performance(&mut app, chart_with_measures(8));
-    let mut s = looped_session(0.70);
-    s.ramp.skip_next_roll = true;
-    app.world_mut().insert_resource(s);
-    {
-        let mut clock = app.world_mut().resource_mut::<GameplayClock>();
-        clock.start();
-        clock.sync(Some(3_000));
-    }
-    finish_loop_pass(&mut app, 4);
-    let session = app.world().resource::<PracticeSession>();
-    assert!(
-        (session.rate - 0.70).abs() < 1e-6,
-        "the roll right after arming must not step the ramp"
-    );
-    assert!(!session.ramp.skip_next_roll, "flag consumed");
-}
-
-#[test]
-fn toggle_ramp_without_loop_is_a_noop_error_toast() {
-    let mut app = build_app();
-    add_ramp_wiring(&mut app);
-    enter_performance(&mut app, chart_with_measures(8));
-    app.world_mut()
-        .insert_resource(PracticeSession::default());
+    app.world_mut().insert_resource(PracticeSession::default());
     send_practice_action(&mut app, PracticeAction::ToggleRamp);
     app.update();
     let session = app.world().resource::<PracticeSession>();
     assert!(
-        !session.ramp.armed,
-        "arming without an A/B loop must be a no-op"
+        session.trainer.ramp.armed,
+        "arming with no loop uses the whole song"
     );
-    let toasts = app.world().resource::<gameplay_drums::practice::toast::ToastQueue>();
-    assert!(
-        !toasts.0.is_empty(),
-        "arming without a loop must push an error toast"
-    );
+    assert!((session.effective_tempo() - 0.70).abs() < 1e-6);
 }
 
 #[test]
@@ -528,15 +481,245 @@ fn toggle_ramp_with_loop_arms() {
     add_ramp_wiring(&mut app);
     enter_performance(&mut app, chart_with_measures(8));
     app.world_mut().insert_resource(PracticeSession {
-        loop_region: Some(LoopRegion {
-            start_ms: 2_000,
-            end_ms: 6_000,
-        }),
-        preroll: gameplay_drums::practice::session::PrerollSetting::Off,
+        transport: PracticeTransport {
+            loop_region: Some(LoopRegion {
+                start_ms: 2_000,
+                end_ms: 6_000,
+            }),
+            preroll: gameplay_drums::practice::session::PrerollSetting::Off,
+            ..Default::default()
+        },
         ..Default::default()
     });
     send_practice_action(&mut app, PracticeAction::ToggleRamp);
     app.update();
     let session = app.world().resource::<PracticeSession>();
-    assert!(session.ramp.armed, "arming with an A/B loop must succeed");
+    assert!(
+        session.trainer.ramp.armed,
+        "arming with an A/B loop must succeed"
+    );
+    assert!(
+        (session.effective_tempo() - 0.70).abs() < 1e-6,
+        "armed ramp starts at the configured start tempo"
+    );
+    assert!(
+        (session.transport.user_tempo - 1.0).abs() < 1e-6,
+        "arming must not touch the user's chosen tempo"
+    );
+}
+
+#[test]
+fn tempo_nudge_while_armed_disarms_and_nudges_user_tempo() {
+    let mut app = build_app();
+    add_action_wiring(&mut app);
+    enter_performance(&mut app, chart_with_measures(8));
+    let mut s = looped_session(0.70);
+    s.transport.user_tempo = 1.0;
+    app.world_mut().insert_resource(s);
+    {
+        let mut clock = app.world_mut().resource_mut::<GameplayClock>();
+        clock.start();
+        clock.sync(Some(3_000));
+    }
+    app.world_mut()
+        .resource_mut::<ButtonInput<KeyCode>>()
+        .press(KeyCode::Minus);
+    app.update();
+    let session = app.world().resource::<PracticeSession>();
+    assert!(!session.trainer.ramp.armed, "manual nudge disarms the ramp");
+    assert!(
+        (session.transport.user_tempo - 0.95).abs() < 1e-6,
+        "nudge applies to the user tempo (1.00 → 0.95)"
+    );
+}
+
+#[test]
+fn pre_roll_miss_is_excluded_from_attempt() {
+    let mut app = build_app();
+    add_ramp_wiring(&mut app);
+    enter_performance(&mut app, chart_with_measures(8));
+    // Attempt starts at 4000ms; chip 0 (at 2000ms) is pre-roll.
+    let mut s = PracticeSession::default();
+    s.current_attempt.start_ms = 4_000;
+    app.world_mut().insert_resource(s);
+    {
+        let mut clock = app.world_mut().resource_mut::<GameplayClock>();
+        clock.start();
+        clock.sync(Some(4_500));
+    }
+    app.world_mut()
+        .resource_mut::<Messages<NoteMissed>>()
+        .write(NoteMissed {
+            lane: 3,
+            audio_ms: 2_300,
+            chip_idx: 0, // value=1.0 -> end of measure 0 == 2000ms < attempt start 4000 → pre-roll
+        });
+    app.world_mut()
+        .resource_mut::<Messages<NoteMissed>>()
+        .write(NoteMissed {
+            lane: 3,
+            audio_ms: 4_300,
+            chip_idx: 1, // value=1.0 -> end of measure 1 == 4000ms >= 4000 → counts
+        });
+    app.update();
+    let session = app.world().resource::<PracticeSession>();
+    assert_eq!(
+        session.current_attempt.counts.miss, 1,
+        "pre-roll miss must not count against the attempt"
+    );
+}
+
+#[test]
+fn empty_hits_accumulate_as_overhits() {
+    let mut app = build_app();
+    add_ramp_wiring(&mut app);
+    enter_performance(&mut app, chart_with_measures(8));
+    app.world_mut().insert_resource(PracticeSession::default());
+    {
+        let mut clock = app.world_mut().resource_mut::<GameplayClock>();
+        clock.start();
+        clock.sync(Some(1_000));
+    }
+    app.world_mut()
+        .resource_mut::<Messages<gameplay_drums::events::EmptyHit>>()
+        .write(gameplay_drums::events::EmptyHit {
+            lane: 3,
+            audio_ms: 1_000,
+        });
+    app.world_mut()
+        .resource_mut::<Messages<gameplay_drums::events::EmptyHit>>()
+        .write(gameplay_drums::events::EmptyHit {
+            lane: 4,
+            audio_ms: 1_100,
+        });
+    app.update();
+    let session = app.world().resource::<PracticeSession>();
+    assert_eq!(session.current_attempt.overhits, 2);
+}
+
+#[test]
+fn manual_restart_does_not_step_the_ramp() {
+    let mut app = build_app();
+    add_action_wiring(&mut app);
+    add_ramp_wiring(&mut app);
+    enter_performance(&mut app, chart_with_measures(8));
+    app.world_mut().insert_resource(looped_session(0.70));
+    {
+        let mut clock = app.world_mut().resource_mut::<GameplayClock>();
+        clock.start();
+        clock.sync(Some(3_000));
+    }
+    // A clean partial attempt, then a manual restart (R) — NOT a wrap.
+    app.world_mut()
+        .resource_mut::<Messages<JudgmentEvent>>()
+        .write(JudgmentEvent {
+            lane: 3,
+            kind: dtx_scoring::JudgmentKind::Perfect,
+            delta_ms: 0,
+            chip_idx: 0,
+        });
+    app.world_mut()
+        .resource_mut::<ButtonInput<KeyCode>>()
+        .press(KeyCode::KeyR);
+    app.update();
+    let session = app.world().resource::<PracticeSession>();
+    assert!(
+        (session.effective_tempo() - 0.70).abs() < 1e-6,
+        "manual restart must never count as a ramp pass"
+    );
+}
+
+#[test]
+fn empty_loop_pass_makes_no_ramp_decision() {
+    let mut app = build_app();
+    add_ramp_wiring(&mut app);
+    enter_performance(&mut app, chart_with_measures(8));
+    // A previous clean pass already sits in history at this loop's start,
+    // so the OLD stale-attempt bug would re-read it and step up.
+    let mut s = looped_session(0.70);
+    s.attempt_history
+        .push(gameplay_drums::practice::session::AttemptRecord {
+            start_ms: 2_000,
+            end_ms: 6_000,
+            tempo: 0.70,
+            counts: Default::default(),
+            overhits: 0,
+            max_combo: 4,
+            accuracy_pct: 100.0,
+            mean_error_ms: 0.0,
+        });
+    app.world_mut().insert_resource(s);
+    {
+        let mut clock = app.world_mut().resource_mut::<GameplayClock>();
+        clock.start();
+        clock.sync(Some(3_000));
+    }
+    // Wrap with ZERO judgments (current_attempt has no data → not recorded).
+    {
+        let mut clock = app.world_mut().resource_mut::<GameplayClock>();
+        clock.sync(Some(6_100));
+    }
+    app.update();
+    let session = app.world().resource::<PracticeSession>();
+    assert!(
+        (session.effective_tempo() - 0.70).abs() < 1e-6,
+        "an empty pass must not re-apply the previous attempt's accuracy"
+    );
+}
+
+#[test]
+fn no_loop_set_wraps_at_chart_end_as_implicit_loop() {
+    let mut app = build_app();
+    add_ramp_wiring(&mut app);
+    enter_performance(&mut app, chart_with_measures(4)); // chart end ≈ 8000-10000ms
+    app.world_mut().insert_resource(PracticeSession::default());
+    let end = app
+        .world()
+        .resource::<gameplay_drums::timeline::ChipTimeline>()
+        .end_ms;
+    {
+        let mut clock = app.world_mut().resource_mut::<GameplayClock>();
+        clock.start();
+        clock.sync(Some(end + 1_000)); // past chart end
+    }
+    app.update();
+    let now = app.world().resource::<GameplayClock>().current_ms;
+    assert!(
+        now < end,
+        "reaching chart end in practice wraps to the start (implicit loop): now={now} end={end}"
+    );
+}
+
+#[test]
+fn loop_wrap_pushes_a_micro_report_toast() {
+    let mut app = build_app();
+    add_ramp_wiring(&mut app);
+    enter_performance(&mut app, chart_with_measures(8));
+    let mut s = looped_session(0.70);
+    s.trainer.ramp.armed = false; // report fires with or without ramp
+    app.world_mut().insert_resource(s);
+    {
+        let mut clock = app.world_mut().resource_mut::<GameplayClock>();
+        clock.start();
+        clock.sync(Some(3_000));
+    }
+    finish_loop_pass(&mut app, 4);
+    let toasts = app
+        .world()
+        .resource::<gameplay_drums::practice::toast::ToastQueue>();
+    let report = toasts
+        .0
+        .iter()
+        .find(|t| t.text.starts_with("pass "))
+        .expect("wrap must push a micro-report toast");
+    assert!(
+        report.text.contains('%'),
+        "report shows accuracy: {}",
+        report.text
+    );
+    assert!(
+        report.text.contains("ms"),
+        "report shows mean error: {}",
+        report.text
+    );
 }

@@ -12,9 +12,9 @@ use crate::events::NoteMissed;
 use crate::hud::HudRoot;
 use crate::interp::RenderClock;
 use crate::judge::{BarLengthChangeList, BpmChangeList, JudgedChips};
-use crate::lanes::Lanes;
 use crate::lane_map::lane_of;
 use crate::lane_map::{lane_channel, LANE_COUNT};
+use crate::lanes::Lanes;
 use crate::layout::PlayfieldLayout;
 use crate::resources::{ActiveChart, GameplayClock, ScrollSettings};
 use dtx_timing::math::ChartTiming;
@@ -245,6 +245,7 @@ fn despawn_missed_notes_system(
                 missed.write(NoteMissed {
                     lane: note.lane,
                     audio_ms: now,
+                    chip_idx: note.chip_id,
                 });
                 hit_lanes[note.lane as usize] = true;
             }

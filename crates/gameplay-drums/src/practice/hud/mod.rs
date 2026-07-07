@@ -27,6 +27,7 @@ pub fn plugin(app: &mut App) {
     app.init_resource::<full_hud::RailSelection>()
         .init_resource::<full_hud::ExitArmed>()
         .init_resource::<timeline_ui::TimelineGesture>()
+        .init_resource::<crate::practice::toast::ToastQueue>()
         .add_systems(
             OnEnter(PauseState::Paused),
             full_hud::spawn_full_hud.run_if(resource_exists::<crate::practice::PracticeSession>),

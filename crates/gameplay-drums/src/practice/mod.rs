@@ -26,7 +26,10 @@ pub(super) fn plugin(app: &mut App) {
         .add_message::<actions::PracticeAction>()
         .add_systems(
             Update,
-            (actions::emit_practice_actions, actions::apply_practice_actions)
+            (
+                actions::emit_practice_actions,
+                actions::apply_practice_actions,
+            )
                 .chain()
                 .run_if(in_state(AppState::Performance))
                 .run_if(in_state(game_shell::PauseState::Running))
@@ -50,7 +53,13 @@ pub(super) fn plugin(app: &mut App) {
             .run_if(in_state(AppState::Performance))
             .run_if(resource_exists::<PracticeSession>),
     )
-    .add_plugins((ab_loop::plugin, hud::plugin, ramp::plugin, rate::plugin, stats::plugin));
+    .add_plugins((
+        ab_loop::plugin,
+        hud::plugin,
+        ramp::plugin,
+        rate::plugin,
+        stats::plugin,
+    ));
 }
 
 fn enter_practice_session(intent: Res<PracticeIntent>, mut commands: Commands) {

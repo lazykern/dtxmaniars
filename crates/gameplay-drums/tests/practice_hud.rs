@@ -75,7 +75,10 @@ fn full_hud_absent_without_practice_session() {
 fn normal_pause_overlay_suppressed_in_practice() {
     let mut app = build_app();
     app.init_resource::<gameplay_drums::pause::PauseSelection>()
-        .add_systems(OnEnter(PauseState::Paused), gameplay_drums::pause::spawn_overlay);
+        .add_systems(
+            OnEnter(PauseState::Paused),
+            gameplay_drums::pause::spawn_overlay,
+        );
     app.world_mut().insert_resource(PracticeSession::default());
     set_paused(&mut app, true);
     let overlays = app
@@ -106,15 +109,15 @@ fn real_hud_plugin_schedule_builds_headlessly() {
         bevy::state::app::StatesPlugin,
         bevy::input::InputPlugin,
     ))
-        .init_state::<AppState>()
-        .init_state::<PauseState>()
-        .add_message::<game_shell::TransitionRequest>()
-        .add_message::<gameplay_drums::seek::SeekToChartTime>()
-        .add_message::<gameplay_drums::practice::actions::PracticeAction>()
-        .init_resource::<GameplayClock>()
-        .init_resource::<ChipTimeline>()
-        .world_mut()
-        .insert_resource(PracticeSession::default());
+    .init_state::<AppState>()
+    .init_state::<PauseState>()
+    .add_message::<game_shell::TransitionRequest>()
+    .add_message::<gameplay_drums::seek::SeekToChartTime>()
+    .add_message::<gameplay_drums::practice::actions::PracticeAction>()
+    .init_resource::<GameplayClock>()
+    .init_resource::<ChipTimeline>()
+    .world_mut()
+    .insert_resource(PracticeSession::default());
 
     gameplay_drums::practice::hud::plugin(&mut app);
 
@@ -173,7 +176,10 @@ fn quick_tier_entities_spawn_on_entering_performance() {
         .query::<&gameplay_drums::practice::hud::mini_strip::MiniStripRoot>()
         .iter(app.world())
         .count();
-    assert_eq!(mini_strips, 1, "mini strip must spawn on entering Performance");
+    assert_eq!(
+        mini_strips, 1,
+        "mini strip must spawn on entering Performance"
+    );
 
     let chips = app
         .world_mut()
@@ -181,6 +187,63 @@ fn quick_tier_entities_spawn_on_entering_performance() {
         .iter(app.world())
         .count();
     assert_eq!(chips, 1, "status chip must spawn on entering Performance");
+}
+
+use gameplay_drums::practice::hud::full_hud::{full_hud_input, ExitArmed, RailItem};
+use gameplay_drums::practice::session::{LoopRegion, PracticeTransport};
+
+#[test]
+fn rail_clear_loop_disarms_the_ramp() {
+    // Regression: the rail "Clear loop" row must go through
+    // `session.clear_loop()` (which disarms) — a raw `loop_region = None`
+    // would leave the ramp armed against a now-different span.
+    let mut app = App::new();
+    app.add_plugins((MinimalPlugins, bevy::state::app::StatesPlugin))
+        .init_state::<AppState>()
+        .init_state::<PauseState>()
+        .add_message::<game_shell::TransitionRequest>()
+        .add_message::<gameplay_drums::seek::SeekToChartTime>()
+        .add_message::<gameplay_drums::practice::actions::PracticeAction>()
+        .init_resource::<ButtonInput<KeyCode>>()
+        .init_resource::<GameplayClock>()
+        .init_resource::<ChipTimeline>()
+        .init_resource::<RailSelection>()
+        .init_resource::<ExitArmed>()
+        .add_systems(Update, full_hud_input);
+
+    let mut session = PracticeSession {
+        transport: PracticeTransport {
+            loop_region: Some(LoopRegion {
+                start_ms: 2_000,
+                end_ms: 6_000,
+            }),
+            ..Default::default()
+        },
+        ..Default::default()
+    };
+    session.trainer.ramp.armed = true;
+    app.world_mut().insert_resource(session);
+
+    // Point the rail selection at the Clear-loop row and press Enter.
+    let idx = RailItem::ORDER
+        .iter()
+        .position(|i| *i == RailItem::ClearLoop)
+        .expect("ClearLoop is a rail row");
+    app.world_mut().resource_mut::<RailSelection>().0 = idx;
+    app.world_mut()
+        .resource_mut::<ButtonInput<KeyCode>>()
+        .press(KeyCode::Enter);
+    app.update();
+
+    let session = app.world().resource::<PracticeSession>();
+    assert!(
+        session.transport.loop_region.is_none(),
+        "rail Clear loop clears the region"
+    );
+    assert!(
+        !session.trainer.ramp.armed,
+        "rail Clear loop must disarm the ramp"
+    );
 }
 
 use gameplay_drums::practice::hud::full_hud::{transport_buttons, TransportButton};
@@ -204,11 +267,13 @@ fn next_bar_button_moves_scrub_cursor() {
     };
     let bpm = gameplay_drums::judge::BpmChangeList::from_chart(&chart);
     let bar = gameplay_drums::judge::BarLengthChangeList::from_chart(&chart);
-    app.world_mut().insert_resource(ChipTimeline::from_chart(
-        &chart, &bpm, &bar, 0, 4_000,
-    ));
+    app.world_mut()
+        .insert_resource(ChipTimeline::from_chart(&chart, &bpm, &bar, 0, 4_000));
     app.world_mut().insert_resource(PracticeSession {
-        scrub_cursor_ms: Some(0),
+        transport: gameplay_drums::practice::session::PracticeTransport {
+            scrub_cursor_ms: Some(0),
+            ..Default::default()
+        },
         ..Default::default()
     });
     app.world_mut()
@@ -217,6 +282,7 @@ fn next_bar_button_moves_scrub_cursor() {
     assert_eq!(
         app.world()
             .resource::<PracticeSession>()
+            .transport
             .scrub_cursor_ms,
         Some(2_000),
         "next-bar button advances the scrub cursor one bar"

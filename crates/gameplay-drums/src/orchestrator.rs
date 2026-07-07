@@ -401,11 +401,10 @@ pub fn detect_end_of_stage(
     if session.0 {
         return; // editor session loops via session_loop_watcher instead
     }
-    // An armed A/B loop owns the stage end: the loop watcher seeks back
-    // before the chart end is ever reached "for real". An A-only region
-    // (B never set) is not armed and must not suppress end-of-stage, or
-    // playing to chart end softlocks the stage.
-    if practice.as_ref().is_some_and(|s| s.loop_armed()) {
+    // Practice is a room, not a run: the implicit whole-song loop wraps
+    // at the chart end (see practice::ab_loop), so the stage never ends
+    // and the XG end bonus never applies while practicing.
+    if practice.is_some() {
         return;
     }
     if !clock.is_ready() {

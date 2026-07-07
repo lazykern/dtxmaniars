@@ -290,9 +290,9 @@ mod tests {
 
     #[test]
     fn visibility_respects_mode() {
-        let transport = default_instance(WidgetKind::PracticeTransport);
-        assert!(!widget_visible(&transport, false));
-        assert!(widget_visible(&transport, true));
+        let score_panel = default_instance(WidgetKind::ScorePanel);
+        assert!(widget_visible(&score_panel, false));
+        assert!(!widget_visible(&score_panel, true));
         let combo = default_instance(WidgetKind::Combo);
         assert!(widget_visible(&combo, false));
         assert!(widget_visible(&combo, true));

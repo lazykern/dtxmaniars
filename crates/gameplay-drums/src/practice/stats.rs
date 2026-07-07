@@ -17,20 +17,27 @@ use dtx_scoring::JudgmentKind;
 use game_shell::AppState;
 
 use super::session::PracticeSession;
-use crate::events::{JudgmentEvent, NoteMissed};
+use crate::events::{EmptyHit, JudgmentEvent, NoteMissed};
 use crate::resources::{Combo, GameplayClock};
 use crate::seek::SeekToChartTime;
 use crate::timeline::ChipTimeline;
 
 pub(super) fn plugin(app: &mut App) {
-    app.add_systems(
+    app.init_resource::<LastFinalizedAttempt>().add_systems(
         FixedUpdate,
-        track_attempt_stats
+        (track_attempt_stats, wrap_micro_report)
+            .chain()
             .after(crate::judge::judge_lane_hit_system)
             .run_if(in_state(AppState::Performance))
             .run_if(resource_exists::<PracticeSession>),
     );
 }
+
+/// The attempt finalized by the most recent seek this tick: `Some` when
+/// it had data and was pushed to history, `None` when it was empty.
+/// Read by `apply_ramp` (and later the wrap report) in the same tick.
+#[derive(Resource, Debug, Default, Clone)]
+pub struct LastFinalizedAttempt(pub Option<crate::practice::session::AttemptRecord>);
 
 /// Fold one judgement into the attempt (pure; unit-tested).
 pub fn apply_judgment(
@@ -58,12 +65,14 @@ pub fn apply_judgment(
 pub fn track_attempt_stats(
     mut judgments: MessageReader<JudgmentEvent>,
     mut missed: MessageReader<NoteMissed>,
+    mut empty_hits: MessageReader<EmptyHit>,
     mut seeks: MessageReader<SeekToChartTime>,
     timeline: Res<ChipTimeline>,
     clock: Res<GameplayClock>,
     mut last_seek_from: ResMut<crate::seek::LastSeekFrom>,
     mut session: ResMut<PracticeSession>,
     mut combo: ResMut<Combo>,
+    mut finalized: ResMut<LastFinalizedAttempt>,
 ) {
     for ev in judgments.read() {
         let judge_ms = timeline
@@ -76,20 +85,58 @@ pub fn track_attempt_stats(
         }
         apply_judgment(&mut session.current_attempt, ev.kind, ev.delta_ms);
     }
-    for _ in missed.read() {
-        // NoteMissed carries no chip index; pre-roll chips are seeded as
-        // judged by the seek, so any miss here belongs to the attempt.
+    for m in missed.read() {
+        let judge_ms = timeline
+            .judge_ms_by_idx
+            .get(m.chip_idx)
+            .copied()
+            .unwrap_or(i64::MIN);
+        if judge_ms < session.current_attempt.start_ms {
+            continue; // pre-roll chip: audible feedback only
+        }
         session.current_attempt.counts.miss += 1;
         session.current_attempt.combo = 0;
+    }
+    for _ in empty_hits.read() {
+        session.current_attempt.overhits += 1;
     }
     if let Some(seek) = seeks.read().last() {
         // Pre-seek clock, captured by apply_seek_system earlier this tick.
         let end_ms = last_seek_from.0.take().unwrap_or(clock.current_ms);
         let next_start = seek.attempt_start_ms.unwrap_or(seek.target_ms);
-        session.roll_attempt(end_ms, next_start);
+        finalized.0 = session.roll_attempt(end_ms, next_start);
         // Fresh attempt = fresh visible combo.
         combo.current = 0;
     }
+}
+
+/// One-line feedback at each loop wrap: `pass 5 · 93.8% · 3 miss · +18ms`
+/// (`+` = late, `−` = early). Pass count = attempts on this span in
+/// history. Feedback lands at the loop boundary, never mid-play.
+pub fn wrap_micro_report(
+    mut completions: MessageReader<super::ab_loop::PracticeLoopCompleted>,
+    finalized: Res<LastFinalizedAttempt>,
+    session: Res<PracticeSession>,
+    mut toasts: ResMut<super::toast::ToastQueue>,
+) {
+    let Some(done) = completions.read().last().copied() else {
+        return;
+    };
+    let Some(att) = finalized.0.as_ref() else {
+        return;
+    };
+    if att.start_ms != done.region_start_ms {
+        return;
+    }
+    let n = session
+        .attempt_history
+        .iter()
+        .filter(|a| a.start_ms == done.region_start_ms)
+        .count();
+    toasts.push(format!(
+        "pass {n} · {:.1}% · {} miss · {:+.0}ms",
+        att.accuracy_pct, att.counts.miss, att.mean_error_ms
+    ));
 }
 
 #[cfg(test)]

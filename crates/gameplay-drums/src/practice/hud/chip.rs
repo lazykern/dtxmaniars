@@ -13,26 +13,47 @@ pub struct StatusChip;
 
 /// Pure: chip contents from session state. `bar_ms` from `ChipTimeline`.
 pub fn chip_text(session: &PracticeSession, bar_ms: &[i64]) -> String {
-    let mut parts = vec![format!("{:.2}×", session.rate)];
-    if session.ramp.armed {
-        let (cur, total) =
-            crate::practice::ramp::ramp_step_index(&session.ramp_config, session.rate);
+    let mut parts = vec![format!("{:.2}×", session.effective_tempo())];
+    if session.trainer.ramp.armed {
+        let (cur, total) = crate::practice::ramp::ramp_step_index(
+            &session.trainer.ramp_config,
+            session.effective_tempo(),
+        );
         parts.push(format!("RAMP {cur}/{total}"));
     }
-    if let Some(r) = session.loop_region.filter(|r| r.end_ms != i64::MAX) {
+    if let Some(r) = session
+        .transport
+        .loop_region
+        .filter(|r| r.end_ms != i64::MAX)
+    {
         parts.push(format!(
             "loop {}–{}",
             bar_number(bar_ms, r.start_ms),
             bar_number(bar_ms, r.end_ms)
         ));
     }
-    if let Some(last) = session.attempt_history.last() {
+    let span_start = session
+        .transport
+        .loop_region
+        .filter(|r| r.end_ms != i64::MAX)
+        .map(|r| r.start_ms)
+        .unwrap_or(0);
+    if let Some(last) = session
+        .attempt_history
+        .iter()
+        .filter(|a| a.start_ms == span_start)
+        .next_back()
+    {
         parts.push(format!("{:.0}%", last.accuracy_pct));
     }
     parts.join(" · ")
 }
 
-pub fn spawn_chip(mut commands: Commands, session: Res<PracticeSession>, timeline: Res<ChipTimeline>) {
+pub fn spawn_chip(
+    mut commands: Commands,
+    session: Res<PracticeSession>,
+    timeline: Res<ChipTimeline>,
+) {
     let theme = Theme::default();
     commands.spawn((
         StatusChip,
@@ -95,18 +116,29 @@ mod tests {
         let bar_ms = vec![0, 2_000, 4_000, 6_000, 8_000];
         assert_eq!(chip_text(&s, &bar_ms), "1.00×");
 
-        s.rate = 0.85;
-        s.loop_region = Some(LoopRegion {
+        s.transport.user_tempo = 0.85;
+        s.transport.loop_region = Some(LoopRegion {
             start_ms: 2_000,
             end_ms: 6_000,
         });
         s.attempt_history.push(AttemptRecord {
             start_ms: 2_000,
             end_ms: 6_000,
-            rate: 0.85,
+            tempo: 0.85,
             counts: Default::default(),
             max_combo: 12,
+            overhits: 0,
             accuracy_pct: 94.2,
+            mean_error_ms: -3.0,
+        });
+        s.attempt_history.push(AttemptRecord {
+            start_ms: 999,
+            end_ms: 3_000,
+            tempo: 0.85,
+            counts: Default::default(),
+            max_combo: 3,
+            overhits: 0,
+            accuracy_pct: 11.0,
             mean_error_ms: -3.0,
         });
         assert_eq!(chip_text(&s, &bar_ms), "0.85× · loop 2–4 · 94%");
@@ -115,8 +147,9 @@ mod tests {
     #[test]
     fn chip_text_shows_ramp_segment_when_armed() {
         let mut s = PracticeSession::default();
-        s.rate = 0.85;
-        s.ramp.armed = true;
+        s.transport.user_tempo = 1.0;
+        s.trainer.ramp.armed = true;
+        s.trainer.ramp.step_tempo = 0.85;
         let bar_ms = vec![0, 2_000];
         assert_eq!(chip_text(&s, &bar_ms), "0.85× · RAMP 3/6");
     }

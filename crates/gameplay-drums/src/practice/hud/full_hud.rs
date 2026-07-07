@@ -50,25 +50,27 @@ pub enum RailItem {
     RampTarget,
     RampStep,
     RampThreshold,
+    RampStreak,
     ExitPractice,
 }
 
 impl RailItem {
-    pub const ORDER: [RailItem; 15] = [
+    pub const ORDER: [RailItem; 16] = [
         RailItem::Resume,
         RailItem::Scrub,
         RailItem::RestartSection,
-        RailItem::SetA,
-        RailItem::SetB,
-        RailItem::ClearLoop,
         RailItem::Rate,
         RailItem::Snap,
         RailItem::Preroll,
+        RailItem::SetA,
+        RailItem::SetB,
+        RailItem::ClearLoop,
         RailItem::RampArm,
         RailItem::RampStart,
         RailItem::RampTarget,
         RailItem::RampStep,
         RailItem::RampThreshold,
+        RailItem::RampStreak,
         RailItem::ExitPractice,
     ];
 }
@@ -84,7 +86,7 @@ pub struct ExitArmed(pub bool);
 pub fn rail_label(item: RailItem, session: &PracticeSession, exit_armed: bool) -> String {
     match item {
         RailItem::Resume => "Resume".into(),
-        RailItem::Scrub => match session.scrub_cursor_ms {
+        RailItem::Scrub => match session.transport.scrub_cursor_ms {
             Some(ms) => format!("Scrub  ◀ {} ▶   (Enter: play here)", format_chart_time(ms)),
             None => "Scrub  ◀ ▶".into(),
         },
@@ -92,26 +94,48 @@ pub fn rail_label(item: RailItem, session: &PracticeSession, exit_armed: bool) -
         RailItem::SetA => "Set A here".into(),
         RailItem::SetB => "Set B here".into(),
         RailItem::ClearLoop => "Clear loop".into(),
-        RailItem::Rate => format!("Rate  ◀ x{:.2} ▶", session.rate),
-        RailItem::Snap => format!("Snap  ◀ {} ▶", session.snap.label()),
-        RailItem::Preroll => format!("Pre-roll  ◀ {} ▶", session.preroll.label()),
+        RailItem::Rate => {
+            if session.trainer.ramp.armed {
+                format!(
+                    "Tempo  ◀ x{:.2} ▶   (ramp x{:.2})",
+                    session.transport.user_tempo, session.trainer.ramp.step_tempo
+                )
+            } else {
+                format!("Tempo  ◀ x{:.2} ▶", session.transport.user_tempo)
+            }
+        }
+        RailItem::Snap => format!("Snap  ◀ {} ▶", session.transport.snap.label()),
+        RailItem::Preroll => format!("Pre-roll  ◀ {} ▶", session.transport.preroll.label()),
         RailItem::RampArm => {
-            if session.ramp.armed {
+            if session.trainer.ramp.armed {
                 let (cur, total) = crate::practice::ramp::ramp_step_index(
-                    &session.ramp_config,
-                    session.rate,
+                    &session.trainer.ramp_config,
+                    session.transport.user_tempo,
                 );
                 format!("Ramp  ON  ({cur}/{total})")
             } else {
                 "Ramp  off  (Enter: arm)".into()
             }
         }
-        RailItem::RampStart => format!("Ramp start  ◀ x{:.2} ▶", session.ramp_config.start_rate),
-        RailItem::RampTarget => format!("Ramp target  ◀ x{:.2} ▶", session.ramp_config.target_rate),
-        RailItem::RampStep => format!("Ramp step  ◀ +{:.2} ▶", session.ramp_config.step),
+        RailItem::RampStart => format!(
+            "Ramp start  ◀ x{:.2} ▶",
+            session.trainer.ramp_config.start_tempo
+        ),
+        RailItem::RampTarget => format!(
+            "Ramp target  ◀ x{:.2} ▶",
+            session.trainer.ramp_config.target_tempo
+        ),
+        RailItem::RampStep => format!("Ramp step  ◀ +{:.2} ▶", session.trainer.ramp_config.step),
         RailItem::RampThreshold => {
-            format!("Ramp pass  ◀ ≥{:.0}% ▶", session.ramp_config.threshold_pct)
+            format!(
+                "Ramp pass  ◀ ≥{:.0}% ▶",
+                session.trainer.ramp_config.threshold_pct
+            )
         }
+        RailItem::RampStreak => format!(
+            "Ramp streak  ◀ ×{} ▶",
+            session.trainer.ramp_config.required_successes
+        ),
         RailItem::ExitPractice => {
             if exit_armed {
                 "Exit practice — Enter again to confirm".into()
@@ -122,15 +146,30 @@ pub fn rail_label(item: RailItem, session: &PracticeSession, exit_armed: bool) -
     }
 }
 
-pub fn attempt_history_text(session: &PracticeSession) -> String {
+/// Attempts for the current span only (armed A/B region, or the
+/// implicit whole-song span when none). `end_ms` = chart end (reserved
+/// for future span-end display; span identity is start-keyed).
+pub fn attempt_history_text(session: &PracticeSession, end_ms: i64) -> String {
+    let span_start = session
+        .transport
+        .loop_region
+        .filter(|r| r.end_ms != i64::MAX)
+        .map(|r| r.start_ms)
+        .unwrap_or(0);
+    let _ = end_ms;
+    let span_attempts: Vec<_> = session
+        .attempt_history
+        .iter()
+        .filter(|a| a.start_ms == span_start)
+        .collect();
     let mut lines = vec!["Attempts:".to_string()];
-    for (i, a) in session.attempt_history.iter().enumerate().rev().take(8) {
+    for (i, a) in span_attempts.iter().enumerate().rev().take(8) {
         lines.push(format!(
             "#{}  {:.1}%  {:+.0}ms  x{:.2}",
             i + 1,
             a.accuracy_pct,
             a.mean_error_ms,
-            a.rate
+            a.tempo
         ));
     }
     lines.join("\n")
@@ -167,13 +206,17 @@ pub fn transport_buttons(
         }
         match button {
             TransportButton::PrevBar | TransportButton::NextBar => {
-                let dir: i8 = if *button == TransportButton::NextBar { 1 } else { -1 };
-                let cur = session.scrub_cursor_ms.unwrap_or(clock.current_ms);
-                session.scrub_cursor_ms = Some(timeline.snap_neighbor(
-                    cur,
-                    crate::timeline::SnapDivisor::Bar,
-                    dir,
-                ));
+                let dir: i8 = if *button == TransportButton::NextBar {
+                    1
+                } else {
+                    -1
+                };
+                let cur = session
+                    .transport
+                    .scrub_cursor_ms
+                    .unwrap_or(clock.current_ms);
+                session.transport.scrub_cursor_ms =
+                    Some(timeline.snap_neighbor(cur, crate::timeline::SnapDivisor::Bar, dir));
             }
             TransportButton::Resume => next_pause.set(PauseState::Running),
         }
@@ -190,7 +233,7 @@ pub fn spawn_full_hud(
 ) {
     selection.0 = 0;
     exit_armed.0 = false;
-    session.scrub_cursor_ms = Some(clock.current_ms);
+    session.transport.scrub_cursor_ms = Some(clock.current_ms);
     let theme = Theme::default();
     commands
         .spawn((
@@ -231,17 +274,34 @@ pub fn spawn_full_hud(
                         ..default()
                     },
                 ));
-                for item in RailItem::ORDER {
+                for (idx, item) in RailItem::ORDER.iter().enumerate() {
+                    let header = match idx {
+                        0 => Some("TRANSPORT"),
+                        6 => Some("LOOP"),
+                        9 => Some("TRAINER"),
+                        _ => None,
+                    };
+                    if let Some(h) = header {
+                        rail.spawn((
+                            Text::new(h),
+                            Theme::label_font(),
+                            TextColor(theme.text_secondary.with_alpha(0.6)),
+                            Node {
+                                margin: UiRect::top(Val::Px(8.0)),
+                                ..default()
+                            },
+                        ));
+                    }
                     rail.spawn((
-                        item,
-                        Text::new(rail_label(item, &session, false)),
+                        *item,
+                        Text::new(rail_label(*item, &session, false)),
                         Theme::hud_font(),
                         TextColor(theme.text_secondary),
                     ));
                 }
                 rail.spawn((
                     AttemptHistoryText,
-                    Text::new(attempt_history_text(&session)),
+                    Text::new(attempt_history_text(&session, timeline.end_ms)),
                     Theme::label_font(),
                     TextColor(theme.text_secondary),
                     Node {
@@ -365,7 +425,7 @@ pub fn despawn_full_hud(
         commands.entity(e).despawn();
     }
     if let Some(session) = session.as_mut() {
-        session.scrub_cursor_ms = None;
+        session.transport.scrub_cursor_ms = None;
     }
 }
 
@@ -403,29 +463,41 @@ pub fn full_hud_input(
         let dir: i8 = if right { 1 } else { -1 };
         match selected {
             RailItem::Scrub => {
-                let cur = session.scrub_cursor_ms.unwrap_or(clock.current_ms);
-                session.scrub_cursor_ms = Some(timeline.snap_neighbor(cur, session.snap, dir));
+                let cur = session
+                    .transport
+                    .scrub_cursor_ms
+                    .unwrap_or(clock.current_ms);
+                session.transport.scrub_cursor_ms =
+                    Some(timeline.snap_neighbor(cur, session.transport.snap, dir));
             }
-            RailItem::Rate => session.step_rate(dir),
-            RailItem::Snap => session.snap = session.snap.next(),
-            RailItem::Preroll => session.preroll = session.preroll.next(),
+            RailItem::Rate => session.step_user_tempo(dir),
+            RailItem::Snap => session.transport.snap = session.transport.snap.next(),
+            RailItem::Preroll => session.transport.preroll = session.transport.preroll.next(),
             RailItem::RampStart => {
-                let c = &mut session.ramp_config;
-                c.start_rate =
-                    (c.start_rate + dir as f32 * 0.05).clamp(0.5, c.target_rate - 0.05);
+                let c = &mut session.trainer.ramp_config;
+                c.start_tempo =
+                    (c.start_tempo + dir as f32 * 0.05).clamp(0.5, c.target_tempo - 0.05);
+                let cfg = session.trainer.ramp_config;
+                crate::practice::ramp::clamp_to_config(&cfg, &mut session.trainer.ramp);
             }
             RailItem::RampTarget => {
-                let c = &mut session.ramp_config;
-                c.target_rate =
-                    (c.target_rate + dir as f32 * 0.05).clamp(c.start_rate + 0.05, 1.5);
+                let c = &mut session.trainer.ramp_config;
+                c.target_tempo =
+                    (c.target_tempo + dir as f32 * 0.05).clamp(c.start_tempo + 0.05, 1.5);
+                let cfg = session.trainer.ramp_config;
+                crate::practice::ramp::clamp_to_config(&cfg, &mut session.trainer.ramp);
             }
             RailItem::RampStep => {
-                let c = &mut session.ramp_config;
+                let c = &mut session.trainer.ramp_config;
                 c.step = (c.step + dir as f32 * 0.05).clamp(0.05, 0.25);
             }
             RailItem::RampThreshold => {
-                let c = &mut session.ramp_config;
+                let c = &mut session.trainer.ramp_config;
                 c.threshold_pct = (c.threshold_pct + dir as f32 * 5.0).clamp(50.0, 100.0);
+            }
+            RailItem::RampStreak => {
+                let c = &mut session.trainer.ramp_config;
+                c.required_successes = (c.required_successes as i8 + dir).clamp(1, 3) as u8;
             }
             _ => {}
         }
@@ -435,9 +507,12 @@ pub fn full_hud_input(
         match selected {
             RailItem::Resume => next_pause.set(PauseState::Running),
             RailItem::Scrub => {
-                let intent = session.scrub_cursor_ms.unwrap_or(clock.current_ms);
+                let intent = session
+                    .transport
+                    .scrub_cursor_ms
+                    .unwrap_or(clock.current_ms);
                 seeks.write(SeekToChartTime {
-                    target_ms: preroll_target(&timeline, session.preroll, intent),
+                    target_ms: preroll_target(&timeline, session.transport.preroll, intent),
                     snap: None,
                     attempt_start_ms: Some(intent),
                 });
@@ -445,25 +520,33 @@ pub fn full_hud_input(
             }
             RailItem::RestartSection => {
                 let intent = session
+                    .transport
                     .loop_region
                     .map(|r| r.start_ms)
                     .unwrap_or(session.current_attempt.start_ms);
                 seeks.write(SeekToChartTime {
-                    target_ms: preroll_target(&timeline, session.preroll, intent),
+                    target_ms: preroll_target(&timeline, session.transport.preroll, intent),
                     snap: None,
                     attempt_start_ms: Some(intent),
                 });
                 next_pause.set(PauseState::Running);
             }
             RailItem::SetA => {
-                let ms =
-                    timeline.bar_start_before(session.scrub_cursor_ms.unwrap_or(clock.current_ms));
+                let ms = timeline.bar_start_before(
+                    session
+                        .transport
+                        .scrub_cursor_ms
+                        .unwrap_or(clock.current_ms),
+                );
                 session.set_loop_start(ms);
             }
             RailItem::SetB => {
-                let cursor = session.scrub_cursor_ms.unwrap_or(clock.current_ms);
+                let cursor = session
+                    .transport
+                    .scrub_cursor_ms
+                    .unwrap_or(clock.current_ms);
                 let mut ms = timeline.bar_start_before(cursor);
-                if let Some(r) = session.loop_region {
+                if let Some(r) = session.transport.loop_region {
                     if ms <= r.start_ms {
                         ms = timeline.snap_neighbor(
                             r.start_ms,
@@ -474,7 +557,7 @@ pub fn full_hud_input(
                 }
                 session.set_loop_end(ms);
             }
-            RailItem::ClearLoop => session.loop_region = None,
+            RailItem::ClearLoop => session.clear_loop(),
             RailItem::Rate | RailItem::Snap | RailItem::Preroll => {}
             RailItem::RampArm => {
                 practice_actions.write(crate::practice::actions::PracticeAction::ToggleRamp);
@@ -482,7 +565,8 @@ pub fn full_hud_input(
             RailItem::RampStart
             | RailItem::RampTarget
             | RailItem::RampStep
-            | RailItem::RampThreshold => {}
+            | RailItem::RampThreshold
+            | RailItem::RampStreak => {}
             RailItem::ExitPractice => {
                 if exit_armed.0 {
                     next_pause.set(PauseState::Running);
@@ -504,7 +588,7 @@ pub fn full_hud_input(
         };
     }
     if let Ok(mut t) = history.single_mut() {
-        t.0 = attempt_history_text(&session);
+        t.0 = attempt_history_text(&session, timeline.end_ms);
     }
 }
 
@@ -523,13 +607,18 @@ pub fn update_full_hud_markers(
 ) {
     let end = timeline.end_ms;
     if let Ok(mut t) = time_text.single_mut() {
-        t.0 = format_chart_time(session.scrub_cursor_ms.unwrap_or(clock.current_ms));
+        t.0 = format_chart_time(
+            session
+                .transport
+                .scrub_cursor_ms
+                .unwrap_or(clock.current_ms),
+        );
     }
     if let Ok(mut node) = markers.p0().single_mut() {
         node.left = Val::Percent(time_to_pct(clock.current_ms, end));
     }
     if let Ok((mut node, mut vis)) = markers.p1().single_mut() {
-        match session.scrub_cursor_ms {
+        match session.transport.scrub_cursor_ms {
             Some(ms) => {
                 node.left = Val::Percent(time_to_pct(ms, end));
                 *vis = Visibility::Visible;
@@ -538,7 +627,11 @@ pub fn update_full_hud_markers(
         }
     }
     if let Ok((mut node, mut vis)) = markers.p2().single_mut() {
-        match session.loop_region.filter(|r| r.end_ms != i64::MAX) {
+        match session
+            .transport
+            .loop_region
+            .filter(|r| r.end_ms != i64::MAX)
+        {
             Some(r) => {
                 let a = time_to_pct(r.start_ms, end);
                 let b = time_to_pct(r.end_ms, end);
@@ -548,5 +641,50 @@ pub fn update_full_hud_markers(
             }
             None => *vis = Visibility::Hidden,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::practice::session::{AttemptRecord, LoopRegion};
+
+    fn record(start_ms: i64, acc: f32) -> AttemptRecord {
+        AttemptRecord {
+            start_ms,
+            end_ms: start_ms + 4_000,
+            tempo: 1.0,
+            counts: Default::default(),
+            overhits: 0,
+            max_combo: 0,
+            accuracy_pct: acc,
+            mean_error_ms: 0.0,
+        }
+    }
+
+    #[test]
+    fn attempt_history_filters_to_current_span() {
+        let mut s = PracticeSession::default();
+        s.transport.loop_region = Some(LoopRegion {
+            start_ms: 2_000,
+            end_ms: 6_000,
+        });
+        s.attempt_history.push(record(0, 50.0)); // old free-play span
+        s.attempt_history.push(record(2_000, 91.0)); // this loop
+        s.attempt_history.push(record(8_000, 60.0)); // scrub junk
+        s.attempt_history.push(record(2_000, 95.0)); // this loop
+        let text = attempt_history_text(&s, 16_000);
+        assert!(text.contains("91.0%") && text.contains("95.0%"));
+        assert!(!text.contains("50.0%") && !text.contains("60.0%"));
+    }
+
+    #[test]
+    fn attempt_history_no_loop_uses_implicit_whole_song_span() {
+        let mut s = PracticeSession::default();
+        s.attempt_history.push(record(0, 88.0)); // implicit span
+        s.attempt_history.push(record(4_000, 70.0)); // partial
+        let text = attempt_history_text(&s, 16_000);
+        assert!(text.contains("88.0%"));
+        assert!(!text.contains("70.0%"));
     }
 }

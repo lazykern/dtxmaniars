@@ -18,12 +18,12 @@ pub use file::{parse_with_migrations, LanesSection, LayoutFile, LATEST_VERSION};
 pub use lane_edit::{
     lane_chips, merge_lane, reorder_lane, set_lane_width, split_channel, structure_signature,
 };
-pub use scene::{default_instance, SceneSection, WidgetEntry};
 pub use lanes::{
     channel_from_short, channel_short_name, default_lane_width, DisplayLane, LaneArrangement,
     DRUM_CHANNELS, MAX_LANE_WIDTH, MIN_LANE_WIDTH,
 };
 pub use presets::{arrangement_for, classic, nx_type_b, nx_type_d, LanePreset};
+pub use scene::{default_instance, SceneSection, WidgetEntry, WidgetKindField};
 pub use widgets::{
     nearest_anchor, offset_for_top_left, resolve_top_left, Anchor9, AnchorSpace, Placement,
     WidgetInstance, WidgetKind, MAX_WIDGET_SCALE, MIN_WIDGET_SCALE,
