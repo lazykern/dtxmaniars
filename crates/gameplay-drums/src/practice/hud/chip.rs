@@ -32,7 +32,18 @@ pub fn chip_text(session: &PracticeSession, bar_ms: &[i64]) -> String {
             bar_number(bar_ms, r.end_ms)
         ));
     }
-    if let Some(last) = session.attempt_history.last() {
+    let span_start = session
+        .transport
+        .loop_region
+        .filter(|r| r.end_ms != i64::MAX)
+        .map(|r| r.start_ms)
+        .unwrap_or(0);
+    if let Some(last) = session
+        .attempt_history
+        .iter()
+        .filter(|a| a.start_ms == span_start)
+        .next_back()
+    {
         parts.push(format!("{:.0}%", last.accuracy_pct));
     }
     parts.join(" · ")
@@ -118,6 +129,16 @@ mod tests {
             max_combo: 12,
             overhits: 0,
             accuracy_pct: 94.2,
+            mean_error_ms: -3.0,
+        });
+        s.attempt_history.push(AttemptRecord {
+            start_ms: 999,
+            end_ms: 3_000,
+            tempo: 0.85,
+            counts: Default::default(),
+            max_combo: 3,
+            overhits: 0,
+            accuracy_pct: 11.0,
             mean_error_ms: -3.0,
         });
         assert_eq!(chip_text(&s, &bar_ms), "0.85× · loop 2–4 · 94%");

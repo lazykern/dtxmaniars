@@ -131,9 +131,24 @@ pub fn rail_label(item: RailItem, session: &PracticeSession, exit_armed: bool) -
     }
 }
 
-pub fn attempt_history_text(session: &PracticeSession) -> String {
+/// Attempts for the current span only (armed A/B region, or the
+/// implicit whole-song span when none). `end_ms` = chart end (reserved
+/// for future span-end display; span identity is start-keyed).
+pub fn attempt_history_text(session: &PracticeSession, end_ms: i64) -> String {
+    let span_start = session
+        .transport
+        .loop_region
+        .filter(|r| r.end_ms != i64::MAX)
+        .map(|r| r.start_ms)
+        .unwrap_or(0);
+    let _ = end_ms;
+    let span_attempts: Vec<_> = session
+        .attempt_history
+        .iter()
+        .filter(|a| a.start_ms == span_start)
+        .collect();
     let mut lines = vec!["Attempts:".to_string()];
-    for (i, a) in session.attempt_history.iter().enumerate().rev().take(8) {
+    for (i, a) in span_attempts.iter().enumerate().rev().take(8) {
         lines.push(format!(
             "#{}  {:.1}%  {:+.0}ms  x{:.2}",
             i + 1,
@@ -254,7 +269,7 @@ pub fn spawn_full_hud(
                 }
                 rail.spawn((
                     AttemptHistoryText,
-                    Text::new(attempt_history_text(&session)),
+                    Text::new(attempt_history_text(&session, timeline.end_ms)),
                     Theme::label_font(),
                     TextColor(theme.text_secondary),
                     Node {
@@ -536,7 +551,7 @@ pub fn full_hud_input(
         };
     }
     if let Ok(mut t) = history.single_mut() {
-        t.0 = attempt_history_text(&session);
+        t.0 = attempt_history_text(&session, timeline.end_ms);
     }
 }
 
@@ -589,5 +604,50 @@ pub fn update_full_hud_markers(
             }
             None => *vis = Visibility::Hidden,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::practice::session::{AttemptRecord, LoopRegion};
+
+    fn record(start_ms: i64, acc: f32) -> AttemptRecord {
+        AttemptRecord {
+            start_ms,
+            end_ms: start_ms + 4_000,
+            tempo: 1.0,
+            counts: Default::default(),
+            overhits: 0,
+            max_combo: 0,
+            accuracy_pct: acc,
+            mean_error_ms: 0.0,
+        }
+    }
+
+    #[test]
+    fn attempt_history_filters_to_current_span() {
+        let mut s = PracticeSession::default();
+        s.transport.loop_region = Some(LoopRegion {
+            start_ms: 2_000,
+            end_ms: 6_000,
+        });
+        s.attempt_history.push(record(0, 50.0)); // old free-play span
+        s.attempt_history.push(record(2_000, 91.0)); // this loop
+        s.attempt_history.push(record(8_000, 60.0)); // scrub junk
+        s.attempt_history.push(record(2_000, 95.0)); // this loop
+        let text = attempt_history_text(&s, 16_000);
+        assert!(text.contains("91.0%") && text.contains("95.0%"));
+        assert!(!text.contains("50.0%") && !text.contains("60.0%"));
+    }
+
+    #[test]
+    fn attempt_history_no_loop_uses_implicit_whole_song_span() {
+        let mut s = PracticeSession::default();
+        s.attempt_history.push(record(0, 88.0)); // implicit span
+        s.attempt_history.push(record(4_000, 70.0)); // partial
+        let text = attempt_history_text(&s, 16_000);
+        assert!(text.contains("88.0%"));
+        assert!(!text.contains("70.0%"));
     }
 }
