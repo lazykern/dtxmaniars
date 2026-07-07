@@ -50,25 +50,27 @@ pub enum RailItem {
     RampTarget,
     RampStep,
     RampThreshold,
+    RampStreak,
     ExitPractice,
 }
 
 impl RailItem {
-    pub const ORDER: [RailItem; 15] = [
+    pub const ORDER: [RailItem; 16] = [
         RailItem::Resume,
         RailItem::Scrub,
         RailItem::RestartSection,
-        RailItem::SetA,
-        RailItem::SetB,
-        RailItem::ClearLoop,
         RailItem::Rate,
         RailItem::Snap,
         RailItem::Preroll,
+        RailItem::SetA,
+        RailItem::SetB,
+        RailItem::ClearLoop,
         RailItem::RampArm,
         RailItem::RampStart,
         RailItem::RampTarget,
         RailItem::RampStep,
         RailItem::RampThreshold,
+        RailItem::RampStreak,
         RailItem::ExitPractice,
     ];
 }
@@ -92,7 +94,16 @@ pub fn rail_label(item: RailItem, session: &PracticeSession, exit_armed: bool) -
         RailItem::SetA => "Set A here".into(),
         RailItem::SetB => "Set B here".into(),
         RailItem::ClearLoop => "Clear loop".into(),
-        RailItem::Rate => format!("Rate  ◀ x{:.2} ▶", session.transport.user_tempo),
+        RailItem::Rate => {
+            if session.trainer.ramp.armed {
+                format!(
+                    "Tempo  ◀ x{:.2} ▶   (ramp x{:.2})",
+                    session.transport.user_tempo, session.trainer.ramp.step_tempo
+                )
+            } else {
+                format!("Tempo  ◀ x{:.2} ▶", session.transport.user_tempo)
+            }
+        }
         RailItem::Snap => format!("Snap  ◀ {} ▶", session.transport.snap.label()),
         RailItem::Preroll => format!("Pre-roll  ◀ {} ▶", session.transport.preroll.label()),
         RailItem::RampArm => {
@@ -121,6 +132,10 @@ pub fn rail_label(item: RailItem, session: &PracticeSession, exit_armed: bool) -
                 session.trainer.ramp_config.threshold_pct
             )
         }
+        RailItem::RampStreak => format!(
+            "Ramp streak  ◀ ×{} ▶",
+            session.trainer.ramp_config.required_successes
+        ),
         RailItem::ExitPractice => {
             if exit_armed {
                 "Exit practice — Enter again to confirm".into()
@@ -259,10 +274,27 @@ pub fn spawn_full_hud(
                         ..default()
                     },
                 ));
-                for item in RailItem::ORDER {
+                for (idx, item) in RailItem::ORDER.iter().enumerate() {
+                    let header = match idx {
+                        0 => Some("TRANSPORT"),
+                        6 => Some("LOOP"),
+                        9 => Some("TRAINER"),
+                        _ => None,
+                    };
+                    if let Some(h) = header {
+                        rail.spawn((
+                            Text::new(h),
+                            Theme::label_font(),
+                            TextColor(theme.text_secondary.with_alpha(0.6)),
+                            Node {
+                                margin: UiRect::top(Val::Px(8.0)),
+                                ..default()
+                            },
+                        ));
+                    }
                     rail.spawn((
-                        item,
-                        Text::new(rail_label(item, &session, false)),
+                        *item,
+                        Text::new(rail_label(*item, &session, false)),
                         Theme::hud_font(),
                         TextColor(theme.text_secondary),
                     ));
@@ -463,6 +495,10 @@ pub fn full_hud_input(
                 let c = &mut session.trainer.ramp_config;
                 c.threshold_pct = (c.threshold_pct + dir as f32 * 5.0).clamp(50.0, 100.0);
             }
+            RailItem::RampStreak => {
+                let c = &mut session.trainer.ramp_config;
+                c.required_successes = (c.required_successes as i8 + dir).clamp(1, 3) as u8;
+            }
             _ => {}
         }
     }
@@ -529,7 +565,8 @@ pub fn full_hud_input(
             RailItem::RampStart
             | RailItem::RampTarget
             | RailItem::RampStep
-            | RailItem::RampThreshold => {}
+            | RailItem::RampThreshold
+            | RailItem::RampStreak => {}
             RailItem::ExitPractice => {
                 if exit_armed.0 {
                     next_pause.set(PauseState::Running);
