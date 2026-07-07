@@ -17,7 +17,7 @@ use dtx_scoring::JudgmentKind;
 use game_shell::AppState;
 
 use super::session::PracticeSession;
-use crate::events::{JudgmentEvent, NoteMissed};
+use crate::events::{EmptyHit, JudgmentEvent, NoteMissed};
 use crate::resources::{Combo, GameplayClock};
 use crate::seek::SeekToChartTime;
 use crate::timeline::ChipTimeline;
@@ -58,6 +58,7 @@ pub fn apply_judgment(
 pub fn track_attempt_stats(
     mut judgments: MessageReader<JudgmentEvent>,
     mut missed: MessageReader<NoteMissed>,
+    mut empty_hits: MessageReader<EmptyHit>,
     mut seeks: MessageReader<SeekToChartTime>,
     timeline: Res<ChipTimeline>,
     clock: Res<GameplayClock>,
@@ -87,6 +88,9 @@ pub fn track_attempt_stats(
         }
         session.current_attempt.counts.miss += 1;
         session.current_attempt.combo = 0;
+    }
+    for _ in empty_hits.read() {
+        session.current_attempt.overhits += 1;
     }
     if let Some(seek) = seeks.read().last() {
         // Pre-seek clock, captured by apply_seek_system earlier this tick.

@@ -108,6 +108,7 @@ pub struct AttemptStats {
     pub counts: JudgmentCounts,
     pub combo: u32,
     pub max_combo: u32,
+    pub overhits: u32,
     pub error_sum_ms: i64,
     pub error_count: u32,
 }
@@ -137,6 +138,7 @@ pub struct AttemptRecord {
     pub rate: f32,
     pub counts: JudgmentCounts,
     pub max_combo: u32,
+    pub overhits: u32,
     pub accuracy_pct: f32,
     pub mean_error_ms: f32,
 }
@@ -192,6 +194,7 @@ impl PracticeSession {
                 rate: self.rate,
                 counts: a.counts,
                 max_combo: a.max_combo,
+                overhits: a.overhits,
                 accuracy_pct: a.accuracy_pct(),
                 mean_error_ms: a.mean_error_ms(),
             });

@@ -351,7 +351,7 @@ fn restart_key_seeks_to_loop_start() {
     );
 }
 
-use gameplay_drums::events::{JudgmentEvent, NoteMissed};
+use gameplay_drums::events::{EmptyHit, JudgmentEvent, NoteMissed};
 
 fn add_ramp_wiring(app: &mut App) {
     if !app.world().contains_resource::<Messages<PracticeAction>>() {
@@ -359,6 +359,7 @@ fn add_ramp_wiring(app: &mut App) {
     }
     app.add_message::<JudgmentEvent>()
         .add_message::<NoteMissed>()
+        .add_message::<EmptyHit>()
         .init_resource::<gameplay_drums::practice::toast::ToastQueue>()
         .add_systems(
             Update,
@@ -577,4 +578,32 @@ fn pre_roll_miss_is_excluded_from_attempt() {
         session.current_attempt.counts.miss, 1,
         "pre-roll miss must not count against the attempt"
     );
+}
+
+#[test]
+fn empty_hits_accumulate_as_overhits() {
+    let mut app = build_app();
+    add_ramp_wiring(&mut app);
+    enter_performance(&mut app, chart_with_measures(8));
+    app.world_mut().insert_resource(PracticeSession::default());
+    {
+        let mut clock = app.world_mut().resource_mut::<GameplayClock>();
+        clock.start();
+        clock.sync(Some(1_000));
+    }
+    app.world_mut()
+        .resource_mut::<Messages<gameplay_drums::events::EmptyHit>>()
+        .write(gameplay_drums::events::EmptyHit {
+            lane: 3,
+            audio_ms: 1_000,
+        });
+    app.world_mut()
+        .resource_mut::<Messages<gameplay_drums::events::EmptyHit>>()
+        .write(gameplay_drums::events::EmptyHit {
+            lane: 4,
+            audio_ms: 1_100,
+        });
+    app.update();
+    let session = app.world().resource::<PracticeSession>();
+    assert_eq!(session.current_attempt.overhits, 2);
 }

@@ -32,7 +32,11 @@ pub fn chip_text(session: &PracticeSession, bar_ms: &[i64]) -> String {
     parts.join(" · ")
 }
 
-pub fn spawn_chip(mut commands: Commands, session: Res<PracticeSession>, timeline: Res<ChipTimeline>) {
+pub fn spawn_chip(
+    mut commands: Commands,
+    session: Res<PracticeSession>,
+    timeline: Res<ChipTimeline>,
+) {
     let theme = Theme::default();
     commands.spawn((
         StatusChip,
@@ -106,6 +110,7 @@ mod tests {
             rate: 0.85,
             counts: Default::default(),
             max_combo: 12,
+            overhits: 0,
             accuracy_pct: 94.2,
             mean_error_ms: -3.0,
         });
