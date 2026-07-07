@@ -51,6 +51,55 @@ pub fn preroll_target(timeline: &ChipTimeline, preroll: PrerollSetting, intent_m
     }
 }
 
+pub const RAMP_START_DEFAULT: f32 = 0.70;
+pub const RAMP_TARGET_DEFAULT: f32 = 1.00;
+pub const RAMP_STEP_DEFAULT: f32 = 0.05;
+pub const RAMP_THRESHOLD_DEFAULT: f32 = 90.0;
+
+/// Accuracy-gated speed-ramp configuration (rail-editable).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct RampConfig {
+    pub start_rate: f32,
+    pub target_rate: f32,
+    pub step: f32,
+    pub threshold_pct: f32,
+}
+
+impl Default for RampConfig {
+    fn default() -> Self {
+        Self {
+            start_rate: RAMP_START_DEFAULT,
+            target_rate: RAMP_TARGET_DEFAULT,
+            step: RAMP_STEP_DEFAULT,
+            threshold_pct: RAMP_THRESHOLD_DEFAULT,
+        }
+    }
+}
+
+/// Live ramp state. `current_rate` mirrors `PracticeSession::rate` (the
+/// applier re-adopts it each pass, so a manual rate nudge simply becomes
+/// the ramp's current step).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct RampState {
+    pub armed: bool,
+    pub current_rate: f32,
+    pub consecutive_fails: u8,
+    /// Arming mid-loop rolls a stale pre-arm attempt on the next seek;
+    /// the applier skips exactly one roll when this is set.
+    pub skip_next_roll: bool,
+}
+
+impl Default for RampState {
+    fn default() -> Self {
+        Self {
+            armed: false,
+            current_rate: RAMP_START_DEFAULT,
+            consecutive_fails: 0,
+            skip_next_roll: false,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Default)]
 pub struct AttemptStats {
     /// Attempt span start (the intent, not the pre-roll point). Chips
@@ -104,6 +153,8 @@ pub struct PracticeSession {
     pub attempt_history: Vec<AttemptRecord>,
     /// Scrub cursor while paused (chart ms). None = cursor at playhead.
     pub scrub_cursor_ms: Option<i64>,
+    pub ramp_config: RampConfig,
+    pub ramp: RampState,
 }
 
 impl Default for PracticeSession {
@@ -116,6 +167,8 @@ impl Default for PracticeSession {
             current_attempt: AttemptStats::default(),
             attempt_history: Vec::new(),
             scrub_cursor_ms: None,
+            ramp_config: RampConfig::default(),
+            ramp: RampState::default(),
         }
     }
 }

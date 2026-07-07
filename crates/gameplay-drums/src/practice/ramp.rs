@@ -1,0 +1,138 @@
+//! Accuracy-gated rate ramp (Rocksmith riff-repeater model). The
+//! protocol is a pure function; systems only apply its decisions.
+
+use super::session::{RampConfig, RampState};
+
+/// Outcome of one finished loop pass while the ramp is armed.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum RampDecision {
+    StepUp { new_rate: f32 },
+    StepDown { new_rate: f32 },
+    /// First fail at a step: keep the rate, remember the fail.
+    Hold,
+    /// Target reached: rate pinned to target, ramp disarms.
+    Complete { new_rate: f32 },
+}
+
+/// Pure ramp protocol. Pass (accuracy ≥ threshold) → step up, completing
+/// at the target. Two consecutive fails → step down once, floored at the
+/// start rate.
+pub fn ramp_step(cfg: &RampConfig, state: &mut RampState, accuracy_pct: f32) -> RampDecision {
+    if accuracy_pct >= cfg.threshold_pct {
+        state.consecutive_fails = 0;
+        let next = (state.current_rate + cfg.step).min(cfg.target_rate);
+        state.current_rate = next;
+        if next >= cfg.target_rate - 1e-6 {
+            state.armed = false;
+            RampDecision::Complete {
+                new_rate: cfg.target_rate,
+            }
+        } else {
+            RampDecision::StepUp { new_rate: next }
+        }
+    } else {
+        state.consecutive_fails += 1;
+        if state.consecutive_fails >= 2 {
+            state.consecutive_fails = 0;
+            let next = (state.current_rate - cfg.step).max(cfg.start_rate);
+            state.current_rate = next;
+            RampDecision::StepDown { new_rate: next }
+        } else {
+            RampDecision::Hold
+        }
+    }
+}
+
+/// `(current, total)` step indices for display ("RAMP 3/6").
+pub fn ramp_step_index(cfg: &RampConfig, rate: f32) -> (u32, u32) {
+    if cfg.step <= 0.0 {
+        return (0, 0);
+    }
+    let total = ((cfg.target_rate - cfg.start_rate) / cfg.step).round().max(0.0) as u32;
+    let cur = (((rate - cfg.start_rate) / cfg.step).round() as i64).clamp(0, total as i64) as u32;
+    (cur, total)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn cfg() -> RampConfig {
+        RampConfig::default() // 0.70 → 1.00, step 0.05, threshold 90%
+    }
+
+    fn state(rate: f32, fails: u8) -> RampState {
+        RampState {
+            armed: true,
+            current_rate: rate,
+            consecutive_fails: fails,
+            skip_next_roll: false,
+        }
+    }
+
+    #[test]
+    fn clean_pass_steps_up() {
+        let mut s = state(0.70, 0);
+        let d = ramp_step(&cfg(), &mut s, 95.0);
+        assert_eq!(d, RampDecision::StepUp { new_rate: 0.75 });
+        assert!((s.current_rate - 0.75).abs() < 1e-6);
+        assert_eq!(s.consecutive_fails, 0);
+    }
+
+    #[test]
+    fn first_fail_holds() {
+        let mut s = state(0.80, 0);
+        let d = ramp_step(&cfg(), &mut s, 60.0);
+        assert_eq!(d, RampDecision::Hold);
+        assert_eq!(s.consecutive_fails, 1);
+        assert!((s.current_rate - 0.80).abs() < 1e-6);
+    }
+
+    #[test]
+    fn second_consecutive_fail_steps_down() {
+        let mut s = state(0.80, 1);
+        let d = ramp_step(&cfg(), &mut s, 60.0);
+        assert_eq!(d, RampDecision::StepDown { new_rate: 0.75 });
+        assert_eq!(s.consecutive_fails, 0, "fail counter resets after demotion");
+    }
+
+    #[test]
+    fn step_down_floors_at_start_rate() {
+        let mut s = state(0.70, 1);
+        let d = ramp_step(&cfg(), &mut s, 0.0);
+        assert_eq!(d, RampDecision::StepDown { new_rate: 0.70 });
+    }
+
+    #[test]
+    fn pass_reaching_target_completes_and_disarms() {
+        let mut s = state(0.95, 0);
+        let d = ramp_step(&cfg(), &mut s, 92.0);
+        assert_eq!(d, RampDecision::Complete { new_rate: 1.00 });
+        assert!(!s.armed);
+    }
+
+    #[test]
+    fn pass_resets_fail_counter() {
+        let mut s = state(0.80, 1);
+        let d = ramp_step(&cfg(), &mut s, 91.0);
+        assert_eq!(d, RampDecision::StepUp { new_rate: 0.85 });
+        assert_eq!(s.consecutive_fails, 0);
+    }
+
+    #[test]
+    fn manual_nudge_adoption_steps_from_the_nudged_rate() {
+        // A manual nudge to 0.90 mid-ramp becomes the current step.
+        let mut s = state(0.75, 0);
+        s.current_rate = 0.90; // applier does this from session.rate
+        let d = ramp_step(&cfg(), &mut s, 95.0);
+        assert_eq!(d, RampDecision::StepUp { new_rate: 0.95 });
+    }
+
+    #[test]
+    fn step_index_display() {
+        let c = cfg();
+        assert_eq!(ramp_step_index(&c, 0.70), (0, 6));
+        assert_eq!(ramp_step_index(&c, 0.85), (3, 6));
+        assert_eq!(ramp_step_index(&c, 1.00), (6, 6));
+    }
+}
