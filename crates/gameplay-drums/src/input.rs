@@ -1,6 +1,8 @@
 //! Keyboard input → `LaneHit` events.
 //!
-//! Trivial bridge for M2: KeyDown → LaneHit. MIDI/pad mapping lands in M6+.
+//! Keys resolve to lanes via [`crate::bindings::BindResolver`], built from the
+//! persisted `dtx-config` `InputBindings`. MIDI is handled in the lib.rs
+//! `midi_consumer` module.
 //!
 //! ## Phase 0 p0-6
 //!

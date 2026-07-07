@@ -11,9 +11,10 @@
 //!
 //! ## LaneId is opaque
 //!
-//! `LaneHit::lane` is just a `u8`. The mapping to a game-specific meaning
-//! (drums HH = 0, guitar R = 0, etc.) is owned by each gameplay crate's
-//! `LaneMap`. dtx-input only knows "key pressed on lane X at audio_ms Y".
+//! `LaneHit::lane` is just a `u8`. Sources here emit raw events (keys,
+//! `MidiEvent`s); resolving them to lanes is the consuming gameplay crate's
+//! job (drums does it via `dtx-config` `InputBindings` → `BindResolver`).
+//! dtx-input only knows "key pressed on lane X at audio_ms Y".
 
 #![warn(missing_docs)]
 
