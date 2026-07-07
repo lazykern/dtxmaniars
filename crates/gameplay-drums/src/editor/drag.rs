@@ -50,6 +50,34 @@ pub fn clamp_scale(s: f32) -> f32 {
     s.clamp(MIN_WIDGET_SCALE, MAX_WIDGET_SCALE)
 }
 
+/// First edit converts a Natural widget to Anchored, capturing its current
+/// visual position so nothing jumps. Keeps existing anchor/origin values.
+pub fn ensure_anchored(
+    inst: &mut dtx_layout::WidgetInstance,
+    visual_top_left: Vec2,
+    unscaled_size: Vec2,
+    parent: (f32, f32, f32, f32),
+    pfl_scale: f32,
+) {
+    if inst.placement == dtx_layout::Placement::Anchored {
+        return;
+    }
+    inst.placement = dtx_layout::Placement::Anchored;
+    inst.scale = 1.0;
+    let off_px = dtx_layout::offset_for_top_left(
+        inst.anchor,
+        inst.origin,
+        (unscaled_size.x, unscaled_size.y),
+        1.0,
+        (visual_top_left.x, visual_top_left.y),
+        parent,
+    );
+    inst.offset = (
+        off_px.0 / pfl_scale.max(f32::EPSILON),
+        off_px.1 / pfl_scale.max(f32::EPSILON),
+    );
+}
+
 pub fn plugin(app: &mut App) {
     app.init_resource::<ActiveGesture>().add_systems(
         Update,
@@ -71,11 +99,17 @@ fn begin_gesture(
     over_chrome: Res<super::picking::CursorOverChrome>,
     aabbs: Res<super::picking::WidgetAabbs>,
     hidden: Res<super::picking::CanvasHidden>,
-    handles: Query<(&super::selection_box::ScaleHandle, &ComputedNode, &GlobalTransform)>,
+    handles: Query<(
+        &super::selection_box::ScaleHandle,
+        &ComputedNode,
+        &bevy::ui::UiGlobalTransform,
+    )>,
     mut selection: ResMut<Selection>,
     mut gesture: ResMut<ActiveGesture>,
-    layouts: Res<WidgetLayouts>,
+    mut layouts: ResMut<WidgetLayouts>,
     lanes: Res<crate::lanes::Lanes>,
+    geoms: Res<crate::widget_layout::WidgetGeoms>,
+    pfl: Res<crate::layout::PlayfieldLayout>,
     mut undo: ResMut<super::undo::UndoStack>,
 ) {
     if !buttons.just_pressed(MouseButton::Left) || over_chrome.0 {
@@ -97,6 +131,7 @@ fn begin_gesture(
                         let start_dist = (pos - start_center).length().max(1.0);
                         let start_scale = layouts.get(kind).scale;
                         undo.push(&layouts, &lanes);
+                        convert_to_anchored(&mut layouts, &geoms, &pfl, window, kind);
                         gesture.0 = Gesture::Scale {
                             start_dist,
                             start_scale,
@@ -123,7 +158,35 @@ fn begin_gesture(
     if let Some(kind) = picked {
         if kind != dtx_layout::WidgetKind::Playfield {
             undo.push(&layouts, &lanes);
+            convert_to_anchored(&mut layouts, &geoms, &pfl, window, kind);
             gesture.0 = Gesture::Move { last_cursor: pos };
+        }
+    }
+}
+
+/// Convert a widget Natural→Anchored at gesture start, capturing its current
+/// visual top-left (from the geom pushed through its applied transform — NOT
+/// `WidgetAabbs`, whose rects are inflated to MIN_GRAB for tiny widgets) so the
+/// widget doesn't jump.
+fn convert_to_anchored(
+    layouts: &mut WidgetLayouts,
+    geoms: &crate::widget_layout::WidgetGeoms,
+    pfl: &crate::layout::PlayfieldLayout,
+    window: &Window,
+    kind: WidgetKind,
+) {
+    if let Some(g) = geoms.0.get(&kind).copied() {
+        if let Some(inst) = layouts.0.get_mut(&kind) {
+            let wsize = Vec2::new(window.width(), window.height());
+            let sc = wsize / 2.0;
+            let visual_min = crate::widget_layout::transform_point(
+                g.unscaled.min,
+                sc,
+                g.applied_translation,
+                g.applied_scale,
+            );
+            let parent = crate::widget_layout::parent_rect_px(inst.space, wsize, pfl);
+            ensure_anchored(inst, visual_min, g.unscaled.size(), parent, pfl.scale);
         }
     }
 }
@@ -235,5 +298,24 @@ mod tests {
     fn scale_clamped() {
         assert_eq!(clamp_scale(99.0), MAX_WIDGET_SCALE);
         assert_eq!(clamp_scale(0.01), MIN_WIDGET_SCALE);
+    }
+
+    #[test]
+    fn ensure_anchored_preserves_position() {
+        let mut inst = dtx_layout::default_instance(dtx_layout::WidgetKind::Combo);
+        let parent = (0.0, 0.0, 1280.0, 720.0);
+        let visual = Vec2::new(831.0, 72.0);
+        let size = Vec2::new(140.0, 60.0);
+        ensure_anchored(&mut inst, visual, size, parent, 1.0);
+        assert_eq!(inst.placement, dtx_layout::Placement::Anchored);
+        let tl = dtx_layout::resolve_top_left(
+            inst.anchor,
+            inst.origin,
+            (size.x, size.y),
+            inst.scale,
+            (inst.offset.0, inst.offset.1),
+            parent,
+        );
+        assert!((tl.0 - visual.x).abs() < 0.001 && (tl.1 - visual.y).abs() < 0.001);
     }
 }

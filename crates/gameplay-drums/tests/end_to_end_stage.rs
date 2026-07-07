@@ -69,6 +69,7 @@ fn build_app() -> App {
     .init_resource::<gameplay_drums::resources::FastSlowCount>()
     .init_resource::<gameplay_drums::resources::SkillValue>()
     .init_resource::<gameplay_drums::derived::ChartDerived>()
+    .init_resource::<game_shell::EditorSession>()
     .add_message::<game_shell::TransitionRequest>()
     .add_systems(
         OnEnter(AppState::Performance),

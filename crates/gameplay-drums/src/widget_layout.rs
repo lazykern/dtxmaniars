@@ -1,18 +1,25 @@
 //! Runtime HUD widget placement: per-widget container nodes driven by a
 //! `WidgetLayouts` resource (code defaults ⊕ layout.toml `[scene.gameplay]`).
 //!
-//! Each HUD widget's children are parented to a `WidgetContainer` node placed
-//! absolutely at ref-origin (0,0), full-size. The container's `left/top` is the
-//! widget's resolved offset·scale, so moving it translates the whole widget as
-//! one unit; at the default offset (0,0) every widget lands where it did before
-//! this system existed (parity). Anchor/origin are modeled for the editor
-//! (plan 3); with the current uniform scale the applied position reduces to
-//! `offset` (screen-space) — see `apply_widget_layout`.
+//! Each HUD widget's children are parented to a full-screen `WidgetContainer`
+//! node. Placement is applied through the container's `UiTransform` (a
+//! render/hit transform that does NOT affect layout, so children keep their
+//! natural size — measurements stay stable):
+//!   - `Natural` (v1 semantics): translate by `offset·pfl.scale`, scale 1. At
+//!     the default offset (0,0) the transform is identity, so every untouched
+//!     widget renders byte-identically to before this system existed (parity).
+//!   - `Anchored`: absolute `resolve_top_left` + uniform scale, applied as a
+//!     scale-about-screen-center transform with a computed translation so the
+//!     content lands exactly at the resolved top-left.
+//!
+//! `measure_widget_geoms` keeps `WidgetGeoms` in UNSCALED logical space by
+//! inverting last frame's applied transform off the measured visual rects.
 
 use std::collections::HashMap;
 
 use bevy::prelude::*;
-use dtx_layout::{WidgetInstance, WidgetKind};
+use bevy::ui::{UiTransform, Val2};
+use dtx_layout::{AnchorSpace, WidgetInstance, WidgetKind};
 use game_shell::AppState;
 
 use crate::layout::PlayfieldLayout;
@@ -37,6 +44,38 @@ impl WidgetLayouts {
     }
 }
 
+/// Per-widget content geometry in UNSCALED logical px (children's natural
+/// layout, before the container's UiTransform). `applied` is the transform we
+/// set last frame, used to invert visual measurements back to unscaled space.
+#[derive(Debug, Clone, Copy)]
+pub struct WidgetGeom {
+    pub unscaled: Rect,
+    pub applied_translation: Vec2,
+    pub applied_scale: f32,
+}
+
+#[derive(Resource, Debug, Default)]
+pub struct WidgetGeoms(pub std::collections::HashMap<WidgetKind, WidgetGeom>);
+
+/// A UiTransform (translation T, uniform scale s) maps an unscaled point p to
+/// S + s·(p − S) + T, where S = screen center (full-screen container's center).
+pub fn transform_point(p: Vec2, screen_center: Vec2, t: Vec2, s: f32) -> Vec2 {
+    screen_center + s * (p - screen_center) + t
+}
+
+/// Inverse of `transform_point` for a whole rect (recover unscaled geometry
+/// from a visual measurement under a known applied transform).
+pub fn untransform_rect(measured: Rect, screen_center: Vec2, t: Vec2, s: f32) -> Rect {
+    let inv = |m: Vec2| screen_center + (m - t - screen_center) / s.max(f32::EPSILON);
+    Rect::from_corners(inv(measured.min), inv(measured.max))
+}
+
+/// Translation that puts the unscaled content top-left `u_min` at visual
+/// position `desired` under scale `s` about `screen_center`.
+pub fn translation_for(desired: Vec2, u_min: Vec2, screen_center: Vec2, s: f32) -> Vec2 {
+    desired - screen_center - s * (u_min - screen_center)
+}
+
 /// Whether a widget is visible in the current mode (practice vs play).
 pub fn widget_visible(inst: &WidgetInstance, practice: bool) -> bool {
     if practice {
@@ -46,17 +85,50 @@ pub fn widget_visible(inst: &WidgetInstance, practice: bool) -> bool {
     }
 }
 
+/// Parent rect (logical px) for a widget's anchor space.
+pub fn parent_rect_px(
+    space: AnchorSpace,
+    window_size: Vec2,
+    pfl: &PlayfieldLayout,
+) -> (f32, f32, f32, f32) {
+    match space {
+        AnchorSpace::Screen => (0.0, 0.0, window_size.x, window_size.y),
+        AnchorSpace::Playfield => (
+            pfl.strip_left(),
+            pfl.lane_top(),
+            pfl.strip_width(),
+            pfl.lane_height(),
+        ),
+    }
+}
+
 pub(super) fn plugin(app: &mut App) {
     app.init_resource::<WidgetLayouts>()
+        .init_resource::<WidgetGeoms>()
         .add_systems(Startup, load_widget_layouts)
         .add_systems(
             Update,
-            apply_widget_layout
-                .run_if(in_state(AppState::Performance))
-                .run_if(
-                    resource_changed::<WidgetLayouts>.or_else(resource_changed::<PlayfieldLayout>),
+            (
+                measure_widget_geoms,
+                apply_widget_layout.run_if(
+                    resource_changed::<WidgetLayouts>
+                        .or_else(resource_changed::<PlayfieldLayout>)
+                        .or_else(any_anchored_widget),
                 ),
+            )
+                .chain()
+                .run_if(in_state(AppState::Performance)),
         );
+}
+
+/// Anchored widgets need a per-frame apply (their resolved position depends on
+/// measured geometry, which can change as content re-lays-out). Natural-only
+/// scenes keep the v1 change-detection behavior.
+fn any_anchored_widget(layouts: Res<WidgetLayouts>) -> bool {
+    layouts
+        .0
+        .values()
+        .any(|i| i.placement == dtx_layout::Placement::Anchored)
 }
 
 /// Load `[scene.gameplay]` from layout.toml at startup (defaults on absence).
@@ -65,26 +137,133 @@ fn load_widget_layouts(mut layouts: ResMut<WidgetLayouts>) {
     layouts.0 = file.scene.resolve();
 }
 
-/// Position + z-order + visibility for every widget container. Runs on layout
-/// or arrangement change. Position = offset·scale (screen-space, uniform scale);
-/// full anchor-aware resolution is a plan-3 concern where variable scale matters.
+/// Measure every widget container's visual content rect and invert the applied
+/// transform to keep `WidgetGeoms` in unscaled space. Runs every frame in
+/// Performance (cheap: ~10 widgets, shallow trees).
+fn measure_widget_geoms(
+    mut geoms: ResMut<WidgetGeoms>,
+    windows: Query<&Window, With<bevy::window::PrimaryWindow>>,
+    containers: Query<(Entity, &WidgetContainer, &UiTransform)>,
+    children_q: Query<&Children>,
+    nodes: Query<(&ComputedNode, &bevy::ui::UiGlobalTransform)>,
+) {
+    let Ok(window) = windows.single() else {
+        return;
+    };
+    let sc = Vec2::new(window.width() / 2.0, window.height() / 2.0);
+    for (entity, container, ui_tf) in &containers {
+        let kind = container.0;
+        if kind == WidgetKind::Playfield {
+            continue;
+        }
+        let (t, s) = applied_of(ui_tf);
+        let mut union: Option<Rect> = None;
+        let mut stack: Vec<Entity> = children_q
+            .get(entity)
+            .map(|c| c.iter().collect())
+            .unwrap_or_default();
+        while let Some(e) = stack.pop() {
+            // UI nodes carry `UiGlobalTransform` (not `GlobalTransform`); its
+            // translation is the node center in physical px and already
+            // includes the container's applied UiTransform. Rendered size is
+            // the layout size times the accumulated scale `s`, so form the
+            // VISUAL rect here and let `untransform_rect` recover unscaled.
+            if let Ok((cn, gt)) = nodes.get(e) {
+                if cn.size().x > 0.0 && cn.size().y > 0.0 {
+                    let inv = cn.inverse_scale_factor();
+                    let center = gt.translation * inv;
+                    let size = cn.size() * inv * s;
+                    let r = Rect::from_center_size(center, size);
+                    union = Some(union.map_or(r, |u| u.union(r)));
+                }
+            }
+            if let Ok(c) = children_q.get(e) {
+                stack.extend(c.iter());
+            }
+        }
+        if let Some(measured) = union.filter(|r| r.width() >= 1.0 && r.height() >= 1.0) {
+            let unscaled = untransform_rect(measured, sc, t, s);
+            geoms.0.insert(
+                kind,
+                WidgetGeom {
+                    unscaled,
+                    applied_translation: t,
+                    applied_scale: s,
+                },
+            );
+        } else if let Some(g) = geoms.0.get_mut(&kind) {
+            // Keep last-known unscaled rect; just refresh the applied transform.
+            g.applied_translation = t;
+            g.applied_scale = s;
+        }
+    }
+}
+
+/// Extract (translation px, uniform scale) from a container's UiTransform.
+fn applied_of(tf: &UiTransform) -> (Vec2, f32) {
+    let t = match (tf.translation.x, tf.translation.y) {
+        (Val::Px(x), Val::Px(y)) => Vec2::new(x, y),
+        _ => Vec2::ZERO,
+    };
+    (t, tf.scale.x.max(f32::EPSILON))
+}
+
+/// Position + z-order + visibility for every widget container, via UiTransform.
 fn apply_widget_layout(
     layouts: Res<WidgetLayouts>,
+    geoms: Res<WidgetGeoms>,
     practice: Option<Res<crate::practice::PracticeSession>>,
     pfl: Res<PlayfieldLayout>,
+    windows: Query<&Window, With<bevy::window::PrimaryWindow>>,
     mut containers: Query<(
         &WidgetContainer,
-        &mut Node,
+        &mut UiTransform,
         Option<&mut ZIndex>,
         &mut Visibility,
     )>,
 ) {
+    let Ok(window) = windows.single() else {
+        return;
+    };
+    let wsize = Vec2::new(window.width(), window.height());
+    let sc = wsize / 2.0;
     let is_practice = practice.is_some();
-    let scale = pfl.scale;
-    for (container, mut node, z, mut vis) in &mut containers {
+    for (container, mut tf, z, mut vis) in &mut containers {
         let inst = layouts.get(container.0);
-        node.left = Val::Px(inst.offset.0 * scale);
-        node.top = Val::Px(inst.offset.1 * scale);
+        match inst.placement {
+            dtx_layout::Placement::Natural => {
+                // v1 semantics: pure ref-px delta, scale inert.
+                tf.translation = Val2::new(
+                    Val::Px(inst.offset.0 * pfl.scale),
+                    Val::Px(inst.offset.1 * pfl.scale),
+                );
+                tf.scale = Vec2::ONE;
+            }
+            dtx_layout::Placement::Anchored => {
+                let Some(geom) = geoms.0.get(&container.0) else {
+                    // Not measured yet (first frames): leave last transform.
+                    continue;
+                };
+                let size = (geom.unscaled.width(), geom.unscaled.height());
+                let parent = parent_rect_px(inst.space, wsize, &pfl);
+                let desired = dtx_layout::resolve_top_left(
+                    inst.anchor,
+                    inst.origin,
+                    size,
+                    inst.scale,
+                    (inst.offset.0 * pfl.scale, inst.offset.1 * pfl.scale),
+                    parent,
+                );
+                let t = translation_for(
+                    Vec2::new(desired.0, desired.1),
+                    geom.unscaled.min,
+                    sc,
+                    inst.scale,
+                );
+                tf.translation = Val2::new(Val::Px(t.x), Val::Px(t.y));
+                tf.scale = Vec2::splat(inst.scale);
+            }
+        }
         if let Some(mut z) = z {
             *z = ZIndex(inst.z);
         }
@@ -117,5 +296,39 @@ mod tests {
         let combo = default_instance(WidgetKind::Combo);
         assert!(widget_visible(&combo, false));
         assert!(widget_visible(&combo, true));
+    }
+
+    #[test]
+    fn transform_math_round_trips() {
+        let sc = Vec2::new(640.0, 360.0);
+        let t = Vec2::new(37.0, -12.0);
+        let s = 1.7;
+        let r = Rect::new(100.0, 50.0, 300.0, 120.0);
+        let vis = Rect::from_corners(
+            transform_point(r.min, sc, t, s),
+            transform_point(r.max, sc, t, s),
+        );
+        let back = untransform_rect(vis, sc, t, s);
+        assert!((back.min - r.min).length() < 0.001);
+        assert!((back.max - r.max).length() < 0.001);
+    }
+
+    #[test]
+    fn translation_for_places_content() {
+        let sc = Vec2::new(640.0, 360.0);
+        let u_min = Vec2::new(200.0, 100.0);
+        let desired = Vec2::new(50.0, 400.0);
+        let s = 2.0;
+        let t = translation_for(desired, u_min, sc, s);
+        assert!((transform_point(u_min, sc, t, s) - desired).length() < 0.001);
+    }
+
+    #[test]
+    fn identity_transform_at_defaults() {
+        let sc = Vec2::new(640.0, 360.0);
+        let u_min = Vec2::new(123.0, 45.0);
+        // Natural placement, offset 0 → desired == natural top-left → T == 0.
+        let t = translation_for(u_min, u_min, sc, 1.0);
+        assert!(t.length() < 0.001);
     }
 }

@@ -14,9 +14,7 @@ struct EditorUiRoot;
 #[derive(Component, Clone, Copy)]
 enum EditorButton {
     Select(WidgetKind),
-    ResetWidget,
     ResetAll,
-    NextPreset,
     Save,
     Undo,
     Redo,
@@ -85,9 +83,7 @@ fn spawn_ui_on_open(
             spawn_button(p, &t, EditorButton::Select(kind), kind.display_name());
         }
         spawn_label(p, &t, "- actions -");
-        spawn_button(p, &t, EditorButton::ResetWidget, "Reset Widget");
         spawn_button(p, &t, EditorButton::ResetAll, "Reset All");
-        spawn_button(p, &t, EditorButton::NextPreset, "Next Lane Preset");
         spawn_button(p, &t, EditorButton::Undo, "Undo (Ctrl+Z)");
         spawn_button(p, &t, EditorButton::Redo, "Redo (Ctrl+Y)");
         spawn_button(p, &t, EditorButton::Save, "Save (Ctrl+S)");
@@ -138,6 +134,8 @@ fn handle_buttons(
     mut stack: ResMut<UndoStack>,
     prev: Res<super::PrevAutoplay>,
     mut autoplay: ResMut<crate::autoplay::AutoplayEnabled>,
+    mut session: ResMut<game_shell::EditorSession>,
+    mut requests: MessageWriter<game_shell::TransitionRequest>,
 ) {
     for (interaction, button, mut bg) in &mut interactions {
         match *interaction {
@@ -149,19 +147,9 @@ fn handle_buttons(
                 };
                 match *button {
                     EditorButton::Select(kind) => selection.0 = Some(kind),
-                    EditorButton::ResetWidget => {
-                        if let Some(kind) = selection.0 {
-                            stack.push(&layouts, &lanes);
-                            save::reset_widget(&mut layouts, kind);
-                        }
-                    }
                     EditorButton::ResetAll => {
                         stack.push(&layouts, &lanes);
                         save::reset_all_widgets(&mut layouts);
-                    }
-                    EditorButton::NextPreset => {
-                        stack.push(&layouts, &lanes);
-                        save::next_lane_preset(&mut lanes);
                     }
                     EditorButton::Undo => {
                         if let Some(s) = stack.undo(snap) {
@@ -185,6 +173,13 @@ fn handle_buttons(
                         open.0 = false;
                         autoplay.0 = prev.0;
                         selection.0 = None;
+                        if session.0 {
+                            session.0 = false;
+                            game_shell::request_transition(
+                                &mut requests,
+                                game_shell::AppState::Title,
+                            );
+                        }
                     }
                 }
             }
@@ -220,6 +215,8 @@ fn close_on_escape(
     mut open: ResMut<EditorOpen>,
     prev: Res<super::PrevAutoplay>,
     mut autoplay: ResMut<crate::autoplay::AutoplayEnabled>,
+    mut session: ResMut<game_shell::EditorSession>,
+    mut requests: MessageWriter<game_shell::TransitionRequest>,
 ) {
     if keys.just_pressed(KeyCode::Escape) {
         if selection.0.is_some() {
@@ -227,6 +224,10 @@ fn close_on_escape(
         } else {
             open.0 = false;
             autoplay.0 = prev.0;
+            if session.0 {
+                session.0 = false;
+                game_shell::request_transition(&mut requests, game_shell::AppState::Title);
+            }
         }
     }
 }

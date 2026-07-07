@@ -103,6 +103,7 @@ pub fn plugin(app: &mut App) {
             OnEnter(AppState::SongLoading),
             (reset_advance_gate, start_load, spawn_loading).chain(),
         )
+        .add_systems(OnEnter(AppState::SongLoading), persist_last_played)
         .add_systems(
             OnExit(AppState::SongLoading),
             (stop_nowloading, despawn_stage::<LoadingEntity>).chain(),
@@ -636,6 +637,26 @@ fn advance_when_loaded(
             gate.0 = true;
         }
         _ => {}
+    }
+}
+
+/// Remember the song for the editor session (`gameplay.last_played`).
+/// Normal runs only — the editor session must not overwrite it with itself.
+fn persist_last_played(selected: Res<SelectedSong>, session: Res<game_shell::EditorSession>) {
+    if session.0 {
+        return;
+    }
+    let Some(path) = selected.0.clone() else {
+        return;
+    };
+    let cfg_path = dtx_config::default_path();
+    let mut cfg = dtx_config::load(&cfg_path);
+    if cfg.gameplay.last_played.as_ref() == Some(&path) {
+        return;
+    }
+    cfg.gameplay.last_played = Some(path);
+    if let Err(e) = dtx_config::save(&cfg_path, &cfg) {
+        warn!("failed to persist last_played: {e}");
     }
 }
 

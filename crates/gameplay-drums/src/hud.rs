@@ -58,6 +58,7 @@ fn spawn_widget_container(commands: &mut Commands, root: Entity, kind: WidgetKin
                 ..default()
             },
             ZIndex(0),
+            bevy::ui::UiTransform::default(),
             Visibility::Inherited,
             // Full-screen transparent overlay: never absorb pointer events, so
             // the plan-3 editor can pick widgets/playfield beneath it.

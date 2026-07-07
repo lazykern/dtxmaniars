@@ -23,10 +23,16 @@ const MAX_HISTORY: usize = 64;
 impl UndoStack {
     /// Record the current state as an undo point (clears redo history).
     pub fn push(&mut self, layouts: &WidgetLayouts, lanes: &Lanes) {
-        self.past.push(Snapshot {
+        self.push_snapshot(Snapshot {
             layouts: layouts.clone(),
             lanes: lanes.clone(),
         });
+    }
+
+    /// Push a pre-built snapshot (callers that must snapshot before a
+    /// conditional mutation).
+    pub fn push_snapshot(&mut self, snap: Snapshot) {
+        self.past.push(snap);
         if self.past.len() > MAX_HISTORY {
             self.past.remove(0);
         }

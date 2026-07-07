@@ -9,7 +9,9 @@ pub mod states;
 mod performance;
 mod transition;
 
-pub use states::{AppState, EGameMode, PauseState, PracticeIntent, StageEntity, despawn_stage};
+pub use states::{
+    AppState, EGameMode, EditorSession, PauseState, PracticeIntent, StageEntity, despawn_stage,
+};
 pub use transition::{request_transition, TransitionRequest};
 
 /// Root plugin. Registers AppState + transitions + Performance wiring.
@@ -20,6 +22,7 @@ impl Plugin for GameShellPlugin {
         app.init_state::<AppState>()
             .init_state::<PauseState>()
             .init_resource::<states::PracticeIntent>()
+            .init_resource::<states::EditorSession>()
             .add_plugins((dtx_ui::plugin, transition::plugin, performance::plugin));
     }
 }
