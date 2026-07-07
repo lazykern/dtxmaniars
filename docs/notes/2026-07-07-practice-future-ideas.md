@@ -28,6 +28,20 @@ fill" (pre-set A/B + rate). Needs persistence (phase 0) to be useful.
 Chart halts until correct pad hit, no clock. Best tool for learning
 fills note-by-note. Already listed as trainer phase 3.
 
+## Layout: per-kind visibility defaults vs saved entries
+
+v3 changed `default_instance` so score widgets (ScorePanel/PhraseMeter/
+LiveGraph/SongProgress) default hidden in practice. Gap: `WidgetEntry`'s
+`visible_play`/`visible_practice` use serde `default = default_true` (a
+constant), and `resolve()` replaces wholesale — so an *explicit* saved
+layout entry for a score widget (written because its position differed
+from default) keeps the OLD `visible_practice = true`, silently defeating
+the new default for that one saved layout. Fresh/default layouts are
+fine. Proper fix: make `visible_*` `Option<bool>`, fall back to
+`default_instance(kind)` in `to_instance` when `None`, and
+`skip_serializing_if` when equal to the kind default. Deferred — it's a
+layout-format change, orthogonal to the practice training model.
+
 ## Count-in click / metronome
 
 Metronome click during pre-roll + visual 4-3-2-1; optional click through
