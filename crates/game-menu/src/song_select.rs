@@ -750,6 +750,7 @@ fn spawn_song_select(
                             ("↑↓ SELECT", false),
                             ("←→ DIFFICULTY", false),
                             ("ENTER PLAY", true),
+                            ("SHIFT+ENTER PRACTICE", false),
                             ("TAB SORT", false),
                             ("F5 RESCAN", false),
                             ("F1 SETTINGS", false),
