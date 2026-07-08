@@ -9,8 +9,10 @@ User smoke 2026-07-08 (Opus session). Chrome structure works but visuals diverge
 - Bindings: click a channel row to select (was spawned-but-never-queried → un-selectable). Row highlights, lane outlines on playfield, source labels draw at pad bottom, selection HOLDS.
 - Bindings: autoplay no longer drives selection (was chasing the judged note). Real MIDI NoteOn still auto-selects (spec §5).
 
-### P2 root cause (mapped, NOT yet fixed)
-`measure_widget_geoms` (widget_layout.rs:169) measures widget anchor geometry against raw WINDOW size, not StageRect. Play-mode widgets (score/combo/live-graph) route position through HudRefRect+origin (P1) but their ANCHOR/scale basis is still window-relative → on the Widgets tab some still land near window edges instead of inside the shrunk stage. Fix = route measure_widget_geoms through StageRect. Regression risk to normal play (origin=0 must stay identity). Verify normal play via BRP after.
+### P2 FIXED (`3f66805`..`a0a292c`) — single HudRoot transform (osu SetCustomRect)
+Abandoned the per-widget-StageRect route (whack-a-mole). Adopted the artifact's model: the WHOLE scene (playfield + every HUD widget, all children of HudRoot) rides ONE uniform `UiTransform` on HudRoot. PlayfieldLayout now always full-window; shrink = the transform (`stage_rect::stage_xform`/`apply_stage_transform`). preset_rect: settings tabs shift full playfield into the gap (scale 1, HUD hidden via P0); kit tabs shrink the whole screen into the gap (inspector reserved only on Widgets+selection). bindings_spatial overlay reparented under HudRoot. Drag divides Δ by pfl.scale*stage_scale. Rounded StageOutline frames the miniature. **BRP-verified: normal play identity; Widgets miniature with HUD contained; Bindings overlay glued; settings shift clean.** 1304 workspace tests pass.
+
+Tried a preview dim veil (scrim child of HudRoot) — reverted: score panel renders in its own stacking context above the scrim, so the dim was partial/inconsistent. A proper "calm/dim" look needs per-element restyling (dim lane bg, thin separators, dimmer notes) — subjective, left for user direction.
 
 ### Remaining aesthetic (subjective — get user steer)
 - Dim the whole preview (artifact is dim/translucent; impl is full brightness).
