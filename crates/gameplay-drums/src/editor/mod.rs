@@ -1,4 +1,5 @@
-//! In-Performance layout editor overlay. Inert unless opened (Ctrl+Shift+E).
+//! In-Performance layout editor overlay. Opens only via an editor session
+//! (Customize entry from Title/SongSelect); never toggleable mid-gameplay.
 //!
 //! Opening force-enables autoplay (notes flow hands-free), gates drum input +
 //! pause, and spawns the sidebar. Closing restores the prior autoplay flag and
@@ -94,12 +95,6 @@ pub fn plugin(app: &mut App) {
         .init_resource::<undo::UndoStack>()
         .add_systems(
             Update,
-            toggle_editor
-                .run_if(in_state(AppState::Performance))
-                .run_if(|s: Res<game_shell::EditorSession>| !s.0),
-        )
-        .add_systems(
-            Update,
             update_preview_state
                 .before(EditorPickSet)
                 .run_if(in_state(AppState::Performance)),
@@ -151,28 +146,6 @@ fn close_editor_on_exit(
     // Covers non-Esc exits (song ended, forced transition): a stale session
     // flag would make the next Performance force-open the editor.
     session.0 = false;
-}
-
-/// Ctrl+Shift+E toggles the editor while in Performance.
-fn toggle_editor(
-    keys: Res<ButtonInput<KeyCode>>,
-    mut open: ResMut<EditorOpen>,
-    mut prev: ResMut<PrevAutoplay>,
-    mut autoplay: ResMut<crate::autoplay::AutoplayEnabled>,
-    mut selection: ResMut<drag::Selection>,
-) {
-    let ctrl = keys.pressed(KeyCode::ControlLeft) || keys.pressed(KeyCode::ControlRight);
-    let shift = keys.pressed(KeyCode::ShiftLeft) || keys.pressed(KeyCode::ShiftRight);
-    if ctrl && shift && keys.just_pressed(KeyCode::KeyE) {
-        open.0 = !open.0;
-        if open.0 {
-            prev.0 = autoplay.0;
-            autoplay.0 = true;
-        } else {
-            autoplay.0 = prev.0;
-            selection.0 = None;
-        }
-    }
 }
 
 /// Run condition: editor is open.
