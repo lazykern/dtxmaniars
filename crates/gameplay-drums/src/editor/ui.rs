@@ -16,7 +16,7 @@ struct EditorUiRoot;
 pub struct TabButton(pub game_shell::CustomizeTab);
 
 #[derive(Component, Clone, Copy)]
-enum EditorButton {
+pub(super) enum EditorButton {
     Select(WidgetKind),
     ResetAll,
     Save,
@@ -120,12 +120,12 @@ fn spawn_label(p: &mut ChildSpawnerCommands, theme: &dtx_ui::theme::Theme, text:
     ));
 }
 
-fn spawn_button(
+pub(super) fn spawn_button(
     p: &mut ChildSpawnerCommands,
     theme: &dtx_ui::theme::Theme,
     button: EditorButton,
     label: &str,
-) {
+) -> Entity {
     p.spawn((
         button,
         Button,
@@ -139,7 +139,8 @@ fn spawn_button(
             dtx_ui::theme::Theme::font(12.0),
             TextColor(theme.text_primary),
         )],
-    ));
+    ))
+    .id()
 }
 
 /// Spawn a tab-rail button; `active` gets the brighter selected tint.

@@ -12,8 +12,18 @@ use super::EditorOpen;
 use crate::lanes::Lanes;
 use crate::widget_layout::WidgetLayouts;
 
+/// Left content panel (docked right of the rail): renders the active tab's
+/// content (settings rows / lane list / widget list / bindings). Rebuilds on
+/// tab/content change only — NOT on selection — so picking a widget no longer
+/// respawns the whole left list.
 #[derive(Component)]
-pub struct PanelRoot;
+pub struct LeftContentRoot;
+
+/// Right inspector panel (docked to the window's right edge): renders the
+/// selected widget's knobs. Rebuilds on selection change; present only on the
+/// Widgets tab with a non-Playfield widget selected.
+#[derive(Component)]
+pub struct RightInspectorRoot;
 
 /// Which widget field a control edits.
 #[derive(Component, Debug, Clone, Copy, PartialEq)]
@@ -87,21 +97,30 @@ fn preset_name(p: dtx_layout::LanePreset) -> &'static str {
 
 pub const PANEL_WIDTH: f32 = 240.0;
 
-/// Left sidebar rail width (editor/ui.rs); settings tabs dock the panel
-/// flush against it on the LEFT, kit tabs keep the right inspector.
+/// Left content panel width (docked right of the rail).
+const LEFT_PANEL_WIDTH: f32 = 348.0;
+
+/// Left sidebar rail width (editor/ui.rs); the left content panel docks flush
+/// against it on the LEFT, the inspector docks against the window's right edge.
 const RAIL_WIDTH: f32 = 220.0;
 
 pub fn plugin(app: &mut App) {
     app.add_systems(
         Update,
         (
-            // Only when a rebuild trigger actually changed — avoids allocating
-            // a fresh signature string every idle frame. The Local guard inside
-            // still debounces width-only Lanes changes (no rebuild mid-drag).
-            rebuild_panel.run_if(
+            // Left content rebuilds on tab/content change only (NOT selection),
+            // so picking a widget no longer respawns the whole left list. The
+            // Local guard inside still debounces width-only Lanes changes.
+            rebuild_left_content.run_if(
+                resource_changed::<super::tabs::ActiveTab>
+                    .or_else(resource_changed::<EditorOpen>)
+                    .or_else(resource_changed::<Lanes>),
+            ),
+            // Right inspector rebuilds on selection change (+ tab/open) — this
+            // is the only panel that reacts to Selection.
+            rebuild_right_inspector.run_if(
                 resource_changed::<Selection>
                     .or_else(resource_changed::<EditorOpen>)
-                    .or_else(resource_changed::<Lanes>)
                     .or_else(resource_changed::<super::tabs::ActiveTab>),
             ),
             (
@@ -123,30 +142,30 @@ pub fn plugin(app: &mut App) {
     .add_systems(OnExit(game_shell::AppState::Performance), despawn_panel);
 }
 
-fn despawn_panel(mut commands: Commands, q: Query<Entity, With<PanelRoot>>) {
+fn despawn_panel(
+    mut commands: Commands,
+    q: Query<Entity, Or<(With<LeftContentRoot>, With<RightInspectorRoot>)>>,
+) {
     for e in &q {
         commands.entity(e).despawn();
     }
 }
 
-fn rebuild_panel(
+/// Left content panel: renders the active tab's content. Rebuilds on
+/// tab/content change only (NOT selection). The debounce signature drops
+/// `selection.0` so picking a widget never respawns this list.
+fn rebuild_left_content(
     mut commands: Commands,
     open: Res<EditorOpen>,
     selection: Res<Selection>,
-    layouts: Res<WidgetLayouts>,
     lanes: Res<Lanes>,
     active: Res<super::tabs::ActiveTab>,
     draft: Res<super::tabs::ConfigDraft>,
     theme: Res<dtx_ui::ThemeResource>,
-    existing: Query<Entity, With<PanelRoot>>,
-    mut last_sig: Local<Option<(Option<WidgetKind>, bool, String, game_shell::CustomizeTab)>>,
+    existing: Query<Entity, With<LeftContentRoot>>,
+    mut last_sig: Local<Option<(bool, String, game_shell::CustomizeTab)>>,
 ) {
-    let sig = (
-        selection.0,
-        open.0,
-        dtx_layout::structure_signature(&lanes.0),
-        active.0,
-    );
+    let sig = (open.0, dtx_layout::structure_signature(&lanes.0), active.0);
     if last_sig.as_ref() == Some(&sig) {
         return;
     }
@@ -157,28 +176,16 @@ fn rebuild_panel(
     if !open.0 {
         return;
     }
-    // Settings tabs render without a widget selection; the Lanes tab renders the
-    // lane block directly. The Widgets tab still needs a selected widget.
-    let is_lanes = active.0 == game_shell::CustomizeTab::Lanes;
-    if !active.0.is_settings() && !is_lanes && selection.0.is_none() {
-        return;
-    }
     let t = theme.0;
-    let (left, right) = if active.0.is_settings() {
-        (Val::Px(RAIL_WIDTH), Val::Auto)
-    } else {
-        (Val::Auto, Val::Px(0.0))
-    };
     let root = commands
         .spawn((
-            PanelRoot,
+            LeftContentRoot,
             EditorChrome,
             Node {
                 position_type: PositionType::Absolute,
-                left,
-                right,
+                left: Val::Px(RAIL_WIDTH),
                 top: Val::Px(0.0),
-                width: Val::Px(PANEL_WIDTH),
+                width: Val::Px(LEFT_PANEL_WIDTH),
                 height: Val::Percent(100.0),
                 flex_direction: FlexDirection::Column,
                 padding: UiRect::all(Val::Px(8.0)),
@@ -194,19 +201,107 @@ fn rebuild_panel(
         spawn_settings_block(&mut commands, root, &t, active.0, &draft);
         return;
     }
-    if is_lanes {
-        commands.entity(root).with_children(|p| {
-            spawn_lane_block(p, &t, &lanes);
-        });
+    // Kit tabs: the Lanes tab owns the lane block; the Widgets tab owns the
+    // widget picker list (selecting Playfield here just shows no inspector —
+    // the lane block lives on the dedicated Lanes tab). Bindings is a Phase 3a
+    // placeholder.
+    commands.entity(root).with_children(|p| match active.0 {
+        game_shell::CustomizeTab::Lanes => spawn_lane_block(p, &t, &lanes),
+        game_shell::CustomizeTab::Widgets => spawn_widget_list(p, &t, &selection),
+        game_shell::CustomizeTab::Bindings => {
+            p.spawn((
+                Text::new("Bindings"),
+                dtx_ui::theme::Theme::font(13.0),
+                TextColor(t.text_primary),
+            ));
+            p.spawn((
+                Text::new("(bindings tab — coming soon)"),
+                dtx_ui::theme::Theme::font(11.0),
+                TextColor(t.text_secondary),
+            ));
+        }
+        _ => {}
+    });
+}
+
+/// Widget picker list (migrated from the rail): one Select button per widget
+/// kind, the selected one tinted. Clicks are processed by ui.rs's
+/// `handle_buttons` Select arm; `highlight_selection` keeps the tint in sync.
+fn spawn_widget_list(
+    p: &mut ChildSpawnerCommands,
+    t: &dtx_ui::theme::Theme,
+    selection: &Selection,
+) {
+    p.spawn((
+        Text::new("Widgets"),
+        dtx_ui::theme::Theme::font(13.0),
+        TextColor(t.text_primary),
+    ));
+    for kind in WidgetKind::ALL {
+        let e = super::ui::spawn_button(
+            p,
+            t,
+            super::ui::EditorButton::Select(kind),
+            kind.display_name(),
+        );
+        if selection.0 == Some(kind) {
+            p.commands_mut()
+                .entity(e)
+                .insert(BackgroundColor(Color::srgb(0.22, 0.3, 0.42)));
+        }
+    }
+}
+
+/// Right inspector: the selected widget's knobs. Rebuilds on selection change
+/// (+ tab/open). Present only on the Widgets tab with a non-Playfield widget
+/// selected; otherwise the right edge stays empty.
+fn rebuild_right_inspector(
+    mut commands: Commands,
+    open: Res<EditorOpen>,
+    selection: Res<Selection>,
+    layouts: Res<WidgetLayouts>,
+    active: Res<super::tabs::ActiveTab>,
+    theme: Res<dtx_ui::ThemeResource>,
+    existing: Query<Entity, With<RightInspectorRoot>>,
+    mut last_sig: Local<Option<(Option<WidgetKind>, game_shell::CustomizeTab, bool)>>,
+) {
+    let sig = (selection.0, active.0, open.0);
+    if last_sig.as_ref() == Some(&sig) {
+        return;
+    }
+    *last_sig = Some(sig);
+    for e in &existing {
+        commands.entity(e).despawn();
+    }
+    if !open.0 || active.0 != game_shell::CustomizeTab::Widgets {
         return;
     }
     let Some(kind) = selection.0 else { return };
+    if kind == WidgetKind::Playfield {
+        return;
+    }
+    let t = theme.0;
+    let root = commands
+        .spawn((
+            RightInspectorRoot,
+            EditorChrome,
+            Node {
+                position_type: PositionType::Absolute,
+                right: Val::Px(0.0),
+                top: Val::Px(0.0),
+                width: Val::Px(PANEL_WIDTH),
+                height: Val::Percent(100.0),
+                flex_direction: FlexDirection::Column,
+                padding: UiRect::all(Val::Px(8.0)),
+                row_gap: Val::Px(6.0),
+                ..default()
+            },
+            BackgroundColor(Color::srgba(0.05, 0.05, 0.07, 0.92)),
+            GlobalZIndex(2000),
+        ))
+        .id();
 
     commands.entity(root).with_children(|p| {
-        if kind == WidgetKind::Playfield {
-            spawn_lane_block(p, &t, &lanes);
-            return;
-        }
         let inst = layouts.get(kind).clone();
         p.spawn((
             Text::new(format!("Settings ({})", kind.display_name())),
