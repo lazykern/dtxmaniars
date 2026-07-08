@@ -48,10 +48,10 @@ scene space, the cursor converts once at the input boundary via
   select clean after close. 1310 workspace tests.
 
 ### Follow-ups discovered during BRP verify (NOT yet fixed)
-- **Surface dies with the song**: `judge` is gated `editor_closed` but the miss
-  sweeper isn't → while the surface is open autoplay hits are never judged, the
-  whole chart misses, and song end closes the surface (~90s on the test song).
-  Real fix: loop/freeze the chart while the surface is open.
+- ~~**Surface dies with the song**~~ RESOLVED (`8f4c209`): the in-gameplay
+  Ctrl+Shift+E toggle was removed per user decision — the surface now opens
+  ONLY via an editor session (F1/F2 from Title, Customize from SongSelect),
+  and sessions already loop the chart (`session_loop_watcher`).
 - Stale `~/.config/dtxmaniars/layout.toml` scene blocks from pre-clamp sessions
   (now-playing offset x = -7335!) were backed up to `layout.toml.bak-2026-07-08`
   and stripped. Consider a load-time sanitize (clamp offsets into the window).
