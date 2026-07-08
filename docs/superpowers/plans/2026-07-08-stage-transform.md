@@ -312,14 +312,19 @@ git -C /home/lazykern/lab/dtxmaniars-customize commit -m "feat(gameplay-drums): 
 
 ---
 
-### Task 3: `widget_layout` reads `StageRect`
+### Task 3: `widget_layout` parent rect reads `StageRect`
 
 **Files:**
 - Modify: `crates/gameplay-drums/src/widget_layout.rs`
+- Modify: `crates/gameplay-drums/src/editor/drag.rs` (parent_rect_px call site @180-188)
+- Modify: `crates/gameplay-drums/src/editor/snap.rs` (call sites @101-106, 153-154)
+- Modify: `crates/gameplay-drums/src/editor/panel.rs` (call sites @699-720, 773-781)
 
-Context: `apply_widget_layout` (`widget_layout.rs:212-276`) uses `sc = window/2` (`:228`), `wsize = window` (`:229`), natural translation `offset * pfl.scale` (`:236-240`); `parent_rect_px` Screen arm returns `(0,0,win.x,win.y)` (`:89-103`). All must read `StageRect`. **Behavior-preserving at rect = full window.**
+Context: `apply_widget_layout` (`widget_layout.rs:212-276`) uses `sc = window/2` (`:228`), `wsize = window` (`:229`), natural translation `offset * pfl.scale` (`:236-240`); `parent_rect_px(space, window_size, pfl)` Screen arm returns `(0,0,win.x,win.y)` (`:89-103`). All must read `StageRect`. **Behavior-preserving at rect = full window.**
 
-READ `widget_layout.rs` fully. Note that `applied_of` (`:159,203-209`) inverts only the per-widget container transform — do NOT change that (it stays a per-widget concern). Only the window-size reads change.
+**Cross-file coupling (why this task spans 4 files):** `parent_rect_px` is called from 5 sites — `widget_layout.rs:248`, `drag.rs:188`, `panel.rs:720/781`, `snap.rs:106/154` — each currently computing `wsize = Vec2::new(window.width(), window.height())` and passing it. Only its **Screen arm** needs the stage origin (the **Playfield arm** already uses `pfl.strip_left()`/`lane_top()`, which Task 2 made origin-aware). So: change the signature `parent_rect_px(space, rect: crate::stage_rect::StageRect, pfl)`, Screen arm → `(rect.origin.x, rect.origin.y, rect.size.x, rect.size.y)`, and update all 5 callers to pass a `StageRect` instead of `wsize`. Each caller is (or is called from) a Bevy system — add `rect: Res<crate::stage_rect::StageRect>` and pass `*rect`; where the caller ALSO uses `wsize` for other local math, map that to `rect.size` and (if it needs a screen-space base) `rect.origin`. At identity all 5 are unchanged. Do NOT change `apply_widget_layout`'s other math beyond the `sc`/`wsize`/parent-rect reads. Do NOT touch `applied_of` (`:159,203-209`) — per-widget transform inversion stays.
+
+READ `widget_layout.rs`, `drag.rs`, `snap.rs`, `panel.rs` fully first. For each of the 5 call sites, confirm whether `wsize` is used ONLY for the `parent_rect_px` call (then just swap to `*rect`) or ALSO elsewhere (then thread `rect.size`/`rect.origin` through). Keep the change minimal and behavior-preserving at identity.
 
 - [ ] **Step 1: Write failing regression test**
 
