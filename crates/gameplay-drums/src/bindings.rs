@@ -13,7 +13,27 @@ use crate::lane_map::{lane_of, LaneId};
 
 pub(super) fn plugin(app: &mut App) {
     app.init_resource::<BindResolver>()
-        .add_systems(OnEnter(game_shell::AppState::Performance), reload_bindings);
+        .init_resource::<LiveBindings>()
+        .add_systems(OnEnter(game_shell::AppState::Performance), reload_bindings)
+        .add_systems(
+            Update,
+            (
+                apply_live_bindings.run_if(resource_changed::<LiveBindings>),
+                save_bindings_on_close,
+            )
+                .run_if(in_state(game_shell::AppState::Performance)),
+        );
+}
+
+/// Live, editable bindings — the Bindings tab mutates this; the resolver +
+/// disk follow. Seeded from bindings.toml on Performance enter.
+#[derive(Resource, Debug, Clone)]
+pub struct LiveBindings(pub dtx_config::InputBindings);
+
+impl Default for LiveBindings {
+    fn default() -> Self {
+        Self(dtx_config::InputBindings::default())
+    }
 }
 
 /// Flattened lookup tables derived from `InputBindings`.
@@ -68,10 +88,30 @@ impl BindResolver {
 }
 
 /// Reload bindings.toml on entering Performance (mirrors config load style,
-/// see lib.rs `load(&default_path())` call sites).
-fn reload_bindings(mut resolver: ResMut<BindResolver>) {
+/// see lib.rs `load(&default_path())` call sites). Seeds both `LiveBindings`
+/// and `BindResolver` from the same load so they start consistent.
+fn reload_bindings(mut resolver: ResMut<BindResolver>, mut live: ResMut<LiveBindings>) {
     let b = dtx_config::load_bindings(&dtx_config::default_bindings_path());
     *resolver = BindResolver::from_bindings(&b);
+    live.0 = b;
+}
+
+/// Rebuild `BindResolver` whenever `LiveBindings` changes (immediate feedback).
+/// Does NOT save — disk persistence happens on surface close.
+fn apply_live_bindings(live: Res<LiveBindings>, mut resolver: ResMut<BindResolver>) {
+    *resolver = BindResolver::from_bindings(&live.0);
+}
+
+/// When the Customize surface closes, persist the live bindings to disk
+/// (mirrors `tabs::save_draft_on_close`).
+fn save_bindings_on_close(open: Res<crate::editor::EditorOpen>, live: Res<LiveBindings>) {
+    if !open.is_changed() || open.0 {
+        return;
+    }
+    let path = dtx_config::default_bindings_path();
+    if let Err(e) = dtx_config::save_bindings(&path, &live.0) {
+        error!("customize: failed to save bindings {}: {e}", path.display());
+    }
 }
 
 #[cfg(test)]
@@ -111,6 +151,18 @@ mod tests {
         b.bind(EChannel::Snare, dtx_config::BindSource::Key(KeyCode::KeyX));
         let r = BindResolver::from_bindings(&b);
         assert_eq!(r.lane_for_key(KeyCode::KeyX), Some(1)); // now SD
+    }
+
+    #[test]
+    fn resolver_tracks_live_binding_edit() {
+        let mut ib = dtx_config::InputBindings::default();
+        let sd = dtx_core::EChannel::Snare;
+        ib.bind(sd, dtx_config::BindSource::Key(KeyCode::KeyP));
+        let resolver = BindResolver::from_bindings(&ib);
+        assert_eq!(
+            resolver.lane_for_key(KeyCode::KeyP),
+            crate::lane_map::lane_of(sd)
+        );
     }
 
     #[test]
