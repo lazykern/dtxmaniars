@@ -12,7 +12,10 @@ User smoke 2026-07-08 (Opus session). Chrome structure works but visuals diverge
 ### P2 FIXED (`3f66805`..`a0a292c`) — single HudRoot transform (osu SetCustomRect)
 Abandoned the per-widget-StageRect route (whack-a-mole). Adopted the artifact's model: the WHOLE scene (playfield + every HUD widget, all children of HudRoot) rides ONE uniform `UiTransform` on HudRoot. PlayfieldLayout now always full-window; shrink = the transform (`stage_rect::stage_xform`/`apply_stage_transform`). preset_rect: settings tabs shift full playfield into the gap (scale 1, HUD hidden via P0); kit tabs shrink the whole screen into the gap (inspector reserved only on Widgets+selection). bindings_spatial overlay reparented under HudRoot. Drag divides Δ by pfl.scale*stage_scale. Rounded StageOutline frames the miniature. **BRP-verified: normal play identity; Widgets miniature with HUD contained; Bindings overlay glued; settings shift clean.** 1304 workspace tests pass.
 
-Tried a preview dim veil (scrim child of HudRoot) — reverted: score panel renders in its own stacking context above the scrim, so the dim was partial/inconsistent. A proper "calm/dim" look needs per-element restyling (dim lane bg, thin separators, dimmer notes) — subjective, left for user direction.
+### Dim preview DONE (`9ca7be1`) — user chose "dim the preview" + "keep the domes"
+A full-window scrim at `GlobalZIndex(1500)` (above all HUD incl. the GlobalZIndex combo, below chrome 2000 + outline 1900) at `srgba(0.02,0.024,0.035,0.72)`. First tried a scrim as a HudRoot CHILD (local z) — failed: GlobalZIndex HUD (combo) escaped it. Top-level GlobalZIndex scrim covers everything uniformly. Spawned/despawned with the bounds outline; hidden on Tab-peek; absent in normal play. BRP-verified: dimmed calm miniature open, full-brightness identity closed. Tune darkness via the one `BackgroundColor` alpha constant in `spawn_outline_on_open`.
+
+Domes kept (user's call) — not swapped for the artifact's flat labels. Adjust the scrim alpha if the user wants more/less dim.
 
 ### Remaining aesthetic (subjective — get user steer)
 - Dim the whole preview (artifact is dim/translucent; impl is full brightness).
