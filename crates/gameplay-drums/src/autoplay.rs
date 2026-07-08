@@ -11,8 +11,8 @@
 use bevy::prelude::*;
 
 use crate::events::LaneHit;
-use crate::judge::{chip_target_ms, BarLengthChangeList, BpmChangeList, JudgedChips};
-use crate::lane_map::{lane_of, LaneId};
+use crate::judge::{BarLengthChangeList, BpmChangeList, JudgedChips, chip_target_ms};
+use crate::lane_map::{LaneId, lane_of};
 use crate::resources::{ActiveChart, GameplayClock};
 use dtx_timing::math::ChartTiming;
 
@@ -38,11 +38,20 @@ fn autoplay_active(flag: Res<AutoplayEnabled>) -> bool {
 
 /// System: for each un-judged chip whose target_ms <= GameplayClock.current_ms,
 /// emit a LaneHit event with audio_ms = target_ms (delta = 0 → Perfect).
+///
+/// In normal play the judge marks the chip judged on the same tick, so each
+/// chip fires exactly once. While the Customize surface is open the judge is
+/// gated off (`editor_closed`), so nothing would mark the chip until the miss
+/// sweep does ~118ms later — the bot would re-emit the same chip every
+/// FixedUpdate tick and `hit_feedback` would stack ~8 copies of its voice. To
+/// keep one hit per chip, the bot marks the chip judged itself when the
+/// editor is open.
 pub fn autoplay_system(
     clock: Res<GameplayClock>,
     chart: Res<ActiveChart>,
     bpm_changes: Res<BpmChangeList>,
     bar_changes: Res<BarLengthChangeList>,
+    editor_open: Res<crate::editor::EditorOpen>,
     mut judged: ResMut<JudgedChips>,
     mut lane_hits: MessageWriter<LaneHit>,
 ) {
@@ -73,6 +82,12 @@ pub fn autoplay_system(
                 lane: lane as LaneId,
                 audio_ms: target_ms,
             });
+            if editor_open.0 {
+                debug!(
+                    "autoplay (editor): chip {idx} lane {lane} target {target_ms}ms marked judged"
+                );
+                judged.0.insert(idx);
+            }
         }
     }
 }
@@ -99,6 +114,7 @@ mod tests {
             .init_resource::<BpmChangeList>()
             .init_resource::<BarLengthChangeList>()
             .init_resource::<AutoplayEnabled>()
+            .init_resource::<crate::editor::EditorOpen>()
             .add_message::<LaneHit>()
             .add_systems(Update, autoplay_system.run_if(autoplay_active));
         app
@@ -113,6 +129,7 @@ mod tests {
             .init_resource::<BpmChangeList>()
             .init_resource::<BarLengthChangeList>()
             .init_resource::<AutoplayEnabled>()
+            .init_resource::<crate::editor::EditorOpen>()
             .init_resource::<crate::resources::DrumGameplaySettings>()
             .init_resource::<crate::resources::Score>()
             .init_resource::<crate::resources::DrumScoring>()
@@ -285,6 +302,34 @@ mod tests {
 
         let judged = app.world().resource::<JudgedChips>();
         assert!(!judged.0.contains(&0));
+    }
+
+    #[test]
+    fn autoplay_editor_open_marks_judged_no_reemit() {
+        let mut app = build_app();
+        let chart = make_chart_with_chips(vec![dtx_core::Chip::new(0, EChannel::BassDrum, 0.0)]);
+        app.world_mut().resource_mut::<ActiveChart>().chart = chart;
+        app.world_mut().resource_mut::<AutoplayEnabled>().0 = true;
+        app.world_mut()
+            .resource_mut::<crate::editor::EditorOpen>()
+            .0 = true;
+        set_clock(&mut app, 100);
+
+        app.update();
+        assert_eq!(lane_hit_count(&app), 1);
+        assert!(
+            app.world().resource::<JudgedChips>().0.contains(&0),
+            "editor open: autoplay must self-mark the chip judged"
+        );
+
+        // Next tick: the judge is gated off while the editor is open, so only
+        // the self-mark prevents this chip from firing (and sounding) again.
+        app.update();
+        assert_eq!(
+            lane_hit_count(&app),
+            0,
+            "chip must not re-emit while judged"
+        );
     }
 
     #[test]

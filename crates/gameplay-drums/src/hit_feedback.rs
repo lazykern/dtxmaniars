@@ -50,6 +50,10 @@ fn play_hit_voice_on_lane_hit(
         let Some(wav_slot) = representative_wav_slot(&chart, hit.lane) else {
             continue;
         };
+        debug!(
+            "hit_feedback: lane {} audio_ms {} → wav {wav_slot}",
+            hit.lane, hit.audio_ms
+        );
         let vol = chart.chart.assets.wav.volume(wav_slot);
         let pan = chart.chart.assets.wav.pan(wav_slot);
         // Reuse hit_sound.rs's exact voice-playing mechanism: preloaded handle
