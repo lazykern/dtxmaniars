@@ -114,17 +114,19 @@ pub enum CustomizeTab {
     Audio,
     Drums,
     System,
+    Bindings,
     Lanes,
     Widgets,
 }
 
 impl CustomizeTab {
     /// All tabs in rail order.
-    pub const ALL: [CustomizeTab; 6] = [
+    pub const ALL: [CustomizeTab; 7] = [
         CustomizeTab::Gameplay,
         CustomizeTab::Audio,
         CustomizeTab::Drums,
         CustomizeTab::System,
+        CustomizeTab::Bindings,
         CustomizeTab::Lanes,
         CustomizeTab::Widgets,
     ];
@@ -136,7 +138,11 @@ impl CustomizeTab {
         CustomizeTab::System,
     ];
     /// Kit group (edits layout.toml).
-    pub const KIT: [CustomizeTab; 2] = [CustomizeTab::Lanes, CustomizeTab::Widgets];
+    pub const KIT: [CustomizeTab; 3] = [
+        CustomizeTab::Bindings,
+        CustomizeTab::Lanes,
+        CustomizeTab::Widgets,
+    ];
 
     /// Short rail label.
     pub fn label(self) -> &'static str {
@@ -145,6 +151,7 @@ impl CustomizeTab {
             CustomizeTab::Audio => "Audio",
             CustomizeTab::Drums => "Drums",
             CustomizeTab::System => "System",
+            CustomizeTab::Bindings => "Bindings",
             CustomizeTab::Lanes => "Lanes",
             CustomizeTab::Widgets => "Widgets",
         }
@@ -176,6 +183,12 @@ mod tests {
                 "{t:?} must be in exactly one group"
             );
         }
+    }
+
+    #[test]
+    fn bindings_is_a_kit_tab() {
+        assert!(!CustomizeTab::Bindings.is_settings());
+        assert!(CustomizeTab::KIT.contains(&CustomizeTab::Bindings));
     }
 
     #[test]
