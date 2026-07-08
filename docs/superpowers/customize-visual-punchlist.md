@@ -2,7 +2,9 @@
 
 User smoke 2026-07-08 (Opus session). Chrome structure works but visuals diverge badly from the prototype artifact. Deferred by user ("we need to tackle this after"). Fix once Phase 3 (bindings + MIDI) lands.
 
-## P0 — Settings preview shows the WHOLE HUD; should show only lanes + notes
+## STATUS (2026-07-08): P0 ✅ FIXED (`08eeb71`), P1 ✅ FIXED (`1679d2f`). P2/P3/P4 pending user re-smoke.
+
+## P0 — Settings preview shows the WHOLE HUD; should show only lanes + notes — ✅ FIXED `08eeb71`
 
 **User:** "why does it always show the full game window like layout editor even when i am not in layout editor setting? it should just show only the lane and notes, no need for other things."
 
@@ -10,7 +12,7 @@ On SETTINGS tabs (Gameplay/Audio/Drums/System) the live preview renders the enti
 
 **Intended (design refinement):** settings tabs preview = **lanes + notes ONLY** (clean minimal playfield, no HUD widgets). Full HUD only on the **Widgets** tab (that's where you edit widget layout). Likely implementation: on non-Widgets tabs, hide all HUD widget entities except the playfield (lanes + notes + judge line); show them on the Widgets tab. This also sidesteps P1 for settings tabs.
 
-## P1 — Stage transform doesn't shrink all widgets (corner-anchored widgets bleed into chrome)
+## P1 — Stage transform doesn't shrink all widgets (corner-anchored widgets bleed into chrome) — ✅ FIXED `1679d2f`
 
 The Fit preset shrinks the playfield/combo into a central band, BUT screen-corner-anchored widgets (score panel top-left, skill bottom-left, live graph right, note-density strip far-left) render at FULL WINDOW edges — overlapping the left settings panel + right inspector. So the "stage rect" isn't actually containing all widgets. Either `apply_widget_layout`'s Screen-anchor path isn't applying `StageRect.origin` for corner placement, or some HUD elements render via a system that bypasses `apply_widget_layout`/`PlayfieldLayout` (i.e. still read raw window size — the 2b "completeness" risk). Investigate which widgets bypass StageRect and route them through it. (P0's hide-on-settings-tabs makes this only matter for the Widgets tab.)
 
