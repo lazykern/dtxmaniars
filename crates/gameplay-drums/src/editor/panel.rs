@@ -712,6 +712,8 @@ fn spawn_settings_block(
             }
             prev_group = item.group;
 
+            let modified = (item.value)(&draft.0) != (item.value)(&dtx_config::Config::default());
+
             p.spawn((
                 SettingRow(i),
                 RowDesc(item.desc),
@@ -724,11 +726,28 @@ fn spawn_settings_block(
                 },
             ))
             .with_children(|r| {
-                r.spawn((
-                    Text::new(item.label),
-                    dtx_ui::theme::Theme::font(11.0),
-                    TextColor(t.text_secondary),
-                ));
+                r.spawn(Node {
+                    flex_direction: FlexDirection::Row,
+                    align_items: AlignItems::Center,
+                    column_gap: Val::Px(6.0),
+                    ..default()
+                })
+                .with_children(|l| {
+                    let mut dot = l.spawn(Node {
+                        width: Val::Px(6.0),
+                        height: Val::Px(6.0),
+                        border_radius: BorderRadius::all(Val::Px(3.0)),
+                        ..default()
+                    });
+                    if modified {
+                        dot.insert(BackgroundColor(t.select_yellow));
+                    }
+                    l.spawn((
+                        Text::new(item.label),
+                        dtx_ui::theme::Theme::font(11.0),
+                        TextColor(t.text_secondary),
+                    ));
+                });
                 r.spawn(Node {
                     flex_direction: FlexDirection::Row,
                     align_items: AlignItems::Center,
