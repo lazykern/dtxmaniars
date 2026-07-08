@@ -145,6 +145,73 @@ pub fn available_ports() -> Vec<String> {
     vec![]
 }
 
+/// Real MIDI input source backed by `midir`. The connection callback runs on
+/// midir's own OS thread and pushes parsed events into a shared inbox; `poll`
+/// drains that inbox on the consumer's thread.
+#[cfg(feature = "midi")]
+pub struct RealMidiSource {
+    _conn: midir::MidiInputConnection<()>,
+    inbox: std::sync::Arc<std::sync::Mutex<std::collections::VecDeque<MidiEvent>>>,
+}
+
+#[cfg(feature = "midi")]
+impl RealMidiSource {
+    /// Connect to the first port whose name contains `port_filter` (or the
+    /// first port if `None`). Returns the source plus the connected port name.
+    /// All errors are mapped to `String`.
+    pub fn connect(port_filter: Option<&str>) -> Result<(Self, String), String> {
+        let mut mi = midir::MidiInput::new("dtxmaniars").map_err(|e| e.to_string())?;
+        mi.ignore(midir::Ignore::None);
+        let ports = mi.ports();
+        let port = ports
+            .iter()
+            .find(|p| match (port_filter, mi.port_name(p)) {
+                (Some(f), Ok(n)) => n.contains(f),
+                (None, _) => true,
+                _ => false,
+            })
+            .cloned()
+            .ok_or_else(|| "no matching MIDI port".to_string())?;
+        let name = mi.port_name(&port).map_err(|e| e.to_string())?;
+        let inbox = std::sync::Arc::new(std::sync::Mutex::new(std::collections::VecDeque::new()));
+        let cb_inbox = inbox.clone();
+        let conn = mi
+            .connect(
+                &port,
+                "dtx-in",
+                move |_ts, bytes, _| {
+                    // audio_ms is stamped in poll_midi on drain, not here.
+                    if let Some(ev) = midi_bytes_to_event(bytes, 0) {
+                        if let Ok(mut q) = cb_inbox.lock() {
+                            q.push_back(ev);
+                        }
+                    }
+                },
+                (),
+            )
+            .map_err(|e| e.to_string())?;
+        Ok((Self { _conn: conn, inbox }, name))
+    }
+}
+
+#[cfg(feature = "midi")]
+impl MidiSource for RealMidiSource {
+    fn poll(&mut self, out: &mut Vec<MidiEvent>) -> usize {
+        let mut n = 0;
+        if let Ok(mut q) = self.inbox.lock() {
+            while let Some(e) = q.pop_front() {
+                out.push(e);
+                n += 1;
+            }
+        }
+        n
+    }
+
+    fn has_events(&self) -> bool {
+        self.inbox.lock().map(|q| !q.is_empty()).unwrap_or(false)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
