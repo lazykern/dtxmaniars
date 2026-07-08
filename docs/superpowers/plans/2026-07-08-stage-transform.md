@@ -375,15 +375,19 @@ git -C /home/lazykern/lab/dtxmaniars-customize commit -m "feat(gameplay-drums): 
 
 ---
 
-### Task 4: `picking` + `drag` read `StageRect`
+### Task 4: editor `transform_point` screen-center reads `StageRect`
 
 **Files:**
 - Modify: `crates/gameplay-drums/src/editor/picking.rs`
 - Modify: `crates/gameplay-drums/src/editor/drag.rs`
+- Modify: `crates/gameplay-drums/src/editor/snap.rs`
+- Modify: `crates/gameplay-drums/src/editor/panel.rs`
 
-Context: widget AABBs (`picking.rs:121,132-147`) use `sc = window/2`; `apply_drag` (`drag.rs:38-46`) divides screen delta by `pfl.scale`; `convert_to_anchored` (drag) uses window size. The cursor stays raw `window.cursor_position()` — because AABBs now include `rect.origin`, cursor↔AABB stays consistent. Chrome mask (`picking.rs:167-170`) stays window-space (unchanged — chrome is the fixed frame). **Behavior-preserving at identity.**
+Context: `transform_point(p, screen_center, t, s)` (widget_layout.rs:62) takes `screen_center = sc = wsize/2` (window center), used to place widget geometry in screen px for AABBs/snap/drag. Under the stage transform this center becomes `rect.center()` (= `window/2` at identity, so **behavior-preserving**). The `sc = wsize/2` occurs at: `picking.rs:121`, `drag.rs:185`, `snap.rs:105`, `panel.rs:714`, `panel.rs:776`. Task 3 already added `rect: Res<StageRect>` to the drag/snap/panel systems, so those are one-line swaps `let sc = rect.center();`. `picking.rs` needs `rect: Res<crate::stage_rect::StageRect>` added to its hover/AABB system(s), then `sc = rect.center()`.
 
-READ both files fully. Map every `window/2` / `window.width()/height()` in the WIDGET-space math (not the chrome mask, not the raw cursor read) to `StageRect`.
+The cursor stays raw `window.cursor_position()` (picking hover + drag press) — because widget AABBs now use `sc = rect.center()` (origin-inclusive), cursor↔AABB comparisons stay consistent in the same window frame. Chrome mask (`picking.rs:167-170`) + `node_rect` (`:84-89`) stay window-space (chrome is the fixed frame — do NOT change). `apply_drag`'s delta→offset (`drag.rs:38-46`, `screen_delta / scale`) STAYS — `scale` is `pfl.scale`, already rect-derived (Task 2). Leave `snap.rs:186-187` `/1280.0`,`/720.0` (REF-space, unrelated). **Behavior-preserving at identity.**
+
+READ all 4 files fully. Change ONLY the `sc = wsize/2` / `sc = window/2` screen-center lines to `rect.center()` (+ add `Res<StageRect>` to picking's system). Do not touch chrome-mask, raw cursor reads, or the REF-space `/1280`,`/720`.
 
 - [ ] **Step 1: Write failing regression test**
 
