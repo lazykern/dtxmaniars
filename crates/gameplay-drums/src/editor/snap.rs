@@ -4,12 +4,12 @@
 //! rewrite recomputes the offset so the resolved position never jumps.
 
 use bevy::prelude::*;
-use dtx_layout::{nearest_anchor, Placement, WidgetKind};
+use dtx_layout::{Placement, WidgetKind, nearest_anchor};
 
 use super::drag::{ActiveGesture, Gesture, Selection};
 use super::selection_box::EditorOverlay;
 use crate::layout::PlayfieldLayout;
-use crate::widget_layout::{parent_rect_px, transform_point, WidgetGeoms, WidgetLayouts};
+use crate::widget_layout::{WidgetGeoms, WidgetLayouts, parent_rect_px, transform_point};
 
 /// Guide line at a parent-space third (spawned once with the overlay).
 #[derive(Component)]
@@ -80,7 +80,7 @@ fn apply_anchor_snap(
     selection: Res<Selection>,
     geoms: Res<WidgetGeoms>,
     pfl: Res<PlayfieldLayout>,
-    rect: Res<crate::stage_rect::StageRect>,
+    windows: Query<&Window>,
     mut layouts: ResMut<WidgetLayouts>,
 ) {
     if !matches!(gesture.0, Gesture::Move { .. }) {
@@ -99,11 +99,13 @@ fn apply_anchor_snap(
         // here, offset-delta dragging continues un-snapped.
         return;
     }
-    let sc = rect.center();
+    let Ok(window) = windows.single() else { return };
+    let full = crate::stage_rect::StageRect::full(Vec2::new(window.width(), window.height()));
+    let sc = full.center();
     let vis_min = transform_point(g.unscaled.min, sc, g.applied_translation, g.applied_scale);
     let vis_max = transform_point(g.unscaled.max, sc, g.applied_translation, g.applied_scale);
     let center = (vis_min + vis_max) / 2.0;
-    let (px, py, pw, ph) = parent_rect_px(inst_ro.space, *rect, &pfl);
+    let (px, py, pw, ph) = parent_rect_px(inst_ro.space, full, &pfl);
     if pw <= 0.0 || ph <= 0.0 {
         return;
     }
@@ -135,7 +137,7 @@ fn sync_snap_guides(
     selection: Res<Selection>,
     layouts: Res<WidgetLayouts>,
     pfl: Res<PlayfieldLayout>,
-    rect: Res<crate::stage_rect::StageRect>,
+    windows: Query<&Window>,
     mut guides: Query<(&SnapGuide, &mut Node, &mut Visibility)>,
 ) {
     let dragging = matches!(gesture.0, Gesture::Move { .. });
@@ -151,7 +153,9 @@ fn sync_snap_guides(
         return;
     }
     let Some(kind) = selection.0 else { return };
-    let (px, py, pw, ph) = parent_rect_px(layouts.get(kind).space, *rect, &pfl);
+    let Ok(window) = windows.single() else { return };
+    let full = crate::stage_rect::StageRect::full(Vec2::new(window.width(), window.height()));
+    let (px, py, pw, ph) = parent_rect_px(layouts.get(kind).space, full, &pfl);
     for (guide, mut node, mut vis) in &mut guides {
         let t = guide.which as f32 / 3.0;
         if guide.vertical {
@@ -171,7 +175,7 @@ fn sync_snap_guides(
 
 #[cfg(test)]
 mod tests {
-    use dtx_layout::{nearest_anchor, Anchor9};
+    use dtx_layout::{Anchor9, nearest_anchor};
 
     #[test]
     fn snap_rewrite_is_no_jump() {
