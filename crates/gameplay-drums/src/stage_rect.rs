@@ -81,6 +81,16 @@ pub fn stage_xform(rect: StageRect, window: Vec2) -> (f32, Vec2) {
     (s, d - c * (1.0 - s))
 }
 
+/// Inverse of `stage_xform`: map a window-space point (e.g. the cursor) into
+/// scene space — the full-window coordinates `HudRoot` children lay out in
+/// before the stage transform shrinks them. Identity while the surface is
+/// closed (rect == full window).
+pub fn window_to_scene(pos: Vec2, rect: StageRect, window: Vec2) -> Vec2 {
+    let (s, t) = stage_xform(rect, window);
+    let c = window * 0.5;
+    c + (pos - t - c) / s
+}
+
 /// Drive `HudRoot`'s `UiTransform` from the current `StageRect`, shrinking the
 /// whole scene (playfield + every HUD widget, all children of `HudRoot`) into
 /// the stage rect. Identity while the surface is closed.
@@ -199,6 +209,30 @@ mod tests {
         assert!(d.x >= rect.origin.x - 0.5 && d.y >= rect.origin.y - 0.5);
         // Scaled window fits within the rect on the binding axis.
         assert!(w.y * s <= rect.size.y + 0.5);
+    }
+
+    #[test]
+    fn window_to_scene_is_identity_when_full() {
+        let w = Vec2::new(1745.0, 1090.0);
+        let p = Vec2::new(300.0, 700.0);
+        let q = window_to_scene(p, StageRect::full(w), w);
+        assert!((q - p).length() < 1e-3);
+    }
+
+    #[test]
+    fn window_to_scene_inverts_stage_xform() {
+        let w = Vec2::new(1745.0, 1090.0);
+        let rect = StageRect {
+            origin: Vec2::new(496.0, 24.0),
+            size: Vec2::new(1233.0, 1042.0),
+        };
+        let (s, t) = stage_xform(rect, w);
+        let c = w * 0.5;
+        // Forward: scene point p renders at c + s(p−c) + t.
+        let p = Vec2::new(200.0, 900.0);
+        let rendered = c + s * (p - c) + t;
+        let back = window_to_scene(rendered, rect, w);
+        assert!((back - p).length() < 1e-3);
     }
 
     #[test]

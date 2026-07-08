@@ -63,6 +63,18 @@ pub fn transform_point(p: Vec2, screen_center: Vec2, t: Vec2, s: f32) -> Vec2 {
     screen_center + s * (p - screen_center) + t
 }
 
+/// Compose two scale-about-the-same-center transforms: `outer(inner(p))`.
+/// Both pivot on the screen center (Bevy `UiTransform` node-center convention
+/// for full-screen nodes), so composition is linear in (T, s).
+pub fn compose_about_center(
+    t_outer: Vec2,
+    s_outer: f32,
+    t_inner: Vec2,
+    s_inner: f32,
+) -> (Vec2, f32) {
+    (s_outer * t_inner + t_outer, s_outer * s_inner)
+}
+
 /// Inverse of `transform_point` for a whole rect (recover unscaled geometry
 /// from a visual measurement under a known applied transform).
 pub fn untransform_rect(measured: Rect, screen_center: Vec2, t: Vec2, s: f32) -> Rect {
@@ -377,6 +389,18 @@ mod tests {
         let back = untransform_rect(vis, sc, t, s);
         assert!((back.min - r.min).length() < 0.001);
         assert!((back.max - r.max).length() < 0.001);
+    }
+
+    #[test]
+    fn compose_about_center_matches_nested_transforms() {
+        let sc = Vec2::new(872.0, 545.0);
+        let (t_in, s_in) = (Vec2::new(40.0, -20.0), 1.5);
+        let (t_out, s_out) = (Vec2::new(-120.0, 60.0), 0.6);
+        let p = Vec2::new(300.0, 700.0);
+        let nested = transform_point(transform_point(p, sc, t_in, s_in), sc, t_out, s_out);
+        let (t_c, s_c) = compose_about_center(t_out, s_out, t_in, s_in);
+        let composed = transform_point(p, sc, t_c, s_c);
+        assert!((nested - composed).length() < 1e-3);
     }
 
     #[test]
