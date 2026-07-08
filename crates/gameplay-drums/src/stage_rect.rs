@@ -82,11 +82,34 @@ fn sync_stage_target_to_window(
     }
 }
 
-/// Move `StageRect` toward `StageTarget`. Task 1: snap (easing added in Task 6).
-fn animate_stage_rect(target: Res<StageTarget>, mut rect: ResMut<StageRect>) {
-    if *rect != target.0 {
-        *rect = target.0;
+/// Exponential ease-out step toward `target` over ~`tau` seconds.
+/// `dt` = frame seconds. Returns the new rect.
+pub fn ease_rect(current: StageRect, target: StageRect, dt: f32) -> StageRect {
+    // Frame-rate independent smoothing: alpha = 1 - exp(-dt / TAU)
+    const TAU: f32 = 0.12; // ~ reaches target in ~450ms visually
+    let a = 1.0 - (-dt / TAU).exp();
+    let lerp = |c: Vec2, t: Vec2| c + (t - c) * a;
+    let next = StageRect {
+        origin: lerp(current.origin, target.origin),
+        size: lerp(current.size, target.size),
+    };
+    // Snap when close to kill the long tail.
+    let close =
+        (next.origin - target.origin).length() < 0.5 && (next.size - target.size).length() < 0.5;
+    if close {
+        target
+    } else {
+        next
     }
+}
+
+/// Move `StageRect` toward `StageTarget` with a frame-rate-independent ease-out.
+fn animate_stage_rect(time: Res<Time>, target: Res<StageTarget>, mut rect: ResMut<StageRect>) {
+    if *rect == target.0 {
+        return;
+    }
+    let next = ease_rect(*rect, target.0, time.delta_secs());
+    *rect = next;
 }
 
 #[cfg(test)]
@@ -104,6 +127,20 @@ mod tests {
     fn center_of_full_is_window_half() {
         let r = StageRect::full(Vec2::new(1600.0, 900.0));
         assert_eq!(r.center(), Vec2::new(800.0, 450.0));
+    }
+
+    #[test]
+    fn ease_moves_toward_target_and_snaps_when_close() {
+        let c = StageRect::full(Vec2::new(1000.0, 1000.0));
+        let t = StageRect {
+            origin: Vec2::new(220.0, 0.0),
+            size: Vec2::new(1000.0, 1000.0),
+        };
+        let mid = ease_rect(c, t, 1.0 / 60.0);
+        assert!(mid.origin.x > 0.0 && mid.origin.x < 220.0, "moved partway");
+        // A big dt (or many steps) snaps exactly.
+        let done = ease_rect(t, t, 1.0 / 60.0);
+        assert_eq!(done, t);
     }
 
     #[test]
