@@ -128,7 +128,8 @@ pub fn plugin(app: &mut App) {
             rebuild_left_content.run_if(
                 resource_changed::<super::tabs::ActiveTab>
                     .or_else(resource_changed::<EditorOpen>)
-                    .or_else(resource_changed::<Lanes>),
+                    .or_else(resource_changed::<Lanes>)
+                    .or_else(resource_changed::<super::bindings_panel::BindingsRev>),
             ),
             // Right inspector rebuilds on selection change (+ tab/open) — this
             // is the only panel that reacts to Selection.
@@ -178,11 +179,18 @@ fn rebuild_left_content(
     lanes: Res<Lanes>,
     active: Res<super::tabs::ActiveTab>,
     draft: Res<super::tabs::ConfigDraft>,
+    live: Res<crate::bindings::LiveBindings>,
+    rev: Res<super::bindings_panel::BindingsRev>,
     theme: Res<dtx_ui::ThemeResource>,
     existing: Query<Entity, With<LeftContentRoot>>,
-    mut last_sig: Local<Option<(bool, String, game_shell::CustomizeTab)>>,
+    mut last_sig: Local<Option<(bool, String, game_shell::CustomizeTab, u64)>>,
 ) {
-    let sig = (open.0, dtx_layout::structure_signature(&lanes.0), active.0);
+    let sig = (
+        open.0,
+        dtx_layout::structure_signature(&lanes.0),
+        active.0,
+        rev.0,
+    );
     if last_sig.as_ref() == Some(&sig) {
         return;
     }
@@ -214,29 +222,22 @@ fn rebuild_left_content(
         ))
         .id();
 
+    // The Bindings tab is a settings-group tab (Offset preset) but renders its
+    // own block, so branch on it BEFORE the generic settings-rows path.
+    if active.0 == game_shell::CustomizeTab::Bindings {
+        super::bindings_panel::spawn_bindings_block(&mut commands, root, &t, &live, &lanes);
+        return;
+    }
     if active.0.is_settings() {
         spawn_settings_block(&mut commands, root, &t, active.0, &draft);
         return;
     }
     // Kit tabs: the Lanes tab owns the lane block; the Widgets tab owns the
     // widget picker list (selecting Playfield here just shows no inspector —
-    // the lane block lives on the dedicated Lanes tab). Bindings is a Phase 3a
-    // placeholder.
+    // the lane block lives on the dedicated Lanes tab).
     commands.entity(root).with_children(|p| match active.0 {
         game_shell::CustomizeTab::Lanes => spawn_lane_block(p, &t, &lanes),
         game_shell::CustomizeTab::Widgets => spawn_widget_list(p, &t, &selection),
-        game_shell::CustomizeTab::Bindings => {
-            p.spawn((
-                Text::new("Bindings"),
-                dtx_ui::theme::Theme::font(13.0),
-                TextColor(t.text_primary),
-            ));
-            p.spawn((
-                Text::new("(bindings tab — coming soon)"),
-                dtx_ui::theme::Theme::font(11.0),
-                TextColor(t.text_secondary),
-            ));
-        }
         _ => {}
     });
 }
