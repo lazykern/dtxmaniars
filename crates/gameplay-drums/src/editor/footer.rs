@@ -78,7 +78,7 @@ fn spawn_footer_on_open(
                 ..default()
             },
             BackgroundColor(t.panel_bg),
-            GlobalZIndex(2000),
+            GlobalZIndex(crate::ui_z::EDITOR_CHROME),
         ))
         .id();
 

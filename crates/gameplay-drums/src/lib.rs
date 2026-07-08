@@ -52,6 +52,7 @@ pub mod sound_bank;
 pub mod stage_end;
 pub mod stage_rect;
 pub mod timeline;
+pub mod ui_z;
 pub mod widget_layout;
 
 use std::time::Duration;

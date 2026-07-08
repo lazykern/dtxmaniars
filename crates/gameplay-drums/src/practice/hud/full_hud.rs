@@ -6,10 +6,10 @@
 use bevy::prelude::*;
 use dtx_ui::theme::Theme;
 use dtx_ui::widget::density_strip::{spawn_density_strip, time_to_pct};
-use game_shell::{request_transition, AppState, PauseState, TransitionRequest};
+use game_shell::{AppState, PauseState, TransitionRequest, request_transition};
 
 use super::format_chart_time;
-use crate::practice::session::{preroll_target, PracticeSession};
+use crate::practice::session::{PracticeSession, preroll_target};
 use crate::resources::GameplayClock;
 use crate::seek::SeekToChartTime;
 use crate::timeline::ChipTimeline;
@@ -97,10 +97,8 @@ pub fn rail_label(item: RailItem, session: &PracticeSession, exit_armed: bool) -
         RailItem::Preroll => format!("Pre-roll  ◀ {} ▶", session.preroll.label()),
         RailItem::RampArm => {
             if session.ramp.armed {
-                let (cur, total) = crate::practice::ramp::ramp_step_index(
-                    &session.ramp_config,
-                    session.rate,
-                );
+                let (cur, total) =
+                    crate::practice::ramp::ramp_step_index(&session.ramp_config, session.rate);
                 format!("Ramp  ON  ({cur}/{total})")
             } else {
                 "Ramp  off  (Enter: arm)".into()
@@ -167,13 +165,14 @@ pub fn transport_buttons(
         }
         match button {
             TransportButton::PrevBar | TransportButton::NextBar => {
-                let dir: i8 = if *button == TransportButton::NextBar { 1 } else { -1 };
+                let dir: i8 = if *button == TransportButton::NextBar {
+                    1
+                } else {
+                    -1
+                };
                 let cur = session.scrub_cursor_ms.unwrap_or(clock.current_ms);
-                session.scrub_cursor_ms = Some(timeline.snap_neighbor(
-                    cur,
-                    crate::timeline::SnapDivisor::Bar,
-                    dir,
-                ));
+                session.scrub_cursor_ms =
+                    Some(timeline.snap_neighbor(cur, crate::timeline::SnapDivisor::Bar, dir));
             }
             TransportButton::Resume => next_pause.set(PauseState::Running),
         }
@@ -202,7 +201,7 @@ pub fn spawn_full_hud(
                 ..default()
             },
             BackgroundColor(Color::srgba(0.0, 0.0, 0.0, 0.6)),
-            GlobalZIndex(1000),
+            GlobalZIndex(crate::ui_z::PRACTICE_FULL_HUD),
         ))
         .with_children(|root| {
             // Right rail.
@@ -411,13 +410,11 @@ pub fn full_hud_input(
             RailItem::Preroll => session.preroll = session.preroll.next(),
             RailItem::RampStart => {
                 let c = &mut session.ramp_config;
-                c.start_rate =
-                    (c.start_rate + dir as f32 * 0.05).clamp(0.5, c.target_rate - 0.05);
+                c.start_rate = (c.start_rate + dir as f32 * 0.05).clamp(0.5, c.target_rate - 0.05);
             }
             RailItem::RampTarget => {
                 let c = &mut session.ramp_config;
-                c.target_rate =
-                    (c.target_rate + dir as f32 * 0.05).clamp(c.start_rate + 0.05, 1.5);
+                c.target_rate = (c.target_rate + dir as f32 * 0.05).clamp(c.start_rate + 0.05, 1.5);
             }
             RailItem::RampStep => {
                 let c = &mut session.ramp_config;

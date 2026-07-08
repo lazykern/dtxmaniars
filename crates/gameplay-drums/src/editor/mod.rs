@@ -11,6 +11,7 @@ use game_shell::AppState;
 pub mod bindings_capture;
 pub mod bindings_panel;
 pub mod bindings_spatial;
+pub mod chrome;
 pub mod drag;
 pub mod footer;
 pub mod hotkeys;

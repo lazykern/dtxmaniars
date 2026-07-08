@@ -3,8 +3,8 @@
 use bevy::prelude::*;
 use dtx_layout::WidgetKind;
 
-use super::drag::Selection;
 use super::EditorOpen;
+use super::drag::Selection;
 
 #[derive(Component)]
 struct EditorUiRoot;
@@ -69,7 +69,7 @@ fn spawn_ui_on_open(
                 position_type: PositionType::Absolute,
                 left: Val::Px(0.0),
                 top: Val::Px(0.0),
-                width: Val::Px(132.0),
+                width: Val::Px(super::chrome::RAIL_WIDTH),
                 height: Val::Percent(100.0),
                 flex_direction: FlexDirection::Column,
                 padding: UiRect::all(Val::Px(8.0)),
@@ -77,7 +77,7 @@ fn spawn_ui_on_open(
                 ..default()
             },
             BackgroundColor(Color::srgba(0.05, 0.05, 0.07, 0.92)),
-            GlobalZIndex(2000),
+            GlobalZIndex(crate::ui_z::EDITOR_CHROME),
         ))
         .id();
 

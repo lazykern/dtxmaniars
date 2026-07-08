@@ -35,7 +35,7 @@ struct BindSourceLabel;
 /// and the stage outline (1900), still under the chrome (2000). The nodes stay
 /// `HudRoot` children — `GlobalZIndex` changes stacking only, the stage
 /// transform still inherits.
-const OUTLINE_Z: i32 = 1910;
+const OUTLINE_Z: i32 = crate::ui_z::BIND_OVERLAY;
 
 pub(super) fn plugin(app: &mut App) {
     app.add_systems(

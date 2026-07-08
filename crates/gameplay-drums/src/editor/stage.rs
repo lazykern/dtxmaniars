@@ -1,16 +1,11 @@
 //! Customize stage-transform presets: map ActiveTab → target StageRect.
 
+use super::chrome::{INSPECTOR_WIDTH, LEFT_PANEL_WIDTH, RAIL_WIDTH};
 use crate::stage_rect::{StageRect, StageTarget};
 use bevy::prelude::*;
 use bevy::window::PrimaryWindow;
 use game_shell::CustomizeTab;
 
-/// Tabs-only rail width (editor/ui.rs).
-const RAIL_WIDTH: f32 = 132.0;
-/// Left content panel width, docked flush right of the rail (editor/panel.rs).
-const LEFT_PANEL_WIDTH: f32 = 348.0;
-/// Right inspector panel width (editor/panel.rs).
-const INSPECTOR_WIDTH: f32 = 236.0;
 const TOP_MARGIN: f32 = 24.0;
 /// Breathing room between the chrome and the shrunk stage.
 const GAP: f32 = 16.0;
@@ -56,13 +51,10 @@ pub fn preset_rect(tab: CustomizeTab, window: Vec2, has_inspector: bool) -> Stag
 #[derive(Component)]
 struct StageOutline;
 
-/// Just below chrome (`GlobalZIndex(2000)`) so the outline reads under the rail.
-const OUTLINE_Z: i32 = 1900;
-/// Preview dim scrim: above all HUD/playfield global z (combo=20, practice=900,
-/// pause=1000, stage_end=1100) but below chrome (2000) and the outline (1900).
-/// A GLOBAL z is required so it also covers `GlobalZIndex` HUD (e.g. combo) that
-/// a local-z child of `HudRoot` can't reach.
-const SCRIM_Z: i32 = 1500;
+/// Just below chrome so the outline reads under the rail; the scrim sits above
+/// all HUD global z but below the outline and chrome. See `crate::ui_z`.
+const OUTLINE_Z: i32 = crate::ui_z::STAGE_OUTLINE;
+const SCRIM_Z: i32 = crate::ui_z::PREVIEW_SCRIM;
 
 /// Full-window dim veil that calms the whole preview while the surface is open
 /// (prototype's dim look). Own visibility so peek (full play view) drops it.
@@ -251,7 +243,7 @@ mod tests {
         assert_eq!(r.origin, Vec2::new(480.0 + 16.0, 24.0));
         assert_eq!(
             r.size,
-            Vec2::new(1600.0 - 480.0 - 32.0 - (236.0 + 16.0), 900.0 - 48.0)
+            Vec2::new(1600.0 - 480.0 - 32.0 - (240.0 + 16.0), 900.0 - 48.0)
         );
     }
 }

@@ -96,7 +96,7 @@ fn spawn_overlay_on_open(
             },
             BorderColor::all(HOVER),
             Visibility::Hidden,
-            GlobalZIndex(2100),
+            GlobalZIndex(crate::ui_z::HOVER_OUTLINE),
             Pickable::IGNORE,
         ))
         .id();
@@ -111,7 +111,7 @@ fn spawn_overlay_on_open(
             },
             BorderColor::all(ACCENT),
             Visibility::Hidden,
-            GlobalZIndex(2200),
+            GlobalZIndex(crate::ui_z::SELECTION_BOX),
             Pickable::IGNORE,
         ))
         .with_children(|p| {
@@ -172,7 +172,7 @@ fn spawn_overlay_on_open(
             UiTransform::default(),
             BackgroundColor(Color::srgba(1.0, 0.3, 0.3, 0.9)),
             Visibility::Hidden,
-            GlobalZIndex(2150),
+            GlobalZIndex(crate::ui_z::ANCHOR_VIZ),
             Pickable::IGNORE,
         ))
         .id();
@@ -189,7 +189,7 @@ fn spawn_overlay_on_open(
             },
             BackgroundColor(Color::srgb(1.0, 0.3, 0.3)),
             Visibility::Hidden,
-            GlobalZIndex(2150),
+            GlobalZIndex(crate::ui_z::ANCHOR_VIZ),
             Pickable::IGNORE,
         ))
         .id();
@@ -206,7 +206,7 @@ fn spawn_overlay_on_open(
             },
             BackgroundColor(ACCENT),
             Visibility::Hidden,
-            GlobalZIndex(2150),
+            GlobalZIndex(crate::ui_z::ANCHOR_VIZ),
             Pickable::IGNORE,
         ))
         .id();

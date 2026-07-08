@@ -10,7 +10,7 @@
 
 use bevy::prelude::*;
 use dtx_ui::theme::Theme;
-use game_shell::{request_transition, AppState, TransitionRequest};
+use game_shell::{AppState, TransitionRequest, request_transition};
 
 use crate::gauge::StageGauge;
 use crate::orchestrator::DrumsStageCompletion;
@@ -122,7 +122,7 @@ fn spawn_banner(mut commands: Commands, mut timer: ResMut<BannerTimer>, label: &
                 ..default()
             },
             BackgroundColor(Color::srgba(0.0, 0.0, 0.0, 0.85)),
-            GlobalZIndex(1100),
+            GlobalZIndex(crate::ui_z::STAGE_END),
         ))
         .with_children(|root| {
             root.spawn((Text::new(label), Theme::title_font(), TextColor(color)));

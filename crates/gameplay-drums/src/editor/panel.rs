@@ -3,12 +3,12 @@
 //! `WidgetLayouts` (single mutation path — undo/save cover it).
 
 use bevy::prelude::*;
-use dtx_layout::{Anchor9, WidgetKind, MAX_WIDGET_SCALE, MIN_WIDGET_SCALE};
+use dtx_layout::{Anchor9, MAX_WIDGET_SCALE, MIN_WIDGET_SCALE, WidgetKind};
 use dtx_ui::widget::controls::{self, ControlBool, ControlValue, Slider, Stepper};
 
+use super::EditorOpen;
 use super::drag::Selection;
 use super::picking::EditorChrome;
-use super::EditorOpen;
 use crate::lanes::Lanes;
 use crate::widget_layout::WidgetLayouts;
 
@@ -109,14 +109,11 @@ fn preset_name(p: dtx_layout::LanePreset) -> &'static str {
     }
 }
 
-pub const PANEL_WIDTH: f32 = 240.0;
+pub use super::chrome::INSPECTOR_WIDTH as PANEL_WIDTH;
 
-/// Left content panel width (docked right of the rail).
-const LEFT_PANEL_WIDTH: f32 = 348.0;
+use super::chrome::LEFT_PANEL_WIDTH;
 
-/// Left sidebar rail width (editor/ui.rs); the left content panel docks flush
-/// against it on the LEFT, the inspector docks against the window's right edge.
-const RAIL_WIDTH: f32 = 132.0;
+use super::chrome::RAIL_WIDTH;
 
 pub fn plugin(app: &mut App) {
     app.add_systems(
@@ -219,7 +216,7 @@ fn rebuild_left_content(
                 ..default()
             },
             BackgroundColor(Color::srgba(0.05, 0.05, 0.07, 0.92)),
-            GlobalZIndex(2000),
+            GlobalZIndex(crate::ui_z::EDITOR_CHROME),
         ))
         .id();
 
@@ -316,7 +313,7 @@ fn rebuild_right_inspector(
                 ..default()
             },
             BackgroundColor(Color::srgba(0.05, 0.05, 0.07, 0.92)),
-            GlobalZIndex(2000),
+            GlobalZIndex(crate::ui_z::EDITOR_CHROME),
         ))
         .id();
 

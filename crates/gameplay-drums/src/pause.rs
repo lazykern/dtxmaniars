@@ -12,7 +12,7 @@ use bevy::prelude::*;
 use bevy_kira_audio::prelude::AudioInstance;
 use dtx_audio::{BgmHandle, DrumPolyphony};
 use dtx_ui::theme::Theme;
-use game_shell::{request_transition, AppState, PauseState, TransitionRequest};
+use game_shell::{AppState, PauseState, TransitionRequest, request_transition};
 
 use crate::resources::ActiveDrumSounds;
 
@@ -56,8 +56,14 @@ pub(super) fn plugin(app: &mut App) {
                 .run_if(in_state(AppState::Performance))
                 .run_if(crate::editor::editor_closed),
         )
-        .add_systems(OnEnter(PauseState::Paused), (pause_chart_audio, spawn_overlay))
-        .add_systems(OnExit(PauseState::Paused), (resume_chart_audio, despawn_overlay))
+        .add_systems(
+            OnEnter(PauseState::Paused),
+            (pause_chart_audio, spawn_overlay),
+        )
+        .add_systems(
+            OnExit(PauseState::Paused),
+            (resume_chart_audio, despawn_overlay),
+        )
         .add_systems(
             Update,
             pause_menu_input.run_if(in_state(PauseState::Paused)),
@@ -131,7 +137,7 @@ pub fn spawn_overlay(
                 ..default()
             },
             BackgroundColor(Color::srgba(0.0, 0.0, 0.0, 0.72)),
-            GlobalZIndex(1000),
+            GlobalZIndex(crate::ui_z::PAUSE),
         ))
         .with_children(|root| {
             root.spawn((

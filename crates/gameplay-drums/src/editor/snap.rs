@@ -74,7 +74,7 @@ fn spawn_guides_on_open(
                         },
                         BackgroundColor(Color::srgba(1.0, 1.0, 1.0, 0.25)),
                         Visibility::Hidden,
-                        GlobalZIndex(2050),
+                        GlobalZIndex(crate::ui_z::SNAP_GUIDES),
                         Pickable::IGNORE,
                     ))
                     .id(),

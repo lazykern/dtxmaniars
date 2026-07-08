@@ -32,7 +32,7 @@ pub fn spawn_mini_strip(mut commands: Commands) {
                 ..default()
             },
             BackgroundColor(Color::srgba(0.0, 0.0, 0.0, 0.55)),
-            GlobalZIndex(900),
+            GlobalZIndex(crate::ui_z::PRACTICE),
         ))
         .with_children(|strip| {
             strip.spawn((
