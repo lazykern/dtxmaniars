@@ -1,6 +1,8 @@
 //! Selection overlay: border + name tag + anchor line + corner scale handles
-//! around the selected widget's AABB, and a lighter hover outline. Editor-only
-//! UI, kept above the sidebar via GlobalZIndex.
+//! around the selected widget's AABB, and a lighter hover outline. Overlay
+//! nodes are `HudRoot` children so the scene-space AABB coords render 1:1
+//! under the stage transform; they keep `GlobalZIndex` (stacking-only, the
+//! transform still inherits) to stay above the preview scrim and the sidebar.
 
 use bevy::prelude::*;
 use bevy::ui::UiTransform;
@@ -69,6 +71,7 @@ fn despawn_overlay(mut commands: Commands, roots: Query<Entity, With<EditorOverl
 fn spawn_overlay_on_open(
     mut commands: Commands,
     open: Res<super::EditorOpen>,
+    roots: Query<Entity, With<crate::hud::HudRoot>>,
     existing: Query<Entity, With<EditorOverlay>>,
 ) {
     if !open.is_changed() {
@@ -80,19 +83,24 @@ fn spawn_overlay_on_open(
     if !open.0 {
         return;
     }
-    commands.spawn((
-        EditorOverlay,
-        HoverOutlineRoot,
-        Node {
-            position_type: PositionType::Absolute,
-            ..default()
-        },
-        BorderColor::all(HOVER),
-        Visibility::Hidden,
-        GlobalZIndex(2100),
-        Pickable::IGNORE,
-    ));
-    commands
+    let Ok(root) = roots.single() else {
+        return;
+    };
+    let hover = commands
+        .spawn((
+            EditorOverlay,
+            HoverOutlineRoot,
+            Node {
+                position_type: PositionType::Absolute,
+                ..default()
+            },
+            BorderColor::all(HOVER),
+            Visibility::Hidden,
+            GlobalZIndex(2100),
+            Pickable::IGNORE,
+        ))
+        .id();
+    let selection = commands
         .spawn((
             EditorOverlay,
             SelectionBoxRoot,
@@ -149,52 +157,62 @@ fn spawn_overlay_on_open(
                 },
                 Pickable::IGNORE,
             ));
-        });
+        })
+        .id();
     // Anchor viz nodes live outside the box (positions are unrelated rects).
-    commands.spawn((
-        EditorOverlay,
-        AnchorLine,
-        Node {
-            position_type: PositionType::Absolute,
-            height: Val::Px(2.0),
-            ..default()
-        },
-        UiTransform::default(),
-        BackgroundColor(Color::srgba(1.0, 0.3, 0.3, 0.9)),
-        Visibility::Hidden,
-        GlobalZIndex(2150),
-        Pickable::IGNORE,
-    ));
-    commands.spawn((
-        EditorOverlay,
-        AnchorDot,
-        Node {
-            position_type: PositionType::Absolute,
-            width: Val::Px(DOT_SIZE),
-            height: Val::Px(DOT_SIZE),
-            border_radius: BorderRadius::all(Val::Px(DOT_SIZE / 2.0)),
-            ..default()
-        },
-        BackgroundColor(Color::srgb(1.0, 0.3, 0.3)),
-        Visibility::Hidden,
-        GlobalZIndex(2150),
-        Pickable::IGNORE,
-    ));
-    commands.spawn((
-        EditorOverlay,
-        OriginDot,
-        Node {
-            position_type: PositionType::Absolute,
-            width: Val::Px(DOT_SIZE),
-            height: Val::Px(DOT_SIZE),
-            border_radius: BorderRadius::all(Val::Px(DOT_SIZE / 2.0)),
-            ..default()
-        },
-        BackgroundColor(ACCENT),
-        Visibility::Hidden,
-        GlobalZIndex(2150),
-        Pickable::IGNORE,
-    ));
+    let line = commands
+        .spawn((
+            EditorOverlay,
+            AnchorLine,
+            Node {
+                position_type: PositionType::Absolute,
+                height: Val::Px(2.0),
+                ..default()
+            },
+            UiTransform::default(),
+            BackgroundColor(Color::srgba(1.0, 0.3, 0.3, 0.9)),
+            Visibility::Hidden,
+            GlobalZIndex(2150),
+            Pickable::IGNORE,
+        ))
+        .id();
+    let a_dot = commands
+        .spawn((
+            EditorOverlay,
+            AnchorDot,
+            Node {
+                position_type: PositionType::Absolute,
+                width: Val::Px(DOT_SIZE),
+                height: Val::Px(DOT_SIZE),
+                border_radius: BorderRadius::all(Val::Px(DOT_SIZE / 2.0)),
+                ..default()
+            },
+            BackgroundColor(Color::srgb(1.0, 0.3, 0.3)),
+            Visibility::Hidden,
+            GlobalZIndex(2150),
+            Pickable::IGNORE,
+        ))
+        .id();
+    let o_dot = commands
+        .spawn((
+            EditorOverlay,
+            OriginDot,
+            Node {
+                position_type: PositionType::Absolute,
+                width: Val::Px(DOT_SIZE),
+                height: Val::Px(DOT_SIZE),
+                border_radius: BorderRadius::all(Val::Px(DOT_SIZE / 2.0)),
+                ..default()
+            },
+            BackgroundColor(ACCENT),
+            Visibility::Hidden,
+            GlobalZIndex(2150),
+            Pickable::IGNORE,
+        ))
+        .id();
+    commands
+        .entity(root)
+        .add_children(&[hover, selection, line, a_dot, o_dot]);
 }
 
 /// The selected widget's kind + AABB, or None (nothing selected / no AABB).

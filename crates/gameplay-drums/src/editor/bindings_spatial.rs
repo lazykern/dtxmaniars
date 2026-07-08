@@ -31,8 +31,10 @@ struct BindLaneOutline;
 #[derive(Component)]
 struct BindSourceLabel;
 
-/// Above the stage outline (`1900`) so the selected-lane accent reads on top of
-/// the playfield but still under the chrome (`GlobalZIndex(2000)`).
+/// GLOBAL z so the selected-lane accent stacks above the preview scrim (1500)
+/// and the stage outline (1900), still under the chrome (2000). The nodes stay
+/// `HudRoot` children — `GlobalZIndex` changes stacking only, the stage
+/// transform still inherits.
 const OUTLINE_Z: i32 = 1910;
 
 pub(super) fn plugin(app: &mut App) {
@@ -101,7 +103,7 @@ fn spawn_overlay_on_open(
             },
             BorderColor::all(Color::WHITE),
             Visibility::Hidden,
-            ZIndex(OUTLINE_Z),
+            GlobalZIndex(OUTLINE_Z),
             Pickable::IGNORE,
         ))
         .id();
@@ -117,7 +119,7 @@ fn spawn_overlay_on_open(
             dtx_ui::theme::Theme::font(12.0),
             TextColor(Color::WHITE),
             Visibility::Hidden,
-            ZIndex(OUTLINE_Z),
+            GlobalZIndex(OUTLINE_Z),
             Pickable::IGNORE,
         ))
         .id();

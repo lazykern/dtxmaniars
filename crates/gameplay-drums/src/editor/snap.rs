@@ -41,6 +41,7 @@ pub fn plugin(app: &mut App) {
 fn spawn_guides_on_open(
     mut commands: Commands,
     open: Res<super::EditorOpen>,
+    roots: Query<Entity, With<crate::hud::HudRoot>>,
     existing: Query<Entity, With<SnapGuide>>,
 ) {
     if !open.is_changed() {
@@ -52,24 +53,35 @@ fn spawn_guides_on_open(
     for e in &existing {
         commands.entity(e).despawn();
     }
+    // Guides position from scene-space thirds, so they ride the HudRoot stage
+    // transform; `GlobalZIndex` keeps them above the preview scrim.
+    let Ok(root) = roots.single() else {
+        return;
+    };
+    let mut ids = Vec::with_capacity(4);
     for vertical in [true, false] {
         for which in [1u8, 2u8] {
-            commands.spawn((
-                EditorOverlay,
-                SnapGuide { vertical, which },
-                Node {
-                    position_type: PositionType::Absolute,
-                    width: if vertical { Val::Px(1.0) } else { Val::Px(0.0) },
-                    height: if vertical { Val::Px(0.0) } else { Val::Px(1.0) },
-                    ..default()
-                },
-                BackgroundColor(Color::srgba(1.0, 1.0, 1.0, 0.25)),
-                Visibility::Hidden,
-                GlobalZIndex(2050),
-                Pickable::IGNORE,
-            ));
+            ids.push(
+                commands
+                    .spawn((
+                        EditorOverlay,
+                        SnapGuide { vertical, which },
+                        Node {
+                            position_type: PositionType::Absolute,
+                            width: if vertical { Val::Px(1.0) } else { Val::Px(0.0) },
+                            height: if vertical { Val::Px(0.0) } else { Val::Px(1.0) },
+                            ..default()
+                        },
+                        BackgroundColor(Color::srgba(1.0, 1.0, 1.0, 0.25)),
+                        Visibility::Hidden,
+                        GlobalZIndex(2050),
+                        Pickable::IGNORE,
+                    ))
+                    .id(),
+            );
         }
     }
+    commands.entity(root).add_children(&ids);
 }
 
 /// While dragging with anchor_auto: nearest ninth from the widget's visual
