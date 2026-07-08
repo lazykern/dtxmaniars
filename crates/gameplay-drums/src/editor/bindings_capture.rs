@@ -10,16 +10,18 @@
 //! surface: `close_on_escape` (ui.rs) is gated `not(capture_active)` so the same
 //! Esc press can't also close the Customize overlay mid-capture.
 //!
-//! `pad_hit_autoselect` mirrors spec §5: hitting a pad on the Bindings tab
-//! selects that lane's channel into `SelectedChannel` (Task 6's spatial display).
+//! Channel selection (drives `SelectedChannel` → the spatial lane display):
+//! clicking a channel row (`select_channel_on_row_click`) is the primary path;
+//! a REAL hardware NoteOn also auto-selects its channel (`midi_hit_autoselect`,
+//! spec §5). Selection is deliberately NOT driven by the autoplay `LaneHit`
+//! stream — that made the pick chase whatever note was being judged.
 
 use bevy::prelude::*;
 use dtx_config::{BindSource, InputBindings};
 
 use crate::bindings::LiveBindings;
-use crate::events::LaneHit;
 
-use super::bindings_panel::BindingsRev;
+use super::bindings_panel::{BindChannelRow, BindingsRev};
 
 /// Keyboard/MIDI capture state machine.
 #[derive(Resource, Default, Debug, Clone)]
@@ -78,7 +80,12 @@ pub fn plugin(app: &mut App) {
         .init_resource::<SelectedChannel>()
         .add_systems(
             Update,
-            (capture_binding, pad_hit_autoselect)
+            (
+                capture_binding,
+                select_channel_on_row_click,
+                midi_hit_autoselect,
+                highlight_selected_row,
+            )
                 .run_if(in_state(game_shell::AppState::Performance))
                 .run_if(super::editor_open),
         );
@@ -184,20 +191,57 @@ fn capture_binding(
     }
 }
 
-/// On the Bindings tab, a pad hit selects its lane's channel (spec §5). Always
-/// drains the reader so the cursor doesn't replay stale hits when the tab flips.
-fn pad_hit_autoselect(
-    mut hits: MessageReader<LaneHit>,
-    active: Res<super::tabs::ActiveTab>,
+/// Clicking a channel row selects it (drives the spatial lane display + the
+/// capture target). This is the primary way to pick a channel — the old
+/// autoplay-driven `pad_hit_autoselect` made the selection chase whatever note
+/// the autoplay was judging, so a user could never hold a channel selected.
+fn select_channel_on_row_click(
+    rows: Query<(&Interaction, &BindChannelRow), Changed<Interaction>>,
     mut selected: ResMut<SelectedChannel>,
 ) {
-    let on_bindings = active.0 == game_shell::CustomizeTab::Bindings;
-    for hit in hits.read() {
-        if on_bindings {
-            if let Some(ch) = crate::lane_map::lane_channel(hit.lane) {
+    for (interaction, row) in &rows {
+        if *interaction == Interaction::Pressed {
+            selected.0 = Some(row.0);
+        }
+    }
+}
+
+/// A REAL hardware NoteOn (via `LastMidiHit`) auto-selects the channel it's
+/// bound to (spec §5, DJMAX-style "hit a pad to inspect it"). Driven off MIDI —
+/// not the autoplay `LaneHit` stream — so autoplay never moves the selection.
+fn midi_hit_autoselect(
+    active: Res<super::tabs::ActiveTab>,
+    last_midi: Res<crate::LastMidiHit>,
+    live: Res<LiveBindings>,
+    mut seen_at: Local<Option<std::time::Instant>>,
+    mut selected: ResMut<SelectedChannel>,
+) {
+    if active.0 != game_shell::CustomizeTab::Bindings {
+        return;
+    }
+    match last_midi.at {
+        Some(t) if last_midi.velocity > 0 && *seen_at != Some(t) => {
+            *seen_at = Some(t);
+            if let Some(ch) = live.0.channel_for_note(last_midi.note) {
                 selected.0 = Some(ch);
             }
         }
+        _ => {}
+    }
+}
+
+/// Tint the selected channel row so the pick is visible in the list.
+fn highlight_selected_row(
+    selected: Res<SelectedChannel>,
+    mut rows: Query<(&BindChannelRow, &mut BackgroundColor)>,
+) {
+    for (row, mut bg) in &mut rows {
+        let on = selected.0 == Some(row.0);
+        *bg = BackgroundColor(if on {
+            Color::srgba(0.30, 0.34, 0.42, 1.0)
+        } else {
+            Color::NONE
+        });
     }
 }
 

@@ -24,7 +24,6 @@ pub mod settings_data;
 pub mod snap;
 pub mod stage;
 pub mod tabs;
-pub mod topbar;
 pub mod ui;
 pub mod undo;
 
@@ -75,7 +74,6 @@ pub fn plugin(app: &mut App) {
             stage::plugin,
             session::plugin,
             tabs::plugin,
-            topbar::plugin,
             footer::plugin,
         ));
 }

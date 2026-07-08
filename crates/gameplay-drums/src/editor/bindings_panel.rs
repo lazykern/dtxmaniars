@@ -7,7 +7,7 @@
 //! bump `BindingsRev`, which re-triggers the left-panel rebuild so chips repaint.
 
 use bevy::prelude::*;
-use dtx_config::{BindSource, BINDABLE_CHANNELS};
+use dtx_config::{BINDABLE_CHANNELS, BindSource};
 
 use super::bindings_capture::CaptureState;
 use crate::bindings::LiveBindings;
@@ -330,14 +330,17 @@ pub fn spawn_bindings_block(
             let sources = live.0.map.get(&ch).cloned().unwrap_or_default();
             p.spawn((
                 BindChannelRow(ch),
+                Button,
                 Node {
                     flex_direction: FlexDirection::Row,
                     align_items: AlignItems::Center,
                     column_gap: Val::Px(4.0),
-                    padding: UiRect::vertical(Val::Px(2.0)),
+                    padding: UiRect::axes(Val::Px(4.0), Val::Px(2.0)),
+                    border_radius: BorderRadius::all(Val::Px(4.0)),
                     flex_wrap: FlexWrap::Wrap,
                     ..default()
                 },
+                BackgroundColor(Color::NONE),
             ))
             .with_children(|r| {
                 r.spawn((
