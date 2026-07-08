@@ -110,13 +110,16 @@ fn begin_gesture(
     lanes: Res<crate::lanes::Lanes>,
     geoms: Res<crate::widget_layout::WidgetGeoms>,
     pfl: Res<crate::layout::PlayfieldLayout>,
+    rect: Res<crate::stage_rect::StageRect>,
     mut undo: ResMut<super::undo::UndoStack>,
 ) {
     if !buttons.just_pressed(MouseButton::Left) || over_chrome.0 {
         return;
     }
     let Ok(window) = windows.single() else { return };
-    let Some(pos) = window.cursor_position() else { return };
+    let Some(pos) = window.cursor_position() else {
+        return;
+    };
 
     // 1. Scale handles first (they can overhang neighboring widgets).
     if let Some(kind) = selection.0 {
@@ -131,7 +134,7 @@ fn begin_gesture(
                         let start_dist = (pos - start_center).length().max(1.0);
                         let start_scale = layouts.get(kind).scale;
                         undo.push(&layouts, &lanes);
-                        convert_to_anchored(&mut layouts, &geoms, &pfl, window, kind);
+                        convert_to_anchored(&mut layouts, &geoms, &pfl, window, *rect, kind);
                         gesture.0 = Gesture::Scale {
                             start_dist,
                             start_scale,
@@ -158,7 +161,7 @@ fn begin_gesture(
     if let Some(kind) = picked {
         if kind != dtx_layout::WidgetKind::Playfield {
             undo.push(&layouts, &lanes);
-            convert_to_anchored(&mut layouts, &geoms, &pfl, window, kind);
+            convert_to_anchored(&mut layouts, &geoms, &pfl, window, *rect, kind);
             gesture.0 = Gesture::Move { last_cursor: pos };
         }
     }
@@ -173,6 +176,7 @@ fn convert_to_anchored(
     geoms: &crate::widget_layout::WidgetGeoms,
     pfl: &crate::layout::PlayfieldLayout,
     window: &Window,
+    rect: crate::stage_rect::StageRect,
     kind: WidgetKind,
 ) {
     if let Some(g) = geoms.0.get(&kind).copied() {
@@ -185,7 +189,7 @@ fn convert_to_anchored(
                 g.applied_translation,
                 g.applied_scale,
             );
-            let parent = crate::widget_layout::parent_rect_px(inst.space, wsize, pfl);
+            let parent = crate::widget_layout::parent_rect_px(inst.space, rect, pfl);
             ensure_anchored(inst, visual_min, g.unscaled.size(), parent, pfl.scale);
         }
     }
@@ -209,7 +213,9 @@ fn update_gesture(
         return;
     };
     let Ok(window) = windows.single() else { return };
-    let Some(pos) = window.cursor_position() else { return };
+    let Some(pos) = window.cursor_position() else {
+        return;
+    };
     match gesture.0 {
         Gesture::None => {}
         Gesture::Move { last_cursor } => {
@@ -286,7 +292,10 @@ mod tests {
 
     #[test]
     fn drag_at_unit_scale_is_raw_delta() {
-        assert_eq!(apply_drag((0.0, 0.0), Vec2::new(5.0, -7.0), 1.0), (5.0, -7.0));
+        assert_eq!(
+            apply_drag((0.0, 0.0), Vec2::new(5.0, -7.0), 1.0),
+            (5.0, -7.0)
+        );
     }
 
     #[test]

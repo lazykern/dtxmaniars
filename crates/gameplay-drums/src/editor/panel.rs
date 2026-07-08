@@ -653,6 +653,7 @@ fn apply_panel_controls(
     mut undo: ResMut<super::undo::UndoStack>,
     geoms: Res<crate::widget_layout::WidgetGeoms>,
     pfl: Res<crate::layout::PlayfieldLayout>,
+    rect: Res<crate::stage_rect::StageRect>,
     windows: Query<&Window, With<bevy::window::PrimaryWindow>>,
     mut snapped_this_hold: Local<bool>,
 ) {
@@ -717,7 +718,7 @@ fn apply_panel_controls(
                     g.applied_translation,
                     g.applied_scale,
                 );
-                let parent = crate::widget_layout::parent_rect_px(inst.space, wsize, &pfl);
+                let parent = crate::widget_layout::parent_rect_px(inst.space, *rect, &pfl);
                 super::drag::ensure_anchored(
                     inst,
                     visual_min,
@@ -749,6 +750,7 @@ fn apply_anchor_cells(
     mut undo: ResMut<super::undo::UndoStack>,
     geoms: Res<crate::widget_layout::WidgetGeoms>,
     pfl: Res<crate::layout::PlayfieldLayout>,
+    rect: Res<crate::stage_rect::StageRect>,
     windows: Query<&Window, With<bevy::window::PrimaryWindow>>,
     mut cell_bg: Query<(&AnchorCell, &mut BackgroundColor)>,
     mut auto_bg: Query<&mut BackgroundColor, (With<AnchorAutoCell>, Without<AnchorCell>)>,
@@ -778,7 +780,7 @@ fn apply_anchor_cells(
         g.applied_translation,
         g.applied_scale,
     );
-    let parent = crate::widget_layout::parent_rect_px(inst.space, wsize, &pfl);
+    let parent = crate::widget_layout::parent_rect_px(inst.space, *rect, &pfl);
     super::drag::ensure_anchored(inst, visual_min, g.unscaled.size(), parent, pfl.scale);
     inst.anchor = new_anchor;
     inst.origin = new_anchor;

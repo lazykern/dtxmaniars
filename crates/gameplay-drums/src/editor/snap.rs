@@ -80,6 +80,7 @@ fn apply_anchor_snap(
     selection: Res<Selection>,
     geoms: Res<WidgetGeoms>,
     pfl: Res<PlayfieldLayout>,
+    rect: Res<crate::stage_rect::StageRect>,
     windows: Query<&Window, With<bevy::window::PrimaryWindow>>,
     mut layouts: ResMut<WidgetLayouts>,
 ) {
@@ -91,7 +92,9 @@ fn apply_anchor_snap(
         return;
     }
     let Ok(window) = windows.single() else { return };
-    let Some(g) = geoms.0.get(&kind).copied() else { return };
+    let Some(g) = geoms.0.get(&kind).copied() else {
+        return;
+    };
     let inst_ro = layouts.get(kind).clone();
     if !inst_ro.anchor_auto || inst_ro.placement != Placement::Anchored {
         // Natural widgets convert on gesture start (plan 2); if still Natural
@@ -103,7 +106,7 @@ fn apply_anchor_snap(
     let vis_min = transform_point(g.unscaled.min, sc, g.applied_translation, g.applied_scale);
     let vis_max = transform_point(g.unscaled.max, sc, g.applied_translation, g.applied_scale);
     let center = (vis_min + vis_max) / 2.0;
-    let (px, py, pw, ph) = parent_rect_px(inst_ro.space, wsize, &pfl);
+    let (px, py, pw, ph) = parent_rect_px(inst_ro.space, *rect, &pfl);
     if pw <= 0.0 || ph <= 0.0 {
         return;
     }
@@ -112,7 +115,9 @@ fn apply_anchor_snap(
     if want == inst_ro.anchor {
         return;
     }
-    let Some(inst) = layouts.0.get_mut(&kind) else { return };
+    let Some(inst) = layouts.0.get_mut(&kind) else {
+        return;
+    };
     inst.anchor = want;
     inst.origin = want;
     let off_px = dtx_layout::offset_for_top_left(
@@ -133,7 +138,7 @@ fn sync_snap_guides(
     selection: Res<Selection>,
     layouts: Res<WidgetLayouts>,
     pfl: Res<PlayfieldLayout>,
-    windows: Query<&Window, With<bevy::window::PrimaryWindow>>,
+    rect: Res<crate::stage_rect::StageRect>,
     mut guides: Query<(&SnapGuide, &mut Node, &mut Visibility)>,
 ) {
     let dragging = matches!(gesture.0, Gesture::Move { .. });
@@ -149,9 +154,7 @@ fn sync_snap_guides(
         return;
     }
     let Some(kind) = selection.0 else { return };
-    let Ok(window) = windows.single() else { return };
-    let wsize = Vec2::new(window.width(), window.height());
-    let (px, py, pw, ph) = parent_rect_px(layouts.get(kind).space, wsize, &pfl);
+    let (px, py, pw, ph) = parent_rect_px(layouts.get(kind).space, *rect, &pfl);
     for (guide, mut node, mut vis) in &mut guides {
         let t = guide.which as f32 / 3.0;
         if guide.vertical {

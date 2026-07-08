@@ -85,14 +85,19 @@ pub fn widget_visible(inst: &WidgetInstance, practice: bool) -> bool {
     }
 }
 
+/// Screen-space parent rect from the stage rect (origin-aware).
+fn screen_parent_rect(rect: crate::stage_rect::StageRect) -> (f32, f32, f32, f32) {
+    (rect.origin.x, rect.origin.y, rect.size.x, rect.size.y)
+}
+
 /// Parent rect (logical px) for a widget's anchor space.
 pub fn parent_rect_px(
     space: AnchorSpace,
-    window_size: Vec2,
+    rect: crate::stage_rect::StageRect,
     pfl: &PlayfieldLayout,
 ) -> (f32, f32, f32, f32) {
     match space {
-        AnchorSpace::Screen => (0.0, 0.0, window_size.x, window_size.y),
+        AnchorSpace::Screen => screen_parent_rect(rect),
         AnchorSpace::Playfield => (
             pfl.strip_left(),
             pfl.lane_top(),
@@ -214,7 +219,7 @@ fn apply_widget_layout(
     geoms: Res<WidgetGeoms>,
     practice: Option<Res<crate::practice::PracticeSession>>,
     pfl: Res<PlayfieldLayout>,
-    windows: Query<&Window, With<bevy::window::PrimaryWindow>>,
+    rect: Res<crate::stage_rect::StageRect>,
     mut containers: Query<(
         &WidgetContainer,
         &mut UiTransform,
@@ -222,11 +227,7 @@ fn apply_widget_layout(
         &mut Visibility,
     )>,
 ) {
-    let Ok(window) = windows.single() else {
-        return;
-    };
-    let wsize = Vec2::new(window.width(), window.height());
-    let sc = wsize / 2.0;
+    let sc = rect.center();
     let is_practice = practice.is_some();
     for (container, mut tf, z, mut vis) in &mut containers {
         let inst = layouts.get(container.0);
@@ -245,7 +246,7 @@ fn apply_widget_layout(
                     continue;
                 };
                 let size = (geom.unscaled.width(), geom.unscaled.height());
-                let parent = parent_rect_px(inst.space, wsize, &pfl);
+                let parent = parent_rect_px(inst.space, *rect, &pfl);
                 let desired = dtx_layout::resolve_top_left(
                     inst.anchor,
                     inst.origin,
@@ -321,6 +322,21 @@ mod tests {
         let s = 2.0;
         let t = translation_for(desired, u_min, sc, s);
         assert!((transform_point(u_min, sc, t, s) - desired).length() < 0.001);
+    }
+
+    #[test]
+    fn screen_parent_rect_full_window_is_zero_origin() {
+        let rect = crate::stage_rect::StageRect::full(Vec2::new(1600.0, 900.0));
+        assert_eq!(screen_parent_rect(rect), (0.0, 0.0, 1600.0, 900.0));
+    }
+
+    #[test]
+    fn screen_parent_rect_offset_uses_origin() {
+        let rect = crate::stage_rect::StageRect {
+            origin: Vec2::new(220.0, 10.0),
+            size: Vec2::new(1000.0, 700.0),
+        };
+        assert_eq!(screen_parent_rect(rect), (220.0, 10.0, 1000.0, 700.0));
     }
 
     #[test]
