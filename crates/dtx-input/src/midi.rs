@@ -103,9 +103,92 @@ pub enum MidiEvent {
     },
 }
 
+/// Parse a raw MIDI message into a note event. `audio_ms` stamps it.
+/// Returns `None` for non-note messages or short (< 3 byte) messages.
+pub fn midi_bytes_to_event(bytes: &[u8], audio_ms: i64) -> Option<MidiEvent> {
+    if bytes.len() < 3 {
+        return None;
+    }
+    match bytes[0] & 0xF0 {
+        0x90 if bytes[2] > 0 => Some(MidiEvent::NoteOn {
+            note: bytes[1],
+            velocity: bytes[2],
+            audio_ms,
+        }),
+        0x90 => Some(MidiEvent::NoteOff {
+            note: bytes[1],
+            audio_ms,
+        }),
+        0x80 => Some(MidiEvent::NoteOff {
+            note: bytes[1],
+            audio_ms,
+        }),
+        _ => None,
+    }
+}
+
+/// Enumerate available MIDI input port names.
+#[cfg(feature = "midi")]
+pub fn available_ports() -> Vec<String> {
+    let Ok(mi) = midir::MidiInput::new("dtxmaniars-scan") else {
+        return vec![];
+    };
+    mi.ports()
+        .iter()
+        .filter_map(|p| mi.port_name(p).ok())
+        .collect()
+}
+
+/// Enumerate available MIDI input port names (no-op without the `midi` feature).
+#[cfg(not(feature = "midi"))]
+pub fn available_ports() -> Vec<String> {
+    vec![]
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn note_on_bytes_parse() {
+        let e = midi_bytes_to_event(&[0x90, 38, 100], 0);
+        assert_eq!(
+            e,
+            Some(MidiEvent::NoteOn {
+                note: 38,
+                velocity: 100,
+                audio_ms: 0
+            })
+        );
+    }
+
+    #[test]
+    fn note_on_velocity_zero_is_note_off() {
+        let e = midi_bytes_to_event(&[0x90, 38, 0], 5);
+        assert_eq!(
+            e,
+            Some(MidiEvent::NoteOff {
+                note: 38,
+                audio_ms: 5
+            })
+        );
+    }
+
+    #[test]
+    fn note_off_bytes_parse() {
+        assert_eq!(
+            midi_bytes_to_event(&[0x80, 40, 64], 0),
+            Some(MidiEvent::NoteOff {
+                note: 40,
+                audio_ms: 0
+            })
+        );
+    }
+
+    #[test]
+    fn non_note_bytes_ignored() {
+        assert_eq!(midi_bytes_to_event(&[0xB0, 4, 127], 0), None);
+    }
 
     #[test]
     fn virtual_source_starts_empty() {
