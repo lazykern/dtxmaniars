@@ -1,8 +1,8 @@
 //! Binding-capture state machine for the Bindings tab.
 //!
 //! `+` on a channel row (bindings_panel) arms `CaptureState::Capturing(ch)`.
-//! From there `capture_binding` listens for the first input (keyboard now; MIDI
-//! is TODO — see below), refuses reserved keys, and either binds immediately or
+//! From there `capture_binding` listens for the first input (keyboard key or
+//! MIDI NoteOn), refuses reserved keys, and either binds immediately or
 //! — when the source already belongs to another channel — routes through a
 //! `ConfirmSteal` step so no bind is stolen silently (Enter steals, Esc cancels).
 //!
@@ -108,12 +108,19 @@ fn owner_of(bindings: &InputBindings, src: BindSource) -> Option<dtx_core::EChan
 /// through `ConfirmSteal`; Esc cancels at any stage.
 fn capture_binding(
     keys: Res<ButtonInput<KeyCode>>,
+    last_midi: Res<crate::LastMidiHit>,
+    mut seen_midi_at: Local<Option<std::time::Instant>>,
     mut capture: ResMut<CaptureState>,
     mut live: ResMut<LiveBindings>,
     mut rev: ResMut<BindingsRev>,
 ) {
     match *capture {
-        CaptureState::Idle => {}
+        CaptureState::Idle => {
+            // While idle, track the latest MIDI hit so a pre-existing (stale)
+            // hit isn't instantly consumed on the first frame of the next
+            // capture — only a strictly-newer NoteOn counts once armed.
+            *seen_midi_at = last_midi.at;
+        }
         CaptureState::Capturing(channel) => {
             // Esc cancels FIRST (before reserved-key logic), and never binds.
             if keys.just_pressed(KeyCode::Escape) {
@@ -124,17 +131,28 @@ fn capture_binding(
             if modifier_held(&keys) {
                 return;
             }
-            // First candidate wins. Keyboard only for Phase 3a.
-            // TODO(3b): also drain just-arrived MIDI notes from the same source
-            // poll_midi reads (dtx_input::midi::VirtualSource) and offer the
-            // first NoteOn as `BindSource::Midi { note }`. Draining here would
-            // race poll_midi's FixedUpdate drain, so it's deferred until the
-            // real-device path (3b) owns MIDI event routing.
-            let candidate = keys
+            // First candidate wins: keyboard is checked first, then MIDI. A
+            // key just pressed this frame beats a NoteOn arriving the same
+            // frame (deterministic tie-break).
+            let key_candidate = keys
                 .get_just_pressed()
                 .copied()
                 .find(|&k| !is_reserved(k))
                 .map(BindSource::Key);
+            // A NEW NoteOn (velocity > 0, `at` strictly newer than the one this
+            // capture already consumed) offers a MIDI candidate. Advancing
+            // `seen_midi_at` here dedupes a held/sustained note so it can't
+            // re-bind every frame while the source keeps reporting it.
+            let midi_candidate = match last_midi.at {
+                Some(t) if last_midi.velocity > 0 && *seen_midi_at != Some(t) => {
+                    *seen_midi_at = Some(t);
+                    Some(BindSource::Midi {
+                        note: last_midi.note,
+                    })
+                }
+                _ => None,
+            };
+            let candidate = key_candidate.or(midi_candidate);
             if let Some(src) = candidate {
                 match owner_of(&live.0, src) {
                     Some(other) if other != channel => {
