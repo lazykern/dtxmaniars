@@ -350,7 +350,7 @@ pub fn settings_items(tab: CustomizeTab) -> &'static [SettingItem] {
         CustomizeTab::Gameplay => &GAMEPLAY_ITEMS,
         CustomizeTab::Audio => &AUDIO_ITEMS,
         CustomizeTab::Drums => &DRUMS_ITEMS,
-        CustomizeTab::Lanes | CustomizeTab::Widgets => &[],
+        CustomizeTab::Bindings | CustomizeTab::Lanes | CustomizeTab::Widgets => &[],
     }
 }
 
