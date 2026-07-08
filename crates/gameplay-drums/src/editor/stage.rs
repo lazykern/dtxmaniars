@@ -5,33 +5,41 @@ use bevy::prelude::*;
 use bevy::window::PrimaryWindow;
 use game_shell::CustomizeTab;
 
-/// Left sidebar width (editor/ui.rs) and right panel width (editor/panel.rs).
-const LEFT_CHROME: f32 = 220.0;
-const RIGHT_CHROME: f32 = 240.0;
+/// Left sidebar width (editor/ui.rs) and panel width (editor/panel.rs).
+const RAIL_WIDTH: f32 = 220.0;
+const PANEL_WIDTH: f32 = 240.0;
 const TOP_MARGIN: f32 = 24.0;
+/// Breathing room between the settings chrome and the shrunk stage.
+const GAP: f32 = 16.0;
+/// Settings tabs dock the panel on the LEFT, flush against the rail.
+const SETTINGS_LEFT_CHROME: f32 = RAIL_WIDTH + PANEL_WIDTH;
 
-/// Preset rect for a tab given the window size.
+/// Preset rect for a tab given the window size. Both groups Fit: the whole
+/// screen shrinks into the gap left free by the chrome for that tab group.
 pub fn preset_rect(tab: CustomizeTab, window: Vec2) -> StageRect {
     if tab.is_settings() {
-        // Offset: true scale, playfield shifted into the gap right of the rail.
+        // Settings: rail + left-docked panel occupy the left edge; no right chrome.
         StageRect {
-            origin: Vec2::new(LEFT_CHROME, 0.0),
-            size: window,
+            origin: Vec2::new(SETTINGS_LEFT_CHROME + GAP, TOP_MARGIN),
+            size: Vec2::new(
+                (window.x - SETTINGS_LEFT_CHROME - 2.0 * GAP).max(1.0),
+                (window.y - 2.0 * TOP_MARGIN).max(1.0),
+            ),
         }
     } else {
-        // Fit: shrink whole screen into the gap between both chrome panels.
+        // Kit: shrink between the rail (left) and the inspector panel (right).
         StageRect {
-            origin: Vec2::new(LEFT_CHROME, TOP_MARGIN),
+            origin: Vec2::new(RAIL_WIDTH, TOP_MARGIN),
             size: Vec2::new(
-                (window.x - LEFT_CHROME - RIGHT_CHROME).max(1.0),
+                (window.x - RAIL_WIDTH - PANEL_WIDTH).max(1.0),
                 (window.y - 2.0 * TOP_MARGIN).max(1.0),
             ),
         }
     }
 }
 
-/// Thin screen-bounds outline drawn at the current `StageRect` while a KIT tab
-/// (Fit) is active and not peeking, so the user sees the true (shrunk) screen
+/// Thin screen-bounds outline drawn at the current `StageRect` while the
+/// surface is open and not peeking, so the user sees the true (shrunk) screen
 /// edges for WYSIWYG anchor placement. Window-space, positioned directly from
 /// `StageRect` (no self-transform). Not tagged `EditorChrome`: it owns its own
 /// visibility so peek does not double-touch it.
@@ -91,11 +99,10 @@ fn despawn_outline(mut commands: Commands, existing: Query<Entity, With<StageOut
     }
 }
 
-/// Track the outline node to the current `StageRect` and show it only on KIT
-/// (Fit) tabs while not peeking; hidden on settings tabs and during peek.
+/// Track the outline node to the current `StageRect` and show it while not
+/// peeking; hidden during peek (and despawned whenever the surface is closed).
 fn sync_stage_outline(
     rect: Res<crate::stage_rect::StageRect>,
-    active: Res<super::tabs::ActiveTab>,
     keys: Res<ButtonInput<KeyCode>>,
     mut q: Query<(&mut Node, &mut Visibility), With<StageOutline>>,
 ) {
@@ -106,7 +113,7 @@ fn sync_stage_outline(
     node.top = Val::Px(rect.origin.y);
     node.width = Val::Px(rect.size.x);
     node.height = Val::Px(rect.size.y);
-    let show = !active.0.is_settings() && !keys.pressed(KeyCode::Tab);
+    let show = !keys.pressed(KeyCode::Tab);
     *vis = if show {
         Visibility::Inherited
     } else {
@@ -153,10 +160,10 @@ mod tests {
     use super::*;
 
     #[test]
-    fn settings_tab_is_offset_true_scale() {
+    fn settings_tab_fits_beside_left_panel() {
         let r = preset_rect(CustomizeTab::Gameplay, Vec2::new(1600.0, 900.0));
-        assert_eq!(r.origin, Vec2::new(220.0, 0.0));
-        assert_eq!(r.size, Vec2::new(1600.0, 900.0)); // scale 1 preserved
+        assert_eq!(r.origin, Vec2::new(460.0 + 16.0, 24.0));
+        assert_eq!(r.size, Vec2::new(1600.0 - 460.0 - 32.0, 900.0 - 48.0));
     }
 
     #[test]

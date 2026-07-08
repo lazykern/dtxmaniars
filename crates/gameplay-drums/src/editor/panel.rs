@@ -87,6 +87,10 @@ fn preset_name(p: dtx_layout::LanePreset) -> &'static str {
 
 pub const PANEL_WIDTH: f32 = 240.0;
 
+/// Left sidebar rail width (editor/ui.rs); settings tabs dock the panel
+/// flush against it on the LEFT, kit tabs keep the right inspector.
+const RAIL_WIDTH: f32 = 220.0;
+
 pub fn plugin(app: &mut App) {
     app.add_systems(
         Update,
@@ -160,13 +164,19 @@ fn rebuild_panel(
         return;
     }
     let t = theme.0;
+    let (left, right) = if active.0.is_settings() {
+        (Val::Px(RAIL_WIDTH), Val::Auto)
+    } else {
+        (Val::Auto, Val::Px(0.0))
+    };
     let root = commands
         .spawn((
             PanelRoot,
             EditorChrome,
             Node {
                 position_type: PositionType::Absolute,
-                right: Val::Px(0.0),
+                left,
+                right,
                 top: Val::Px(0.0),
                 width: Val::Px(PANEL_WIDTH),
                 height: Val::Percent(100.0),

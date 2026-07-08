@@ -88,7 +88,7 @@ fn spawn_ui_on_open(
 
     let active_tab = active.0;
     commands.entity(root).with_children(|p| {
-        spawn_label(p, &t, "LAYOUT EDITOR");
+        spawn_label(p, &t, "CUSTOMIZE");
         spawn_label(p, &t, "SETTINGS");
         for tab in game_shell::CustomizeTab::SETTINGS {
             spawn_tab_button(p, &t, tab, tab == active_tab);

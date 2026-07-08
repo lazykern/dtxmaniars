@@ -8,7 +8,13 @@ pub(super) fn plugin(app: &mut App) {
         .init_resource::<ConfigDraft>()
         .add_systems(
             Update,
-            (sync_active_tab_on_open, save_draft_on_close)
+            (
+                sync_active_tab_on_open,
+                save_draft_on_close,
+                apply_draft_live
+                    .run_if(super::editor_open)
+                    .run_if(resource_changed::<ConfigDraft>),
+            )
                 .run_if(in_state(game_shell::AppState::Performance)),
         );
 }
@@ -56,6 +62,20 @@ fn save_draft_on_close(open: Res<super::EditorOpen>, draft: Res<ConfigDraft>) {
     if let Err(e) = dtx_config::save(&path, &draft.0) {
         error!("customize: failed to save config {}: {e}", path.display());
     }
+}
+
+/// Draft edits with a live runtime resource apply immediately while the
+/// surface is open (scroll speed, input offset, common BGM adjust). Everything
+/// else still takes effect via save-on-close.
+fn apply_draft_live(
+    draft: Res<ConfigDraft>,
+    mut scroll: ResMut<crate::resources::ScrollSettings>,
+    mut input_offset: ResMut<crate::resources::InputOffsetMs>,
+    mut bgm_adjust: ResMut<crate::resources::BgmAdjustState>,
+) {
+    *scroll = crate::resources::ScrollSettings::from_scroll_speed(draft.0.gameplay.scroll_speed);
+    input_offset.0 = draft.0.gameplay.input_offset_ms;
+    bgm_adjust.common_ms = draft.0.gameplay.bgm_adjust_ms;
 }
 
 #[cfg(test)]
