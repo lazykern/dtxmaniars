@@ -2,7 +2,20 @@
 
 User smoke 2026-07-08 (Opus session). Chrome structure works but visuals diverge badly from the prototype artifact. Deferred by user ("we need to tackle this after"). Fix once Phase 3 (bindings + MIDI) lands.
 
-## STATUS (2026-07-08): P0 ✅ FIXED (`08eeb71`), P1 ✅ FIXED (`1679d2f`). P2/P3/P4 pending user re-smoke.
+## STATUS (2026-07-08): P0 ✅ (`08eeb71`), P1 ✅ (`1679d2f`), P3 topbar ✅ REMOVED (`f285ac7`). BRP loop now working (launch dtxmaniars from worktree, Ctrl+Shift+E opens surface, click at logical coords = physical/1.65). P2 widget-bleed + aesthetic still open.
+
+### BRP-verified this session (`f285ac7`)
+- Topbar deleted → garbled top-left overlap gone.
+- Bindings: click a channel row to select (was spawned-but-never-queried → un-selectable). Row highlights, lane outlines on playfield, source labels draw at pad bottom, selection HOLDS.
+- Bindings: autoplay no longer drives selection (was chasing the judged note). Real MIDI NoteOn still auto-selects (spec §5).
+
+### P2 root cause (mapped, NOT yet fixed)
+`measure_widget_geoms` (widget_layout.rs:169) measures widget anchor geometry against raw WINDOW size, not StageRect. Play-mode widgets (score/combo/live-graph) route position through HudRefRect+origin (P1) but their ANCHOR/scale basis is still window-relative → on the Widgets tab some still land near window edges instead of inside the shrunk stage. Fix = route measure_widget_geoms through StageRect. Regression risk to normal play (origin=0 must stay identity). Verify normal play via BRP after.
+
+### Remaining aesthetic (subjective — get user steer)
+- Dim the whole preview (artifact is dim/translucent; impl is full brightness).
+- Pad domes (LC/HH/SD arches) vs artifact flat thin lane labels — domes are core playfield render, gate on preview-mode, don't delete.
+- Widgets-tab: many real HUD widgets (density strip, live graph, judgement breakdown) vs artifact's few — clutter is inherent to our richer HUD.
 
 ## P0 — Settings preview shows the WHOLE HUD; should show only lanes + notes — ✅ FIXED `08eeb71`
 
