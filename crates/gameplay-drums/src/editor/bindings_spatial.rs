@@ -139,9 +139,8 @@ fn despawn_overlay(
 /// only on the Bindings tab with a live selection and no peek in progress.
 #[allow(clippy::too_many_arguments)]
 fn sync_bind_overlay(
-    active: Res<super::tabs::ActiveTab>,
+    state: Res<super::PreviewState>,
     selected: Res<SelectedChannel>,
-    keys: Res<ButtonInput<KeyCode>>,
     pfl: Res<PlayfieldLayout>,
     lanes: Res<Lanes>,
     live: Res<LiveBindings>,
@@ -154,8 +153,8 @@ fn sync_bind_overlay(
         (With<BindSourceLabel>, Without<BindLaneOutline>),
     >,
 ) {
-    let peeking = keys.pressed(KeyCode::Tab);
-    let on_bindings = active.0 == game_shell::CustomizeTab::Bindings;
+    let peeking = state.peeking;
+    let on_bindings = state.tab == game_shell::CustomizeTab::Bindings;
     // Resolve the selected channel's column (None → nothing to draw).
     let col = if on_bindings && !peeking {
         selected.0.and_then(|ch| lanes.col_of(ch).map(|c| (ch, c)))

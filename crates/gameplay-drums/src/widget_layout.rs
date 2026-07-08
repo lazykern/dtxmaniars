@@ -131,8 +131,7 @@ pub(super) fn plugin(app: &mut App) {
                     resource_changed::<WidgetLayouts>
                         .or_else(resource_changed::<PlayfieldLayout>)
                         .or_else(any_anchored_widget)
-                        .or_else(resource_changed::<crate::editor::tabs::ActiveTab>)
-                        .or_else(resource_changed::<crate::editor::EditorOpen>),
+                        .or_else(resource_changed::<crate::editor::PreviewState>),
                 ),
             )
                 .chain()
@@ -142,10 +141,7 @@ pub(super) fn plugin(app: &mut App) {
             Update,
             hide_practice_hud_on_preview
                 .run_if(in_state(AppState::Performance))
-                .run_if(
-                    resource_changed::<crate::editor::tabs::ActiveTab>
-                        .or_else(resource_changed::<crate::editor::EditorOpen>),
-                ),
+                .run_if(resource_changed::<crate::editor::PreviewState>),
         );
 }
 
@@ -251,8 +247,7 @@ fn apply_widget_layout(
     practice: Option<Res<crate::practice::PracticeSession>>,
     pfl: Res<PlayfieldLayout>,
     windows: Query<&Window, With<bevy::window::PrimaryWindow>>,
-    open: Res<crate::editor::EditorOpen>,
-    active: Res<crate::editor::tabs::ActiveTab>,
+    state: Res<crate::editor::PreviewState>,
     mut containers: Query<(
         &WidgetContainer,
         &mut UiTransform,
@@ -312,8 +307,8 @@ fn apply_widget_layout(
         // preview ONLY lanes+notes (HudRoot children, unaffected here), so hide
         // every HUD widget container. The Playfield kind spawns no container, but
         // exempt it defensively in case one is ever added.
-        let hide_for_preview = open.0
-            && active.0 != game_shell::CustomizeTab::Widgets
+        let hide_for_preview = state.open
+            && state.tab != game_shell::CustomizeTab::Widgets
             && container.0 != WidgetKind::Playfield;
         *vis = if hide_for_preview {
             Visibility::Hidden
@@ -330,8 +325,7 @@ fn apply_widget_layout(
 /// (not widget containers), so they need their own gate. When practice isn't
 /// active the queries match nothing (harmless).
 fn hide_practice_hud_on_preview(
-    open: Res<crate::editor::EditorOpen>,
-    active: Res<crate::editor::tabs::ActiveTab>,
+    state: Res<crate::editor::PreviewState>,
     mut full_hud: Query<
         &mut Visibility,
         (
@@ -347,7 +341,7 @@ fn hide_practice_hud_on_preview(
         ),
     >,
 ) {
-    let hide = open.0 && active.0 != game_shell::CustomizeTab::Widgets;
+    let hide = state.open && state.tab != game_shell::CustomizeTab::Widgets;
     let vis = if hide {
         Visibility::Hidden
     } else {

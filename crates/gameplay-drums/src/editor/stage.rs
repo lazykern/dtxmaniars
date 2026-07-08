@@ -85,13 +85,13 @@ pub(super) fn plugin(app: &mut App) {
 /// Fade the dim scrim in while the surface is open and not peeking; the
 /// `spawn_outline_on_open` pass spawns/despawns it alongside the outline.
 fn sync_preview_scrim(
-    keys: Res<ButtonInput<KeyCode>>,
+    state: Res<super::PreviewState>,
     mut q: Query<&mut Visibility, With<PreviewScrim>>,
 ) {
     let Ok(mut vis) = q.single_mut() else {
         return;
     };
-    let show = !keys.pressed(KeyCode::Tab);
+    let show = !state.peeking;
     *vis = if show {
         Visibility::Inherited
     } else {
@@ -166,8 +166,7 @@ fn despawn_outline(
 /// peeking; hidden during peek (and despawned whenever the surface is closed).
 fn sync_stage_outline(
     rect: Res<crate::stage_rect::StageRect>,
-    keys: Res<ButtonInput<KeyCode>>,
-    active: Res<super::tabs::ActiveTab>,
+    state: Res<super::PreviewState>,
     mut q: Query<(&mut Node, &mut Visibility), With<StageOutline>>,
 ) {
     let Ok((mut node, mut vis)) = q.single_mut() else {
@@ -180,7 +179,7 @@ fn sync_stage_outline(
     // Bounds outline only frames the shrunk miniature on KIT tabs (matches the
     // prototype's `.shrunk` outline). Settings tabs shift the full-size
     // playfield without a box; peek hides all chrome.
-    let show = !keys.pressed(KeyCode::Tab) && !active.0.is_settings();
+    let show = !state.peeking && !state.tab.is_settings();
     *vis = if show {
         Visibility::Inherited
     } else {
@@ -192,25 +191,22 @@ fn sync_stage_outline(
 /// Holding `Tab` peeks: forces Identity (full window) and hides chrome for the
 /// exact play view; releasing restores the preset + chrome.
 fn peek_stage(
-    keys: Res<ButtonInput<KeyCode>>,
+    state: Res<super::PreviewState>,
     windows: Query<&Window, With<PrimaryWindow>>,
-    active: Res<super::tabs::ActiveTab>,
-    selection: Res<super::drag::Selection>,
     mut target: ResMut<StageTarget>,
     mut chrome: Query<&mut Visibility, With<super::picking::EditorChrome>>,
 ) {
     let Ok(win) = windows.single() else {
         return;
     };
-    let peeking = keys.pressed(KeyCode::Tab);
-    let has_inspector = active.0 == CustomizeTab::Widgets && selection.0.is_some();
+    let peeking = state.peeking;
     let want = if peeking {
         StageRect::full(Vec2::new(win.width(), win.height()))
     } else {
         preset_rect(
-            active.0,
+            state.tab,
             Vec2::new(win.width(), win.height()),
-            has_inspector,
+            state.has_inspector,
         )
     };
     if target.0 != want {

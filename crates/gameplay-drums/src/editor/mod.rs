@@ -35,6 +35,49 @@ pub struct EditorOpen(pub bool);
 #[derive(Resource, Debug, Default, Clone, Copy)]
 pub struct PrevAutoplay(pub bool);
 
+/// Single source of truth for the Customize preview's frame state. Computed
+/// once per frame (before the editor sets); systems read this instead of
+/// re-deriving open/peek/tab/inspector themselves.
+#[derive(Resource, Debug, Clone, Copy, PartialEq)]
+pub struct PreviewState {
+    pub open: bool,
+    /// Tab held: full play view peek (chrome + overlays hidden, identity rect).
+    pub peeking: bool,
+    pub tab: game_shell::CustomizeTab,
+    /// Widgets tab with a live selection → right inspector reserves space.
+    pub has_inspector: bool,
+}
+
+impl Default for PreviewState {
+    fn default() -> Self {
+        Self {
+            open: false,
+            peeking: false,
+            // Mirrors `tabs::ActiveTab::default()` (Widgets landing).
+            tab: game_shell::CustomizeTab::Widgets,
+            has_inspector: false,
+        }
+    }
+}
+
+fn update_preview_state(
+    open: Res<EditorOpen>,
+    keys: Res<ButtonInput<KeyCode>>,
+    active: Res<tabs::ActiveTab>,
+    selection: Res<drag::Selection>,
+    mut state: ResMut<PreviewState>,
+) {
+    let next = PreviewState {
+        open: open.0,
+        peeking: open.0 && keys.pressed(KeyCode::Tab),
+        tab: active.0,
+        has_inspector: active.0 == game_shell::CustomizeTab::Widgets && selection.0.is_some(),
+    };
+    if *state != next {
+        *state = next;
+    }
+}
+
 /// Ordering: picking (AABBs/hover) → gestures (drag) → overlay sync.
 #[derive(SystemSet, Debug, Clone, PartialEq, Eq, Hash)]
 pub struct EditorPickSet;
@@ -45,6 +88,7 @@ pub struct EditorGestureSet;
 pub fn plugin(app: &mut App) {
     app.init_resource::<EditorOpen>()
         .init_resource::<PrevAutoplay>()
+        .init_resource::<PreviewState>()
         .init_resource::<drag::Selection>()
         .init_resource::<undo::UndoStack>()
         .add_systems(
@@ -52,6 +96,12 @@ pub fn plugin(app: &mut App) {
             toggle_editor
                 .run_if(in_state(AppState::Performance))
                 .run_if(|s: Res<game_shell::EditorSession>| !s.0),
+        )
+        .add_systems(
+            Update,
+            update_preview_state
+                .before(EditorPickSet)
+                .run_if(in_state(AppState::Performance)),
         )
         .add_systems(OnExit(AppState::Performance), close_editor_on_exit)
         .configure_sets(Update, (EditorPickSet, EditorGestureSet).chain())
