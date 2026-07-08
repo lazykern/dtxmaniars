@@ -9,6 +9,7 @@ use bevy::prelude::*;
 use game_shell::AppState;
 
 pub mod drag;
+pub mod footer;
 pub mod hotkeys;
 pub mod panel;
 pub mod picking;
@@ -65,6 +66,7 @@ pub fn plugin(app: &mut App) {
             session::plugin,
             tabs::plugin,
             topbar::plugin,
+            footer::plugin,
         ));
 }
 

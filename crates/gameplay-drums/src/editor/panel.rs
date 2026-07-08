@@ -75,6 +75,11 @@ pub struct PresetLabel;
 #[derive(Component, Clone, Copy)]
 pub struct SettingRow(pub usize);
 
+/// Carries a settings row's one-line description, surfaced in the footer while
+/// the row is hovered.
+#[derive(Component, Clone, Copy)]
+struct RowDesc(&'static str);
+
 /// Tags the ◂ / ▸ adjust buttons on a settings row (dir = -1 / +1).
 #[derive(Component, Clone, Copy)]
 pub struct SettingAdjust {
@@ -134,6 +139,7 @@ pub fn plugin(app: &mut App) {
                 refresh_lane_panel_values,
                 handle_settings_adjust,
                 refresh_settings_values,
+                update_hovered_desc,
             )
                 .run_if(super::editor_open),
         )
@@ -658,6 +664,8 @@ fn spawn_settings_block(
         for (i, item) in items.iter().enumerate() {
             p.spawn((
                 SettingRow(i),
+                RowDesc(item.desc),
+                Interaction::default(),
                 Node {
                     flex_direction: FlexDirection::Row,
                     justify_content: JustifyContent::SpaceBetween,
@@ -720,6 +728,19 @@ fn spawn_settings_block(
             });
         }
     });
+}
+
+/// Push the hovered settings row's description into the footer resource so the
+/// footer chrome can render it.
+fn update_hovered_desc(
+    rows: Query<(&Interaction, &RowDesc), Changed<Interaction>>,
+    mut hovered: ResMut<super::footer::HoveredDesc>,
+) {
+    for (interaction, row_desc) in &rows {
+        if *interaction == Interaction::Hovered {
+            hovered.0 = row_desc.0.to_string();
+        }
+    }
 }
 
 fn row(
