@@ -46,6 +46,20 @@ pub fn apply_drag(offset: (f32, f32), screen_delta: Vec2, scale: f32) -> (f32, f
     )
 }
 
+/// Clamp a scene-px move delta so the widget's AABB stays inside the window
+/// (the miniature's true screen bounds — Bevy can't clip a transformed
+/// subtree, so escapes are prevented at the gesture instead). Clamps the
+/// delta, not the position: an out-of-bounds widget can move back in but
+/// never further out.
+pub fn clamp_delta(aabb: Rect, delta: Vec2, window: Vec2) -> Vec2 {
+    let lo = -aabb.min;
+    let hi = window - aabb.max;
+    Vec2::new(
+        delta.x.clamp(lo.x.min(0.0), hi.x.max(0.0)),
+        delta.y.clamp(lo.y.min(0.0), hi.y.max(0.0)),
+    )
+}
+
 /// Pure: clamp a widget scale into the allowed band.
 pub fn clamp_scale(s: f32) -> f32 {
     s.clamp(MIN_WIDGET_SCALE, MAX_WIDGET_SCALE)
@@ -208,6 +222,7 @@ fn update_gesture(
     selection: Res<Selection>,
     pfl: Res<crate::layout::PlayfieldLayout>,
     rect: Res<crate::stage_rect::StageRect>,
+    aabbs: Res<super::picking::WidgetAabbs>,
     mut gesture: ResMut<ActiveGesture>,
     mut layouts: ResMut<WidgetLayouts>,
 ) {
@@ -232,7 +247,10 @@ fn update_gesture(
     match gesture.0 {
         Gesture::None => {}
         Gesture::Move { last_cursor } => {
-            let delta = pos - last_cursor;
+            let mut delta = pos - last_cursor;
+            if let Some(aabb) = aabbs.0.get(&kind) {
+                delta = clamp_delta(*aabb, delta, Vec2::new(window.width(), window.height()));
+            }
             if delta != Vec2::ZERO {
                 if let Some(inst) = layouts.0.get_mut(&kind) {
                     inst.offset = apply_drag(inst.offset, delta, drag_scale);
@@ -262,6 +280,9 @@ fn update_gesture(
 fn nudge_selected_widget(
     keys: Res<ButtonInput<KeyCode>>,
     selection: Res<Selection>,
+    aabbs: Res<super::picking::WidgetAabbs>,
+    pfl: Res<crate::layout::PlayfieldLayout>,
+    windows: Query<&Window>,
     mut layouts: ResMut<WidgetLayouts>,
 ) {
     let Some(kind) = selection.0 else {
@@ -286,9 +307,15 @@ fn nudge_selected_widget(
         d.1 += step;
     }
     if d != (0.0, 0.0) {
+        // Nudge steps are ref-px; clamp in scene px against the window bounds.
+        let mut scene_d = Vec2::new(d.0, d.1) * pfl.scale;
+        if let (Ok(window), Some(aabb)) = (windows.single(), aabbs.0.get(&kind)) {
+            scene_d = clamp_delta(*aabb, scene_d, Vec2::new(window.width(), window.height()));
+        }
+        let scale = pfl.scale.max(f32::EPSILON);
         if let Some(inst) = layouts.0.get_mut(&kind) {
-            inst.offset.0 += d.0;
-            inst.offset.1 += d.1;
+            inst.offset.0 += scene_d.x / scale;
+            inst.offset.1 += scene_d.y / scale;
         }
     }
 }
@@ -314,6 +341,35 @@ mod tests {
     #[test]
     fn drag_zero_scale_is_noop() {
         assert_eq!(apply_drag((3.0, 4.0), Vec2::new(9.0, 9.0), 0.0), (3.0, 4.0));
+    }
+
+    #[test]
+    fn clamp_delta_free_when_inside() {
+        let aabb = Rect::new(100.0, 100.0, 200.0, 150.0);
+        let w = Vec2::new(1280.0, 720.0);
+        assert_eq!(
+            clamp_delta(aabb, Vec2::new(10.0, -20.0), w),
+            Vec2::new(10.0, -20.0)
+        );
+    }
+
+    #[test]
+    fn clamp_delta_stops_at_edges() {
+        let aabb = Rect::new(100.0, 100.0, 200.0, 150.0);
+        let w = Vec2::new(1280.0, 720.0);
+        // Trying to move 200 left only allows 100 (aabb.min.x).
+        assert_eq!(clamp_delta(aabb, Vec2::new(-200.0, 0.0), w).x, -100.0);
+        // Trying to move 2000 right only allows window − aabb.max.x = 1080.
+        assert_eq!(clamp_delta(aabb, Vec2::new(2000.0, 0.0), w).x, 1080.0);
+    }
+
+    #[test]
+    fn clamp_delta_out_of_bounds_can_only_return() {
+        // AABB hangs off the left edge: further left is blocked, right is open.
+        let aabb = Rect::new(-50.0, 100.0, 50.0, 150.0);
+        let w = Vec2::new(1280.0, 720.0);
+        assert_eq!(clamp_delta(aabb, Vec2::new(-30.0, 0.0), w).x, 0.0);
+        assert!(clamp_delta(aabb, Vec2::new(30.0, 0.0), w).x > 0.0);
     }
 
     #[test]
