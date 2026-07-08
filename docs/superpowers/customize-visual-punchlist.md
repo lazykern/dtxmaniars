@@ -17,6 +17,48 @@ A full-window scrim at `GlobalZIndex(1500)` (above all HUD incl. the GlobalZInde
 
 Domes kept (user's call) — not swapped for the artifact's flat labels. Adjust the scrim alpha if the user wants more/less dim.
 
+### Scene-space unification (post-P2, plan `2026-07-08-customize-scene-space-unification.md`)
+The P2 refactor left a coordinate split-brain: placement moved to full-window
+("scene") space but picking/snap/measure still computed against the shrunk
+`StageRect` (and `measure_widget_geoms` didn't strip the HudRoot stage
+transform from `UiGlobalTransform`). Fixed by one rule — ALL widget math in
+scene space, the cursor converts once at the input boundary via
+`stage_rect::window_to_scene` (inverse of `stage_xform`). Also:
+- `measure_widget_geoms` inverts the COMPOSED (stage ∘ container) transform
+  (`compose_about_center`); killed the `drag_scale = pfl.scale * stage_s` hack.
+- Editor overlays (selection box, snap guides, anchor viz) reparented under
+  `HudRoot` so scene coords render 1:1 in the miniature; they KEEP
+  `GlobalZIndex` (stacking-only, transform still inherits) to sit above the
+  scrim. Bindings overlay switched back `ZIndex`→`GlobalZIndex` — it was being
+  dimmed by the scrim.
+- **Clamp instead of clipping**: bevy_ui 0.19 `update_clipping` adds only the
+  transform's TRANSLATION to clip rects (scale ignored — verified in source),
+  so osu-style masking of the miniature is impossible without wrecking the
+  layout-stability premise. `drag::clamp_delta` clamps drag/nudge deltas so a
+  widget's AABB can't leave the window (= the miniature's bounds); an
+  out-of-bounds widget can move back in, never further out.
+- `PreviewState` resource (open/peeking/tab/has_inspector computed once per
+  frame) replaced 4 scattered `keys.pressed(Tab)`/ActiveTab reads.
+- `ui_z.rs` z-registry + `editor/chrome.rs` width constants. Found real drift:
+  stage.rs reserved 236px for the inspector, panel.rs spawns 240px.
+- BRP-verified: widgets miniature contained+dimmed with widget list; click in
+  the SHRUNK miniature selects (scene-space picking); selection box + handles +
+  anchor viz glued inside the miniature and undimmed; bindings SD row click →
+  bright lane outline + "C D N38 N40" sources glued to the shrunk lane; song
+  select clean after close. 1310 workspace tests.
+
+### Follow-ups discovered during BRP verify (NOT yet fixed)
+- **Surface dies with the song**: `judge` is gated `editor_closed` but the miss
+  sweeper isn't → while the surface is open autoplay hits are never judged, the
+  whole chart misses, and song end closes the surface (~90s on the test song).
+  Real fix: loop/freeze the chart while the surface is open.
+- Stale `~/.config/dtxmaniars/layout.toml` scene blocks from pre-clamp sessions
+  (now-playing offset x = -7335!) were backed up to `layout.toml.bak-2026-07-08`
+  and stripped. Consider a load-time sanitize (clamp offsets into the window).
+- Converting Natural→Anchored during the open/tab rect ANIMATION can bake a
+  small offset (saw offset.y=74 on Frame Chrome) because geoms lag the lerping
+  stage transform by a frame. Cosmetic; drag re-snap corrects it.
+
 ### Remaining aesthetic (subjective — get user steer)
 - Dim the whole preview (artifact is dim/translucent; impl is full brightness).
 - Pad domes (LC/HH/SD arches) vs artifact flat thin lane labels — domes are core playfield render, gate on preview-mode, don't delete.
