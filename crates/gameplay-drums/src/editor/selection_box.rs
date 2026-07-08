@@ -8,7 +8,7 @@ use dtx_layout::WidgetKind;
 
 use super::drag::Selection;
 use super::picking::{Hovered, WidgetAabbs};
-use crate::widget_layout::{widget_visible, WidgetLayouts};
+use crate::widget_layout::{WidgetLayouts, widget_visible};
 
 /// Every editor-overlay entity (cleanup marker).
 #[derive(Component)]
@@ -40,7 +40,7 @@ pub struct HoverOutlineRoot;
 
 const ACCENT: Color = Color::srgb(1.0, 0.75, 0.1);
 const HOVER: Color = Color::srgba(1.0, 1.0, 1.0, 0.5);
-const HANDLE_SIZE: f32 = 10.0;
+pub const HANDLE_SIZE: f32 = 10.0;
 const DOT_SIZE: f32 = 6.0;
 
 pub fn plugin(app: &mut App) {
@@ -56,10 +56,7 @@ pub fn plugin(app: &mut App) {
             .after(super::EditorGestureSet)
             .run_if(in_state(game_shell::AppState::Performance)),
     )
-    .add_systems(
-        OnExit(game_shell::AppState::Performance),
-        despawn_overlay,
-    );
+    .add_systems(OnExit(game_shell::AppState::Performance), despawn_overlay);
 }
 
 fn despawn_overlay(mut commands: Commands, roots: Query<Entity, With<EditorOverlay>>) {
@@ -220,9 +217,7 @@ fn parent_rect(
     pfl: &crate::layout::PlayfieldLayout,
 ) -> Rect {
     match space {
-        dtx_layout::AnchorSpace::Screen => {
-            Rect::new(0.0, 0.0, window.width(), window.height())
-        }
+        dtx_layout::AnchorSpace::Screen => Rect::new(0.0, 0.0, window.width(), window.height()),
         dtx_layout::AnchorSpace::Playfield => Rect::new(
             pfl.strip_left(),
             pfl.lane_top(),
@@ -238,14 +233,13 @@ fn sync_selection_border(
     aabbs: Res<WidgetAabbs>,
     layouts: Res<WidgetLayouts>,
     practice: Option<Res<crate::practice::PracticeSession>>,
-    mut box_q: Query<
-        (&mut Node, &mut Visibility, &mut BorderColor),
-        With<SelectionBoxRoot>,
-    >,
+    mut box_q: Query<(&mut Node, &mut Visibility, &mut BorderColor), With<SelectionBoxRoot>>,
     mut tag_q: Query<&mut Text, With<SelectionNameTag>>,
     mut handles: Query<&mut Visibility, (With<ScaleHandle>, Without<SelectionBoxRoot>)>,
 ) {
-    let Ok((mut node, mut vis, mut border)) = box_q.single_mut() else { return };
+    let Ok((mut node, mut vis, mut border)) = box_q.single_mut() else {
+        return;
+    };
     let Some((kind, aabb)) = selected_aabb(&open, &selection, &aabbs) else {
         *vis = Visibility::Hidden;
         return;
@@ -259,7 +253,11 @@ fn sync_selection_border(
     node.height = Val::Px(aabb.height());
     *vis = Visibility::Visible;
     // Hidden-in-mode widget: dim the border (selected from the sidebar list).
-    let alpha = if widget_visible(inst, is_practice) { 1.0 } else { 0.35 };
+    let alpha = if widget_visible(inst, is_practice) {
+        1.0
+    } else {
+        0.35
+    };
     *border = BorderColor::all(ACCENT.with_alpha(alpha));
 
     if let Ok(mut text) = tag_q.single_mut() {
@@ -267,7 +265,11 @@ fn sync_selection_border(
     }
     let show_handles = kind != WidgetKind::Playfield;
     for mut hv in handles.iter_mut() {
-        *hv = if show_handles { Visibility::Inherited } else { Visibility::Hidden };
+        *hv = if show_handles {
+            Visibility::Inherited
+        } else {
+            Visibility::Hidden
+        };
     }
 }
 
@@ -286,9 +288,15 @@ fn sync_anchor_viz(
 ) {
     let sel = selected_aabb(&open, &selection, &aabbs);
     let Some((kind, aabb)) = sel else {
-        if let Ok((_, mut v, _)) = viz.p0().single_mut() { *v = Visibility::Hidden; }
-        if let Ok((_, mut v)) = viz.p1().single_mut() { *v = Visibility::Hidden; }
-        if let Ok((_, mut v)) = viz.p2().single_mut() { *v = Visibility::Hidden; }
+        if let Ok((_, mut v, _)) = viz.p0().single_mut() {
+            *v = Visibility::Hidden;
+        }
+        if let Ok((_, mut v)) = viz.p1().single_mut() {
+            *v = Visibility::Hidden;
+        }
+        if let Ok((_, mut v)) = viz.p2().single_mut() {
+            *v = Visibility::Hidden;
+        }
         return;
     };
     let Ok(window) = windows.single() else { return };
@@ -313,7 +321,11 @@ fn sync_anchor_viz(
         ln.top = Val::Px(mid.y - 1.0);
         ln.width = Val::Px(len);
         lt.rotation = Rot2::radians(seg.y.atan2(seg.x));
-        *lv = if len > 4.0 { Visibility::Visible } else { Visibility::Hidden };
+        *lv = if len > 4.0 {
+            Visibility::Visible
+        } else {
+            Visibility::Hidden
+        };
     }
     if let Ok((mut dn, mut dv)) = viz.p1().single_mut() {
         dn.left = Val::Px(anchor_pt.x - DOT_SIZE / 2.0);
@@ -334,11 +346,15 @@ fn sync_hover_outline(
     aabbs: Res<WidgetAabbs>,
     mut q: Query<(&mut Node, &mut Visibility), With<HoverOutlineRoot>>,
 ) {
-    let Ok((mut node, mut vis)) = q.single_mut() else { return };
-    let show = open.0
-        && hovered.0.is_some()
-        && hovered.0 != selection.0;
-    let Some(aabb) = hovered.0.and_then(|k| aabbs.0.get(&k).copied()).filter(|_| show) else {
+    let Ok((mut node, mut vis)) = q.single_mut() else {
+        return;
+    };
+    let show = open.0 && hovered.0.is_some() && hovered.0 != selection.0;
+    let Some(aabb) = hovered
+        .0
+        .and_then(|k| aabbs.0.get(&k).copied())
+        .filter(|_| show)
+    else {
         *vis = Visibility::Hidden;
         return;
     };

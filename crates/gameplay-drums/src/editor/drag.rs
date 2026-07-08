@@ -14,7 +14,8 @@ use crate::widget_layout::WidgetLayouts;
 #[derive(Resource, Debug, Default, Clone, Copy)]
 pub struct Selection(pub Option<WidgetKind>);
 
-/// Active mouse gesture. Scale carries drag-start reference data.
+/// Active mouse gesture (cursor points in scene space). Scale carries
+/// drag-start reference data.
 #[derive(Debug, Default, Clone, Copy, PartialEq)]
 pub enum Gesture {
     #[default]
@@ -99,11 +100,6 @@ fn begin_gesture(
     over_chrome: Res<super::picking::CursorOverChrome>,
     aabbs: Res<super::picking::WidgetAabbs>,
     hidden: Res<super::picking::CanvasHidden>,
-    handles: Query<(
-        &super::selection_box::ScaleHandle,
-        &ComputedNode,
-        &bevy::ui::UiGlobalTransform,
-    )>,
     mut selection: ResMut<Selection>,
     mut gesture: ResMut<ActiveGesture>,
     mut layouts: ResMut<WidgetLayouts>,
@@ -120,28 +116,38 @@ fn begin_gesture(
     let Some(pos) = window.cursor_position() else {
         return;
     };
+    let win_size = Vec2::new(window.width(), window.height());
+    let pos = crate::stage_rect::window_to_scene(pos, *rect, win_size);
 
-    // 1. Scale handles first (they can overhang neighboring widgets).
+    // 1. Scale handles first (they can overhang neighboring widgets). Handle
+    // rects are derived from the selected widget's scene-space AABB corners
+    // (the visual handles are children of the selection box and sit exactly
+    // on those corners).
     if let Some(kind) = selection.0 {
         if kind != dtx_layout::WidgetKind::Playfield {
-            for (_, cn, gt) in &handles {
-                let r = super::picking::node_rect(cn, gt);
-                // Inflate for easier grabbing.
-                let r = Rect::from_center_size(r.center(), r.size() + Vec2::splat(6.0));
-                if r.contains(pos) {
-                    if let Some(aabb) = aabbs.0.get(&kind) {
-                        let start_center = aabb.center();
-                        let start_dist = (pos - start_center).length().max(1.0);
-                        let start_scale = layouts.get(kind).scale;
-                        undo.push(&layouts, &lanes);
-                        convert_to_anchored(&mut layouts, &geoms, &pfl, *rect, kind);
-                        gesture.0 = Gesture::Scale {
-                            start_dist,
-                            start_scale,
-                            start_center,
-                        };
-                        return;
-                    }
+            if let Some(aabb) = aabbs.0.get(&kind) {
+                let grab = super::selection_box::HANDLE_SIZE + 6.0;
+                let corners = [
+                    aabb.min,
+                    Vec2::new(aabb.max.x, aabb.min.y),
+                    Vec2::new(aabb.min.x, aabb.max.y),
+                    aabb.max,
+                ];
+                if corners
+                    .iter()
+                    .any(|c| Rect::from_center_size(*c, Vec2::splat(grab)).contains(pos))
+                {
+                    let start_center = aabb.center();
+                    let start_dist = (pos - start_center).length().max(1.0);
+                    let start_scale = layouts.get(kind).scale;
+                    undo.push(&layouts, &lanes);
+                    convert_to_anchored(&mut layouts, &geoms, &pfl, win_size, kind);
+                    gesture.0 = Gesture::Scale {
+                        start_dist,
+                        start_scale,
+                        start_center,
+                    };
+                    return;
                 }
             }
         }
@@ -161,33 +167,35 @@ fn begin_gesture(
     if let Some(kind) = picked {
         if kind != dtx_layout::WidgetKind::Playfield {
             undo.push(&layouts, &lanes);
-            convert_to_anchored(&mut layouts, &geoms, &pfl, *rect, kind);
+            convert_to_anchored(&mut layouts, &geoms, &pfl, win_size, kind);
             gesture.0 = Gesture::Move { last_cursor: pos };
         }
     }
 }
 
 /// Convert a widget Natural→Anchored at gesture start, capturing its current
-/// visual top-left (from the geom pushed through its applied transform — NOT
-/// `WidgetAabbs`, whose rects are inflated to MIN_GRAB for tiny widgets) so the
-/// widget doesn't jump.
+/// scene-space visual top-left (from the geom pushed through its applied
+/// transform — NOT `WidgetAabbs`, whose rects are inflated to MIN_GRAB for tiny
+/// widgets) so the widget doesn't jump. All math in scene space: parent is the
+/// full window, matching `apply_widget_layout`.
 fn convert_to_anchored(
     layouts: &mut WidgetLayouts,
     geoms: &crate::widget_layout::WidgetGeoms,
     pfl: &crate::layout::PlayfieldLayout,
-    rect: crate::stage_rect::StageRect,
+    window: Vec2,
     kind: WidgetKind,
 ) {
     if let Some(g) = geoms.0.get(&kind).copied() {
         if let Some(inst) = layouts.0.get_mut(&kind) {
-            let sc = rect.center();
+            let full = crate::stage_rect::StageRect::full(window);
+            let sc = full.center();
             let visual_min = crate::widget_layout::transform_point(
                 g.unscaled.min,
                 sc,
                 g.applied_translation,
                 g.applied_scale,
             );
-            let parent = crate::widget_layout::parent_rect_px(inst.space, rect, pfl);
+            let parent = crate::widget_layout::parent_rect_px(inst.space, full, pfl);
             ensure_anchored(inst, visual_min, g.unscaled.size(), parent, pfl.scale);
         }
     }
@@ -215,13 +223,12 @@ fn update_gesture(
     let Some(pos) = window.cursor_position() else {
         return;
     };
-    // The scene is drawn at `pfl.scale` (ref→window) AND the HudRoot stage
-    // transform `s` (window→miniature). A screen-px cursor delta therefore maps
-    // to `delta / (pfl.scale * s)` ref-px, or the widget out-runs the cursor on
-    // the shrunk Widgets tab.
-    let stage_s =
-        crate::stage_rect::stage_xform(*rect, Vec2::new(window.width(), window.height())).0;
-    let drag_scale = pfl.scale * stage_s;
+    // Cursor converts to scene space at the boundary, so gesture deltas and
+    // distances are scene-px; the only remaining unit change is scene-px →
+    // ref-px, i.e. `pfl.scale`.
+    let pos =
+        crate::stage_rect::window_to_scene(pos, *rect, Vec2::new(window.width(), window.height()));
+    let drag_scale = pfl.scale;
     match gesture.0 {
         Gesture::None => {}
         Gesture::Move { last_cursor } => {
