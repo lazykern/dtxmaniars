@@ -31,21 +31,40 @@ pub fn preset_rect(tab: CustomizeTab, window: Vec2) -> StageRect {
 }
 
 pub(super) fn plugin(app: &mut App) {
-    app.add_systems(Update, set_stage_target.run_if(super::editor_open));
+    app.add_systems(Update, peek_stage.run_if(super::editor_open));
 }
 
 /// While the surface is open, drive the target rect from the active tab.
-fn set_stage_target(
-    active: Res<super::tabs::ActiveTab>,
+/// Holding `Tab` peeks: forces Identity (full window) and hides chrome for the
+/// exact play view; releasing restores the preset + chrome.
+fn peek_stage(
+    keys: Res<ButtonInput<KeyCode>>,
     windows: Query<&Window, With<PrimaryWindow>>,
+    active: Res<super::tabs::ActiveTab>,
     mut target: ResMut<StageTarget>,
+    mut chrome: Query<&mut Visibility, With<super::picking::EditorChrome>>,
 ) {
     let Ok(win) = windows.single() else {
         return;
     };
-    let want = preset_rect(active.0, Vec2::new(win.width(), win.height()));
+    let peeking = keys.pressed(KeyCode::Tab);
+    let want = if peeking {
+        StageRect::full(Vec2::new(win.width(), win.height()))
+    } else {
+        preset_rect(active.0, Vec2::new(win.width(), win.height()))
+    };
     if target.0 != want {
         target.0 = want;
+    }
+    let vis = if peeking {
+        Visibility::Hidden
+    } else {
+        Visibility::Inherited
+    };
+    for mut v in &mut chrome {
+        if *v != vis {
+            *v = vis;
+        }
     }
 }
 
