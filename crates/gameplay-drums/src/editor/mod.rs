@@ -10,6 +10,7 @@ use game_shell::AppState;
 
 pub mod bindings_capture;
 pub mod bindings_panel;
+pub mod bindings_spatial;
 pub mod drag;
 pub mod footer;
 pub mod hotkeys;
@@ -59,6 +60,7 @@ pub fn plugin(app: &mut App) {
             (
                 bindings_panel::plugin,
                 bindings_capture::plugin,
+                bindings_spatial::plugin,
                 drag::plugin,
             ),
             hotkeys::plugin,
