@@ -14,8 +14,6 @@ pub enum AppState {
     Startup,
     /// CStageTitle — title screen, "Press ENTER to start".
     Title,
-    /// CStageConfig — settings/config screen.
-    Config,
     /// CStageSongSelectionNew — BocuD's new song select.
     SongSelect,
     /// CStageSongLoading — chart + BGM preview load.
