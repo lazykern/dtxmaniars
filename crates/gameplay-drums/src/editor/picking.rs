@@ -11,11 +11,12 @@ use bevy::prelude::*;
 use dtx_layout::WidgetKind;
 
 use crate::layout::PlayfieldLayout;
-use crate::widget_layout::{widget_visible, WidgetLayouts};
+use crate::widget_layout::{WidgetLayouts, widget_visible};
 
-/// Logical-px AABB per widget, rebuilt each frame while the editor is open.
-/// Entries persist across frames (last non-empty wins) so widgets that render
-/// nothing this instant (e.g. judgment popup between hits) stay grabbable.
+/// SCENE-space (full-window logical px, pre stage-transform) AABB per widget,
+/// rebuilt each frame while the editor is open. Entries persist across frames
+/// (last non-empty wins) so widgets that render nothing this instant (e.g.
+/// judgment popup between hits) stay grabbable.
 #[derive(Resource, Debug, Default)]
 pub struct WidgetAabbs(pub HashMap<WidgetKind, Rect>);
 
@@ -119,9 +120,10 @@ fn collect_widget_aabbs(
     layouts: Res<WidgetLayouts>,
     practice: Option<Res<crate::practice::PracticeSession>>,
     pfl: Res<PlayfieldLayout>,
-    rect: Res<crate::stage_rect::StageRect>,
+    windows: Query<&Window>,
 ) {
-    let sc = rect.center();
+    let Ok(window) = windows.single() else { return };
+    let sc = Vec2::new(window.width() / 2.0, window.height() / 2.0);
     let is_practice = practice.is_some();
     hidden.0.clear();
     for kind in dtx_layout::WidgetKind::ALL {
@@ -189,6 +191,7 @@ fn update_hover(
     hidden: Res<CanvasHidden>,
     layouts: Res<WidgetLayouts>,
     windows: Query<&Window>,
+    rect: Res<crate::stage_rect::StageRect>,
 ) {
     if over_chrome.0 || !matches!(gesture.0, super::drag::Gesture::None) {
         hovered.0 = None;
@@ -199,6 +202,9 @@ fn update_hover(
         hovered.0 = None;
         return;
     };
+    // AABBs are scene-space; the cursor converts at the boundary.
+    let pos =
+        crate::stage_rect::window_to_scene(pos, *rect, Vec2::new(window.width(), window.height()));
     hovered.0 = candidates_at(&aabbs.0, |k| layouts.get(k).z, pos)
         .into_iter()
         .find(|k| !hidden.0.contains(k));
