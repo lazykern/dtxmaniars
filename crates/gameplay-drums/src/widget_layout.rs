@@ -118,11 +118,22 @@ pub(super) fn plugin(app: &mut App) {
                 apply_widget_layout.run_if(
                     resource_changed::<WidgetLayouts>
                         .or_else(resource_changed::<PlayfieldLayout>)
-                        .or_else(any_anchored_widget),
+                        .or_else(any_anchored_widget)
+                        .or_else(resource_changed::<crate::editor::tabs::ActiveTab>)
+                        .or_else(resource_changed::<crate::editor::EditorOpen>),
                 ),
             )
                 .chain()
                 .run_if(in_state(AppState::Performance)),
+        )
+        .add_systems(
+            Update,
+            hide_practice_hud_on_preview
+                .run_if(in_state(AppState::Performance))
+                .run_if(
+                    resource_changed::<crate::editor::tabs::ActiveTab>
+                        .or_else(resource_changed::<crate::editor::EditorOpen>),
+                ),
         );
 }
 
@@ -220,6 +231,8 @@ fn apply_widget_layout(
     practice: Option<Res<crate::practice::PracticeSession>>,
     pfl: Res<PlayfieldLayout>,
     rect: Res<crate::stage_rect::StageRect>,
+    open: Res<crate::editor::EditorOpen>,
+    active: Res<crate::editor::tabs::ActiveTab>,
     mut containers: Query<(
         &WidgetContainer,
         &mut UiTransform,
@@ -268,11 +281,56 @@ fn apply_widget_layout(
         if let Some(mut z) = z {
             *z = ZIndex(inst.z);
         }
-        *vis = if widget_visible(inst, is_practice) {
+        // On the Customize surface, non-Widgets tabs (settings/bindings/lanes)
+        // preview ONLY lanes+notes (HudRoot children, unaffected here), so hide
+        // every HUD widget container. The Playfield kind spawns no container, but
+        // exempt it defensively in case one is ever added.
+        let hide_for_preview = open.0
+            && active.0 != game_shell::CustomizeTab::Widgets
+            && container.0 != WidgetKind::Playfield;
+        *vis = if hide_for_preview {
+            Visibility::Hidden
+        } else if widget_visible(inst, is_practice) {
             Visibility::Inherited
         } else {
             Visibility::Hidden
         };
+    }
+}
+
+/// Hide the practice HUD roots (density strip + mini strip) when previewing a
+/// non-Widgets Customize tab, so only lanes+notes show. These are separate roots
+/// (not widget containers), so they need their own gate. When practice isn't
+/// active the queries match nothing (harmless).
+fn hide_practice_hud_on_preview(
+    open: Res<crate::editor::EditorOpen>,
+    active: Res<crate::editor::tabs::ActiveTab>,
+    mut full_hud: Query<
+        &mut Visibility,
+        (
+            With<crate::practice::hud::full_hud::FullHudRoot>,
+            Without<crate::practice::hud::mini_strip::MiniStripRoot>,
+        ),
+    >,
+    mut mini_strip: Query<
+        &mut Visibility,
+        (
+            With<crate::practice::hud::mini_strip::MiniStripRoot>,
+            Without<crate::practice::hud::full_hud::FullHudRoot>,
+        ),
+    >,
+) {
+    let hide = open.0 && active.0 != game_shell::CustomizeTab::Widgets;
+    let vis = if hide {
+        Visibility::Hidden
+    } else {
+        Visibility::Inherited
+    };
+    for mut v in &mut full_hud {
+        *v = vis;
+    }
+    for mut v in &mut mini_strip {
+        *v = vis;
     }
 }
 
