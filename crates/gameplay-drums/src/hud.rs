@@ -3,23 +3,22 @@
 use bevy::prelude::*;
 use dtx_scoring::JudgmentKind;
 use dtx_ui::{
+    ThemeResource,
     theme::REF_WIDTH,
     widget::{
-        combo_display::ComboDisplay, frame_chrome, hud_ref::HudRefRect, judgment_popup,
-        live_graph, now_playing, perf_combo, phrase_meter, playfield_speed, score_detailed,
-        song_progress,
+        combo_display::ComboDisplay, frame_chrome, hud_ref::HudRefRect, judgment_popup, live_graph,
+        now_playing, perf_combo, phrase_meter, playfield_speed, score_detailed, song_progress,
     },
-    ThemeResource,
 };
 use game_shell::{AppState, EGameMode};
 
 use dtx_layout::WidgetKind;
 
 use crate::components::LastJudgment;
-use crate::widget_layout::WidgetContainer;
 use crate::derived::ChartDerived;
-use crate::hud_cache::{set_text_if_changed, HudDisplayCache};
+use crate::hud_cache::{HudDisplayCache, set_text_if_changed};
 use crate::keyboard_viz;
+use crate::widget_layout::WidgetContainer;
 
 pub use crate::lane_map::LANE_COUNT;
 use crate::layout::PlayfieldLayout;
@@ -141,6 +140,11 @@ fn spawn_hud(
                 height: Val::Percent(100.0),
                 ..default()
             },
+            // Single stage transform (identity in normal play). The Customize
+            // surface shrinks the whole scene — playfield + every HUD widget,
+            // all children of this root — into a miniature via this one
+            // transform (`stage_rect::apply_stage_transform`).
+            bevy::ui::UiTransform::default(),
             BackgroundColor(Color::srgb(0.0, 0.0, 0.0)),
         ))
         .id();
@@ -255,8 +259,20 @@ fn apply_hit_line_layout(
 
 fn apply_progress_layout(
     layout: Res<PlayfieldLayout>,
-    mut track: Query<&mut Node, (With<song_progress::SongProgressTrack>, Without<song_progress::SongProgressFill>)>,
-    mut fill: Query<&mut Node, (With<song_progress::SongProgressFill>, Without<song_progress::SongProgressTrack>)>,
+    mut track: Query<
+        &mut Node,
+        (
+            With<song_progress::SongProgressTrack>,
+            Without<song_progress::SongProgressFill>,
+        ),
+    >,
+    mut fill: Query<
+        &mut Node,
+        (
+            With<song_progress::SongProgressFill>,
+            Without<song_progress::SongProgressTrack>,
+        ),
+    >,
 ) {
     for mut node in &mut track {
         node.left = Val::Px(layout.progress_bar_left());
@@ -504,7 +520,12 @@ fn sync_now_playing(
     if !chart.is_changed() {
         return;
     }
-    let title = chart.chart.metadata.title.as_deref().unwrap_or("— no chart —");
+    let title = chart
+        .chart
+        .metadata
+        .title
+        .as_deref()
+        .unwrap_or("— no chart —");
     let artist = chart.chart.metadata.artist.as_deref().unwrap_or("");
     let maker = chart.chart.metadata.maker.as_deref().unwrap_or("");
     for mut t in &mut q_title {

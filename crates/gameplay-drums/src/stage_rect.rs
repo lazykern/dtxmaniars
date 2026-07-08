@@ -7,6 +7,7 @@
 //! so all gameplay geometry is byte-identical to pre-transform behavior.
 
 use bevy::prelude::*;
+use bevy::ui::Val2;
 use bevy::window::PrimaryWindow;
 
 /// Window sub-rect the drums stage is mapped into (physical px).
@@ -58,9 +59,44 @@ pub(crate) fn plugin(app: &mut App) {
             (
                 sync_stage_target_to_window.run_if(surface_closed),
                 animate_stage_rect,
+                apply_stage_transform,
             )
                 .chain(),
         );
+}
+
+/// Uniform transform (scale `s`, translation `t` px) that maps the FULL WINDOW
+/// into `rect`, aspect-preserving and centered (osu "SetCustomRect"). Scale
+/// pivots about the window center `C` (Bevy `UiTransform` convention), so the
+/// translation compensates: `t = D − C·(1−s)` where `D` is the top-left of the
+/// scaled window inside `rect`. Closed surface ⇒ `rect == full window` ⇒
+/// `s = 1, t = 0` ⇒ identity (normal play byte-identical).
+pub fn stage_xform(rect: StageRect, window: Vec2) -> (f32, Vec2) {
+    let s = (rect.size.x / window.x)
+        .min(rect.size.y / window.y)
+        .min(1.0)
+        .max(0.01);
+    let d = rect.origin + (rect.size - window * s) * 0.5;
+    let c = window * 0.5;
+    (s, d - c * (1.0 - s))
+}
+
+/// Drive `HudRoot`'s `UiTransform` from the current `StageRect`, shrinking the
+/// whole scene (playfield + every HUD widget, all children of `HudRoot`) into
+/// the stage rect. Identity while the surface is closed.
+fn apply_stage_transform(
+    rect: Res<StageRect>,
+    windows: Query<&Window, With<PrimaryWindow>>,
+    mut roots: Query<&mut bevy::ui::UiTransform, With<crate::hud::HudRoot>>,
+) {
+    let Ok(win) = windows.single() else {
+        return;
+    };
+    let (s, t) = stage_xform(*rect, Vec2::new(win.width(), win.height()));
+    for mut tf in &mut roots {
+        tf.scale = Vec2::splat(s);
+        tf.translation = Val2::new(Val::Px(t.x), Val::Px(t.y));
+    }
 }
 
 /// True when the Customize surface is NOT open (identity should hold).
@@ -96,11 +132,7 @@ pub fn ease_rect(current: StageRect, target: StageRect, dt: f32) -> StageRect {
     // Snap when close to kill the long tail.
     let close =
         (next.origin - target.origin).length() < 0.5 && (next.size - target.size).length() < 0.5;
-    if close {
-        target
-    } else {
-        next
-    }
+    if close { target } else { next }
 }
 
 /// Move `StageRect` toward `StageTarget` with a frame-rate-independent ease-out.
@@ -141,6 +173,32 @@ mod tests {
         // A big dt (or many steps) snaps exactly.
         let done = ease_rect(t, t, 1.0 / 60.0);
         assert_eq!(done, t);
+    }
+
+    #[test]
+    fn xform_full_window_is_identity() {
+        let w = Vec2::new(1745.0, 1090.0);
+        let (s, t) = stage_xform(StageRect::full(w), w);
+        assert!((s - 1.0).abs() < 1e-4);
+        assert!(t.length() < 1e-3);
+    }
+
+    #[test]
+    fn xform_shrinks_and_centers_into_rect() {
+        let w = Vec2::new(1745.0, 1090.0);
+        // A centered sub-rect: uniform scale, window maps inside it.
+        let rect = StageRect {
+            origin: Vec2::new(500.0, 24.0),
+            size: Vec2::new(800.0, 1000.0),
+        };
+        let (s, t) = stage_xform(rect, w);
+        assert!(s < 1.0 && s > 0.0);
+        // Window top-left (0,0) maps to D = t + C(1-s); must land inside rect.
+        let c = w * 0.5;
+        let d = t + c * (1.0 - s);
+        assert!(d.x >= rect.origin.x - 0.5 && d.y >= rect.origin.y - 0.5);
+        // Scaled window fits within the rect on the binding axis.
+        assert!(w.y * s <= rect.size.y + 0.5);
     }
 
     #[test]

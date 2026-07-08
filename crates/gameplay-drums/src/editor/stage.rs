@@ -10,7 +10,7 @@ const RAIL_WIDTH: f32 = 132.0;
 /// Left content panel width, docked flush right of the rail (editor/panel.rs).
 const LEFT_PANEL_WIDTH: f32 = 348.0;
 /// Right inspector panel width (editor/panel.rs).
-const PANEL_WIDTH: f32 = 240.0;
+const INSPECTOR_WIDTH: f32 = 236.0;
 const TOP_MARGIN: f32 = 24.0;
 /// Breathing room between the chrome and the shrunk stage.
 const GAP: f32 = 16.0;
@@ -18,14 +18,31 @@ const GAP: f32 = 16.0;
 /// always rail + left panel; the inspector reserves the right chrome.
 const LEFT_CHROME: f32 = RAIL_WIDTH + LEFT_PANEL_WIDTH;
 
-/// Preset rect for a tab given the window size. Both groups Fit identically: the
-/// screen shrinks into the gap between the left chrome (rail + left panel) and
-/// the right chrome (inspector), centered with a `GAP` margin on each side.
-pub fn preset_rect(_tab: CustomizeTab, window: Vec2) -> StageRect {
+/// Preset stage rect per tab (osu SetCustomRect target; `stage_xform` derives the
+/// actual scale/offset). Two modes, matching the prototype:
+///   - SETTINGS tabs: NO shrink. Rect = full window shifted right by half the
+///     left chrome, so the full-size playfield centers in the visible gap
+///     (`stage_xform` → scale 1, translate ≈ (chrome/2, 0)). HUD stays hidden
+///     (P0), so only lanes+notes show.
+///   - KIT tabs (Bindings/Lanes/Widgets): the whole screen shrinks into the gap
+///     between the left chrome and the right inspector, centered. The inspector
+///     only reserves space on the Widgets tab with a selection.
+pub fn preset_rect(tab: CustomizeTab, window: Vec2, has_inspector: bool) -> StageRect {
+    if tab.is_settings() {
+        return StageRect {
+            origin: Vec2::new(LEFT_CHROME / 2.0, 0.0),
+            size: window,
+        };
+    }
+    let right = if has_inspector {
+        INSPECTOR_WIDTH + GAP
+    } else {
+        0.0
+    };
     StageRect {
         origin: Vec2::new(LEFT_CHROME + GAP, TOP_MARGIN),
         size: Vec2::new(
-            (window.x - LEFT_CHROME - PANEL_WIDTH - 2.0 * GAP).max(1.0),
+            (window.x - LEFT_CHROME - 2.0 * GAP - right).max(1.0),
             (window.y - 2.0 * TOP_MARGIN).max(1.0),
         ),
     }
@@ -97,6 +114,7 @@ fn despawn_outline(mut commands: Commands, existing: Query<Entity, With<StageOut
 fn sync_stage_outline(
     rect: Res<crate::stage_rect::StageRect>,
     keys: Res<ButtonInput<KeyCode>>,
+    active: Res<super::tabs::ActiveTab>,
     mut q: Query<(&mut Node, &mut Visibility), With<StageOutline>>,
 ) {
     let Ok((mut node, mut vis)) = q.single_mut() else {
@@ -106,7 +124,10 @@ fn sync_stage_outline(
     node.top = Val::Px(rect.origin.y);
     node.width = Val::Px(rect.size.x);
     node.height = Val::Px(rect.size.y);
-    let show = !keys.pressed(KeyCode::Tab);
+    // Bounds outline only frames the shrunk miniature on KIT tabs (matches the
+    // prototype's `.shrunk` outline). Settings tabs shift the full-size
+    // playfield without a box; peek hides all chrome.
+    let show = !keys.pressed(KeyCode::Tab) && !active.0.is_settings();
     *vis = if show {
         Visibility::Inherited
     } else {
@@ -121,6 +142,7 @@ fn peek_stage(
     keys: Res<ButtonInput<KeyCode>>,
     windows: Query<&Window, With<PrimaryWindow>>,
     active: Res<super::tabs::ActiveTab>,
+    selection: Res<super::drag::Selection>,
     mut target: ResMut<StageTarget>,
     mut chrome: Query<&mut Visibility, With<super::picking::EditorChrome>>,
 ) {
@@ -128,10 +150,15 @@ fn peek_stage(
         return;
     };
     let peeking = keys.pressed(KeyCode::Tab);
+    let has_inspector = active.0 == CustomizeTab::Widgets && selection.0.is_some();
     let want = if peeking {
         StageRect::full(Vec2::new(win.width(), win.height()))
     } else {
-        preset_rect(active.0, Vec2::new(win.width(), win.height()))
+        preset_rect(
+            active.0,
+            Vec2::new(win.width(), win.height()),
+            has_inspector,
+        )
     };
     if target.0 != want {
         target.0 = want;
@@ -152,24 +179,30 @@ fn peek_stage(
 mod tests {
     use super::*;
 
-    // Left chrome = rail(132) + left panel(348) = 480; right chrome = inspector(240).
+    // Left chrome = rail(132) + left panel(348) = 480; inspector = 236.
     #[test]
-    fn settings_tab_fits_beside_left_panel() {
-        let r = preset_rect(CustomizeTab::Gameplay, Vec2::new(1600.0, 900.0));
-        assert_eq!(r.origin, Vec2::new(480.0 + 16.0, 24.0));
-        assert_eq!(
-            r.size,
-            Vec2::new(1600.0 - 480.0 - 240.0 - 32.0, 900.0 - 48.0)
-        );
+    fn settings_tab_shifts_full_screen_into_gap() {
+        // Settings: no shrink — full window shifted right by half the chrome.
+        let win = Vec2::new(1600.0, 900.0);
+        let r = preset_rect(CustomizeTab::Gameplay, win, false);
+        assert_eq!(r.origin, Vec2::new(240.0, 0.0));
+        assert_eq!(r.size, win);
     }
 
     #[test]
-    fn kit_tab_is_fit_between_chrome() {
-        let r = preset_rect(CustomizeTab::Widgets, Vec2::new(1600.0, 900.0));
+    fn kit_tab_fits_between_chrome_no_inspector() {
+        let r = preset_rect(CustomizeTab::Widgets, Vec2::new(1600.0, 900.0), false);
+        assert_eq!(r.origin, Vec2::new(480.0 + 16.0, 24.0));
+        assert_eq!(r.size, Vec2::new(1600.0 - 480.0 - 32.0, 900.0 - 48.0));
+    }
+
+    #[test]
+    fn kit_tab_reserves_inspector_when_selected() {
+        let r = preset_rect(CustomizeTab::Widgets, Vec2::new(1600.0, 900.0), true);
         assert_eq!(r.origin, Vec2::new(480.0 + 16.0, 24.0));
         assert_eq!(
             r.size,
-            Vec2::new(1600.0 - 480.0 - 240.0 - 32.0, 900.0 - 48.0)
+            Vec2::new(1600.0 - 480.0 - 32.0 - (236.0 + 16.0), 900.0 - 48.0)
         );
     }
 }

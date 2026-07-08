@@ -210,17 +210,21 @@ fn init_playfield_layout(
 }
 
 fn sync_playfield_layout(
-    rect: Res<crate::stage_rect::StageRect>,
+    windows: Query<&Window, With<PrimaryWindow>>,
     lanes: Res<Lanes>,
     mut layout: ResMut<PlayfieldLayout>,
 ) {
-    // `StageRect` already tracks the window size (identity sync in `stage_rect`),
-    // so its change signal subsumes the old `WindowResized` trigger. Rebuild on
-    // either a rect change (resize or Customize-surface animation) or lane edits.
-    if !rect.is_changed() && !lanes.is_changed() {
+    // The playfield always lays out at FULL WINDOW size. The Customize surface's
+    // "shrink into a miniature" is a single UiTransform on `HudRoot` (osu
+    // SetCustomRect model — see `stage_rect::apply_stage_transform`), NOT a
+    // layout-space rescale, so this only rebuilds on a real resize or lane edit.
+    let Ok(window) = windows.single() else {
         return;
+    };
+    let want = PlayfieldLayout::from_window(window, &lanes);
+    if *layout != want {
+        *layout = want;
     }
-    *layout = PlayfieldLayout::from_rect(*rect, &lanes);
 }
 
 #[cfg(test)]

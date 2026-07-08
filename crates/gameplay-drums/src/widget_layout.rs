@@ -230,7 +230,7 @@ fn apply_widget_layout(
     geoms: Res<WidgetGeoms>,
     practice: Option<Res<crate::practice::PracticeSession>>,
     pfl: Res<PlayfieldLayout>,
-    rect: Res<crate::stage_rect::StageRect>,
+    windows: Query<&Window, With<bevy::window::PrimaryWindow>>,
     open: Res<crate::editor::EditorOpen>,
     active: Res<crate::editor::tabs::ActiveTab>,
     mut containers: Query<(
@@ -240,6 +240,13 @@ fn apply_widget_layout(
         &mut Visibility,
     )>,
 ) {
+    // Widgets are placed in FULL-WINDOW space (their normal-play position); the
+    // Customize "shrink into a miniature" rides the shared `HudRoot` transform,
+    // so this anchors against the whole window, never the shrunk stage rect.
+    let Ok(window) = windows.single() else {
+        return;
+    };
+    let rect = crate::stage_rect::StageRect::full(Vec2::new(window.width(), window.height()));
     let sc = rect.center();
     let is_practice = practice.is_some();
     for (container, mut tf, z, mut vis) in &mut containers {
@@ -259,7 +266,7 @@ fn apply_widget_layout(
                     continue;
                 };
                 let size = (geom.unscaled.width(), geom.unscaled.height());
-                let parent = parent_rect_px(inst.space, *rect, &pfl);
+                let parent = parent_rect_px(inst.space, rect, &pfl);
                 let desired = dtx_layout::resolve_top_left(
                     inst.anchor,
                     inst.origin,
