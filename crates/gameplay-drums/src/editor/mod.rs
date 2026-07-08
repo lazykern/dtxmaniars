@@ -11,6 +11,7 @@ use game_shell::AppState;
 pub mod drag;
 pub mod footer;
 pub mod hotkeys;
+pub mod keyboard_nav;
 pub mod panel;
 pub mod picking;
 pub mod save;
@@ -55,6 +56,7 @@ pub fn plugin(app: &mut App) {
         .add_plugins((
             drag::plugin,
             hotkeys::plugin,
+            keyboard_nav::plugin,
             undo::plugin,
             save::plugin,
             ui::plugin,
