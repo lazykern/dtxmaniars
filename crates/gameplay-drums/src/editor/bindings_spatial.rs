@@ -73,6 +73,7 @@ fn source_label(src: &BindSource) -> String {
 fn spawn_overlay_on_open(
     mut commands: Commands,
     open: Res<super::EditorOpen>,
+    roots: Query<Entity, With<crate::hud::HudRoot>>,
     existing: Query<Entity, Or<(With<BindLaneOutline>, With<BindSourceLabel>)>>,
 ) {
     if !open.is_changed() {
@@ -84,32 +85,43 @@ fn spawn_overlay_on_open(
     if !open.0 {
         return;
     }
-    commands.spawn((
-        BindLaneOutline,
-        Node {
-            position_type: PositionType::Absolute,
-            border: UiRect::all(Val::Px(2.0)),
-            ..default()
-        },
-        BorderColor::all(Color::WHITE),
-        Visibility::Hidden,
-        GlobalZIndex(OUTLINE_Z),
-        Pickable::IGNORE,
-    ));
-    commands.spawn((
-        BindSourceLabel,
-        Node {
-            position_type: PositionType::Absolute,
-            justify_content: JustifyContent::Center,
-            ..default()
-        },
-        Text::new(String::new()),
-        dtx_ui::theme::Theme::font(12.0),
-        TextColor(Color::WHITE),
-        Visibility::Hidden,
-        GlobalZIndex(OUTLINE_Z),
-        Pickable::IGNORE,
-    ));
+    // The overlay reads full-window `PlayfieldLayout` coords, so it must ride the
+    // same `HudRoot` stage transform as the playfield to stay glued to the lane
+    // while the scene is shrunk into the miniature. Parent it under HudRoot.
+    let Ok(root) = roots.single() else {
+        return;
+    };
+    let outline = commands
+        .spawn((
+            BindLaneOutline,
+            Node {
+                position_type: PositionType::Absolute,
+                border: UiRect::all(Val::Px(2.0)),
+                ..default()
+            },
+            BorderColor::all(Color::WHITE),
+            Visibility::Hidden,
+            ZIndex(OUTLINE_Z),
+            Pickable::IGNORE,
+        ))
+        .id();
+    let label = commands
+        .spawn((
+            BindSourceLabel,
+            Node {
+                position_type: PositionType::Absolute,
+                justify_content: JustifyContent::Center,
+                ..default()
+            },
+            Text::new(String::new()),
+            dtx_ui::theme::Theme::font(12.0),
+            TextColor(Color::WHITE),
+            Visibility::Hidden,
+            ZIndex(OUTLINE_Z),
+            Pickable::IGNORE,
+        ))
+        .id();
+    commands.entity(root).add_children(&[outline, label]);
 }
 
 fn despawn_overlay(
