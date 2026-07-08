@@ -1,12 +1,10 @@
-//! Editor overlay UI: left sidebar (widget list + actions), spawned while open.
+//! Editor overlay UI: left rail of SETTINGS/KIT tab buttons, spawned while open.
 
 use bevy::prelude::*;
 use dtx_layout::WidgetKind;
 
 use super::drag::Selection;
-use super::{save, undo::UndoStack, EditorOpen};
-use crate::lanes::Lanes;
-use crate::widget_layout::WidgetLayouts;
+use super::EditorOpen;
 
 #[derive(Component)]
 struct EditorUiRoot;
@@ -18,11 +16,6 @@ pub struct TabButton(pub game_shell::CustomizeTab);
 #[derive(Component, Clone, Copy)]
 pub(super) enum EditorButton {
     Select(WidgetKind),
-    ResetAll,
-    Save,
-    Undo,
-    Redo,
-    Close,
 }
 
 pub fn plugin(app: &mut App) {
@@ -74,7 +67,7 @@ fn spawn_ui_on_open(
                 position_type: PositionType::Absolute,
                 left: Val::Px(0.0),
                 top: Val::Px(0.0),
-                width: Val::Px(220.0),
+                width: Val::Px(132.0),
                 height: Val::Percent(100.0),
                 flex_direction: FlexDirection::Column,
                 padding: UiRect::all(Val::Px(8.0)),
@@ -88,7 +81,6 @@ fn spawn_ui_on_open(
 
     let active_tab = active.0;
     commands.entity(root).with_children(|p| {
-        spawn_label(p, &t, "CUSTOMIZE");
         spawn_label(p, &t, "SETTINGS");
         for tab in game_shell::CustomizeTab::SETTINGS {
             spawn_tab_button(p, &t, tab, tab == active_tab);
@@ -97,18 +89,6 @@ fn spawn_ui_on_open(
         for tab in game_shell::CustomizeTab::KIT {
             spawn_tab_button(p, &t, tab, tab == active_tab);
         }
-        if active_tab == game_shell::CustomizeTab::Widgets {
-            spawn_label(p, &t, "- widgets -");
-            for kind in WidgetKind::ALL {
-                spawn_button(p, &t, EditorButton::Select(kind), kind.display_name());
-            }
-        }
-        spawn_label(p, &t, "- actions -");
-        spawn_button(p, &t, EditorButton::ResetAll, "Reset All");
-        spawn_button(p, &t, EditorButton::Undo, "Undo (Ctrl+Z)");
-        spawn_button(p, &t, EditorButton::Redo, "Redo (Ctrl+Y)");
-        spawn_button(p, &t, EditorButton::Save, "Save (Ctrl+S)");
-        spawn_button(p, &t, EditorButton::Close, "Close (Esc)");
     });
 }
 
@@ -183,66 +163,21 @@ fn handle_tab_buttons(
     }
 }
 
-/// Handle button clicks.
+/// Handle widget `Select` button clicks (the migrated widget list in the left
+/// content panel). Actions (Undo/Redo/Save/Close/Reset) now live on hotkeys.
 fn handle_buttons(
     mut interactions: Query<
         (&Interaction, &EditorButton, &mut BackgroundColor),
         Changed<Interaction>,
     >,
     mut selection: ResMut<Selection>,
-    mut open: ResMut<EditorOpen>,
-    mut layouts: ResMut<WidgetLayouts>,
-    mut lanes: ResMut<Lanes>,
-    mut stack: ResMut<UndoStack>,
-    prev: Res<super::PrevAutoplay>,
-    mut autoplay: ResMut<crate::autoplay::AutoplayEnabled>,
-    mut session: ResMut<game_shell::EditorSession>,
-    mut requests: MessageWriter<game_shell::TransitionRequest>,
 ) {
     for (interaction, button, mut bg) in &mut interactions {
         match *interaction {
             Interaction::Pressed => {
                 bg.0 = Color::srgb(0.25, 0.25, 0.32);
-                let snap = super::undo::Snapshot {
-                    layouts: layouts.clone(),
-                    lanes: lanes.clone(),
-                };
                 match *button {
                     EditorButton::Select(kind) => selection.0 = Some(kind),
-                    EditorButton::ResetAll => {
-                        stack.push(&layouts, &lanes);
-                        save::reset_all_widgets(&mut layouts);
-                    }
-                    EditorButton::Undo => {
-                        if let Some(s) = stack.undo(snap) {
-                            *layouts = s.layouts;
-                            *lanes = s.lanes;
-                        }
-                    }
-                    EditorButton::Redo => {
-                        if let Some(s) = stack.redo(snap) {
-                            *layouts = s.layouts;
-                            *lanes = s.lanes;
-                        }
-                    }
-                    EditorButton::Save => {
-                        let file = save::layout_file_from(&layouts, &lanes);
-                        if let Err(e) = dtx_layout::save(&dtx_layout::default_path(), &file) {
-                            warn!("layout save failed: {e}");
-                        }
-                    }
-                    EditorButton::Close => {
-                        open.0 = false;
-                        autoplay.0 = prev.0;
-                        selection.0 = None;
-                        if session.0 {
-                            session.0 = false;
-                            game_shell::request_transition(
-                                &mut requests,
-                                game_shell::AppState::Title,
-                            );
-                        }
-                    }
                 }
             }
             Interaction::Hovered => bg.0 = Color::srgb(0.2, 0.2, 0.26),
@@ -258,13 +193,12 @@ fn highlight_selection(
 ) {
     for (button, mut bg, interaction) in &mut buttons {
         if matches!(interaction, Interaction::None) {
-            if let EditorButton::Select(kind) = *button {
-                bg.0 = if selection.0 == Some(kind) {
-                    Color::srgb(0.22, 0.3, 0.42)
-                } else {
-                    Color::srgb(0.14, 0.14, 0.18)
-                };
-            }
+            let EditorButton::Select(kind) = *button;
+            bg.0 = if selection.0 == Some(kind) {
+                Color::srgb(0.22, 0.3, 0.42)
+            } else {
+                Color::srgb(0.14, 0.14, 0.18)
+            };
         }
     }
 }

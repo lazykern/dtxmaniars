@@ -102,7 +102,7 @@ const LEFT_PANEL_WIDTH: f32 = 348.0;
 
 /// Left sidebar rail width (editor/ui.rs); the left content panel docks flush
 /// against it on the LEFT, the inspector docks against the window's right edge.
-const RAIL_WIDTH: f32 = 220.0;
+const RAIL_WIDTH: f32 = 132.0;
 
 pub fn plugin(app: &mut App) {
     app.add_systems(

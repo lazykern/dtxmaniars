@@ -9,6 +9,7 @@ use bevy::prelude::*;
 use game_shell::AppState;
 
 pub mod drag;
+pub mod hotkeys;
 pub mod panel;
 pub mod picking;
 pub mod save;
@@ -51,6 +52,7 @@ pub fn plugin(app: &mut App) {
         .configure_sets(Update, (EditorPickSet, EditorGestureSet).chain())
         .add_plugins((
             drag::plugin,
+            hotkeys::plugin,
             undo::plugin,
             save::plugin,
             ui::plugin,

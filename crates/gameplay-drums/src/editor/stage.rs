@@ -5,36 +5,29 @@ use bevy::prelude::*;
 use bevy::window::PrimaryWindow;
 use game_shell::CustomizeTab;
 
-/// Left sidebar width (editor/ui.rs) and panel width (editor/panel.rs).
-const RAIL_WIDTH: f32 = 220.0;
+/// Tabs-only rail width (editor/ui.rs).
+const RAIL_WIDTH: f32 = 132.0;
+/// Left content panel width, docked flush right of the rail (editor/panel.rs).
+const LEFT_PANEL_WIDTH: f32 = 348.0;
+/// Right inspector panel width (editor/panel.rs).
 const PANEL_WIDTH: f32 = 240.0;
 const TOP_MARGIN: f32 = 24.0;
-/// Breathing room between the settings chrome and the shrunk stage.
+/// Breathing room between the chrome and the shrunk stage.
 const GAP: f32 = 16.0;
-/// Settings tabs dock the panel on the LEFT, flush against the rail.
-const SETTINGS_LEFT_CHROME: f32 = RAIL_WIDTH + PANEL_WIDTH;
+/// The left content panel is present on ALL tabs now, so the left chrome is
+/// always rail + left panel; the inspector reserves the right chrome.
+const LEFT_CHROME: f32 = RAIL_WIDTH + LEFT_PANEL_WIDTH;
 
-/// Preset rect for a tab given the window size. Both groups Fit: the whole
-/// screen shrinks into the gap left free by the chrome for that tab group.
-pub fn preset_rect(tab: CustomizeTab, window: Vec2) -> StageRect {
-    if tab.is_settings() {
-        // Settings: rail + left-docked panel occupy the left edge; no right chrome.
-        StageRect {
-            origin: Vec2::new(SETTINGS_LEFT_CHROME + GAP, TOP_MARGIN),
-            size: Vec2::new(
-                (window.x - SETTINGS_LEFT_CHROME - 2.0 * GAP).max(1.0),
-                (window.y - 2.0 * TOP_MARGIN).max(1.0),
-            ),
-        }
-    } else {
-        // Kit: shrink between the rail (left) and the inspector panel (right).
-        StageRect {
-            origin: Vec2::new(RAIL_WIDTH, TOP_MARGIN),
-            size: Vec2::new(
-                (window.x - RAIL_WIDTH - PANEL_WIDTH).max(1.0),
-                (window.y - 2.0 * TOP_MARGIN).max(1.0),
-            ),
-        }
+/// Preset rect for a tab given the window size. Both groups Fit identically: the
+/// screen shrinks into the gap between the left chrome (rail + left panel) and
+/// the right chrome (inspector), centered with a `GAP` margin on each side.
+pub fn preset_rect(_tab: CustomizeTab, window: Vec2) -> StageRect {
+    StageRect {
+        origin: Vec2::new(LEFT_CHROME + GAP, TOP_MARGIN),
+        size: Vec2::new(
+            (window.x - LEFT_CHROME - PANEL_WIDTH - 2.0 * GAP).max(1.0),
+            (window.y - 2.0 * TOP_MARGIN).max(1.0),
+        ),
     }
 }
 
@@ -159,17 +152,24 @@ fn peek_stage(
 mod tests {
     use super::*;
 
+    // Left chrome = rail(132) + left panel(348) = 480; right chrome = inspector(240).
     #[test]
     fn settings_tab_fits_beside_left_panel() {
         let r = preset_rect(CustomizeTab::Gameplay, Vec2::new(1600.0, 900.0));
-        assert_eq!(r.origin, Vec2::new(460.0 + 16.0, 24.0));
-        assert_eq!(r.size, Vec2::new(1600.0 - 460.0 - 32.0, 900.0 - 48.0));
+        assert_eq!(r.origin, Vec2::new(480.0 + 16.0, 24.0));
+        assert_eq!(
+            r.size,
+            Vec2::new(1600.0 - 480.0 - 240.0 - 32.0, 900.0 - 48.0)
+        );
     }
 
     #[test]
     fn kit_tab_is_fit_between_chrome() {
         let r = preset_rect(CustomizeTab::Widgets, Vec2::new(1600.0, 900.0));
-        assert_eq!(r.origin, Vec2::new(220.0, 24.0));
-        assert_eq!(r.size, Vec2::new(1600.0 - 220.0 - 240.0, 900.0 - 48.0));
+        assert_eq!(r.origin, Vec2::new(480.0 + 16.0, 24.0));
+        assert_eq!(
+            r.size,
+            Vec2::new(1600.0 - 480.0 - 240.0 - 32.0, 900.0 - 48.0)
+        );
     }
 }
