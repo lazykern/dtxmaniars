@@ -6,7 +6,7 @@
 //! ÷scale) to the selected widget's offset.
 
 use bevy::prelude::*;
-use dtx_layout::{WidgetKind, MAX_WIDGET_SCALE, MIN_WIDGET_SCALE};
+use dtx_layout::{MAX_WIDGET_SCALE, MIN_WIDGET_SCALE, WidgetKind};
 
 use crate::widget_layout::WidgetLayouts;
 
@@ -199,6 +199,7 @@ fn update_gesture(
     windows: Query<&Window>,
     selection: Res<Selection>,
     pfl: Res<crate::layout::PlayfieldLayout>,
+    rect: Res<crate::stage_rect::StageRect>,
     mut gesture: ResMut<ActiveGesture>,
     mut layouts: ResMut<WidgetLayouts>,
 ) {
@@ -214,13 +215,20 @@ fn update_gesture(
     let Some(pos) = window.cursor_position() else {
         return;
     };
+    // The scene is drawn at `pfl.scale` (ref→window) AND the HudRoot stage
+    // transform `s` (window→miniature). A screen-px cursor delta therefore maps
+    // to `delta / (pfl.scale * s)` ref-px, or the widget out-runs the cursor on
+    // the shrunk Widgets tab.
+    let stage_s =
+        crate::stage_rect::stage_xform(*rect, Vec2::new(window.width(), window.height())).0;
+    let drag_scale = pfl.scale * stage_s;
     match gesture.0 {
         Gesture::None => {}
         Gesture::Move { last_cursor } => {
             let delta = pos - last_cursor;
             if delta != Vec2::ZERO {
                 if let Some(inst) = layouts.0.get_mut(&kind) {
-                    inst.offset = apply_drag(inst.offset, delta, pfl.scale);
+                    inst.offset = apply_drag(inst.offset, delta, drag_scale);
                 }
             }
             gesture.0 = Gesture::Move { last_cursor: pos };

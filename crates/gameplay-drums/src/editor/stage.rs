@@ -93,7 +93,9 @@ fn spawn_outline_on_open(
         StageOutline,
         Node {
             position_type: PositionType::Absolute,
-            border: UiRect::all(Val::Px(2.0)),
+            border: UiRect::all(Val::Px(1.0)),
+            // Rounded frame around the shrunk miniature (prototype `.shrunk`).
+            border_radius: BorderRadius::all(Val::Px(10.0)),
             ..default()
         },
         BorderColor::all(theme.0.stage_panel_border),
