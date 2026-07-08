@@ -166,12 +166,17 @@ fn load_widget_layouts(mut layouts: ResMut<WidgetLayouts>) {
 }
 
 /// Measure every widget container's visual content rect and invert the applied
-/// transform to keep `WidgetGeoms` in unscaled space. Runs every frame in
-/// Performance (cheap: ~10 widgets, shallow trees).
+/// transforms to keep `WidgetGeoms` in unscaled SCENE space. The measured
+/// `UiGlobalTransform` includes BOTH the container's own `UiTransform` and the
+/// inherited HudRoot stage transform, so the inversion must strip their
+/// composition; `applied_*` still stores only the container's own transform
+/// (consumers reconstruct scene-space visual rects with it). Runs every frame
+/// in Performance (cheap: ~10 widgets, shallow trees).
 fn measure_widget_geoms(
     mut geoms: ResMut<WidgetGeoms>,
     windows: Query<&Window, With<bevy::window::PrimaryWindow>>,
-    containers: Query<(Entity, &WidgetContainer, &UiTransform)>,
+    roots: Query<&UiTransform, With<crate::hud::HudRoot>>,
+    containers: Query<(Entity, &WidgetContainer, &UiTransform), Without<crate::hud::HudRoot>>,
     children_q: Query<&Children>,
     nodes: Query<(&ComputedNode, &bevy::ui::UiGlobalTransform)>,
 ) {
@@ -179,12 +184,14 @@ fn measure_widget_geoms(
         return;
     };
     let sc = Vec2::new(window.width() / 2.0, window.height() / 2.0);
+    let (stage_t, stage_s) = roots.single().map(applied_of).unwrap_or((Vec2::ZERO, 1.0));
     for (entity, container, ui_tf) in &containers {
         let kind = container.0;
         if kind == WidgetKind::Playfield {
             continue;
         }
         let (t, s) = applied_of(ui_tf);
+        let (t_comp, s_comp) = compose_about_center(stage_t, stage_s, t, s);
         let mut union: Option<Rect> = None;
         let mut stack: Vec<Entity> = children_q
             .get(entity)
@@ -193,14 +200,15 @@ fn measure_widget_geoms(
         while let Some(e) = stack.pop() {
             // UI nodes carry `UiGlobalTransform` (not `GlobalTransform`); its
             // translation is the node center in physical px and already
-            // includes the container's applied UiTransform. Rendered size is
-            // the layout size times the accumulated scale `s`, so form the
-            // VISUAL rect here and let `untransform_rect` recover unscaled.
+            // includes the container's UiTransform AND the HudRoot stage
+            // transform. Rendered size is the layout size times the composed
+            // scale, so form the VISUAL rect here and let `untransform_rect`
+            // (with the composed transform) recover unscaled scene space.
             if let Ok((cn, gt)) = nodes.get(e) {
                 if cn.size().x > 0.0 && cn.size().y > 0.0 {
                     let inv = cn.inverse_scale_factor();
                     let center = gt.translation * inv;
-                    let size = cn.size() * inv * s;
+                    let size = cn.size() * inv * s_comp;
                     let r = Rect::from_center_size(center, size);
                     union = Some(union.map_or(r, |u| u.union(r)));
                 }
@@ -210,7 +218,7 @@ fn measure_widget_geoms(
             }
         }
         if let Some(measured) = union.filter(|r| r.width() >= 1.0 && r.height() >= 1.0) {
-            let unscaled = untransform_rect(measured, sc, t, s);
+            let unscaled = untransform_rect(measured, sc, t_comp, s_comp);
             geoms.0.insert(
                 kind,
                 WidgetGeom {
