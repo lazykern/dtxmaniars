@@ -11,6 +11,10 @@ use crate::widget_layout::WidgetLayouts;
 #[derive(Component)]
 struct EditorUiRoot;
 
+/// A rail button that activates a Customize tab.
+#[derive(Component, Clone, Copy)]
+pub struct TabButton(pub game_shell::CustomizeTab);
+
 #[derive(Component, Clone, Copy)]
 enum EditorButton {
     Select(WidgetKind),
@@ -25,8 +29,8 @@ pub fn plugin(app: &mut App) {
     app.add_systems(
         Update,
         (
-            spawn_ui_on_open.run_if(resource_changed::<EditorOpen>),
-            (handle_buttons, highlight_selection).run_if(super::editor_open),
+            spawn_ui_on_open.run_if(ui_needs_respawn),
+            (handle_buttons, handle_tab_buttons, highlight_selection).run_if(super::editor_open),
             close_on_escape.run_if(super::editor_open),
         )
             .run_if(in_state(game_shell::AppState::Performance)),
@@ -42,10 +46,16 @@ fn despawn_editor_ui(mut commands: Commands, existing: Query<Entity, With<Editor
     }
 }
 
+/// Rebuild the sidebar when the editor opens/closes or the active tab changes.
+fn ui_needs_respawn(open: Res<EditorOpen>, active: Res<super::tabs::ActiveTab>) -> bool {
+    open.is_changed() || active.is_changed()
+}
+
 /// Spawn the sidebar when the editor opens; despawn when it closes.
 fn spawn_ui_on_open(
     mut commands: Commands,
     open: Res<EditorOpen>,
+    active: Res<super::tabs::ActiveTab>,
     theme: Res<dtx_ui::ThemeResource>,
     existing: Query<Entity, With<EditorUiRoot>>,
 ) {
@@ -76,11 +86,22 @@ fn spawn_ui_on_open(
         ))
         .id();
 
+    let active_tab = active.0;
     commands.entity(root).with_children(|p| {
         spawn_label(p, &t, "LAYOUT EDITOR");
-        spawn_label(p, &t, "- widgets -");
-        for kind in WidgetKind::ALL {
-            spawn_button(p, &t, EditorButton::Select(kind), kind.display_name());
+        spawn_label(p, &t, "SETTINGS");
+        for tab in game_shell::CustomizeTab::SETTINGS {
+            spawn_tab_button(p, &t, tab, tab == active_tab);
+        }
+        spawn_label(p, &t, "KIT");
+        for tab in game_shell::CustomizeTab::KIT {
+            spawn_tab_button(p, &t, tab, tab == active_tab);
+        }
+        if active_tab == game_shell::CustomizeTab::Widgets {
+            spawn_label(p, &t, "- widgets -");
+            for kind in WidgetKind::ALL {
+                spawn_button(p, &t, EditorButton::Select(kind), kind.display_name());
+            }
         }
         spawn_label(p, &t, "- actions -");
         spawn_button(p, &t, EditorButton::ResetAll, "Reset All");
@@ -119,6 +140,46 @@ fn spawn_button(
             TextColor(theme.text_primary),
         )],
     ));
+}
+
+/// Spawn a tab-rail button; `active` gets the brighter selected tint.
+fn spawn_tab_button(
+    p: &mut ChildSpawnerCommands,
+    theme: &dtx_ui::theme::Theme,
+    tab: game_shell::CustomizeTab,
+    active: bool,
+) {
+    let bg = if active {
+        Color::srgb(0.22, 0.3, 0.42)
+    } else {
+        Color::srgb(0.14, 0.14, 0.18)
+    };
+    p.spawn((
+        TabButton(tab),
+        Button,
+        Node {
+            padding: UiRect::axes(Val::Px(6.0), Val::Px(3.0)),
+            ..default()
+        },
+        BackgroundColor(bg),
+        children![(
+            Text::new(tab.label().to_string()),
+            dtx_ui::theme::Theme::font(12.0),
+            TextColor(theme.text_primary),
+        )],
+    ));
+}
+
+/// Handle tab-rail clicks: activate the clicked Customize tab.
+fn handle_tab_buttons(
+    q: Query<(&Interaction, &TabButton), Changed<Interaction>>,
+    mut active: ResMut<super::tabs::ActiveTab>,
+) {
+    for (interaction, tab) in &q {
+        if *interaction == Interaction::Pressed {
+            active.0 = tab.0;
+        }
+    }
 }
 
 /// Handle button clicks.
