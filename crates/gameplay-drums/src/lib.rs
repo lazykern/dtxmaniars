@@ -292,6 +292,11 @@ fn sync_gameplay_clock(
 
 mod midi_consumer {
     //! Polls `dtx_input::midi::VirtualSource` and emits gameplay-drums `LaneHit`s.
+    //!
+    //! When the `midi` feature is enabled, a feature-gated `drain_real_midi`
+    //! system drains a real `midir`-backed source into `VirtualSource` first,
+    //! so real events flow through the exact same path as virtual ones and
+    //! `poll_midi` handles everything uniformly.
 
     use bevy::prelude::*;
     use dtx_input::midi::{MidiSource, VirtualSource};
@@ -299,13 +304,89 @@ mod midi_consumer {
     use super::events::LaneHit;
     use crate::resources::{ActiveChart, GameplayClock};
 
+    /// Last MIDI NoteOn observed by `poll_midi`, written before the threshold
+    /// gate. Drives the bindings-tab velocity meter and MIDI note capture,
+    /// avoiding a second drain that would race `poll_midi`.
+    #[derive(Resource, Default, Debug, Clone, Copy)]
+    pub struct LastMidiHit {
+        pub note: u8,
+        pub velocity: u8,
+        pub below_threshold: bool,
+        pub at: Option<std::time::Instant>,
+    }
+
+    /// Holds the live real-MIDI connection. Stored as a **non-send** resource
+    /// because `midir` connections are not `Sync`; systems touching it run on
+    /// the main thread only.
+    #[cfg(feature = "midi")]
+    #[derive(Default)]
+    struct MidiConnection(Option<dtx_input::midi::RealMidiSource>);
+
     pub(super) fn plugin(app: &mut App) {
-        app.add_systems(
+        app.init_resource::<LastMidiHit>().add_systems(
             FixedUpdate,
             poll_midi
                 .in_set(super::DrumsSets::Input)
                 .run_if(in_state(game_shell::AppState::Performance)),
         );
+
+        #[cfg(feature = "midi")]
+        {
+            app.insert_non_send(MidiConnection::default())
+                .add_systems(OnEnter(game_shell::AppState::Performance), connect_midi)
+                .add_systems(
+                    Update,
+                    connect_midi.run_if(
+                        resource_changed::<crate::bindings::LiveBindings>
+                            .and_then(in_state(game_shell::AppState::Performance)),
+                    ),
+                )
+                .add_systems(
+                    FixedUpdate,
+                    drain_real_midi
+                        .in_set(super::DrumsSets::Input)
+                        .before(poll_midi)
+                        .run_if(in_state(game_shell::AppState::Performance)),
+                );
+        }
+    }
+
+    /// Connect (or reconnect) the real MIDI source using the port filter from
+    /// `LiveBindings`. Runs on Performance enter and whenever the bindings
+    /// (hence the selected port) change. Reconnect overwrites, dropping the old
+    /// connection. Non-send: runs on the main thread only.
+    #[cfg(feature = "midi")]
+    fn connect_midi(
+        mut conn: NonSendMut<MidiConnection>,
+        live: Res<crate::bindings::LiveBindings>,
+    ) {
+        let filter = live.0.midi.port.as_deref();
+        match dtx_input::midi::RealMidiSource::connect(filter) {
+            Ok((src, name)) => {
+                info!("MIDI connected: {name}");
+                conn.0 = Some(src);
+            }
+            Err(e) => {
+                warn!("MIDI connect failed: {e}");
+                conn.0 = None;
+            }
+        }
+    }
+
+    /// Drain the real MIDI source into `VirtualSource` so real events are
+    /// indistinguishable from virtual ones downstream. Real events carry
+    /// `audio_ms == 0`; `poll_midi` restamps them with the current
+    /// `GameplayClock`. Non-send: runs on the main thread only.
+    #[cfg(feature = "midi")]
+    fn drain_real_midi(mut conn: NonSendMut<MidiConnection>, mut virt: ResMut<VirtualSource>) {
+        let Some(src) = conn.0.as_mut() else {
+            return;
+        };
+        let mut buf: Vec<dtx_input::midi::MidiEvent> = Vec::new();
+        src.poll(&mut buf);
+        for ev in buf {
+            virt.push(ev);
+        }
     }
 
     fn poll_midi(
@@ -314,6 +395,7 @@ mod midi_consumer {
         chart: Res<ActiveChart>,
         clock: Res<GameplayClock>,
         mut hits: MessageWriter<LaneHit>,
+        mut last: ResMut<LastMidiHit>,
     ) {
         if source.is_empty() {
             return;
@@ -336,6 +418,14 @@ mod midi_consumer {
             else {
                 continue;
             };
+            // Capture the last hit before the threshold gate so the meter +
+            // capture see soft (ignored) hits too.
+            *last = LastMidiHit {
+                note,
+                velocity,
+                below_threshold: velocity <= resolver.velocity_threshold,
+                at: Some(std::time::Instant::now()),
+            };
             if velocity == 0 || velocity <= resolver.velocity_threshold {
                 continue;
             }
@@ -353,6 +443,8 @@ mod midi_consumer {
         }
     }
 }
+
+pub use midi_consumer::LastMidiHit;
 
 /// Re-export as struct form for callers that prefer `add_plugins(...)` syntax.
 pub use plugin as DrumsPlugin;
