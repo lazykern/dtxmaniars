@@ -72,7 +72,10 @@ pub(super) fn plugin(app: &mut App) {
             FixedUpdate,
             judge_lane_hit_system
                 .in_set(super::DrumsSets::Judge)
-                .run_if(in_state(game_shell::AppState::Performance)),
+                .run_if(in_state(game_shell::AppState::Performance))
+                // No judgment/scoring while the Customize surface is open; hits
+                // still flash + play a voice via `hit_feedback` (feedback only).
+                .run_if(crate::editor::editor_closed),
         );
 }
 

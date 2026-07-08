@@ -23,11 +23,13 @@ pub(super) fn plugin(app: &mut App) {
     app.init_resource::<PendingLaneInputs>()
         .add_systems(
             PreUpdate,
+            // Not gated on `editor_closed`: while the Customize surface is open we
+            // still want captured hits to reach `LaneHit` (flash + feedback sound).
+            // Scoring is gated instead — see `judge::judge_lane_hit_system`.
             capture_key_to_lane_input
                 .after(bevy::input::InputSystems)
                 .run_if(in_state(game_shell::AppState::Performance))
-                .run_if(in_state(game_shell::PauseState::Running))
-                .run_if(crate::editor::editor_closed),
+                .run_if(in_state(game_shell::PauseState::Running)),
         )
         .add_systems(
             FixedUpdate,

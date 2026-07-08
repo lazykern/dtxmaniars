@@ -24,6 +24,7 @@ pub mod drums_perf;
 pub mod editor;
 pub mod events;
 pub mod gauge;
+pub mod hit_feedback;
 pub mod hit_sound;
 pub mod hud;
 pub mod hud_cache;
@@ -195,6 +196,7 @@ pub fn plugin(app: &mut App) {
         stage_rect::plugin,
         practice::plugin,
         editor::plugin,
+        hit_feedback::plugin,
     ));
 }
 
