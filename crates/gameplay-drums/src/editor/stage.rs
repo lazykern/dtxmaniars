@@ -58,6 +58,16 @@ struct StageOutline;
 
 /// Just below chrome (`GlobalZIndex(2000)`) so the outline reads under the rail.
 const OUTLINE_Z: i32 = 1900;
+/// Preview dim scrim: above all HUD/playfield global z (combo=20, practice=900,
+/// pause=1000, stage_end=1100) but below chrome (2000) and the outline (1900).
+/// A GLOBAL z is required so it also covers `GlobalZIndex` HUD (e.g. combo) that
+/// a local-z child of `HudRoot` can't reach.
+const SCRIM_Z: i32 = 1500;
+
+/// Full-window dim veil that calms the whole preview while the surface is open
+/// (prototype's dim look). Own visibility so peek (full play view) drops it.
+#[derive(Component)]
+struct PreviewScrim;
 
 pub(super) fn plugin(app: &mut App) {
     app.add_systems(
@@ -66,9 +76,27 @@ pub(super) fn plugin(app: &mut App) {
             peek_stage.run_if(super::editor_open),
             spawn_outline_on_open.run_if(in_state(game_shell::AppState::Performance)),
             sync_stage_outline.run_if(super::editor_open),
+            sync_preview_scrim.run_if(super::editor_open),
         ),
     )
     .add_systems(OnExit(game_shell::AppState::Performance), despawn_outline);
+}
+
+/// Fade the dim scrim in while the surface is open and not peeking; the
+/// `spawn_outline_on_open` pass spawns/despawns it alongside the outline.
+fn sync_preview_scrim(
+    keys: Res<ButtonInput<KeyCode>>,
+    mut q: Query<&mut Visibility, With<PreviewScrim>>,
+) {
+    let Ok(mut vis) = q.single_mut() else {
+        return;
+    };
+    let show = !keys.pressed(KeyCode::Tab);
+    *vis = if show {
+        Visibility::Inherited
+    } else {
+        Visibility::Hidden
+    };
 }
 
 /// Spawn one `StageOutline` node when the surface opens; despawn when it closes.
@@ -79,6 +107,7 @@ fn spawn_outline_on_open(
     open: Res<super::EditorOpen>,
     theme: Res<dtx_ui::ThemeResource>,
     existing: Query<Entity, With<StageOutline>>,
+    scrims: Query<Entity, With<PreviewScrim>>,
 ) {
     if !open.is_changed() {
         return;
@@ -86,9 +115,28 @@ fn spawn_outline_on_open(
     for e in &existing {
         commands.entity(e).despawn();
     }
+    for e in &scrims {
+        commands.entity(e).despawn();
+    }
     if !open.0 {
         return;
     }
+    // Full-window dim veil under the chrome, above all HUD (see SCRIM_Z).
+    commands.spawn((
+        PreviewScrim,
+        Node {
+            position_type: PositionType::Absolute,
+            left: Val::Px(0.0),
+            top: Val::Px(0.0),
+            width: Val::Percent(100.0),
+            height: Val::Percent(100.0),
+            ..default()
+        },
+        BackgroundColor(Color::srgba(0.02, 0.024, 0.035, 0.72)),
+        GlobalZIndex(SCRIM_Z),
+        Visibility::Hidden,
+        Pickable::IGNORE,
+    ));
     commands.spawn((
         StageOutline,
         Node {
@@ -105,7 +153,10 @@ fn spawn_outline_on_open(
     ));
 }
 
-fn despawn_outline(mut commands: Commands, existing: Query<Entity, With<StageOutline>>) {
+fn despawn_outline(
+    mut commands: Commands,
+    existing: Query<Entity, Or<(With<StageOutline>, With<PreviewScrim>)>>,
+) {
     for e in &existing {
         commands.entity(e).despawn();
     }
