@@ -98,7 +98,7 @@ fn spawn_title(mut commands: Commands, theme: Res<ThemeResource>) {
                         TextColor(t.text_secondary),
                     ));
                     bar.spawn((
-                        Text::new("F2 LAYOUT EDITOR"),
+                        Text::new("F1 SETTINGS   F2 LAYOUT EDITOR"),
                         Theme::font(12.0),
                         TextColor(t.text_secondary),
                     ));
@@ -117,9 +117,20 @@ fn title_input(
     mut session: ResMut<game_shell::EditorSession>,
     mut selected: ResMut<crate::song_select::SelectedSong>,
     mut db: ResMut<dtx_library::SongDb>,
+    mut pending: ResMut<game_shell::PendingCustomizeTab>,
 ) {
     if keys.just_pressed(KeyCode::Enter) {
         request_transition(&mut requests, AppState::SongSelect);
+    } else if keys.just_pressed(KeyCode::F1) {
+        match pick_editor_song(&mut db) {
+            Some(path) => {
+                pending.0 = Some(game_shell::CustomizeTab::Gameplay);
+                session.0 = true;
+                selected.0 = Some(path);
+                request_transition(&mut requests, AppState::SongLoading);
+            }
+            None => warn!("customize: no songs available (empty SongDb)"),
+        }
     } else if keys.just_pressed(KeyCode::F2) {
         match pick_editor_song(&mut db) {
             Some(path) => {

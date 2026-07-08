@@ -1211,6 +1211,8 @@ fn song_select_navigation(
     mut selected_song: ResMut<SelectedSong>,
     mut requests: MessageWriter<TransitionRequest>,
     mut practice_intent: ResMut<PracticeIntent>,
+    mut pending: ResMut<game_shell::PendingCustomizeTab>,
+    mut session: ResMut<game_shell::EditorSession>,
 ) {
     if selection_state.visible.is_empty() {
         if keys.just_pressed(KeyCode::F5)
@@ -1258,7 +1260,16 @@ fn song_select_navigation(
     } else if keys.just_pressed(KeyCode::Escape) {
         request_transition(&mut requests, AppState::Title);
     } else if keys.just_pressed(KeyCode::F1) {
-        request_transition(&mut requests, AppState::Config);
+        if let Some(chart_idx) = selection.chart_index(&selection_state)
+            && let Some(song) = db.songs.get(chart_idx)
+        {
+            pending.0 = Some(game_shell::CustomizeTab::Gameplay);
+            session.0 = true;
+            selected_song.0 = Some(song.path.clone());
+            request_transition(&mut requests, AppState::SongLoading);
+        } else {
+            warn!("customize: no song highlighted");
+        }
     } else if keys.just_pressed(KeyCode::F5)
         && let Err(e) = db.rescan(&default_song_dir())
     {
