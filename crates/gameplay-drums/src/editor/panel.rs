@@ -654,7 +654,6 @@ fn apply_panel_controls(
     geoms: Res<crate::widget_layout::WidgetGeoms>,
     pfl: Res<crate::layout::PlayfieldLayout>,
     rect: Res<crate::stage_rect::StageRect>,
-    windows: Query<&Window, With<bevy::window::PrimaryWindow>>,
     mut snapped_this_hold: Local<bool>,
 ) {
     let Some(kind) = selection.0 else { return };
@@ -696,9 +695,6 @@ fn apply_panel_controls(
     }
 
     // Geometry-dependent conversion context.
-    let Ok(window) = windows.single() else { return };
-    let wsize = Vec2::new(window.width(), window.height());
-
     for (field, val, boolean) in &values {
         let Some(inst) = layouts.0.get_mut(&kind) else {
             continue;
@@ -711,7 +707,7 @@ fn apply_panel_controls(
         let needs_anchor = matches!(field, PanelField::Scale);
         if needs_anchor {
             if let Some(g) = geoms.0.get(&kind).copied() {
-                let sc = wsize / 2.0;
+                let sc = rect.center();
                 let visual_min = crate::widget_layout::transform_point(
                     g.unscaled.min,
                     sc,
@@ -751,7 +747,6 @@ fn apply_anchor_cells(
     geoms: Res<crate::widget_layout::WidgetGeoms>,
     pfl: Res<crate::layout::PlayfieldLayout>,
     rect: Res<crate::stage_rect::StageRect>,
-    windows: Query<&Window, With<bevy::window::PrimaryWindow>>,
     mut cell_bg: Query<(&AnchorCell, &mut BackgroundColor)>,
     mut auto_bg: Query<&mut BackgroundColor, (With<AnchorAutoCell>, Without<AnchorCell>)>,
     theme: Res<dtx_ui::ThemeResource>,
@@ -764,7 +759,6 @@ fn apply_anchor_cells(
         }
     }
     let Some(new_anchor) = clicked else { return };
-    let Ok(window) = windows.single() else { return };
     let Some(g) = geoms.0.get(&kind).copied() else {
         return;
     };
@@ -772,8 +766,7 @@ fn apply_anchor_cells(
     let Some(inst) = layouts.0.get_mut(&kind) else {
         return;
     };
-    let wsize = Vec2::new(window.width(), window.height());
-    let sc = wsize / 2.0;
+    let sc = rect.center();
     let visual_min = crate::widget_layout::transform_point(
         g.unscaled.min,
         sc,

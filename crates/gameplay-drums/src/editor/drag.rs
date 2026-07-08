@@ -134,7 +134,7 @@ fn begin_gesture(
                         let start_dist = (pos - start_center).length().max(1.0);
                         let start_scale = layouts.get(kind).scale;
                         undo.push(&layouts, &lanes);
-                        convert_to_anchored(&mut layouts, &geoms, &pfl, window, *rect, kind);
+                        convert_to_anchored(&mut layouts, &geoms, &pfl, *rect, kind);
                         gesture.0 = Gesture::Scale {
                             start_dist,
                             start_scale,
@@ -161,7 +161,7 @@ fn begin_gesture(
     if let Some(kind) = picked {
         if kind != dtx_layout::WidgetKind::Playfield {
             undo.push(&layouts, &lanes);
-            convert_to_anchored(&mut layouts, &geoms, &pfl, window, *rect, kind);
+            convert_to_anchored(&mut layouts, &geoms, &pfl, *rect, kind);
             gesture.0 = Gesture::Move { last_cursor: pos };
         }
     }
@@ -175,14 +175,12 @@ fn convert_to_anchored(
     layouts: &mut WidgetLayouts,
     geoms: &crate::widget_layout::WidgetGeoms,
     pfl: &crate::layout::PlayfieldLayout,
-    window: &Window,
     rect: crate::stage_rect::StageRect,
     kind: WidgetKind,
 ) {
     if let Some(g) = geoms.0.get(&kind).copied() {
         if let Some(inst) = layouts.0.get_mut(&kind) {
-            let wsize = Vec2::new(window.width(), window.height());
-            let sc = wsize / 2.0;
+            let sc = rect.center();
             let visual_min = crate::widget_layout::transform_point(
                 g.unscaled.min,
                 sc,

@@ -95,7 +95,11 @@ pub fn plugin(app: &mut App) {
         .init_resource::<CursorOverChrome>()
         .add_systems(
             Update,
-            (collect_widget_aabbs, update_cursor_over_chrome, update_hover)
+            (
+                collect_widget_aabbs,
+                update_cursor_over_chrome,
+                update_hover,
+            )
                 .chain()
                 .in_set(super::EditorPickSet)
                 .run_if(super::editor_open)
@@ -115,10 +119,9 @@ fn collect_widget_aabbs(
     layouts: Res<WidgetLayouts>,
     practice: Option<Res<crate::practice::PracticeSession>>,
     pfl: Res<PlayfieldLayout>,
-    windows: Query<&Window, With<bevy::window::PrimaryWindow>>,
+    rect: Res<crate::stage_rect::StageRect>,
 ) {
-    let Ok(window) = windows.single() else { return };
-    let sc = Vec2::new(window.width() / 2.0, window.height() / 2.0);
+    let sc = rect.center();
     let is_practice = practice.is_some();
     hidden.0.clear();
     for kind in dtx_layout::WidgetKind::ALL {
@@ -128,7 +131,9 @@ fn collect_widget_aabbs(
         if !widget_visible(layouts.get(kind), is_practice) {
             hidden.0.insert(kind);
         }
-        let Some(g) = geoms.0.get(&kind) else { continue };
+        let Some(g) = geoms.0.get(&kind) else {
+            continue;
+        };
         let vis = Rect::from_corners(
             crate::widget_layout::transform_point(
                 g.unscaled.min,
@@ -165,7 +170,9 @@ fn update_cursor_over_chrome(
 ) {
     over.0 = false;
     let Ok(window) = windows.single() else { return };
-    let Some(pos) = window.cursor_position() else { return };
+    let Some(pos) = window.cursor_position() else {
+        return;
+    };
     for (cn, gt) in &chrome {
         if node_rect(cn, gt).contains(pos) {
             over.0 = true;
@@ -237,10 +244,20 @@ mod tests {
 
     #[test]
     fn cycle_wraps_through_candidates() {
-        let c = [WidgetKind::Combo, WidgetKind::ScorePanel, WidgetKind::Playfield];
+        let c = [
+            WidgetKind::Combo,
+            WidgetKind::ScorePanel,
+            WidgetKind::Playfield,
+        ];
         assert_eq!(cycle_pick(&c, None), Some(WidgetKind::Combo));
-        assert_eq!(cycle_pick(&c, Some(WidgetKind::Combo)), Some(WidgetKind::ScorePanel));
-        assert_eq!(cycle_pick(&c, Some(WidgetKind::Playfield)), Some(WidgetKind::Combo));
+        assert_eq!(
+            cycle_pick(&c, Some(WidgetKind::Combo)),
+            Some(WidgetKind::ScorePanel)
+        );
+        assert_eq!(
+            cycle_pick(&c, Some(WidgetKind::Playfield)),
+            Some(WidgetKind::Combo)
+        );
         assert_eq!(cycle_pick(&[], Some(WidgetKind::Combo)), None);
     }
 }

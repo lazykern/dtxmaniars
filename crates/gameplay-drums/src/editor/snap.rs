@@ -81,7 +81,6 @@ fn apply_anchor_snap(
     geoms: Res<WidgetGeoms>,
     pfl: Res<PlayfieldLayout>,
     rect: Res<crate::stage_rect::StageRect>,
-    windows: Query<&Window, With<bevy::window::PrimaryWindow>>,
     mut layouts: ResMut<WidgetLayouts>,
 ) {
     if !matches!(gesture.0, Gesture::Move { .. }) {
@@ -91,7 +90,6 @@ fn apply_anchor_snap(
     if kind == WidgetKind::Playfield {
         return;
     }
-    let Ok(window) = windows.single() else { return };
     let Some(g) = geoms.0.get(&kind).copied() else {
         return;
     };
@@ -101,8 +99,7 @@ fn apply_anchor_snap(
         // here, offset-delta dragging continues un-snapped.
         return;
     }
-    let wsize = Vec2::new(window.width(), window.height());
-    let sc = wsize / 2.0;
+    let sc = rect.center();
     let vis_min = transform_point(g.unscaled.min, sc, g.applied_translation, g.applied_scale);
     let vis_max = transform_point(g.unscaled.max, sc, g.applied_translation, g.applied_scale);
     let center = (vis_min + vis_max) / 2.0;
