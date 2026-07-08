@@ -30,8 +30,88 @@ pub fn preset_rect(tab: CustomizeTab, window: Vec2) -> StageRect {
     }
 }
 
+/// Thin screen-bounds outline drawn at the current `StageRect` while a KIT tab
+/// (Fit) is active and not peeking, so the user sees the true (shrunk) screen
+/// edges for WYSIWYG anchor placement. Window-space, positioned directly from
+/// `StageRect` (no self-transform). Not tagged `EditorChrome`: it owns its own
+/// visibility so peek does not double-touch it.
+#[derive(Component)]
+struct StageOutline;
+
+/// Just below chrome (`GlobalZIndex(2000)`) so the outline reads under the rail.
+const OUTLINE_Z: i32 = 1900;
+
 pub(super) fn plugin(app: &mut App) {
-    app.add_systems(Update, peek_stage.run_if(super::editor_open));
+    app.add_systems(
+        Update,
+        (
+            peek_stage.run_if(super::editor_open),
+            spawn_outline_on_open.run_if(in_state(game_shell::AppState::Performance)),
+            sync_stage_outline.run_if(super::editor_open),
+        ),
+    )
+    .add_systems(OnExit(game_shell::AppState::Performance), despawn_outline);
+}
+
+/// Spawn one `StageOutline` node when the surface opens; despawn when it closes.
+/// Because the node is despawned on close, the outline is guaranteed invisible
+/// whenever the surface is closed (the `editor_open`-gated sync never runs then).
+fn spawn_outline_on_open(
+    mut commands: Commands,
+    open: Res<super::EditorOpen>,
+    theme: Res<dtx_ui::ThemeResource>,
+    existing: Query<Entity, With<StageOutline>>,
+) {
+    if !open.is_changed() {
+        return;
+    }
+    for e in &existing {
+        commands.entity(e).despawn();
+    }
+    if !open.0 {
+        return;
+    }
+    commands.spawn((
+        StageOutline,
+        Node {
+            position_type: PositionType::Absolute,
+            border: UiRect::all(Val::Px(2.0)),
+            ..default()
+        },
+        BorderColor::all(theme.0.stage_panel_border),
+        Visibility::Hidden,
+        GlobalZIndex(OUTLINE_Z),
+        Pickable::IGNORE,
+    ));
+}
+
+fn despawn_outline(mut commands: Commands, existing: Query<Entity, With<StageOutline>>) {
+    for e in &existing {
+        commands.entity(e).despawn();
+    }
+}
+
+/// Track the outline node to the current `StageRect` and show it only on KIT
+/// (Fit) tabs while not peeking; hidden on settings tabs and during peek.
+fn sync_stage_outline(
+    rect: Res<crate::stage_rect::StageRect>,
+    active: Res<super::tabs::ActiveTab>,
+    keys: Res<ButtonInput<KeyCode>>,
+    mut q: Query<(&mut Node, &mut Visibility), With<StageOutline>>,
+) {
+    let Ok((mut node, mut vis)) = q.single_mut() else {
+        return;
+    };
+    node.left = Val::Px(rect.origin.x);
+    node.top = Val::Px(rect.origin.y);
+    node.width = Val::Px(rect.size.x);
+    node.height = Val::Px(rect.size.y);
+    let show = !active.0.is_settings() && !keys.pressed(KeyCode::Tab);
+    *vis = if show {
+        Visibility::Inherited
+    } else {
+        Visibility::Hidden
+    };
 }
 
 /// While the surface is open, drive the target rect from the active tab.
