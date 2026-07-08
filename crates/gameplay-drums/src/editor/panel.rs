@@ -91,6 +91,15 @@ pub struct SettingAdjust {
 #[derive(Component, Clone, Copy)]
 pub struct SettingValueText(pub usize);
 
+/// Tags a settings-row slider with its index into the active tab's item list.
+#[derive(Component, Clone, Copy)]
+pub struct SettingSlider(pub usize);
+
+/// "RESET TAB" button at the top of the left content panel: restores the active
+/// settings tab's values to `Config::default()`.
+#[derive(Component)]
+pub struct ResetTabButton;
+
 fn preset_name(p: dtx_layout::LanePreset) -> &'static str {
     match p {
         dtx_layout::LanePreset::Classic => "classic",
@@ -138,6 +147,8 @@ pub fn plugin(app: &mut App) {
                 apply_lane_width_sliders,
                 refresh_lane_panel_values,
                 handle_settings_adjust,
+                apply_settings_sliders,
+                handle_reset_tab,
                 refresh_settings_values,
                 update_hovered_desc,
             )
@@ -654,14 +665,53 @@ fn spawn_settings_block(
     tab: game_shell::CustomizeTab,
     draft: &super::tabs::ConfigDraft,
 ) {
+    use crate::editor::settings_data::SettingControl;
     let items = crate::editor::settings_data::settings_items(tab);
     commands.entity(root).with_children(|p| {
-        p.spawn((
-            Text::new(tab.label()),
-            dtx_ui::theme::Theme::font(13.0),
-            TextColor(t.text_primary),
-        ));
+        // Header row: tab title on the left, RESET TAB on the right.
+        p.spawn(Node {
+            flex_direction: FlexDirection::Row,
+            justify_content: JustifyContent::SpaceBetween,
+            align_items: AlignItems::Center,
+            ..default()
+        })
+        .with_children(|h| {
+            h.spawn((
+                Text::new(tab.label()),
+                dtx_ui::theme::Theme::font(13.0),
+                TextColor(t.text_primary),
+            ));
+            h.spawn((
+                ResetTabButton,
+                Button,
+                Node {
+                    padding: UiRect::axes(Val::Px(8.0), Val::Px(3.0)),
+                    ..default()
+                },
+                BackgroundColor(Color::srgb(0.3, 0.14, 0.14)),
+                children![(
+                    Text::new("RESET TAB"),
+                    dtx_ui::theme::Theme::font(10.0),
+                    TextColor(t.text_primary),
+                )],
+            ));
+        });
+
+        let mut prev_group = "";
         for (i, item) in items.iter().enumerate() {
+            if item.group != prev_group && !item.group.is_empty() {
+                p.spawn((
+                    Text::new(item.group),
+                    dtx_ui::theme::Theme::font(10.0),
+                    TextColor(t.text_secondary),
+                    Node {
+                        margin: UiRect::top(Val::Px(4.0)),
+                        ..default()
+                    },
+                ));
+            }
+            prev_group = item.group;
+
             p.spawn((
                 SettingRow(i),
                 RowDesc(item.desc),
@@ -685,45 +735,62 @@ fn spawn_settings_block(
                     column_gap: Val::Px(4.0),
                     ..default()
                 })
-                .with_children(|c| {
-                    c.spawn((
-                        SettingAdjust { index: i, dir: -1 },
-                        Button,
-                        Node {
-                            padding: UiRect::axes(Val::Px(6.0), Val::Px(1.0)),
-                            ..default()
-                        },
-                        BackgroundColor(Color::srgb(0.14, 0.14, 0.18)),
-                        children![(
-                            Text::new("<"),
+                .with_children(|c| match item.control {
+                    SettingControl::Slider { min, max, .. } => {
+                        let e =
+                            controls::spawn_slider(c, t, Slider { min, max }, (item.raw)(&draft.0));
+                        c.commands_mut().entity(e).insert(SettingSlider(i));
+                        c.spawn((
+                            SettingValueText(i),
+                            Text::new((item.value)(&draft.0)),
                             dtx_ui::theme::Theme::font(12.0),
-                            TextColor(t.text_primary)
-                        )],
-                    ));
-                    c.spawn((
-                        SettingValueText(i),
-                        Text::new((item.value)(&draft.0)),
-                        dtx_ui::theme::Theme::font(12.0),
-                        TextColor(t.text_primary),
-                        Node {
-                            min_width: Val::Px(60.0),
-                            ..default()
-                        },
-                    ));
-                    c.spawn((
-                        SettingAdjust { index: i, dir: 1 },
-                        Button,
-                        Node {
-                            padding: UiRect::axes(Val::Px(6.0), Val::Px(1.0)),
-                            ..default()
-                        },
-                        BackgroundColor(Color::srgb(0.14, 0.14, 0.18)),
-                        children![(
-                            Text::new(">"),
+                            TextColor(t.text_primary),
+                            Node {
+                                min_width: Val::Px(52.0),
+                                ..default()
+                            },
+                        ));
+                    }
+                    SettingControl::Stepper => {
+                        c.spawn((
+                            SettingAdjust { index: i, dir: -1 },
+                            Button,
+                            Node {
+                                padding: UiRect::axes(Val::Px(6.0), Val::Px(1.0)),
+                                ..default()
+                            },
+                            BackgroundColor(Color::srgb(0.14, 0.14, 0.18)),
+                            children![(
+                                Text::new("<"),
+                                dtx_ui::theme::Theme::font(12.0),
+                                TextColor(t.text_primary)
+                            )],
+                        ));
+                        c.spawn((
+                            SettingValueText(i),
+                            Text::new((item.value)(&draft.0)),
                             dtx_ui::theme::Theme::font(12.0),
-                            TextColor(t.text_primary)
-                        )],
-                    ));
+                            TextColor(t.text_primary),
+                            Node {
+                                min_width: Val::Px(60.0),
+                                ..default()
+                            },
+                        ));
+                        c.spawn((
+                            SettingAdjust { index: i, dir: 1 },
+                            Button,
+                            Node {
+                                padding: UiRect::axes(Val::Px(6.0), Val::Px(1.0)),
+                                ..default()
+                            },
+                            BackgroundColor(Color::srgb(0.14, 0.14, 0.18)),
+                            children![(
+                                Text::new(">"),
+                                dtx_ui::theme::Theme::font(12.0),
+                                TextColor(t.text_primary)
+                            )],
+                        ));
+                    }
                 });
             });
         }
@@ -1167,21 +1234,84 @@ fn handle_settings_adjust(
     }
 }
 
-/// Draft changes → refresh the visible settings values.
+/// Settings-row slider drags → apply the snapped value to the config draft.
+/// Snaps to the control's `step` and only writes on a full-step move, so the
+/// draft never fights the continuous cursor position (mirrors the lane-width
+/// slider pattern; ConfigDraft mutation drives the existing live-apply).
+fn apply_settings_sliders(
+    active: Res<super::tabs::ActiveTab>,
+    sliders: Query<(&SettingSlider, &ControlValue), Changed<ControlValue>>,
+    mut draft: ResMut<super::tabs::ConfigDraft>,
+) {
+    use crate::editor::settings_data::SettingControl;
+    if !active.0.is_settings() {
+        return;
+    }
+    let items = crate::editor::settings_data::settings_items(active.0);
+    for (slider, value) in &sliders {
+        let Some(item) = items.get(slider.0) else {
+            continue;
+        };
+        if let SettingControl::Slider { min, max, step } = item.control {
+            let snapped = (((value.0 - min) / step).round() * step + min).clamp(min, max);
+            let cur = (item.raw)(&draft.0);
+            if (snapped - cur).abs() > step * 0.5 {
+                (item.set)(&mut draft.0, snapped);
+            }
+        }
+    }
+}
+
+/// RESET TAB click: restore every row of the active settings tab to its
+/// `Config::default()` value. Kit tabs don't spawn the button, so this is a
+/// no-op there (settings-only for now).
+fn handle_reset_tab(
+    q: Query<&Interaction, (With<ResetTabButton>, Changed<Interaction>)>,
+    active: Res<super::tabs::ActiveTab>,
+    mut draft: ResMut<super::tabs::ConfigDraft>,
+) {
+    if !active.0.is_settings() {
+        return;
+    }
+    let pressed = q.iter().any(|i| *i == Interaction::Pressed);
+    if !pressed {
+        return;
+    }
+    let d = dtx_config::Config::default();
+    for item in crate::editor::settings_data::settings_items(active.0) {
+        (item.reset)(&mut draft.0, &d);
+    }
+}
+
+/// Draft changes → refresh the visible settings values (text + slider knobs).
 fn refresh_settings_values(
     active: Res<super::tabs::ActiveTab>,
     draft: Res<super::tabs::ConfigDraft>,
-    mut q: Query<(&SettingValueText, &mut Text)>,
+    mut texts: Query<(&SettingValueText, &mut Text)>,
+    mut sliders: Query<(&SettingSlider, &mut ControlValue)>,
 ) {
+    use crate::editor::settings_data::SettingControl;
     if !draft.is_changed() || !active.0.is_settings() {
         return;
     }
     let items = crate::editor::settings_data::settings_items(active.0);
-    for (tag, mut text) in &mut q {
+    for (tag, mut text) in &mut texts {
         if let Some(item) = items.get(tag.0) {
             let want = (item.value)(&draft.0);
             if text.0 != want {
                 text.0 = want;
+            }
+        }
+    }
+    // External changes (RESET TAB, live edits) → resync slider knobs. Guarded
+    // by a half-step threshold so an active drag isn't yanked back mid-motion.
+    for (slider, mut value) in &mut sliders {
+        if let Some(item) = items.get(slider.0) {
+            if let SettingControl::Slider { step, .. } = item.control {
+                let want = (item.raw)(&draft.0);
+                if (value.0 - want).abs() > step * 0.5 {
+                    value.0 = want;
+                }
             }
         }
     }
