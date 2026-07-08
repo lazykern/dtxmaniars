@@ -8,6 +8,7 @@
 use bevy::prelude::*;
 use game_shell::AppState;
 
+pub mod bindings_capture;
 pub mod bindings_panel;
 pub mod drag;
 pub mod footer;
@@ -55,7 +56,11 @@ pub fn plugin(app: &mut App) {
         .add_systems(OnExit(AppState::Performance), close_editor_on_exit)
         .configure_sets(Update, (EditorPickSet, EditorGestureSet).chain())
         .add_plugins((
-            (bindings_panel::plugin, drag::plugin),
+            (
+                bindings_panel::plugin,
+                bindings_capture::plugin,
+                drag::plugin,
+            ),
             hotkeys::plugin,
             keyboard_nav::plugin,
             undo::plugin,

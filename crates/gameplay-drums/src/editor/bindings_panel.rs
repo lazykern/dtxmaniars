@@ -9,6 +9,7 @@
 use bevy::prelude::*;
 use dtx_config::{BindSource, BINDABLE_CHANNELS};
 
+use super::bindings_capture::CaptureState;
 use crate::bindings::LiveBindings;
 use crate::lanes::Lanes;
 
@@ -37,28 +38,17 @@ pub struct VelocityThresholdAdjust(pub i32);
 #[derive(Resource, Debug, Default, Clone, Copy)]
 pub struct BindingsRev(pub u64);
 
-/// Keyboard-capture state machine. Minimal for Phase 3a (Task 4 only sets
-/// `Capturing`); Task 5 extends this with steal-confirm.
-#[derive(Resource, Debug, Default, Clone, PartialEq)]
-pub enum CaptureState {
-    #[default]
-    Idle,
-    Capturing(dtx_core::EChannel),
-}
-
 pub fn plugin(app: &mut App) {
-    app.init_resource::<BindingsRev>()
-        .init_resource::<CaptureState>()
-        .add_systems(
-            Update,
-            (
-                handle_velocity_adjust,
-                handle_bind_chip_remove,
-                handle_capture_start,
-            )
-                .run_if(in_state(game_shell::AppState::Performance))
-                .run_if(super::editor_open),
-        );
+    app.init_resource::<BindingsRev>().add_systems(
+        Update,
+        (
+            handle_velocity_adjust,
+            handle_bind_chip_remove,
+            handle_capture_start,
+        )
+            .run_if(in_state(game_shell::AppState::Performance))
+            .run_if(super::editor_open),
+    );
 }
 
 /// Short label for a `KeyCode`: strip the `Key`/`Digit` prefix (`KeyX` → "X",

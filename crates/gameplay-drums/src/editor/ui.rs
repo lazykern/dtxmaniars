@@ -24,7 +24,9 @@ pub fn plugin(app: &mut App) {
         (
             spawn_ui_on_open.run_if(ui_needs_respawn),
             (handle_buttons, handle_tab_buttons, highlight_selection).run_if(super::editor_open),
-            close_on_escape.run_if(super::editor_open),
+            close_on_escape
+                .run_if(super::editor_open)
+                .run_if(not(super::bindings_capture::capture_active)),
         )
             .run_if(in_state(game_shell::AppState::Performance)),
     )
