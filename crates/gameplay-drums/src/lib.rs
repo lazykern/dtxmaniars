@@ -49,6 +49,7 @@ pub mod seek;
 pub mod skill;
 pub mod sound_bank;
 pub mod stage_end;
+pub mod stage_rect;
 pub mod timeline;
 pub mod widget_layout;
 
@@ -191,6 +192,7 @@ pub fn plugin(app: &mut App) {
         pause::plugin,
         perf_hotkeys::plugin,
         stage_end::plugin,
+        stage_rect::plugin,
         practice::plugin,
         editor::plugin,
     ));
