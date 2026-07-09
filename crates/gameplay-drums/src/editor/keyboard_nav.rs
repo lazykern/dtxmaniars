@@ -18,10 +18,20 @@ pub(super) fn plugin(app: &mut App) {
 
 fn settings_keyboard_nav(
     keys: Res<ButtonInput<KeyCode>>,
-    active: Res<super::tabs::ActiveTab>,
+    mut active: ResMut<super::tabs::ActiveTab>,
     mut focused: ResMut<FocusedRow>,
     mut draft: ResMut<super::tabs::ConfigDraft>,
 ) {
+    let ctrl = keys.pressed(KeyCode::ControlLeft) || keys.pressed(KeyCode::ControlRight);
+    if !ctrl {
+        if keys.just_pressed(KeyCode::PageDown) {
+            active.0 = active.0.next();
+            return;
+        } else if keys.just_pressed(KeyCode::PageUp) {
+            active.0 = active.0.prev();
+            return;
+        }
+    }
     if !active.0.is_settings() {
         return;
     }
@@ -34,7 +44,7 @@ fn settings_keyboard_nav(
         return;
     }
     // Don't hijack when Ctrl held (perf hotkeys / save).
-    if keys.pressed(KeyCode::ControlLeft) || keys.pressed(KeyCode::ControlRight) {
+    if ctrl {
         return;
     }
     if keys.just_pressed(KeyCode::ArrowDown) {

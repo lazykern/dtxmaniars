@@ -21,7 +21,7 @@ struct FooterDescText;
 const HINT: &str = "Hover a setting for details.";
 
 /// Static key legend for the right-hand side of the footer.
-const LEGEND: &str = "↑↓ row   ←→ adjust   Tab peek   Ctrl+S save   Esc close";
+const LEGEND: &str = "↑↓ row   ←→ adjust (Shift=coarse)   PgUp/Dn tab   Tab peek   Ctrl+S save   Esc close";
 
 pub(super) fn plugin(app: &mut App) {
     app.init_resource::<HoveredDesc>()

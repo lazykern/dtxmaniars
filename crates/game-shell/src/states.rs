@@ -161,6 +161,18 @@ impl CustomizeTab {
     pub fn is_settings(self) -> bool {
         Self::SETTINGS.contains(&self)
     }
+
+    /// Next tab in rail order, wrapping.
+    pub fn next(self) -> Self {
+        let i = Self::ALL.iter().position(|t| *t == self).unwrap_or(0);
+        Self::ALL[(i + 1) % Self::ALL.len()]
+    }
+
+    /// Previous tab in rail order, wrapping.
+    pub fn prev(self) -> Self {
+        let i = Self::ALL.iter().position(|t| *t == self).unwrap_or(0);
+        Self::ALL[(i + Self::ALL.len() - 1) % Self::ALL.len()]
+    }
 }
 
 /// Initial Customize tab to open, set by the entry key (F1/F2) before the
@@ -194,5 +206,13 @@ mod tests {
     #[test]
     fn pending_customize_tab_defaults_none() {
         assert_eq!(PendingCustomizeTab::default().0, None);
+    }
+
+    #[test]
+    fn customize_tab_next_prev_cycle() {
+        assert_eq!(CustomizeTab::Gameplay.next(), CustomizeTab::Audio);
+        assert_eq!(CustomizeTab::Widgets.next(), CustomizeTab::Gameplay);
+        assert_eq!(CustomizeTab::Gameplay.prev(), CustomizeTab::Widgets);
+        assert_eq!(CustomizeTab::Audio.prev(), CustomizeTab::Gameplay);
     }
 }
