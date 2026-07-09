@@ -2,6 +2,7 @@
 
 use bevy::log::LogPlugin;
 use bevy::prelude::*;
+use bevy::window::PresentMode;
 use bevy::window::{MonitorSelection, Window, WindowMode, WindowPlugin};
 use dtx_assets::DtxAssetsPlugin;
 use dtx_audio;
@@ -37,6 +38,11 @@ fn main() {
                         (1280u32, 720u32).into()
                     } else {
                         (1280u32, REF_HEIGHT as u32).into()
+                    },
+                    present_mode: if dtx_config::load(&dtx_config::default_path()).system.vsync {
+                        PresentMode::AutoVsync
+                    } else {
+                        PresentMode::AutoNoVsync
                     },
                     ..default()
                 }),

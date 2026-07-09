@@ -69,16 +69,47 @@ fn save_draft_on_close(open: Res<super::EditorOpen>, draft: Res<ConfigDraft>) {
 fn apply_draft_live(
     draft: Res<ConfigDraft>,
     audio: Res<Audio>,
+    chart: Res<crate::resources::ActiveChart>,
     mut scroll: ResMut<crate::resources::ScrollSettings>,
     mut input_offset: ResMut<crate::resources::InputOffsetMs>,
     mut bgm_adjust: ResMut<crate::resources::BgmAdjustState>,
     mut audio_settings: ResMut<crate::resources::DrumAudioSettings>,
+    mut gauge: ResMut<crate::gauge::StageGauge>,
+    mut show_perf_info: ResMut<crate::resources::ShowPerfInfo>,
+    mut metronome_on: ResMut<crate::resources::MetronomeEnabled>,
+    mut show_timing_lines: ResMut<crate::resources::ShowTimingLines>,
+    mut drum_cfg: ResMut<crate::resources::DrumGameplaySettings>,
+    mut polyphony: ResMut<dtx_audio::DrumPolyphony>,
+    mut windows: Query<&mut bevy::window::Window, With<bevy::window::PrimaryWindow>>,
     mut bgm: ResMut<dtx_audio::BgmHandle>,
     mut instances: ResMut<Assets<AudioInstance>>,
 ) {
-    *scroll = crate::resources::ScrollSettings::from_scroll_speed(draft.0.gameplay.scroll_speed);
-    input_offset.0 = draft.0.gameplay.input_offset_ms;
-    bgm_adjust.common_ms = draft.0.gameplay.bgm_adjust_ms;
+    let g = &draft.0.gameplay;
+    *scroll = crate::resources::ScrollSettings::from_scroll_speed(g.scroll_speed);
+    scroll.play_speed = dtx_config::play_speed_multiplier(g.play_speed);
+    input_offset.0 = g.input_offset_ms;
+    bgm_adjust.common_ms = g.bgm_adjust_ms;
+    gauge.damage_level = crate::map_damage_level(g.damage_level);
+    show_timing_lines.0 = g.lane_display.shows_timing_lines();
+    show_perf_info.0 = draft.0.system.show_perf_info;
+    metronome_on.0 = draft.0.system.metronome;
+
+    if drum_cfg.config != draft.0.drums {
+        drum_cfg.config = draft.0.drums.clone();
+        drum_cfg.rebuild_from_chart(&chart.chart);
+    }
+    polyphony.set_voices(draft.0.drums.polyphonic_sounds);
+
+    if let Ok(mut window) = windows.single_mut() {
+        let want = if draft.0.system.vsync {
+            bevy::window::PresentMode::AutoVsync
+        } else {
+            bevy::window::PresentMode::AutoNoVsync
+        };
+        if window.present_mode != want {
+            window.present_mode = want;
+        }
+    }
 
     let next_audio = crate::resources::DrumAudioSettings {
         bgm_enabled: draft.0.audio.bgm_enabled,
@@ -87,14 +118,13 @@ fn apply_draft_live(
         bgm_volume: draft.0.audio.bgm_volume,
         drum_volume: draft.0.audio.drum_volume,
     };
-    if *audio_settings == next_audio {
-        return;
-    }
-    *audio_settings = next_audio;
-    if audio_settings.bgm_enabled {
-        dtx_audio::set_bgm_volume(&bgm, &mut instances, audio_settings.bgm_gain());
-    } else {
-        dtx_audio::stop_bgm(&audio, &mut bgm, &mut instances);
+    if *audio_settings != next_audio {
+        *audio_settings = next_audio;
+        if audio_settings.bgm_enabled {
+            dtx_audio::set_bgm_volume(&bgm, &mut instances, audio_settings.bgm_gain());
+        } else {
+            dtx_audio::stop_bgm(&audio, &mut bgm, &mut instances);
+        }
     }
 }
 

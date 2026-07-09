@@ -215,7 +215,7 @@ fn load_scroll_settings(mut settings: ResMut<resources::ScrollSettings>) {
 
 /// Map the persisted `dtx_config::DamageLevel` onto the gameplay
 /// `dtx_core::constants::DamageLevel` used by the gauge.
-fn map_damage_level(level: dtx_config::DamageLevel) -> dtx_core::constants::DamageLevel {
+pub(crate) fn map_damage_level(level: dtx_config::DamageLevel) -> dtx_core::constants::DamageLevel {
     use dtx_config::DamageLevel as Cfg;
     use dtx_core::constants::DamageLevel as Core;
     match level {
