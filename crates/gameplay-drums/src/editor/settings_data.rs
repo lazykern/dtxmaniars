@@ -105,7 +105,7 @@ static GAMEPLAY_ITEMS: LazyLock<Vec<SettingItem>> = LazyLock::new(|| {
             label: "Input Offset",
             value: |c| format!("{:+} ms", c.gameplay.input_offset_ms),
             adjust: |c, d| {
-                c.gameplay.input_offset_ms = (c.gameplay.input_offset_ms + 10 * d).clamp(
+                c.gameplay.input_offset_ms = (c.gameplay.input_offset_ms + d).clamp(
                     -dtx_config::INPUT_OFFSET_CLAMP_MS,
                     dtx_config::INPUT_OFFSET_CLAMP_MS,
                 );
@@ -115,7 +115,7 @@ static GAMEPLAY_ITEMS: LazyLock<Vec<SettingItem>> = LazyLock::new(|| {
             control: SettingControl::Slider {
                 min: -(dtx_config::INPUT_OFFSET_CLAMP_MS as f32),
                 max: dtx_config::INPUT_OFFSET_CLAMP_MS as f32,
-                step: 10.0,
+                step: 1.0,
             },
             raw: |c| c.gameplay.input_offset_ms as f32,
             set: |c, v| {
@@ -130,7 +130,7 @@ static GAMEPLAY_ITEMS: LazyLock<Vec<SettingItem>> = LazyLock::new(|| {
             label: "BGM Offset",
             value: |c| format!("{:+} ms", c.gameplay.bgm_adjust_ms),
             adjust: |c, d| {
-                c.gameplay.bgm_adjust_ms = (c.gameplay.bgm_adjust_ms + 10 * d).clamp(
+                c.gameplay.bgm_adjust_ms = (c.gameplay.bgm_adjust_ms + d).clamp(
                     -dtx_config::BGM_ADJUST_CLAMP_MS,
                     dtx_config::BGM_ADJUST_CLAMP_MS,
                 );
@@ -140,7 +140,7 @@ static GAMEPLAY_ITEMS: LazyLock<Vec<SettingItem>> = LazyLock::new(|| {
             control: SettingControl::Slider {
                 min: -(dtx_config::BGM_ADJUST_CLAMP_MS as f32),
                 max: dtx_config::BGM_ADJUST_CLAMP_MS as f32,
-                step: 10.0,
+                step: 1.0,
             },
             raw: |c| c.gameplay.bgm_adjust_ms as f32,
             set: |c, v| {

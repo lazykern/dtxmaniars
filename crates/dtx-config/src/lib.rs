@@ -155,8 +155,8 @@ pub fn play_speed_multiplier(raw: u8) -> f32 {
 }
 
 /// NX in-song / config clamp for `nInputAdjustTimeMs` and `nCommonBGMAdjustMs`.
-pub const INPUT_OFFSET_CLAMP_MS: i32 = 99;
-pub const BGM_ADJUST_CLAMP_MS: i32 = 99;
+pub const INPUT_OFFSET_CLAMP_MS: i32 = 300;
+pub const BGM_ADJUST_CLAMP_MS: i32 = 300;
 
 fn default_damage_level() -> DamageLevel {
     DamageLevel::default()

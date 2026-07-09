@@ -47,17 +47,23 @@ fn settings_keyboard_nav(
     if ctrl {
         return;
     }
+    let coarse = keys.pressed(KeyCode::ShiftLeft) || keys.pressed(KeyCode::ShiftRight);
+    let reps = if coarse { 10 } else { 1 };
     if keys.just_pressed(KeyCode::ArrowDown) {
         focused.0 = (focused.0 + 1).min(items.len() - 1);
     } else if keys.just_pressed(KeyCode::ArrowUp) {
         focused.0 = focused.0.saturating_sub(1);
     } else if keys.just_pressed(KeyCode::ArrowRight) {
         if let Some(item) = items.get(focused.0) {
-            (item.adjust)(&mut draft.0, 1);
+            for _ in 0..reps {
+                (item.adjust)(&mut draft.0, 1);
+            }
         }
     } else if keys.just_pressed(KeyCode::ArrowLeft) {
         if let Some(item) = items.get(focused.0) {
-            (item.adjust)(&mut draft.0, -1);
+            for _ in 0..reps {
+                (item.adjust)(&mut draft.0, -1);
+            }
         }
     }
 }
