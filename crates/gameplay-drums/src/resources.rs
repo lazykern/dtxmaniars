@@ -264,21 +264,27 @@ impl Default for AudioRate {
     }
 }
 
-/// Drum hit audio settings from `dtx-config`.
-#[derive(Resource, Debug, Clone, Copy)]
+/// Runtime audio settings from `dtx-config`.
+#[derive(Resource, Debug, Clone, Copy, PartialEq)]
 pub struct DrumAudioSettings {
-    pub enabled: bool,
     pub bgm_enabled: bool,
+    pub drum_enabled: bool,
     pub master_volume: f32,
     pub bgm_volume: f32,
     pub drum_volume: f32,
 }
 
+impl DrumAudioSettings {
+    pub fn bgm_gain(self) -> f32 {
+        self.master_volume * self.bgm_volume
+    }
+}
+
 impl Default for DrumAudioSettings {
     fn default() -> Self {
         Self {
-            enabled: true,
             bgm_enabled: true,
+            drum_enabled: true,
             master_volume: 0.8,
             bgm_volume: 0.7,
             drum_volume: 0.8,
@@ -611,7 +617,10 @@ impl AccuracyHistory {
 
 #[cfg(test)]
 mod tests {
-    use super::{AccuracyHistory, AudioRate, GameplayClock, JudgmentCounts, ScrollSettings};
+    use super::{
+        AccuracyHistory, AudioRate, DrumAudioSettings, GameplayClock, JudgmentCounts,
+        ScrollSettings,
+    };
 
     #[test]
     fn achievement_pct_empty_is_full() {
@@ -647,6 +656,16 @@ mod tests {
     fn scroll_velocity_scales_linearly_with_multiplier() {
         let s = ScrollSettings::from_scroll_speed(2.0);
         assert!((s.pixels_per_ms - 0.3575).abs() < 1e-6);
+    }
+
+    #[test]
+    fn bgm_gain_combines_master_and_bgm_volume() {
+        let s = DrumAudioSettings {
+            master_volume: 0.5,
+            bgm_volume: 0.25,
+            ..Default::default()
+        };
+        assert!((s.bgm_gain() - 0.125).abs() < 1e-6);
     }
 
     #[test]

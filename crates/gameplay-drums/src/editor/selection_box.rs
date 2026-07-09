@@ -1,6 +1,8 @@
 //! Selection overlay: border + name tag + anchor line + corner scale handles
-//! around the selected widget's AABB, and a lighter hover outline. Editor-only
-//! UI, kept above the sidebar via GlobalZIndex.
+//! around the selected widget's AABB, and a lighter hover outline. Overlay
+//! nodes are `HudRoot` children so the scene-space AABB coords render 1:1
+//! under the stage transform; they keep `GlobalZIndex` (stacking-only, the
+//! transform still inherits) to stay above the preview scrim and the sidebar.
 
 use bevy::prelude::*;
 use bevy::ui::UiTransform;
@@ -40,7 +42,7 @@ pub struct HoverOutlineRoot;
 
 const ACCENT: Color = Color::srgb(1.0, 0.75, 0.1);
 const HOVER: Color = Color::srgba(1.0, 1.0, 1.0, 0.5);
-const HANDLE_SIZE: f32 = 10.0;
+pub const HANDLE_SIZE: f32 = 10.0;
 const DOT_SIZE: f32 = 6.0;
 
 pub fn plugin(app: &mut App) {
@@ -56,10 +58,7 @@ pub fn plugin(app: &mut App) {
             .after(super::EditorGestureSet)
             .run_if(in_state(game_shell::AppState::Performance)),
     )
-    .add_systems(
-        OnExit(game_shell::AppState::Performance),
-        despawn_overlay,
-    );
+    .add_systems(OnExit(game_shell::AppState::Performance), despawn_overlay);
 }
 
 fn despawn_overlay(mut commands: Commands, roots: Query<Entity, With<EditorOverlay>>) {
@@ -72,6 +71,7 @@ fn despawn_overlay(mut commands: Commands, roots: Query<Entity, With<EditorOverl
 fn spawn_overlay_on_open(
     mut commands: Commands,
     open: Res<super::EditorOpen>,
+    roots: Query<Entity, With<crate::hud::HudRoot>>,
     existing: Query<Entity, With<EditorOverlay>>,
 ) {
     if !open.is_changed() {
@@ -83,19 +83,24 @@ fn spawn_overlay_on_open(
     if !open.0 {
         return;
     }
-    commands.spawn((
-        EditorOverlay,
-        HoverOutlineRoot,
-        Node {
-            position_type: PositionType::Absolute,
-            ..default()
-        },
-        BorderColor::all(HOVER),
-        Visibility::Hidden,
-        GlobalZIndex(2100),
-        Pickable::IGNORE,
-    ));
-    commands
+    let Ok(root) = roots.single() else {
+        return;
+    };
+    let hover = commands
+        .spawn((
+            EditorOverlay,
+            HoverOutlineRoot,
+            Node {
+                position_type: PositionType::Absolute,
+                ..default()
+            },
+            BorderColor::all(HOVER),
+            Visibility::Hidden,
+            GlobalZIndex(crate::ui_z::HOVER_OUTLINE),
+            Pickable::IGNORE,
+        ))
+        .id();
+    let selection = commands
         .spawn((
             EditorOverlay,
             SelectionBoxRoot,
@@ -106,7 +111,7 @@ fn spawn_overlay_on_open(
             },
             BorderColor::all(ACCENT),
             Visibility::Hidden,
-            GlobalZIndex(2200),
+            GlobalZIndex(crate::ui_z::SELECTION_BOX),
             Pickable::IGNORE,
         ))
         .with_children(|p| {
@@ -152,52 +157,62 @@ fn spawn_overlay_on_open(
                 },
                 Pickable::IGNORE,
             ));
-        });
+        })
+        .id();
     // Anchor viz nodes live outside the box (positions are unrelated rects).
-    commands.spawn((
-        EditorOverlay,
-        AnchorLine,
-        Node {
-            position_type: PositionType::Absolute,
-            height: Val::Px(2.0),
-            ..default()
-        },
-        UiTransform::default(),
-        BackgroundColor(Color::srgba(1.0, 0.3, 0.3, 0.9)),
-        Visibility::Hidden,
-        GlobalZIndex(2150),
-        Pickable::IGNORE,
-    ));
-    commands.spawn((
-        EditorOverlay,
-        AnchorDot,
-        Node {
-            position_type: PositionType::Absolute,
-            width: Val::Px(DOT_SIZE),
-            height: Val::Px(DOT_SIZE),
-            border_radius: BorderRadius::all(Val::Px(DOT_SIZE / 2.0)),
-            ..default()
-        },
-        BackgroundColor(Color::srgb(1.0, 0.3, 0.3)),
-        Visibility::Hidden,
-        GlobalZIndex(2150),
-        Pickable::IGNORE,
-    ));
-    commands.spawn((
-        EditorOverlay,
-        OriginDot,
-        Node {
-            position_type: PositionType::Absolute,
-            width: Val::Px(DOT_SIZE),
-            height: Val::Px(DOT_SIZE),
-            border_radius: BorderRadius::all(Val::Px(DOT_SIZE / 2.0)),
-            ..default()
-        },
-        BackgroundColor(ACCENT),
-        Visibility::Hidden,
-        GlobalZIndex(2150),
-        Pickable::IGNORE,
-    ));
+    let line = commands
+        .spawn((
+            EditorOverlay,
+            AnchorLine,
+            Node {
+                position_type: PositionType::Absolute,
+                height: Val::Px(2.0),
+                ..default()
+            },
+            UiTransform::default(),
+            BackgroundColor(Color::srgba(1.0, 0.3, 0.3, 0.9)),
+            Visibility::Hidden,
+            GlobalZIndex(crate::ui_z::ANCHOR_VIZ),
+            Pickable::IGNORE,
+        ))
+        .id();
+    let a_dot = commands
+        .spawn((
+            EditorOverlay,
+            AnchorDot,
+            Node {
+                position_type: PositionType::Absolute,
+                width: Val::Px(DOT_SIZE),
+                height: Val::Px(DOT_SIZE),
+                border_radius: BorderRadius::all(Val::Px(DOT_SIZE / 2.0)),
+                ..default()
+            },
+            BackgroundColor(Color::srgb(1.0, 0.3, 0.3)),
+            Visibility::Hidden,
+            GlobalZIndex(crate::ui_z::ANCHOR_VIZ),
+            Pickable::IGNORE,
+        ))
+        .id();
+    let o_dot = commands
+        .spawn((
+            EditorOverlay,
+            OriginDot,
+            Node {
+                position_type: PositionType::Absolute,
+                width: Val::Px(DOT_SIZE),
+                height: Val::Px(DOT_SIZE),
+                border_radius: BorderRadius::all(Val::Px(DOT_SIZE / 2.0)),
+                ..default()
+            },
+            BackgroundColor(ACCENT),
+            Visibility::Hidden,
+            GlobalZIndex(crate::ui_z::ANCHOR_VIZ),
+            Pickable::IGNORE,
+        ))
+        .id();
+    commands
+        .entity(root)
+        .add_children(&[hover, selection, line, a_dot, o_dot]);
 }
 
 /// The selected widget's kind + AABB, or None (nothing selected / no AABB).
@@ -220,9 +235,7 @@ fn parent_rect(
     pfl: &crate::layout::PlayfieldLayout,
 ) -> Rect {
     match space {
-        dtx_layout::AnchorSpace::Screen => {
-            Rect::new(0.0, 0.0, window.width(), window.height())
-        }
+        dtx_layout::AnchorSpace::Screen => Rect::new(0.0, 0.0, window.width(), window.height()),
         dtx_layout::AnchorSpace::Playfield => Rect::new(
             pfl.strip_left(),
             pfl.lane_top(),
@@ -238,14 +251,13 @@ fn sync_selection_border(
     aabbs: Res<WidgetAabbs>,
     layouts: Res<WidgetLayouts>,
     practice: Option<Res<crate::practice::PracticeSession>>,
-    mut box_q: Query<
-        (&mut Node, &mut Visibility, &mut BorderColor),
-        With<SelectionBoxRoot>,
-    >,
+    mut box_q: Query<(&mut Node, &mut Visibility, &mut BorderColor), With<SelectionBoxRoot>>,
     mut tag_q: Query<&mut Text, With<SelectionNameTag>>,
     mut handles: Query<&mut Visibility, (With<ScaleHandle>, Without<SelectionBoxRoot>)>,
 ) {
-    let Ok((mut node, mut vis, mut border)) = box_q.single_mut() else { return };
+    let Ok((mut node, mut vis, mut border)) = box_q.single_mut() else {
+        return;
+    };
     let Some((kind, aabb)) = selected_aabb(&open, &selection, &aabbs) else {
         *vis = Visibility::Hidden;
         return;
@@ -259,7 +271,11 @@ fn sync_selection_border(
     node.height = Val::Px(aabb.height());
     *vis = Visibility::Visible;
     // Hidden-in-mode widget: dim the border (selected from the sidebar list).
-    let alpha = if widget_visible(inst, is_practice) { 1.0 } else { 0.35 };
+    let alpha = if widget_visible(inst, is_practice) {
+        1.0
+    } else {
+        0.35
+    };
     *border = BorderColor::all(ACCENT.with_alpha(alpha));
 
     if let Ok(mut text) = tag_q.single_mut() {
@@ -267,7 +283,11 @@ fn sync_selection_border(
     }
     let show_handles = kind != WidgetKind::Playfield;
     for mut hv in handles.iter_mut() {
-        *hv = if show_handles { Visibility::Inherited } else { Visibility::Hidden };
+        *hv = if show_handles {
+            Visibility::Inherited
+        } else {
+            Visibility::Hidden
+        };
     }
 }
 
@@ -286,9 +306,15 @@ fn sync_anchor_viz(
 ) {
     let sel = selected_aabb(&open, &selection, &aabbs);
     let Some((kind, aabb)) = sel else {
-        if let Ok((_, mut v, _)) = viz.p0().single_mut() { *v = Visibility::Hidden; }
-        if let Ok((_, mut v)) = viz.p1().single_mut() { *v = Visibility::Hidden; }
-        if let Ok((_, mut v)) = viz.p2().single_mut() { *v = Visibility::Hidden; }
+        if let Ok((_, mut v, _)) = viz.p0().single_mut() {
+            *v = Visibility::Hidden;
+        }
+        if let Ok((_, mut v)) = viz.p1().single_mut() {
+            *v = Visibility::Hidden;
+        }
+        if let Ok((_, mut v)) = viz.p2().single_mut() {
+            *v = Visibility::Hidden;
+        }
         return;
     };
     let Ok(window) = windows.single() else { return };
@@ -313,7 +339,11 @@ fn sync_anchor_viz(
         ln.top = Val::Px(mid.y - 1.0);
         ln.width = Val::Px(len);
         lt.rotation = Rot2::radians(seg.y.atan2(seg.x));
-        *lv = if len > 4.0 { Visibility::Visible } else { Visibility::Hidden };
+        *lv = if len > 4.0 {
+            Visibility::Visible
+        } else {
+            Visibility::Hidden
+        };
     }
     if let Ok((mut dn, mut dv)) = viz.p1().single_mut() {
         dn.left = Val::Px(anchor_pt.x - DOT_SIZE / 2.0);
@@ -334,11 +364,15 @@ fn sync_hover_outline(
     aabbs: Res<WidgetAabbs>,
     mut q: Query<(&mut Node, &mut Visibility), With<HoverOutlineRoot>>,
 ) {
-    let Ok((mut node, mut vis)) = q.single_mut() else { return };
-    let show = open.0
-        && hovered.0.is_some()
-        && hovered.0 != selection.0;
-    let Some(aabb) = hovered.0.and_then(|k| aabbs.0.get(&k).copied()).filter(|_| show) else {
+    let Ok((mut node, mut vis)) = q.single_mut() else {
+        return;
+    };
+    let show = open.0 && hovered.0.is_some() && hovered.0 != selection.0;
+    let Some(aabb) = hovered
+        .0
+        .and_then(|k| aabbs.0.get(&k).copied())
+        .filter(|_| show)
+    else {
         *vis = Visibility::Hidden;
         return;
     };

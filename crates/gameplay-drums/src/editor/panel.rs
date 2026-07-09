@@ -12,8 +12,18 @@ use super::EditorOpen;
 use crate::lanes::Lanes;
 use crate::widget_layout::WidgetLayouts;
 
+/// Left content panel (docked right of the rail): renders the active tab's
+/// content (settings rows / lane list / widget list / bindings). Rebuilds on
+/// tab/content change only — NOT on selection — so picking a widget no longer
+/// respawns the whole left list.
 #[derive(Component)]
-pub struct PanelRoot;
+pub struct LeftContentRoot;
+
+/// Right inspector panel (docked to the window's right edge): renders the
+/// selected widget's knobs. Rebuilds on selection change; present only on the
+/// Widgets tab with a non-Playfield widget selected.
+#[derive(Component)]
+pub struct RightInspectorRoot;
 
 /// Which widget field a control edits.
 #[derive(Component, Debug, Clone, Copy, PartialEq)]
@@ -61,6 +71,35 @@ pub struct PresetCycleBtn(pub i32);
 #[derive(Component)]
 pub struct PresetLabel;
 
+/// Tags a settings row control with its index into the active tab's item list.
+#[derive(Component, Clone, Copy)]
+pub struct SettingRow(pub usize);
+
+/// Carries a settings row's one-line description, surfaced in the footer while
+/// the row is hovered.
+#[derive(Component, Clone, Copy)]
+struct RowDesc(&'static str);
+
+/// Tags the ◂ / ▸ adjust buttons on a settings row (dir = -1 / +1).
+#[derive(Component, Clone, Copy)]
+pub struct SettingAdjust {
+    pub index: usize,
+    pub dir: i32,
+}
+
+/// Tags the value text of a settings row for live refresh.
+#[derive(Component, Clone, Copy)]
+pub struct SettingValueText(pub usize);
+
+/// Tags a settings-row slider with its index into the active tab's item list.
+#[derive(Component, Clone, Copy)]
+pub struct SettingSlider(pub usize);
+
+/// "RESET TAB" button at the top of the left content panel: restores the active
+/// settings tab's values to `Config::default()`.
+#[derive(Component)]
+pub struct ResetTabButton;
+
 fn preset_name(p: dtx_layout::LanePreset) -> &'static str {
     match p {
         dtx_layout::LanePreset::Classic => "classic",
@@ -70,19 +109,31 @@ fn preset_name(p: dtx_layout::LanePreset) -> &'static str {
     }
 }
 
-pub const PANEL_WIDTH: f32 = 240.0;
+pub use super::chrome::INSPECTOR_WIDTH as PANEL_WIDTH;
+
+use super::chrome::LEFT_PANEL_WIDTH;
+
+use super::chrome::RAIL_WIDTH;
 
 pub fn plugin(app: &mut App) {
     app.add_systems(
         Update,
         (
-            // Only when a rebuild trigger actually changed — avoids allocating
-            // a fresh signature string every idle frame. The Local guard inside
-            // still debounces width-only Lanes changes (no rebuild mid-drag).
-            rebuild_panel.run_if(
+            // Left content rebuilds on tab/content change only (NOT selection),
+            // so picking a widget no longer respawns the whole left list. The
+            // Local guard inside still debounces width-only Lanes changes.
+            rebuild_left_content.run_if(
+                resource_changed::<super::tabs::ActiveTab>
+                    .or_else(resource_changed::<EditorOpen>)
+                    .or_else(resource_changed::<Lanes>)
+                    .or_else(resource_changed::<super::bindings_panel::BindingsRev>),
+            ),
+            // Right inspector rebuilds on selection change (+ tab/open) — this
+            // is the only panel that reacts to Selection.
+            rebuild_right_inspector.run_if(
                 resource_changed::<Selection>
                     .or_else(resource_changed::<EditorOpen>)
-                    .or_else(resource_changed::<Lanes>),
+                    .or_else(resource_changed::<super::tabs::ActiveTab>),
             ),
             (
                 apply_panel_controls,
@@ -93,6 +144,11 @@ pub fn plugin(app: &mut App) {
                 handle_lane_buttons,
                 apply_lane_width_sliders,
                 refresh_lane_panel_values,
+                handle_settings_adjust,
+                apply_settings_sliders,
+                handle_reset_tab,
+                refresh_settings_values,
+                update_hovered_desc,
             )
                 .run_if(super::editor_open),
         )
@@ -101,26 +157,37 @@ pub fn plugin(app: &mut App) {
     .add_systems(OnExit(game_shell::AppState::Performance), despawn_panel);
 }
 
-fn despawn_panel(mut commands: Commands, q: Query<Entity, With<PanelRoot>>) {
+fn despawn_panel(
+    mut commands: Commands,
+    q: Query<Entity, Or<(With<LeftContentRoot>, With<RightInspectorRoot>)>>,
+) {
     for e in &q {
         commands.entity(e).despawn();
     }
 }
 
-fn rebuild_panel(
+/// Left content panel: renders the active tab's content. Rebuilds on
+/// tab/content change only (NOT selection). The debounce signature drops
+/// `selection.0` so picking a widget never respawns this list.
+fn rebuild_left_content(
     mut commands: Commands,
     open: Res<EditorOpen>,
     selection: Res<Selection>,
-    layouts: Res<WidgetLayouts>,
     lanes: Res<Lanes>,
+    active: Res<super::tabs::ActiveTab>,
+    draft: Res<super::tabs::ConfigDraft>,
+    live: Res<crate::bindings::LiveBindings>,
+    rev: Res<super::bindings_panel::BindingsRev>,
+    ports: Res<super::bindings_panel::MidiPortList>,
     theme: Res<dtx_ui::ThemeResource>,
-    existing: Query<Entity, With<PanelRoot>>,
-    mut last_sig: Local<Option<(Option<WidgetKind>, bool, String)>>,
+    existing: Query<Entity, With<LeftContentRoot>>,
+    mut last_sig: Local<Option<(bool, String, game_shell::CustomizeTab, u64)>>,
 ) {
     let sig = (
-        selection.0,
         open.0,
         dtx_layout::structure_signature(&lanes.0),
+        active.0,
+        rev.0,
     );
     if last_sig.as_ref() == Some(&sig) {
         return;
@@ -132,11 +199,107 @@ fn rebuild_panel(
     if !open.0 {
         return;
     }
-    let Some(kind) = selection.0 else { return };
     let t = theme.0;
     let root = commands
         .spawn((
-            PanelRoot,
+            LeftContentRoot,
+            EditorChrome,
+            Node {
+                position_type: PositionType::Absolute,
+                left: Val::Px(RAIL_WIDTH),
+                top: Val::Px(0.0),
+                width: Val::Px(LEFT_PANEL_WIDTH),
+                height: Val::Percent(100.0),
+                flex_direction: FlexDirection::Column,
+                padding: UiRect::all(Val::Px(8.0)),
+                row_gap: Val::Px(6.0),
+                ..default()
+            },
+            BackgroundColor(Color::srgba(0.05, 0.05, 0.07, 0.92)),
+            GlobalZIndex(crate::ui_z::EDITOR_CHROME),
+        ))
+        .id();
+
+    // The Bindings tab is a settings-group tab (Offset preset) but renders its
+    // own block, so branch on it BEFORE the generic settings-rows path.
+    if active.0 == game_shell::CustomizeTab::Bindings {
+        super::bindings_panel::spawn_bindings_block(&mut commands, root, &t, &live, &lanes, &ports);
+        return;
+    }
+    if active.0.is_settings() {
+        spawn_settings_block(&mut commands, root, &t, active.0, &draft);
+        return;
+    }
+    // Kit tabs: the Lanes tab owns the lane block; the Widgets tab owns the
+    // widget picker list (selecting Playfield here just shows no inspector —
+    // the lane block lives on the dedicated Lanes tab).
+    commands.entity(root).with_children(|p| match active.0 {
+        game_shell::CustomizeTab::Lanes => spawn_lane_block(p, &t, &lanes),
+        game_shell::CustomizeTab::Widgets => spawn_widget_list(p, &t, &selection),
+        _ => {}
+    });
+}
+
+/// Widget picker list (migrated from the rail): one Select button per widget
+/// kind, the selected one tinted. Clicks are processed by ui.rs's
+/// `handle_buttons` Select arm; `highlight_selection` keeps the tint in sync.
+fn spawn_widget_list(
+    p: &mut ChildSpawnerCommands,
+    t: &dtx_ui::theme::Theme,
+    selection: &Selection,
+) {
+    p.spawn((
+        Text::new("Widgets"),
+        dtx_ui::theme::Theme::font(13.0),
+        TextColor(t.text_primary),
+    ));
+    for kind in WidgetKind::ALL {
+        let e = super::ui::spawn_button(
+            p,
+            t,
+            super::ui::EditorButton::Select(kind),
+            kind.display_name(),
+        );
+        if selection.0 == Some(kind) {
+            p.commands_mut()
+                .entity(e)
+                .insert(BackgroundColor(Color::srgb(0.22, 0.3, 0.42)));
+        }
+    }
+}
+
+/// Right inspector: the selected widget's knobs. Rebuilds on selection change
+/// (+ tab/open). Present only on the Widgets tab with a non-Playfield widget
+/// selected; otherwise the right edge stays empty.
+fn rebuild_right_inspector(
+    mut commands: Commands,
+    open: Res<EditorOpen>,
+    selection: Res<Selection>,
+    layouts: Res<WidgetLayouts>,
+    active: Res<super::tabs::ActiveTab>,
+    theme: Res<dtx_ui::ThemeResource>,
+    existing: Query<Entity, With<RightInspectorRoot>>,
+    mut last_sig: Local<Option<(Option<WidgetKind>, game_shell::CustomizeTab, bool)>>,
+) {
+    let sig = (selection.0, active.0, open.0);
+    if last_sig.as_ref() == Some(&sig) {
+        return;
+    }
+    *last_sig = Some(sig);
+    for e in &existing {
+        commands.entity(e).despawn();
+    }
+    if !open.0 || active.0 != game_shell::CustomizeTab::Widgets {
+        return;
+    }
+    let Some(kind) = selection.0 else { return };
+    if kind == WidgetKind::Playfield {
+        return;
+    }
+    let t = theme.0;
+    let root = commands
+        .spawn((
+            RightInspectorRoot,
             EditorChrome,
             Node {
                 position_type: PositionType::Absolute,
@@ -150,15 +313,11 @@ fn rebuild_panel(
                 ..default()
             },
             BackgroundColor(Color::srgba(0.05, 0.05, 0.07, 0.92)),
-            GlobalZIndex(2000),
+            GlobalZIndex(crate::ui_z::EDITOR_CHROME),
         ))
         .id();
 
     commands.entity(root).with_children(|p| {
-        if kind == WidgetKind::Playfield {
-            spawn_lane_block(p, &t, &lanes);
-            return;
-        }
         let inst = layouts.get(kind).clone();
         p.spawn((
             Text::new(format!("Settings ({})", kind.display_name())),
@@ -237,7 +396,12 @@ fn rebuild_panel(
             let e = controls::spawn_stepper(
                 p,
                 &t,
-                Stepper { step: 1.0, min: -2000.0, max: 2000.0, decimals: 0 },
+                Stepper {
+                    step: 1.0,
+                    min: -2000.0,
+                    max: 2000.0,
+                    decimals: 0,
+                },
                 inst.offset.0,
             );
             p.commands_mut().entity(e).insert(PanelField::OffsetX);
@@ -246,7 +410,12 @@ fn rebuild_panel(
             let e = controls::spawn_stepper(
                 p,
                 &t,
-                Stepper { step: 1.0, min: -2000.0, max: 2000.0, decimals: 0 },
+                Stepper {
+                    step: 1.0,
+                    min: -2000.0,
+                    max: 2000.0,
+                    decimals: 0,
+                },
                 inst.offset.1,
             );
             p.commands_mut().entity(e).insert(PanelField::OffsetY);
@@ -255,7 +424,10 @@ fn rebuild_panel(
             let e = controls::spawn_slider(
                 p,
                 &t,
-                Slider { min: MIN_WIDGET_SCALE, max: MAX_WIDGET_SCALE },
+                Slider {
+                    min: MIN_WIDGET_SCALE,
+                    max: MAX_WIDGET_SCALE,
+                },
                 inst.scale,
             );
             p.commands_mut().entity(e).insert(PanelField::Scale);
@@ -264,7 +436,12 @@ fn rebuild_panel(
             let e = controls::spawn_stepper(
                 p,
                 &t,
-                Stepper { step: 1.0, min: -100.0, max: 100.0, decimals: 0 },
+                Stepper {
+                    step: 1.0,
+                    min: -100.0,
+                    max: 100.0,
+                    decimals: 0,
+                },
                 inst.z as f32,
             );
             p.commands_mut().entity(e).insert(PanelField::Z);
@@ -275,7 +452,9 @@ fn rebuild_panel(
         });
         row(p, &t, "show in practice", |p| {
             let e = controls::spawn_toggle(p, &t, inst.visible_practice);
-            p.commands_mut().entity(e).insert(PanelField::VisiblePractice);
+            p.commands_mut()
+                .entity(e)
+                .insert(PanelField::VisiblePractice);
         });
 
         p.spawn((
@@ -314,23 +493,40 @@ fn spawn_lane_block(p: &mut ChildSpawnerCommands, t: &dtx_ui::theme::Theme, lane
         r.spawn((
             PresetCycleBtn(-1),
             Button,
-            Node { padding: UiRect::axes(Val::Px(6.0), Val::Px(1.0)), ..default() },
+            Node {
+                padding: UiRect::axes(Val::Px(6.0), Val::Px(1.0)),
+                ..default()
+            },
             BackgroundColor(Color::srgb(0.14, 0.14, 0.18)),
-            children![(Text::new("<"), dtx_ui::theme::Theme::font(12.0), TextColor(t.text_primary))],
+            children![(
+                Text::new("<"),
+                dtx_ui::theme::Theme::font(12.0),
+                TextColor(t.text_primary)
+            )],
         ));
         r.spawn((
             PresetLabel,
             Text::new(preset_name(lanes.0.preset).to_string()),
             dtx_ui::theme::Theme::font(12.0),
             TextColor(t.text_primary),
-            Node { min_width: Val::Px(70.0), ..default() },
+            Node {
+                min_width: Val::Px(70.0),
+                ..default()
+            },
         ));
         r.spawn((
             PresetCycleBtn(1),
             Button,
-            Node { padding: UiRect::axes(Val::Px(6.0), Val::Px(1.0)), ..default() },
+            Node {
+                padding: UiRect::axes(Val::Px(6.0), Val::Px(1.0)),
+                ..default()
+            },
             BackgroundColor(Color::srgb(0.14, 0.14, 0.18)),
-            children![(Text::new(">"), dtx_ui::theme::Theme::font(12.0), TextColor(t.text_primary))],
+            children![(
+                Text::new(">"),
+                dtx_ui::theme::Theme::font(12.0),
+                TextColor(t.text_primary)
+            )],
         ));
     });
 
@@ -360,14 +556,28 @@ fn spawn_lane_block(p: &mut ChildSpawnerCommands, t: &dtx_ui::theme::Theme, lane
                             r.spawn((
                                 LaneReorderBtn { index: i, dir },
                                 Button,
-                                Node { padding: UiRect::axes(Val::Px(4.0), Val::Px(1.0)), ..default() },
+                                Node {
+                                    padding: UiRect::axes(Val::Px(4.0), Val::Px(1.0)),
+                                    ..default()
+                                },
                                 BackgroundColor(Color::srgb(0.14, 0.14, 0.18)),
-                                children![(Text::new(sym), dtx_ui::theme::Theme::font(11.0), TextColor(t.text_primary))],
+                                children![(
+                                    Text::new(sym),
+                                    dtx_ui::theme::Theme::font(11.0),
+                                    TextColor(t.text_primary)
+                                )],
                             ));
                         } else {
                             r.spawn((
-                                Node { padding: UiRect::axes(Val::Px(4.0), Val::Px(1.0)), ..default() },
-                                children![(Text::new(sym), dtx_ui::theme::Theme::font(11.0), TextColor(t.text_secondary))],
+                                Node {
+                                    padding: UiRect::axes(Val::Px(4.0), Val::Px(1.0)),
+                                    ..default()
+                                },
+                                children![(
+                                    Text::new(sym),
+                                    dtx_ui::theme::Theme::font(11.0),
+                                    TextColor(t.text_secondary)
+                                )],
                             ));
                         }
                     }
@@ -375,7 +585,10 @@ fn spawn_lane_block(p: &mut ChildSpawnerCommands, t: &dtx_ui::theme::Theme, lane
                         Text::new(lane.id.clone()),
                         dtx_ui::theme::Theme::font(12.0),
                         TextColor(t.text_primary),
-                        Node { min_width: Val::Px(34.0), ..default() },
+                        Node {
+                            min_width: Val::Px(34.0),
+                            ..default()
+                        },
                     ));
                     // Chips: primary shown flat; secondaries are split buttons.
                     for ch in &chips {
@@ -390,7 +603,10 @@ fn spawn_lane_block(p: &mut ChildSpawnerCommands, t: &dtx_ui::theme::Theme, lane
                             r.spawn((
                                 ChipSplitBtn(*ch),
                                 Button,
-                                Node { padding: UiRect::axes(Val::Px(3.0), Val::Px(0.0)), ..default() },
+                                Node {
+                                    padding: UiRect::axes(Val::Px(3.0), Val::Px(0.0)),
+                                    ..default()
+                                },
                                 BackgroundColor(Color::srgb(0.18, 0.22, 0.28)),
                                 children![(
                                     Text::new(format!("{name} x")),
@@ -404,9 +620,16 @@ fn spawn_lane_block(p: &mut ChildSpawnerCommands, t: &dtx_ui::theme::Theme, lane
                         r.spawn((
                             LaneMergeBtn(i),
                             Button,
-                            Node { padding: UiRect::axes(Val::Px(4.0), Val::Px(1.0)), ..default() },
+                            Node {
+                                padding: UiRect::axes(Val::Px(4.0), Val::Px(1.0)),
+                                ..default()
+                            },
                             BackgroundColor(Color::srgb(0.3, 0.14, 0.14)),
-                            children![(Text::new("x"), dtx_ui::theme::Theme::font(11.0), TextColor(t.text_primary))],
+                            children![(
+                                Text::new("x"),
+                                dtx_ui::theme::Theme::font(11.0),
+                                TextColor(t.text_primary)
+                            )],
                         ));
                     }
                 });
@@ -422,12 +645,186 @@ fn spawn_lane_block(p: &mut ChildSpawnerCommands, t: &dtx_ui::theme::Theme, lane
                     let e = controls::spawn_slider(
                         r,
                         t,
-                        Slider { min: dtx_layout::MIN_LANE_WIDTH, max: dtx_layout::MAX_LANE_WIDTH },
+                        Slider {
+                            min: dtx_layout::MIN_LANE_WIDTH,
+                            max: dtx_layout::MAX_LANE_WIDTH,
+                        },
                         width,
                     );
                     r.commands_mut().entity(e).insert(LaneWidthSlider(i));
                 });
         });
+    }
+}
+
+fn spawn_settings_block(
+    commands: &mut Commands,
+    root: Entity,
+    t: &dtx_ui::theme::Theme,
+    tab: game_shell::CustomizeTab,
+    draft: &super::tabs::ConfigDraft,
+) {
+    use crate::editor::settings_data::SettingControl;
+    let items = crate::editor::settings_data::settings_items(tab);
+    commands.entity(root).with_children(|p| {
+        // Header row: tab title on the left, RESET TAB on the right.
+        p.spawn(Node {
+            flex_direction: FlexDirection::Row,
+            justify_content: JustifyContent::SpaceBetween,
+            align_items: AlignItems::Center,
+            ..default()
+        })
+        .with_children(|h| {
+            h.spawn((
+                Text::new(tab.label()),
+                dtx_ui::theme::Theme::font(13.0),
+                TextColor(t.text_primary),
+            ));
+            h.spawn((
+                ResetTabButton,
+                Button,
+                Node {
+                    padding: UiRect::axes(Val::Px(8.0), Val::Px(3.0)),
+                    ..default()
+                },
+                BackgroundColor(Color::srgb(0.3, 0.14, 0.14)),
+                children![(
+                    Text::new("RESET TAB"),
+                    dtx_ui::theme::Theme::font(10.0),
+                    TextColor(t.text_primary),
+                )],
+            ));
+        });
+
+        let mut prev_group = "";
+        for (i, item) in items.iter().enumerate() {
+            if item.group != prev_group && !item.group.is_empty() {
+                p.spawn((
+                    Text::new(item.group),
+                    dtx_ui::theme::Theme::font(10.0),
+                    TextColor(t.text_secondary),
+                    Node {
+                        margin: UiRect::top(Val::Px(4.0)),
+                        ..default()
+                    },
+                ));
+            }
+            prev_group = item.group;
+
+            let modified = (item.value)(&draft.0) != (item.value)(&dtx_config::Config::default());
+
+            p.spawn((
+                SettingRow(i),
+                RowDesc(item.desc),
+                Interaction::default(),
+                Node {
+                    flex_direction: FlexDirection::Row,
+                    justify_content: JustifyContent::SpaceBetween,
+                    align_items: AlignItems::Center,
+                    ..default()
+                },
+            ))
+            .with_children(|r| {
+                r.spawn(Node {
+                    flex_direction: FlexDirection::Row,
+                    align_items: AlignItems::Center,
+                    column_gap: Val::Px(6.0),
+                    ..default()
+                })
+                .with_children(|l| {
+                    let mut dot = l.spawn(Node {
+                        width: Val::Px(6.0),
+                        height: Val::Px(6.0),
+                        border_radius: BorderRadius::all(Val::Px(3.0)),
+                        ..default()
+                    });
+                    if modified {
+                        dot.insert(BackgroundColor(t.select_yellow));
+                    }
+                    l.spawn((
+                        Text::new(item.label),
+                        dtx_ui::theme::Theme::font(11.0),
+                        TextColor(t.text_secondary),
+                    ));
+                });
+                r.spawn(Node {
+                    flex_direction: FlexDirection::Row,
+                    align_items: AlignItems::Center,
+                    column_gap: Val::Px(4.0),
+                    ..default()
+                })
+                .with_children(|c| match item.control {
+                    SettingControl::Slider { min, max, .. } => {
+                        let e =
+                            controls::spawn_slider(c, t, Slider { min, max }, (item.raw)(&draft.0));
+                        c.commands_mut().entity(e).insert(SettingSlider(i));
+                        c.spawn((
+                            SettingValueText(i),
+                            Text::new((item.value)(&draft.0)),
+                            dtx_ui::theme::Theme::font(12.0),
+                            TextColor(t.text_primary),
+                            Node {
+                                min_width: Val::Px(52.0),
+                                ..default()
+                            },
+                        ));
+                    }
+                    SettingControl::Stepper => {
+                        c.spawn((
+                            SettingAdjust { index: i, dir: -1 },
+                            Button,
+                            Node {
+                                padding: UiRect::axes(Val::Px(6.0), Val::Px(1.0)),
+                                ..default()
+                            },
+                            BackgroundColor(Color::srgb(0.14, 0.14, 0.18)),
+                            children![(
+                                Text::new("<"),
+                                dtx_ui::theme::Theme::font(12.0),
+                                TextColor(t.text_primary)
+                            )],
+                        ));
+                        c.spawn((
+                            SettingValueText(i),
+                            Text::new((item.value)(&draft.0)),
+                            dtx_ui::theme::Theme::font(12.0),
+                            TextColor(t.text_primary),
+                            Node {
+                                min_width: Val::Px(60.0),
+                                ..default()
+                            },
+                        ));
+                        c.spawn((
+                            SettingAdjust { index: i, dir: 1 },
+                            Button,
+                            Node {
+                                padding: UiRect::axes(Val::Px(6.0), Val::Px(1.0)),
+                                ..default()
+                            },
+                            BackgroundColor(Color::srgb(0.14, 0.14, 0.18)),
+                            children![(
+                                Text::new(">"),
+                                dtx_ui::theme::Theme::font(12.0),
+                                TextColor(t.text_primary)
+                            )],
+                        ));
+                    }
+                });
+            });
+        }
+    });
+}
+
+/// Push the hovered settings row's description into the footer resource so the
+/// footer chrome can render it.
+fn update_hovered_desc(
+    rows: Query<(&Interaction, &RowDesc), Changed<Interaction>>,
+    mut hovered: ResMut<super::footer::HoveredDesc>,
+) {
+    for (interaction, row_desc) in &rows {
+        if *interaction == Interaction::Hovered {
+            hovered.0 = row_desc.0.to_string();
+        }
     }
 }
 
@@ -467,7 +864,7 @@ fn apply_panel_controls(
     mut undo: ResMut<super::undo::UndoStack>,
     geoms: Res<crate::widget_layout::WidgetGeoms>,
     pfl: Res<crate::layout::PlayfieldLayout>,
-    windows: Query<&Window, With<bevy::window::PrimaryWindow>>,
+    rect: Res<crate::stage_rect::StageRect>,
     mut snapped_this_hold: Local<bool>,
 ) {
     let Some(kind) = selection.0 else { return };
@@ -509,11 +906,10 @@ fn apply_panel_controls(
     }
 
     // Geometry-dependent conversion context.
-    let Ok(window) = windows.single() else { return };
-    let wsize = Vec2::new(window.width(), window.height());
-
     for (field, val, boolean) in &values {
-        let Some(inst) = layouts.0.get_mut(&kind) else { continue };
+        let Some(inst) = layouts.0.get_mut(&kind) else {
+            continue;
+        };
         // Only Scale forces Anchored placement (Natural renders scale as 1).
         // Offset works in BOTH modes — it's the ref-px delta — so an offset
         // stepper must NOT convert; converting first rewrites `inst.offset`
@@ -522,15 +918,21 @@ fn apply_panel_controls(
         let needs_anchor = matches!(field, PanelField::Scale);
         if needs_anchor {
             if let Some(g) = geoms.0.get(&kind).copied() {
-                let sc = wsize / 2.0;
+                let sc = rect.center();
                 let visual_min = crate::widget_layout::transform_point(
                     g.unscaled.min,
                     sc,
                     g.applied_translation,
                     g.applied_scale,
                 );
-                let parent = crate::widget_layout::parent_rect_px(inst.space, wsize, &pfl);
-                super::drag::ensure_anchored(inst, visual_min, g.unscaled.size(), parent, pfl.scale);
+                let parent = crate::widget_layout::parent_rect_px(inst.space, *rect, &pfl);
+                super::drag::ensure_anchored(
+                    inst,
+                    visual_min,
+                    g.unscaled.size(),
+                    parent,
+                    pfl.scale,
+                );
             }
         }
         match (field, val, boolean) {
@@ -555,7 +957,7 @@ fn apply_anchor_cells(
     mut undo: ResMut<super::undo::UndoStack>,
     geoms: Res<crate::widget_layout::WidgetGeoms>,
     pfl: Res<crate::layout::PlayfieldLayout>,
-    windows: Query<&Window, With<bevy::window::PrimaryWindow>>,
+    rect: Res<crate::stage_rect::StageRect>,
     mut cell_bg: Query<(&AnchorCell, &mut BackgroundColor)>,
     mut auto_bg: Query<&mut BackgroundColor, (With<AnchorAutoCell>, Without<AnchorCell>)>,
     theme: Res<dtx_ui::ThemeResource>,
@@ -568,19 +970,21 @@ fn apply_anchor_cells(
         }
     }
     let Some(new_anchor) = clicked else { return };
-    let Ok(window) = windows.single() else { return };
-    let Some(g) = geoms.0.get(&kind).copied() else { return };
+    let Some(g) = geoms.0.get(&kind).copied() else {
+        return;
+    };
     undo.push(&layouts, &lanes);
-    let Some(inst) = layouts.0.get_mut(&kind) else { return };
-    let wsize = Vec2::new(window.width(), window.height());
-    let sc = wsize / 2.0;
+    let Some(inst) = layouts.0.get_mut(&kind) else {
+        return;
+    };
+    let sc = rect.center();
     let visual_min = crate::widget_layout::transform_point(
         g.unscaled.min,
         sc,
         g.applied_translation,
         g.applied_scale,
     );
-    let parent = crate::widget_layout::parent_rect_px(inst.space, wsize, &pfl);
+    let parent = crate::widget_layout::parent_rect_px(inst.space, *rect, &pfl);
     super::drag::ensure_anchored(inst, visual_min, g.unscaled.size(), parent, pfl.scale);
     inst.anchor = new_anchor;
     inst.origin = new_anchor;
@@ -623,7 +1027,9 @@ fn handle_anchor_auto_cell(
         }
         let Some(kind) = selection.0 else { continue };
         undo.push(&layouts, &lanes);
-        let Some(inst) = layouts.0.get_mut(&kind) else { continue };
+        let Some(inst) = layouts.0.get_mut(&kind) else {
+            continue;
+        };
         inst.anchor_auto = !inst.anchor_auto;
         for mut bg in &mut cell_bg {
             bg.0 = if inst.anchor_auto {
@@ -658,13 +1064,19 @@ fn handle_reset(
 fn refresh_panel_values(
     selection: Res<Selection>,
     layouts: Res<WidgetLayouts>,
-    mut values: Query<(&PanelField, Option<&mut ControlValue>, Option<&mut ControlBool>)>,
+    mut values: Query<(
+        &PanelField,
+        Option<&mut ControlValue>,
+        Option<&mut ControlBool>,
+    )>,
 ) {
     if !layouts.is_changed() {
         return;
     }
     let Some(kind) = selection.0 else { return };
-    let Some(inst) = layouts.0.get(&kind) else { return };
+    let Some(inst) = layouts.0.get(&kind) else {
+        return;
+    };
     for (field, val, boolean) in &mut values {
         let want = match field {
             PanelField::OffsetX => Some(inst.offset.0),
@@ -712,7 +1124,9 @@ fn handle_lane_buttons(
     for (btn, i) in &reorders {
         if *i == Interaction::Pressed {
             let (index, dir) = (btn.index, btn.dir);
-            mutate = Some(Box::new(move |arr| dtx_layout::reorder_lane(arr, index, dir)));
+            mutate = Some(Box::new(move |arr| {
+                dtx_layout::reorder_lane(arr, index, dir)
+            }));
         }
     }
     for (btn, i) in &merges {
@@ -815,6 +1229,108 @@ fn refresh_lane_panel_values(
         let want = preset_name(lanes.0.preset);
         if text.0 != want {
             text.0 = want.to_string();
+        }
+    }
+}
+
+/// Settings-row ◂/▸ clicks: adjust the matching config draft item.
+fn handle_settings_adjust(
+    q: Query<(&Interaction, &SettingAdjust), Changed<Interaction>>,
+    active: Res<super::tabs::ActiveTab>,
+    mut draft: ResMut<super::tabs::ConfigDraft>,
+) {
+    if !active.0.is_settings() {
+        return;
+    }
+    let items = crate::editor::settings_data::settings_items(active.0);
+    for (interaction, adj) in &q {
+        if *interaction == Interaction::Pressed {
+            if let Some(item) = items.get(adj.index) {
+                (item.adjust)(&mut draft.0, adj.dir);
+            }
+        }
+    }
+}
+
+/// Settings-row slider drags → apply the snapped value to the config draft.
+/// Snaps to the control's `step` and only writes on a full-step move, so the
+/// draft never fights the continuous cursor position (mirrors the lane-width
+/// slider pattern; ConfigDraft mutation drives the existing live-apply).
+fn apply_settings_sliders(
+    active: Res<super::tabs::ActiveTab>,
+    sliders: Query<(&SettingSlider, &ControlValue), Changed<ControlValue>>,
+    mut draft: ResMut<super::tabs::ConfigDraft>,
+) {
+    use crate::editor::settings_data::SettingControl;
+    if !active.0.is_settings() {
+        return;
+    }
+    let items = crate::editor::settings_data::settings_items(active.0);
+    for (slider, value) in &sliders {
+        let Some(item) = items.get(slider.0) else {
+            continue;
+        };
+        if let SettingControl::Slider { min, max, step } = item.control {
+            let snapped = (((value.0 - min) / step).round() * step + min).clamp(min, max);
+            let cur = (item.raw)(&draft.0);
+            if (snapped - cur).abs() > step * 0.5 {
+                (item.set)(&mut draft.0, snapped);
+            }
+        }
+    }
+}
+
+/// RESET TAB click: restore every row of the active settings tab to its
+/// `Config::default()` value. Kit tabs don't spawn the button, so this is a
+/// no-op there (settings-only for now).
+fn handle_reset_tab(
+    q: Query<&Interaction, (With<ResetTabButton>, Changed<Interaction>)>,
+    active: Res<super::tabs::ActiveTab>,
+    mut draft: ResMut<super::tabs::ConfigDraft>,
+) {
+    if !active.0.is_settings() {
+        return;
+    }
+    let pressed = q.iter().any(|i| *i == Interaction::Pressed);
+    if !pressed {
+        return;
+    }
+    let d = dtx_config::Config::default();
+    for item in crate::editor::settings_data::settings_items(active.0) {
+        (item.reset)(&mut draft.0, &d);
+    }
+}
+
+/// Draft changes → refresh the visible settings values (text + slider knobs).
+fn refresh_settings_values(
+    active: Res<super::tabs::ActiveTab>,
+    draft: Res<super::tabs::ConfigDraft>,
+    mut texts: Query<(&SettingValueText, &mut Text)>,
+    mut sliders: Query<(&SettingSlider, &mut ControlValue)>,
+) {
+    use crate::editor::settings_data::SettingControl;
+    if !draft.is_changed() || !active.0.is_settings() {
+        return;
+    }
+    let items = crate::editor::settings_data::settings_items(active.0);
+    for (tag, mut text) in &mut texts {
+        if let Some(item) = items.get(tag.0) {
+            let want = (item.value)(&draft.0);
+            if text.0 != want {
+                text.0 = want;
+            }
+        }
+    }
+    // External changes (RESET TAB, live edits) → resync slider knobs. Guarded
+    // by a half-step threshold so an active drag isn't yanked back mid-motion.
+    for (slider, mut value) in &mut sliders {
+        if let Some(item) = items.get(slider.0) {
+            if let SettingControl::Slider { step, .. } = item.control {
+                let want = (item.raw)(&draft.0);
+                if (value.0 - want).abs() > step * 0.5 {
+                    value.0 = want;
+                }
+            }
         }
     }
 }

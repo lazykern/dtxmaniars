@@ -1,7 +1,7 @@
 //! Playfield layout — ref-resolution scaling for drums HUD (dtxpt-inspired).
 
 use bevy::prelude::*;
-use bevy::window::{PrimaryWindow, WindowResized};
+use bevy::window::PrimaryWindow;
 use dtx_ui::theme::{REF_HEIGHT, REF_WIDTH};
 use game_shell::AppState;
 
@@ -24,9 +24,11 @@ pub const REF_KEY_VIZ_OFFSET: f32 = 5.0;
 
 pub const REF_COMBO_Y: f32 = 72.0;
 
-#[derive(Resource, Clone, Debug)]
+#[derive(Resource, Clone, Debug, PartialEq)]
 pub struct PlayfieldLayout {
     pub scale: f32,
+    /// Absolute window-space offset of the stage rect (px); `(0,0)` = identity.
+    pub origin: Vec2,
     pub width: f32,
     pub height: f32,
     strip_ref_width: f32,
@@ -45,14 +47,22 @@ impl PlayfieldLayout {
     }
 
     pub fn from_size(width: f32, height: f32, lanes: &Lanes) -> Self {
-        let scale = (width / REF_WIDTH).min(height / REF_HEIGHT);
+        Self::from_rect(
+            crate::stage_rect::StageRect::full(Vec2::new(width, height)),
+            lanes,
+        )
+    }
+
+    pub fn from_rect(rect: crate::stage_rect::StageRect, lanes: &Lanes) -> Self {
+        let scale = (rect.size.x / REF_WIDTH).min(rect.size.y / REF_HEIGHT);
         let cols = (0..lanes.count())
             .map(|i| (lanes.ref_offset(i), lanes.ref_width(i)))
             .collect();
         Self {
             scale,
-            width,
-            height,
+            origin: rect.origin,
+            width: rect.size.x,
+            height: rect.size.y,
             strip_ref_width: lanes.strip_ref_width(),
             cols,
         }
@@ -79,11 +89,11 @@ impl PlayfieldLayout {
     }
 
     pub fn judge_y(&self) -> f32 {
-        REF_JUDGE_Y * self.scale
+        REF_JUDGE_Y * self.scale + self.origin.y
     }
 
     pub fn lane_top(&self) -> f32 {
-        REF_LANE_TOP * self.scale
+        REF_LANE_TOP * self.scale + self.origin.y
     }
 
     pub fn lane_height(&self) -> f32 {
@@ -92,7 +102,7 @@ impl PlayfieldLayout {
 
     pub fn col_left(&self, col: usize) -> f32 {
         let off = self.cols.get(col).map(|c| c.0).unwrap_or(0.0);
-        (self.ref_strip_left() + off) * self.scale
+        (self.ref_strip_left() + off) * self.scale + self.origin.x
     }
 
     pub fn col_width(&self, col: usize) -> f32 {
@@ -101,7 +111,7 @@ impl PlayfieldLayout {
     }
 
     pub fn strip_left(&self) -> f32 {
-        self.ref_strip_left() * self.scale
+        self.ref_strip_left() * self.scale + self.origin.x
     }
 
     pub fn strip_width(&self) -> f32 {
@@ -142,7 +152,7 @@ impl PlayfieldLayout {
     }
 
     pub fn phrase_x(&self) -> f32 {
-        self.ref_phrase_x() * self.scale
+        self.ref_phrase_x() * self.scale + self.origin.x
     }
 
     pub fn progress_bar_left(&self) -> f32 {
@@ -154,11 +164,11 @@ impl PlayfieldLayout {
     }
 
     pub fn progress_bar_top(&self) -> f32 {
-        696.0 * self.scale
+        696.0 * self.scale + self.origin.y
     }
 
     pub fn ref_hud_right(&self) -> f32 {
-        self.ref_hud_right_x() * self.scale
+        self.ref_hud_right_x() * self.scale + self.origin.x
     }
 
     pub fn px(&self, ref_px: f32) -> f32 {
@@ -170,7 +180,7 @@ impl PlayfieldLayout {
     }
 
     pub fn combo_top(&self) -> f32 {
-        self.px(REF_COMBO_Y)
+        self.px(REF_COMBO_Y) + self.origin.y
     }
 
     pub fn note_height(&self) -> f32 {
@@ -200,26 +210,21 @@ fn init_playfield_layout(
 }
 
 fn sync_playfield_layout(
-    mut resize_events: MessageReader<WindowResized>,
     windows: Query<&Window, With<PrimaryWindow>>,
     lanes: Res<Lanes>,
     mut layout: ResMut<PlayfieldLayout>,
-    mut dirty: Local<bool>,
 ) {
-    if resize_events.read().next().is_some() || lanes.is_changed() {
-        *dirty = true;
-    }
+    // The playfield always lays out at FULL WINDOW size. The Customize surface's
+    // "shrink into a miniature" is a single UiTransform on `HudRoot` (osu
+    // SetCustomRect model — see `stage_rect::apply_stage_transform`), NOT a
+    // layout-space rescale, so this only rebuilds on a real resize or lane edit.
     let Ok(window) = windows.single() else {
         return;
     };
-    if !*dirty {
-        let next_scale = (window.width() / REF_WIDTH).min(window.height() / REF_HEIGHT);
-        if next_scale == layout.scale && window.width() == layout.width {
-            return;
-        }
+    let want = PlayfieldLayout::from_window(window, &lanes);
+    if *layout != want {
+        *layout = want;
     }
-    *layout = PlayfieldLayout::from_window(window, &lanes);
-    *dirty = false;
 }
 
 #[cfg(test)]
@@ -255,8 +260,7 @@ mod tests {
         assert!((layout.col_left(0) - expected_left).abs() < 0.01);
         let last = layout.col_count() - 1;
         assert!(
-            (layout.col_left(last) + layout.col_width(last) - (expected_left + 558.0)).abs()
-                < 0.5,
+            (layout.col_left(last) + layout.col_width(last) - (expected_left + 558.0)).abs() < 0.5,
             "strip right edge should be centered"
         );
     }
@@ -276,14 +280,45 @@ mod tests {
     }
 
     #[test]
+    fn from_rect_full_window_equals_from_size() {
+        let lanes = Lanes::default();
+        let win = bevy::math::Vec2::new(1600.0, 900.0);
+        let from_size = PlayfieldLayout::from_size(win.x, win.y, &lanes);
+        let from_rect = PlayfieldLayout::from_rect(crate::stage_rect::StageRect::full(win), &lanes);
+        assert_eq!(
+            from_rect, from_size,
+            "identity rect must reproduce from_size exactly"
+        );
+    }
+
+    #[test]
+    fn from_rect_offset_shifts_all_x_by_origin() {
+        let lanes = Lanes::default();
+        let win = bevy::math::Vec2::new(1600.0, 900.0);
+        let base = PlayfieldLayout::from_rect(crate::stage_rect::StageRect::full(win), &lanes);
+        let shifted = PlayfieldLayout::from_rect(
+            crate::stage_rect::StageRect {
+                origin: bevy::math::Vec2::new(220.0, 0.0),
+                size: win,
+            },
+            &lanes,
+        );
+        assert_eq!(shifted.scale, base.scale);
+        assert!((shifted.col_left(0) - (base.col_left(0) + 220.0)).abs() < 0.01);
+        assert!((shifted.strip_left() - (base.strip_left() + 220.0)).abs() < 0.01);
+    }
+
+    #[test]
     fn wider_arrangement_widens_and_recenters_strip() {
         let section = dtx_layout::LanesSection {
             preset: dtx_layout::LanePreset::Custom,
             order: Some(
-                ["LC", "HH", "HHO", "LP", "SD", "HT", "BD", "LT", "FT", "CY", "RD"]
-                    .iter()
-                    .map(|s| s.to_string())
-                    .collect(),
+                [
+                    "LC", "HH", "HHO", "LP", "SD", "HT", "BD", "LT", "FT", "CY", "RD",
+                ]
+                .iter()
+                .map(|s| s.to_string())
+                .collect(),
             ),
             map: Some([("HHO".to_string(), "HHO".to_string())].into()),
             ..Default::default()

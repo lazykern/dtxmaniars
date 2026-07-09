@@ -273,20 +273,28 @@ pub fn play_bgm(
     path: &str,
     fade_in_ms: u32,
 ) -> Handle<AudioInstance> {
-    play_bgm_with_volume(audio, asset_server, bgm, instances, path, fade_in_ms, 1.0)
+    play_bgm_with_volume(audio, asset_server, bgm, instances, path, 1.0, fade_in_ms)
 }
 
+/// Play a BGM file at a linear gain (1.0 = unchanged), looped.
 pub fn play_bgm_with_volume(
     audio: &Audio,
     asset_server: &AssetServer,
     bgm: &mut BgmHandle,
     instances: &mut Assets<AudioInstance>,
     path: &str,
-    fade_in_ms: u32,
     volume: f32,
+    fade_in_ms: u32,
 ) -> Handle<AudioInstance> {
     play_bgm_from_seconds_with_volume(
-        audio, asset_server, bgm, instances, path, 0.0, fade_in_ms, volume,
+        audio,
+        asset_server,
+        bgm,
+        instances,
+        path,
+        0.0,
+        volume,
+        fade_in_ms,
     )
 }
 
@@ -309,11 +317,12 @@ pub fn play_bgm_from_seconds(
         instances,
         path,
         start_seconds,
-        fade_in_ms,
         1.0,
+        fade_in_ms,
     )
 }
 
+/// Play a BGM file from a stream-local offset at a linear gain.
 pub fn play_bgm_from_seconds_with_volume(
     audio: &Audio,
     asset_server: &AssetServer,
@@ -321,8 +330,8 @@ pub fn play_bgm_from_seconds_with_volume(
     instances: &mut Assets<AudioInstance>,
     path: &str,
     start_seconds: f64,
-    fade_in_ms: u32,
     volume: f32,
+    fade_in_ms: u32,
 ) -> Handle<AudioInstance> {
     stop_bgm(audio, bgm, instances);
     let source = asset_server
@@ -331,7 +340,6 @@ pub fn play_bgm_from_seconds_with_volume(
         .load(path.to_owned());
     let db = linear_gain_to_db(volume.clamp(0.0, 1.0));
     let handle = if fade_in_ms > 0 {
-        // kira fade_in tweens silence→with_volume target.
         audio
             .play(source)
             .looped()
@@ -596,6 +604,27 @@ fn linear_gain_to_db(gain: f32) -> f32 {
     }
 }
 
+/// Set linear gain on an active audio instance.
+pub fn set_instance_volume(
+    instances: &mut Assets<AudioInstance>,
+    handle: &Handle<AudioInstance>,
+    gain: f32,
+) {
+    if let Some(mut instance) = instances.get_mut(handle) {
+        instance.set_decibels(
+            linear_gain_to_db(gain.clamp(0.0, 1.0)),
+            AudioTween::default(),
+        );
+    }
+}
+
+/// Set linear gain on the tracked BGM instance if it exists.
+pub fn set_bgm_volume(bgm: &BgmHandle, instances: &mut Assets<AudioInstance>, gain: f32) {
+    if let Some(handle) = bgm.instance.as_ref() {
+        set_instance_volume(instances, handle, gain);
+    }
+}
+
 /// Get the current playback position in milliseconds, if BGM is playing.
 ///
 /// Returns `None` for Queued/Stopped states or when no BGM is loaded.
@@ -625,6 +654,16 @@ mod tests {
         assert_eq!(p.advance(1), 2);
         assert_eq!(p.advance(1), 3);
         assert_eq!(p.advance(1), 0);
+    }
+
+    #[test]
+    fn linear_gain_zero_is_silent_db() {
+        assert_eq!(linear_gain_to_db(0.0), -100.0);
+    }
+
+    #[test]
+    fn linear_gain_one_is_identity_db() {
+        assert!(linear_gain_to_db(1.0).abs() < 1e-6);
     }
 
     #[test]

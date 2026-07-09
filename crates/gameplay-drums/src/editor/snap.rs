@@ -41,6 +41,7 @@ pub fn plugin(app: &mut App) {
 fn spawn_guides_on_open(
     mut commands: Commands,
     open: Res<super::EditorOpen>,
+    roots: Query<Entity, With<crate::hud::HudRoot>>,
     existing: Query<Entity, With<SnapGuide>>,
 ) {
     if !open.is_changed() {
@@ -52,24 +53,35 @@ fn spawn_guides_on_open(
     for e in &existing {
         commands.entity(e).despawn();
     }
+    // Guides position from scene-space thirds, so they ride the HudRoot stage
+    // transform; `GlobalZIndex` keeps them above the preview scrim.
+    let Ok(root) = roots.single() else {
+        return;
+    };
+    let mut ids = Vec::with_capacity(4);
     for vertical in [true, false] {
         for which in [1u8, 2u8] {
-            commands.spawn((
-                EditorOverlay,
-                SnapGuide { vertical, which },
-                Node {
-                    position_type: PositionType::Absolute,
-                    width: if vertical { Val::Px(1.0) } else { Val::Px(0.0) },
-                    height: if vertical { Val::Px(0.0) } else { Val::Px(1.0) },
-                    ..default()
-                },
-                BackgroundColor(Color::srgba(1.0, 1.0, 1.0, 0.25)),
-                Visibility::Hidden,
-                GlobalZIndex(2050),
-                Pickable::IGNORE,
-            ));
+            ids.push(
+                commands
+                    .spawn((
+                        EditorOverlay,
+                        SnapGuide { vertical, which },
+                        Node {
+                            position_type: PositionType::Absolute,
+                            width: if vertical { Val::Px(1.0) } else { Val::Px(0.0) },
+                            height: if vertical { Val::Px(0.0) } else { Val::Px(1.0) },
+                            ..default()
+                        },
+                        BackgroundColor(Color::srgba(1.0, 1.0, 1.0, 0.25)),
+                        Visibility::Hidden,
+                        GlobalZIndex(crate::ui_z::SNAP_GUIDES),
+                        Pickable::IGNORE,
+                    ))
+                    .id(),
+            );
         }
     }
+    commands.entity(root).add_children(&ids);
 }
 
 /// While dragging with anchor_auto: nearest ninth from the widget's visual
@@ -80,7 +92,7 @@ fn apply_anchor_snap(
     selection: Res<Selection>,
     geoms: Res<WidgetGeoms>,
     pfl: Res<PlayfieldLayout>,
-    windows: Query<&Window, With<bevy::window::PrimaryWindow>>,
+    windows: Query<&Window>,
     mut layouts: ResMut<WidgetLayouts>,
 ) {
     if !matches!(gesture.0, Gesture::Move { .. }) {
@@ -90,20 +102,22 @@ fn apply_anchor_snap(
     if kind == WidgetKind::Playfield {
         return;
     }
-    let Ok(window) = windows.single() else { return };
-    let Some(g) = geoms.0.get(&kind).copied() else { return };
+    let Some(g) = geoms.0.get(&kind).copied() else {
+        return;
+    };
     let inst_ro = layouts.get(kind).clone();
     if !inst_ro.anchor_auto || inst_ro.placement != Placement::Anchored {
         // Natural widgets convert on gesture start (plan 2); if still Natural
         // here, offset-delta dragging continues un-snapped.
         return;
     }
-    let wsize = Vec2::new(window.width(), window.height());
-    let sc = wsize / 2.0;
+    let Ok(window) = windows.single() else { return };
+    let full = crate::stage_rect::StageRect::full(Vec2::new(window.width(), window.height()));
+    let sc = full.center();
     let vis_min = transform_point(g.unscaled.min, sc, g.applied_translation, g.applied_scale);
     let vis_max = transform_point(g.unscaled.max, sc, g.applied_translation, g.applied_scale);
     let center = (vis_min + vis_max) / 2.0;
-    let (px, py, pw, ph) = parent_rect_px(inst_ro.space, wsize, &pfl);
+    let (px, py, pw, ph) = parent_rect_px(inst_ro.space, full, &pfl);
     if pw <= 0.0 || ph <= 0.0 {
         return;
     }
@@ -112,7 +126,9 @@ fn apply_anchor_snap(
     if want == inst_ro.anchor {
         return;
     }
-    let Some(inst) = layouts.0.get_mut(&kind) else { return };
+    let Some(inst) = layouts.0.get_mut(&kind) else {
+        return;
+    };
     inst.anchor = want;
     inst.origin = want;
     let off_px = dtx_layout::offset_for_top_left(
@@ -133,7 +149,7 @@ fn sync_snap_guides(
     selection: Res<Selection>,
     layouts: Res<WidgetLayouts>,
     pfl: Res<PlayfieldLayout>,
-    windows: Query<&Window, With<bevy::window::PrimaryWindow>>,
+    windows: Query<&Window>,
     mut guides: Query<(&SnapGuide, &mut Node, &mut Visibility)>,
 ) {
     let dragging = matches!(gesture.0, Gesture::Move { .. });
@@ -150,8 +166,8 @@ fn sync_snap_guides(
     }
     let Some(kind) = selection.0 else { return };
     let Ok(window) = windows.single() else { return };
-    let wsize = Vec2::new(window.width(), window.height());
-    let (px, py, pw, ph) = parent_rect_px(layouts.get(kind).space, wsize, &pfl);
+    let full = crate::stage_rect::StageRect::full(Vec2::new(window.width(), window.height()));
+    let (px, py, pw, ph) = parent_rect_px(layouts.get(kind).space, full, &pfl);
     for (guide, mut node, mut vis) in &mut guides {
         let t = guide.which as f32 / 3.0;
         if guide.vertical {

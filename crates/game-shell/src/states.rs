@@ -14,8 +14,6 @@ pub enum AppState {
     Startup,
     /// CStageTitle — title screen, "Press ENTER to start".
     Title,
-    /// CStageConfig — settings/config screen.
-    Config,
     /// CStageSongSelectionNew — BocuD's new song select.
     SongSelect,
     /// CStageSongLoading — chart + BGM preview load.
@@ -107,3 +105,94 @@ pub struct PracticeIntent(pub bool);
 /// Title instead of Results.
 #[derive(Resource, Debug, Default, Clone, Copy, PartialEq, Eq)]
 pub struct EditorSession(pub bool);
+
+/// Which Customize-surface tab is active. SETTINGS group edits `config.toml`;
+/// KIT group edits the layout (lanes/widgets). Bindings tab lands in Phase 3.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum CustomizeTab {
+    Gameplay,
+    Audio,
+    Drums,
+    System,
+    Bindings,
+    Lanes,
+    Widgets,
+}
+
+impl CustomizeTab {
+    /// All tabs in rail order.
+    pub const ALL: [CustomizeTab; 7] = [
+        CustomizeTab::Gameplay,
+        CustomizeTab::Audio,
+        CustomizeTab::Drums,
+        CustomizeTab::System,
+        CustomizeTab::Bindings,
+        CustomizeTab::Lanes,
+        CustomizeTab::Widgets,
+    ];
+    /// Settings group (edits config.toml).
+    pub const SETTINGS: [CustomizeTab; 4] = [
+        CustomizeTab::Gameplay,
+        CustomizeTab::Audio,
+        CustomizeTab::Drums,
+        CustomizeTab::System,
+    ];
+    /// Kit group (edits layout.toml).
+    pub const KIT: [CustomizeTab; 3] = [
+        CustomizeTab::Bindings,
+        CustomizeTab::Lanes,
+        CustomizeTab::Widgets,
+    ];
+
+    /// Short rail label.
+    pub fn label(self) -> &'static str {
+        match self {
+            CustomizeTab::Gameplay => "Gameplay",
+            CustomizeTab::Audio => "Audio",
+            CustomizeTab::Drums => "Drums",
+            CustomizeTab::System => "System",
+            CustomizeTab::Bindings => "Bindings",
+            CustomizeTab::Lanes => "Lanes",
+            CustomizeTab::Widgets => "Widgets",
+        }
+    }
+
+    /// True if this tab edits `config.toml` (vs the layout).
+    pub fn is_settings(self) -> bool {
+        Self::SETTINGS.contains(&self)
+    }
+}
+
+/// Initial Customize tab to open, set by the entry key (F1/F2) before the
+/// SongLoading→Performance transition and consumed when the surface opens.
+#[derive(Resource, Default, Debug, Clone, Copy)]
+pub struct PendingCustomizeTab(pub Option<CustomizeTab>);
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn customize_tab_groups_partition_all_variants() {
+        let settings = CustomizeTab::SETTINGS;
+        let kit = CustomizeTab::KIT;
+        assert_eq!(settings.len() + kit.len(), CustomizeTab::ALL.len());
+        for t in CustomizeTab::ALL {
+            assert!(
+                settings.contains(&t) ^ kit.contains(&t),
+                "{t:?} must be in exactly one group"
+            );
+        }
+    }
+
+    #[test]
+    fn bindings_is_a_kit_tab() {
+        assert!(!CustomizeTab::Bindings.is_settings());
+        assert!(CustomizeTab::KIT.contains(&CustomizeTab::Bindings));
+    }
+
+    #[test]
+    fn pending_customize_tab_defaults_none() {
+        assert_eq!(PendingCustomizeTab::default().0, None);
+    }
+}

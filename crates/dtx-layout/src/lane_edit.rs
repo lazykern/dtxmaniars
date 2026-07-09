@@ -240,7 +240,11 @@ mod tests {
         let sig0 = structure_signature(&arr);
         set_lane_width(&mut arr, 0, 100.0);
         assert_eq!(arr.preset, LanePreset::Custom, "width edit flips preset");
-        assert_eq!(sig0, structure_signature(&arr), "width edit keeps signature");
+        assert_eq!(
+            sig0,
+            structure_signature(&arr),
+            "width edit keeps signature"
+        );
         set_lane_width(&mut arr, 0, 120.0);
         assert_eq!(sig0, structure_signature(&arr));
         split_channel(&mut arr, EChannel::HiHatOpen);

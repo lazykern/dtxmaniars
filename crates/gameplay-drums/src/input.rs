@@ -1,6 +1,8 @@
 //! Keyboard input → `LaneHit` events.
 //!
-//! Trivial bridge for M2: KeyDown → LaneHit. MIDI/pad mapping lands in M6+.
+//! Keys resolve to lanes via [`crate::bindings::BindResolver`], built from the
+//! persisted `dtx-config` `InputBindings`. MIDI is handled in the lib.rs
+//! `midi_consumer` module.
 //!
 //! ## Phase 0 p0-6
 //!
@@ -13,19 +15,21 @@ use std::time::{Duration, Instant};
 use bevy::prelude::*;
 use game_shell::EGameMode;
 
+use crate::bindings::BindResolver;
 use crate::events::LaneHit;
-use crate::lane_map::LaneMap;
 use crate::resources::GameplayClock;
 
 pub(super) fn plugin(app: &mut App) {
     app.init_resource::<PendingLaneInputs>()
         .add_systems(
             PreUpdate,
+            // Not gated on `editor_closed`: while the Customize surface is open we
+            // still want captured hits to reach `LaneHit` (flash + feedback sound).
+            // Scoring is gated instead — see `judge::judge_lane_hit_system`.
             capture_key_to_lane_input
                 .after(bevy::input::InputSystems)
                 .run_if(in_state(game_shell::AppState::Performance))
-                .run_if(in_state(game_shell::PauseState::Running))
-                .run_if(crate::editor::editor_closed),
+                .run_if(in_state(game_shell::PauseState::Running)),
         )
         .add_systems(
             FixedUpdate,
@@ -49,7 +53,7 @@ struct CapturedLaneInput {
 
 fn capture_key_to_lane_input(
     keys: Res<ButtonInput<KeyCode>>,
-    lane_map: Res<LaneMap>,
+    resolver: Res<BindResolver>,
     mode: Res<EGameMode>,
     mut pending: ResMut<PendingLaneInputs>,
 ) {
@@ -57,11 +61,9 @@ fn capture_key_to_lane_input(
         return;
     }
     for key in keys.get_just_pressed() {
-        if let Some(lane) = lane_map.lane_for_key(*key) {
-            pending.events.push(CapturedLaneInput {
-                lane,
-                captured_at: Instant::now(),
-            });
+        let captured_at = Instant::now();
+        for lane in resolver.lanes_for_key(*key) {
+            pending.events.push(CapturedLaneInput { lane, captured_at });
         }
     }
 }
@@ -98,21 +100,11 @@ mod tests {
     use super::*;
 
     #[test]
-    fn lane_map_drums_default_matches_bocud() {
+    fn resolver_drums_default_matches_bocud() {
         // BocuD default: X = HH, Space = BD.
-        // references/DTXmaniaNX-BocuD/DTXMania/Core/CConfigIni.cs:3783
-        let m = LaneMap::default_drums();
-        assert_eq!(m.lane_for_key(KeyCode::KeyX), Some(0));
-        assert_eq!(m.lane_for_key(KeyCode::Space), Some(2));
-    }
-
-    #[test]
-    fn guitar_mode_does_not_match_drums_keys() {
-        // When mode is Guitar, the drums system must early-return. The LaneMap
-        // itself doesn't change; the gating is at the system level.
-        let m = LaneMap::default_drums();
-        // LaneMap is purely structural — it does not depend on EGameMode.
-        assert!(m.lane_for_key(KeyCode::KeyX).is_some());
+        let r = crate::bindings::BindResolver::default();
+        assert_eq!(r.lane_for_key(KeyCode::KeyX), Some(0));
+        assert_eq!(r.lane_for_key(KeyCode::Space), Some(2));
     }
 
     #[test]

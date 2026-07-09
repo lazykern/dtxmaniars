@@ -13,9 +13,10 @@ use dtx_layout::WidgetKind;
 use crate::layout::PlayfieldLayout;
 use crate::widget_layout::{widget_visible, WidgetLayouts};
 
-/// Logical-px AABB per widget, rebuilt each frame while the editor is open.
-/// Entries persist across frames (last non-empty wins) so widgets that render
-/// nothing this instant (e.g. judgment popup between hits) stay grabbable.
+/// SCENE-space (full-window logical px, pre stage-transform) AABB per widget,
+/// rebuilt each frame while the editor is open. Entries persist across frames
+/// (last non-empty wins) so widgets that render nothing this instant (e.g.
+/// judgment popup between hits) stay grabbable.
 #[derive(Resource, Debug, Default)]
 pub struct WidgetAabbs(pub HashMap<WidgetKind, Rect>);
 
@@ -95,7 +96,11 @@ pub fn plugin(app: &mut App) {
         .init_resource::<CursorOverChrome>()
         .add_systems(
             Update,
-            (collect_widget_aabbs, update_cursor_over_chrome, update_hover)
+            (
+                collect_widget_aabbs,
+                update_cursor_over_chrome,
+                update_hover,
+            )
                 .chain()
                 .in_set(super::EditorPickSet)
                 .run_if(super::editor_open)
@@ -115,7 +120,7 @@ fn collect_widget_aabbs(
     layouts: Res<WidgetLayouts>,
     practice: Option<Res<crate::practice::PracticeSession>>,
     pfl: Res<PlayfieldLayout>,
-    windows: Query<&Window, With<bevy::window::PrimaryWindow>>,
+    windows: Query<&Window>,
 ) {
     let Ok(window) = windows.single() else { return };
     let sc = Vec2::new(window.width() / 2.0, window.height() / 2.0);
@@ -128,7 +133,9 @@ fn collect_widget_aabbs(
         if !widget_visible(layouts.get(kind), is_practice) {
             hidden.0.insert(kind);
         }
-        let Some(g) = geoms.0.get(&kind) else { continue };
+        let Some(g) = geoms.0.get(&kind) else {
+            continue;
+        };
         let vis = Rect::from_corners(
             crate::widget_layout::transform_point(
                 g.unscaled.min,
@@ -165,7 +172,9 @@ fn update_cursor_over_chrome(
 ) {
     over.0 = false;
     let Ok(window) = windows.single() else { return };
-    let Some(pos) = window.cursor_position() else { return };
+    let Some(pos) = window.cursor_position() else {
+        return;
+    };
     for (cn, gt) in &chrome {
         if node_rect(cn, gt).contains(pos) {
             over.0 = true;
@@ -182,6 +191,7 @@ fn update_hover(
     hidden: Res<CanvasHidden>,
     layouts: Res<WidgetLayouts>,
     windows: Query<&Window>,
+    rect: Res<crate::stage_rect::StageRect>,
 ) {
     if over_chrome.0 || !matches!(gesture.0, super::drag::Gesture::None) {
         hovered.0 = None;
@@ -192,6 +202,9 @@ fn update_hover(
         hovered.0 = None;
         return;
     };
+    // AABBs are scene-space; the cursor converts at the boundary.
+    let pos =
+        crate::stage_rect::window_to_scene(pos, *rect, Vec2::new(window.width(), window.height()));
     hovered.0 = candidates_at(&aabbs.0, |k| layouts.get(k).z, pos)
         .into_iter()
         .find(|k| !hidden.0.contains(k));
@@ -237,10 +250,20 @@ mod tests {
 
     #[test]
     fn cycle_wraps_through_candidates() {
-        let c = [WidgetKind::Combo, WidgetKind::ScorePanel, WidgetKind::Playfield];
+        let c = [
+            WidgetKind::Combo,
+            WidgetKind::ScorePanel,
+            WidgetKind::Playfield,
+        ];
         assert_eq!(cycle_pick(&c, None), Some(WidgetKind::Combo));
-        assert_eq!(cycle_pick(&c, Some(WidgetKind::Combo)), Some(WidgetKind::ScorePanel));
-        assert_eq!(cycle_pick(&c, Some(WidgetKind::Playfield)), Some(WidgetKind::Combo));
+        assert_eq!(
+            cycle_pick(&c, Some(WidgetKind::Combo)),
+            Some(WidgetKind::ScorePanel)
+        );
+        assert_eq!(
+            cycle_pick(&c, Some(WidgetKind::Playfield)),
+            Some(WidgetKind::Combo)
+        );
         assert_eq!(cycle_pick(&[], Some(WidgetKind::Combo)), None);
     }
 }

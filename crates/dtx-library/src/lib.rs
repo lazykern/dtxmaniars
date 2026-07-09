@@ -77,17 +77,16 @@ impl SongInfo {
 
         // Preview path: prefer #PREVIEW: file; fall back to full BGM.
         // (ADR-0015 Q1: per-chart, BocaD-compatible.)
-        let (preview_path, preview_is_loopable) =
-            match chart.metadata.preview_filename.as_deref() {
-                Some(name) => {
-                    let p = dtx_path.parent().map(|d| d.join(name));
-                    match p {
-                        Some(p) => (Some(p), true),
-                        None => (bgm_path.clone(), false),
-                    }
+        let (preview_path, preview_is_loopable) = match chart.metadata.preview_filename.as_deref() {
+            Some(name) => {
+                let p = dtx_path.parent().map(|d| d.join(name));
+                match p {
+                    Some(p) => (Some(p), true),
+                    None => (bgm_path.clone(), false),
                 }
-                None => (bgm_path.clone(), false),
-            };
+            }
+            None => (bgm_path.clone(), false),
+        };
 
         // Album art path: #PREIMAGE: (ADR-0015 deferred item (e)).
         let preimage_path = chart
@@ -393,7 +392,10 @@ mod tests {
         let info = SongInfo::from_chart(&path, &chart);
         assert_eq!(info.preview_path, Some(PathBuf::from("/songs/x/clip.ogg")));
         assert!(info.preview_is_loopable);
-        assert_eq!(info.preimage_path, Some(PathBuf::from("/songs/x/cover.jpg")));
+        assert_eq!(
+            info.preimage_path,
+            Some(PathBuf::from("/songs/x/cover.jpg"))
+        );
     }
 
     #[test]

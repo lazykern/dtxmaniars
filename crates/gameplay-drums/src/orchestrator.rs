@@ -210,6 +210,7 @@ pub fn enter_reset_run_state(
 /// limits when listed in a tuple.
 pub fn enter_derive_from_chart(
     chart: Res<ActiveChart>,
+    settings: Res<DrumAudioSettings>,
     mut completion: ResMut<DrumsStageCompletion>,
     mut bpm_changes: ResMut<BpmChangeList>,
     mut bar_changes: ResMut<BarLengthChangeList>,
@@ -223,7 +224,7 @@ pub fn enter_derive_from_chart(
             .as_ref()
             .and_then(|path| dtx_core::resolve_bgm_path(path, &chart.chart))
             .is_some();
-    if has_bgm {
+    if has_bgm && settings.bgm_enabled {
         gameplay_clock.start_audio_required();
     } else {
         gameplay_clock.start_wall_clock();
@@ -285,9 +286,9 @@ pub fn enter_seed_bgm_state(
 /// chips can play before the primary BGM starts.
 fn start_bgm_on_enter(
     chart: Res<ActiveChart>,
+    settings: Res<DrumAudioSettings>,
     audio: Res<Audio>,
     asset_server: Res<AssetServer>,
-    settings: Res<DrumAudioSettings>,
     mut bgm: ResMut<BgmHandle>,
     mut instances: ResMut<Assets<AudioInstance>>,
 ) {
@@ -307,8 +308,8 @@ fn start_bgm_on_enter(
             &mut bgm,
             &mut instances,
             &path_str,
+            settings.bgm_gain(),
             dtx_ui::SCREEN_TRANSITION_MS as u32,
-            settings.master_volume * settings.bgm_volume,
         );
     } else {
         warn!(
@@ -501,6 +502,7 @@ mod tests {
             .init_resource::<BpmChangeList>()
             .init_resource::<BarLengthChangeList>()
             .init_resource::<GameplayClock>()
+            .init_resource::<DrumAudioSettings>()
             .init_resource::<crate::derived::ChartDerived>()
             .init_resource::<SkillValue>()
             .init_resource::<crate::resources::CurrentEmptyHitTemplates>()
@@ -531,8 +533,6 @@ mod tests {
         // See docs/superpowers/specs/2026-07-05-bar-length-timing-fix-design.md.
         use dtx_core::channel::EChannel;
         use dtx_core::chart::{Chart, Chip, Metadata};
-        use dtx_timing::math::BarLengthChange;
-
         let mut chart = Chart {
             metadata: Metadata {
                 bpm: Some(171.0),

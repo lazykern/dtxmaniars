@@ -15,8 +15,11 @@ name = "dtxmaniars"
 path = "src/main.rs"
 
 [features]
-default = ["brp"]
+default = ["brp", "midi"]
 brp = ["dep:bevy_brp_extras"]
+# Real hardware MIDI input via midir. On by default for the shipping binary;
+# forwarded through gameplay-drums to dtx-input's `midi` feature.
+midi = ["gameplay-drums/midi"]
 
 [dependencies]
 bevy = { workspace = true, features = ["default", "bevy_remote", "system_font_discovery"] }

@@ -63,6 +63,18 @@ pub fn transform_point(p: Vec2, screen_center: Vec2, t: Vec2, s: f32) -> Vec2 {
     screen_center + s * (p - screen_center) + t
 }
 
+/// Compose two scale-about-the-same-center transforms: `outer(inner(p))`.
+/// Both pivot on the screen center (Bevy `UiTransform` node-center convention
+/// for full-screen nodes), so composition is linear in (T, s).
+pub fn compose_about_center(
+    t_outer: Vec2,
+    s_outer: f32,
+    t_inner: Vec2,
+    s_inner: f32,
+) -> (Vec2, f32) {
+    (s_outer * t_inner + t_outer, s_outer * s_inner)
+}
+
 /// Inverse of `transform_point` for a whole rect (recover unscaled geometry
 /// from a visual measurement under a known applied transform).
 pub fn untransform_rect(measured: Rect, screen_center: Vec2, t: Vec2, s: f32) -> Rect {
@@ -85,14 +97,19 @@ pub fn widget_visible(inst: &WidgetInstance, practice: bool) -> bool {
     }
 }
 
+/// Screen-space parent rect from the stage rect (origin-aware).
+fn screen_parent_rect(rect: crate::stage_rect::StageRect) -> (f32, f32, f32, f32) {
+    (rect.origin.x, rect.origin.y, rect.size.x, rect.size.y)
+}
+
 /// Parent rect (logical px) for a widget's anchor space.
 pub fn parent_rect_px(
     space: AnchorSpace,
-    window_size: Vec2,
+    rect: crate::stage_rect::StageRect,
     pfl: &PlayfieldLayout,
 ) -> (f32, f32, f32, f32) {
     match space {
-        AnchorSpace::Screen => (0.0, 0.0, window_size.x, window_size.y),
+        AnchorSpace::Screen => screen_parent_rect(rect),
         AnchorSpace::Playfield => (
             pfl.strip_left(),
             pfl.lane_top(),
@@ -113,11 +130,18 @@ pub(super) fn plugin(app: &mut App) {
                 apply_widget_layout.run_if(
                     resource_changed::<WidgetLayouts>
                         .or_else(resource_changed::<PlayfieldLayout>)
-                        .or_else(any_anchored_widget),
+                        .or_else(any_anchored_widget)
+                        .or_else(resource_changed::<crate::editor::PreviewState>),
                 ),
             )
                 .chain()
                 .run_if(in_state(AppState::Performance)),
+        )
+        .add_systems(
+            Update,
+            hide_practice_hud_on_preview
+                .run_if(in_state(AppState::Performance))
+                .run_if(resource_changed::<crate::editor::PreviewState>),
         );
 }
 
@@ -138,12 +162,17 @@ fn load_widget_layouts(mut layouts: ResMut<WidgetLayouts>) {
 }
 
 /// Measure every widget container's visual content rect and invert the applied
-/// transform to keep `WidgetGeoms` in unscaled space. Runs every frame in
-/// Performance (cheap: ~10 widgets, shallow trees).
+/// transforms to keep `WidgetGeoms` in unscaled SCENE space. The measured
+/// `UiGlobalTransform` includes BOTH the container's own `UiTransform` and the
+/// inherited HudRoot stage transform, so the inversion must strip their
+/// composition; `applied_*` still stores only the container's own transform
+/// (consumers reconstruct scene-space visual rects with it). Runs every frame
+/// in Performance (cheap: ~10 widgets, shallow trees).
 fn measure_widget_geoms(
     mut geoms: ResMut<WidgetGeoms>,
     windows: Query<&Window, With<bevy::window::PrimaryWindow>>,
-    containers: Query<(Entity, &WidgetContainer, &UiTransform)>,
+    roots: Query<&UiTransform, With<crate::hud::HudRoot>>,
+    containers: Query<(Entity, &WidgetContainer, &UiTransform), Without<crate::hud::HudRoot>>,
     children_q: Query<&Children>,
     nodes: Query<(&ComputedNode, &bevy::ui::UiGlobalTransform)>,
 ) {
@@ -151,12 +180,14 @@ fn measure_widget_geoms(
         return;
     };
     let sc = Vec2::new(window.width() / 2.0, window.height() / 2.0);
+    let (stage_t, stage_s) = roots.single().map(applied_of).unwrap_or((Vec2::ZERO, 1.0));
     for (entity, container, ui_tf) in &containers {
         let kind = container.0;
         if kind == WidgetKind::Playfield {
             continue;
         }
         let (t, s) = applied_of(ui_tf);
+        let (t_comp, s_comp) = compose_about_center(stage_t, stage_s, t, s);
         let mut union: Option<Rect> = None;
         let mut stack: Vec<Entity> = children_q
             .get(entity)
@@ -165,14 +196,15 @@ fn measure_widget_geoms(
         while let Some(e) = stack.pop() {
             // UI nodes carry `UiGlobalTransform` (not `GlobalTransform`); its
             // translation is the node center in physical px and already
-            // includes the container's applied UiTransform. Rendered size is
-            // the layout size times the accumulated scale `s`, so form the
-            // VISUAL rect here and let `untransform_rect` recover unscaled.
+            // includes the container's UiTransform AND the HudRoot stage
+            // transform. Rendered size is the layout size times the composed
+            // scale, so form the VISUAL rect here and let `untransform_rect`
+            // (with the composed transform) recover unscaled scene space.
             if let Ok((cn, gt)) = nodes.get(e) {
                 if cn.size().x > 0.0 && cn.size().y > 0.0 {
                     let inv = cn.inverse_scale_factor();
                     let center = gt.translation * inv;
-                    let size = cn.size() * inv * s;
+                    let size = cn.size() * inv * s_comp;
                     let r = Rect::from_center_size(center, size);
                     union = Some(union.map_or(r, |u| u.union(r)));
                 }
@@ -182,7 +214,7 @@ fn measure_widget_geoms(
             }
         }
         if let Some(measured) = union.filter(|r| r.width() >= 1.0 && r.height() >= 1.0) {
-            let unscaled = untransform_rect(measured, sc, t, s);
+            let unscaled = untransform_rect(measured, sc, t_comp, s_comp);
             geoms.0.insert(
                 kind,
                 WidgetGeom {
@@ -215,6 +247,7 @@ fn apply_widget_layout(
     practice: Option<Res<crate::practice::PracticeSession>>,
     pfl: Res<PlayfieldLayout>,
     windows: Query<&Window, With<bevy::window::PrimaryWindow>>,
+    state: Res<crate::editor::PreviewState>,
     mut containers: Query<(
         &WidgetContainer,
         &mut UiTransform,
@@ -222,11 +255,14 @@ fn apply_widget_layout(
         &mut Visibility,
     )>,
 ) {
+    // Widgets are placed in FULL-WINDOW space (their normal-play position); the
+    // Customize "shrink into a miniature" rides the shared `HudRoot` transform,
+    // so this anchors against the whole window, never the shrunk stage rect.
     let Ok(window) = windows.single() else {
         return;
     };
-    let wsize = Vec2::new(window.width(), window.height());
-    let sc = wsize / 2.0;
+    let rect = crate::stage_rect::StageRect::full(Vec2::new(window.width(), window.height()));
+    let sc = rect.center();
     let is_practice = practice.is_some();
     for (container, mut tf, z, mut vis) in &mut containers {
         let inst = layouts.get(container.0);
@@ -245,7 +281,7 @@ fn apply_widget_layout(
                     continue;
                 };
                 let size = (geom.unscaled.width(), geom.unscaled.height());
-                let parent = parent_rect_px(inst.space, wsize, &pfl);
+                let parent = parent_rect_px(inst.space, rect, &pfl);
                 let desired = dtx_layout::resolve_top_left(
                     inst.anchor,
                     inst.origin,
@@ -267,11 +303,55 @@ fn apply_widget_layout(
         if let Some(mut z) = z {
             *z = ZIndex(inst.z);
         }
-        *vis = if widget_visible(inst, is_practice) {
+        // On the Customize surface, non-Widgets tabs (settings/bindings/lanes)
+        // preview ONLY lanes+notes (HudRoot children, unaffected here), so hide
+        // every HUD widget container. The Playfield kind spawns no container, but
+        // exempt it defensively in case one is ever added.
+        let hide_for_preview = state.open
+            && state.tab != game_shell::CustomizeTab::Widgets
+            && container.0 != WidgetKind::Playfield;
+        *vis = if hide_for_preview {
+            Visibility::Hidden
+        } else if widget_visible(inst, is_practice) {
             Visibility::Inherited
         } else {
             Visibility::Hidden
         };
+    }
+}
+
+/// Hide the practice HUD roots (density strip + mini strip) when previewing a
+/// non-Widgets Customize tab, so only lanes+notes show. These are separate roots
+/// (not widget containers), so they need their own gate. When practice isn't
+/// active the queries match nothing (harmless).
+fn hide_practice_hud_on_preview(
+    state: Res<crate::editor::PreviewState>,
+    mut full_hud: Query<
+        &mut Visibility,
+        (
+            With<crate::practice::hud::full_hud::FullHudRoot>,
+            Without<crate::practice::hud::mini_strip::MiniStripRoot>,
+        ),
+    >,
+    mut mini_strip: Query<
+        &mut Visibility,
+        (
+            With<crate::practice::hud::mini_strip::MiniStripRoot>,
+            Without<crate::practice::hud::full_hud::FullHudRoot>,
+        ),
+    >,
+) {
+    let hide = state.open && state.tab != game_shell::CustomizeTab::Widgets;
+    let vis = if hide {
+        Visibility::Hidden
+    } else {
+        Visibility::Inherited
+    };
+    for mut v in &mut full_hud {
+        *v = vis;
+    }
+    for mut v in &mut mini_strip {
+        *v = vis;
     }
 }
 
@@ -314,6 +394,18 @@ mod tests {
     }
 
     #[test]
+    fn compose_about_center_matches_nested_transforms() {
+        let sc = Vec2::new(872.0, 545.0);
+        let (t_in, s_in) = (Vec2::new(40.0, -20.0), 1.5);
+        let (t_out, s_out) = (Vec2::new(-120.0, 60.0), 0.6);
+        let p = Vec2::new(300.0, 700.0);
+        let nested = transform_point(transform_point(p, sc, t_in, s_in), sc, t_out, s_out);
+        let (t_c, s_c) = compose_about_center(t_out, s_out, t_in, s_in);
+        let composed = transform_point(p, sc, t_c, s_c);
+        assert!((nested - composed).length() < 1e-3);
+    }
+
+    #[test]
     fn translation_for_places_content() {
         let sc = Vec2::new(640.0, 360.0);
         let u_min = Vec2::new(200.0, 100.0);
@@ -321,6 +413,21 @@ mod tests {
         let s = 2.0;
         let t = translation_for(desired, u_min, sc, s);
         assert!((transform_point(u_min, sc, t, s) - desired).length() < 0.001);
+    }
+
+    #[test]
+    fn screen_parent_rect_full_window_is_zero_origin() {
+        let rect = crate::stage_rect::StageRect::full(Vec2::new(1600.0, 900.0));
+        assert_eq!(screen_parent_rect(rect), (0.0, 0.0, 1600.0, 900.0));
+    }
+
+    #[test]
+    fn screen_parent_rect_offset_uses_origin() {
+        let rect = crate::stage_rect::StageRect {
+            origin: Vec2::new(220.0, 10.0),
+            size: Vec2::new(1000.0, 700.0),
+        };
+        assert_eq!(screen_parent_rect(rect), (220.0, 10.0, 1000.0, 700.0));
     }
 
     #[test]

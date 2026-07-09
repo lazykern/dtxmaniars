@@ -1,0 +1,114 @@
+//! Customize-surface tab state + settings draft lifecycle.
+
+use bevy::prelude::*;
+use bevy_kira_audio::prelude::*;
+use game_shell::{CustomizeTab, PendingCustomizeTab};
+
+pub(super) fn plugin(app: &mut App) {
+    app.init_resource::<ActiveTab>()
+        .init_resource::<ConfigDraft>()
+        .add_systems(
+            Update,
+            (
+                sync_active_tab_on_open,
+                save_draft_on_close,
+                apply_draft_live
+                    .run_if(super::editor_open)
+                    .run_if(resource_changed::<ConfigDraft>),
+            )
+                .run_if(in_state(game_shell::AppState::Performance)),
+        );
+}
+
+/// Which Customize tab is currently shown. Defaults to Widgets (F2 landing).
+#[derive(Resource, Debug, Clone, Copy)]
+pub struct ActiveTab(pub CustomizeTab);
+
+impl Default for ActiveTab {
+    fn default() -> Self {
+        Self(CustomizeTab::Widgets)
+    }
+}
+
+/// In-memory editable copy of `config.toml`, loaded when the surface opens,
+/// saved when it closes. Same persistence contract as the old config screen.
+#[derive(Resource, Default, Debug, Clone)]
+pub struct ConfigDraft(pub dtx_config::Config);
+
+/// On the frame the surface opens, load the config draft and adopt the pending
+/// tab (defaulting to Widgets when none was requested).
+fn sync_active_tab_on_open(
+    open: Res<super::EditorOpen>,
+    mut pending: ResMut<PendingCustomizeTab>,
+    mut active: ResMut<ActiveTab>,
+    mut draft: ResMut<ConfigDraft>,
+) {
+    if !open.is_changed() || !open.0 {
+        return;
+    }
+    draft.0 = dtx_config::load(&dtx_config::default_path());
+    if let Some(tab) = pending.0.take() {
+        active.0 = tab;
+    } else {
+        active.0 = CustomizeTab::Widgets;
+    }
+}
+
+/// When the surface closes, persist the draft (settings tabs auto-save on exit).
+fn save_draft_on_close(open: Res<super::EditorOpen>, draft: Res<ConfigDraft>) {
+    if !open.is_changed() || open.0 {
+        return;
+    }
+    let path = dtx_config::default_path();
+    if let Err(e) = dtx_config::save(&path, &draft.0) {
+        error!("customize: failed to save config {}: {e}", path.display());
+    }
+}
+
+/// Draft edits with a live runtime resource apply immediately while open.
+fn apply_draft_live(
+    draft: Res<ConfigDraft>,
+    audio: Res<Audio>,
+    mut scroll: ResMut<crate::resources::ScrollSettings>,
+    mut input_offset: ResMut<crate::resources::InputOffsetMs>,
+    mut bgm_adjust: ResMut<crate::resources::BgmAdjustState>,
+    mut audio_settings: ResMut<crate::resources::DrumAudioSettings>,
+    mut bgm: ResMut<dtx_audio::BgmHandle>,
+    mut instances: ResMut<Assets<AudioInstance>>,
+) {
+    *scroll = crate::resources::ScrollSettings::from_scroll_speed(draft.0.gameplay.scroll_speed);
+    input_offset.0 = draft.0.gameplay.input_offset_ms;
+    bgm_adjust.common_ms = draft.0.gameplay.bgm_adjust_ms;
+
+    let next_audio = crate::resources::DrumAudioSettings {
+        bgm_enabled: draft.0.audio.bgm_enabled,
+        drum_enabled: draft.0.audio.drum_sound_enabled,
+        master_volume: draft.0.audio.master_volume,
+        bgm_volume: draft.0.audio.bgm_volume,
+        drum_volume: draft.0.audio.drum_volume,
+    };
+    if *audio_settings == next_audio {
+        return;
+    }
+    *audio_settings = next_audio;
+    if audio_settings.bgm_enabled {
+        dtx_audio::set_bgm_volume(&bgm, &mut instances, audio_settings.bgm_gain());
+    } else {
+        dtx_audio::stop_bgm(&audio, &mut bgm, &mut instances);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn active_tab_defaults_to_widgets() {
+        assert_eq!(ActiveTab::default().0, CustomizeTab::Widgets);
+    }
+
+    #[test]
+    fn config_draft_defaults_to_config_default() {
+        assert_eq!(ConfigDraft::default().0, dtx_config::Config::default());
+    }
+}

@@ -12,17 +12,19 @@
 //! Reference: `references/DTXmaniaNX-BocuD/DTXMania/Stage/06.Performance/DrumsScreen/*`
 //! Lane order: LC, HH, SD, BD, HT, LT, FT, CY, LP, RD, HHO (BocuD CActPerfDrumsLaneFlushD.cs).
 
-pub mod beat_lines;
 pub mod autoplay;
+pub mod beat_lines;
 pub mod bgm_scheduler;
+pub mod bindings;
 pub mod components;
 pub mod damage_level;
 pub mod derived;
 pub mod drum_groups;
-pub mod editor;
 pub mod drums_perf;
+pub mod editor;
 pub mod events;
 pub mod gauge;
+pub mod hit_feedback;
 pub mod hit_sound;
 pub mod hud;
 pub mod hud_cache;
@@ -30,25 +32,27 @@ pub mod input;
 pub mod interp;
 pub mod judge;
 pub mod keyboard_viz;
-pub mod phrase;
-pub mod skill;
 pub mod lane_map;
 pub mod lanes;
 pub mod layout;
 pub mod miss;
 pub mod orchestrator;
 pub mod pause;
-pub mod perf_hotkeys;
-pub mod stage_end;
 pub mod perf_common;
+pub mod perf_hotkeys;
+pub mod phrase;
 pub mod practice;
 pub mod resources;
 pub mod score;
 pub mod scroll;
 pub mod se_scheduler;
 pub mod seek;
+pub mod skill;
 pub mod sound_bank;
+pub mod stage_end;
+pub mod stage_rect;
 pub mod timeline;
+pub mod ui_z;
 pub mod widget_layout;
 
 use std::time::Duration;
@@ -102,7 +106,6 @@ pub fn plugin(app: &mut App) {
     .init_resource::<phrase::PhraseMeter>()
     .init_resource::<derived::ChartDerived>()
     .init_resource::<dtx_audio::DrumPolyphony>()
-    .init_resource::<lane_map::LaneMap>()
     .init_resource::<lanes::Lanes>()
     .init_resource::<hud_cache::HudDisplayCache>()
     .init_resource::<dtx_input::midi::VirtualSource>()
@@ -184,14 +187,17 @@ pub fn plugin(app: &mut App) {
         interp::plugin,
     ))
     .add_plugins((
+        bindings::plugin,
         beat_lines::plugin,
         se_scheduler::plugin,
         midi_consumer::plugin,
         pause::plugin,
         perf_hotkeys::plugin,
         stage_end::plugin,
+        stage_rect::plugin,
         practice::plugin,
         editor::plugin,
+        hit_feedback::plugin,
     ));
 }
 
@@ -210,8 +216,8 @@ fn load_scroll_settings(mut settings: ResMut<resources::ScrollSettings>) {
 /// Map the persisted `dtx_config::DamageLevel` onto the gameplay
 /// `dtx_core::constants::DamageLevel` used by the gauge.
 fn map_damage_level(level: dtx_config::DamageLevel) -> dtx_core::constants::DamageLevel {
-    use dtx_core::constants::DamageLevel as Core;
     use dtx_config::DamageLevel as Cfg;
+    use dtx_core::constants::DamageLevel as Core;
     match level {
         Cfg::None => Core::None,
         Cfg::Small => Core::Small,
@@ -238,8 +244,8 @@ fn apply_config_on_enter(
     let cfg = load(&default_path());
     *scroll = resources::ScrollSettings::from_scroll_speed(cfg.gameplay.scroll_speed);
     scroll.play_speed = play_speed_multiplier(cfg.gameplay.play_speed);
-    audio.enabled = cfg.audio.drum_sound_enabled;
     audio.bgm_enabled = cfg.audio.bgm_enabled;
+    audio.drum_enabled = cfg.audio.drum_sound_enabled;
     audio.master_volume = cfg.audio.master_volume;
     audio.bgm_volume = cfg.audio.bgm_volume;
     audio.drum_volume = cfg.audio.drum_volume;
@@ -252,9 +258,7 @@ fn apply_config_on_enter(
     bgm_adjust.song_ms = chart
         .source_path
         .as_ref()
-        .map(|p| {
-            dtx_scoring::score_ini::read_bgm_adjust(dtx_scoring::score_ini::score_ini_path(p))
-        })
+        .map(|p| dtx_scoring::score_ini::read_bgm_adjust(dtx_scoring::score_ini::score_ini_path(p)))
         .unwrap_or(0);
 }
 
@@ -266,8 +270,8 @@ fn load_drum_audio_settings(
     use dtx_config::{default_path, load};
     let cfg = load(&default_path());
     *settings = resources::DrumAudioSettings {
-        enabled: cfg.audio.drum_sound_enabled,
         bgm_enabled: cfg.audio.bgm_enabled,
+        drum_enabled: cfg.audio.drum_sound_enabled,
         master_volume: cfg.audio.master_volume,
         bgm_volume: cfg.audio.bgm_volume,
         drum_volume: cfg.audio.drum_volume,
@@ -293,6 +297,11 @@ fn sync_gameplay_clock(
 
 mod midi_consumer {
     //! Polls `dtx_input::midi::VirtualSource` and emits gameplay-drums `LaneHit`s.
+    //!
+    //! When the `midi` feature is enabled, a feature-gated `drain_real_midi`
+    //! system drains a real `midir`-backed source into `VirtualSource` first,
+    //! so real events flow through the exact same path as virtual ones and
+    //! `poll_midi` handles everything uniformly.
 
     use bevy::prelude::*;
     use dtx_input::midi::{MidiSource, VirtualSource};
@@ -300,20 +309,106 @@ mod midi_consumer {
     use super::events::LaneHit;
     use crate::resources::{ActiveChart, GameplayClock};
 
+    /// Last MIDI NoteOn observed by `poll_midi`, written before the threshold
+    /// gate. Drives the bindings-tab velocity meter and MIDI note capture,
+    /// avoiding a second drain that would race `poll_midi`.
+    #[derive(Resource, Default, Debug, Clone, Copy)]
+    pub struct LastMidiHit {
+        pub note: u8,
+        pub velocity: u8,
+        pub below_threshold: bool,
+        pub at: Option<std::time::Instant>,
+    }
+
+    /// Holds the live real-MIDI connection. Stored as a **non-send** resource
+    /// because `midir` connections are not `Sync`; systems touching it run on
+    /// the main thread only.
+    #[cfg(feature = "midi")]
+    #[derive(Default)]
+    struct MidiConnection {
+        source: Option<dtx_input::midi::RealMidiSource>,
+        port_filter: Option<String>,
+    }
+
     pub(super) fn plugin(app: &mut App) {
-        app.add_systems(
+        app.init_resource::<LastMidiHit>().add_systems(
             FixedUpdate,
             poll_midi
                 .in_set(super::DrumsSets::Input)
                 .run_if(in_state(game_shell::AppState::Performance)),
         );
+
+        #[cfg(feature = "midi")]
+        {
+            app.insert_non_send(MidiConnection::default())
+                .add_systems(OnEnter(game_shell::AppState::Performance), connect_midi)
+                .add_systems(
+                    Update,
+                    connect_midi.run_if(
+                        resource_changed::<crate::bindings::LiveBindings>
+                            .and_then(in_state(game_shell::AppState::Performance)),
+                    ),
+                )
+                .add_systems(
+                    FixedUpdate,
+                    drain_real_midi
+                        .in_set(super::DrumsSets::Input)
+                        .before(poll_midi)
+                        .run_if(in_state(game_shell::AppState::Performance)),
+                );
+        }
+    }
+
+    /// Connect (or reconnect) the real MIDI source using the port filter from
+    /// `LiveBindings`. Runs on Performance enter and whenever the bindings
+    /// (hence the selected port) change. Reconnect overwrites, dropping the old
+    /// connection. Non-send: runs on the main thread only.
+    #[cfg(feature = "midi")]
+    fn connect_midi(
+        mut conn: NonSendMut<MidiConnection>,
+        live: Res<crate::bindings::LiveBindings>,
+    ) {
+        let filter = live.0.midi.port.clone();
+        if conn.source.is_some() && conn.port_filter == filter {
+            return;
+        }
+        match dtx_input::midi::RealMidiSource::connect(filter.as_deref()) {
+            Ok((src, name)) => {
+                info!("MIDI connected: {name}");
+                conn.source = Some(src);
+                conn.port_filter = filter;
+            }
+            Err(e) => {
+                warn!("MIDI connect failed: {e}");
+                conn.source = None;
+                conn.port_filter = filter;
+            }
+        }
+    }
+
+    /// Drain the real MIDI source into `VirtualSource` so real events are
+    /// indistinguishable from virtual ones downstream. Real events carry
+    /// `audio_ms == 0`; `poll_midi` restamps them with the current
+    /// `GameplayClock`. Non-send: runs on the main thread only.
+    #[cfg(feature = "midi")]
+    fn drain_real_midi(mut conn: NonSendMut<MidiConnection>, mut virt: ResMut<VirtualSource>) {
+        let Some(src) = conn.source.as_mut() else {
+            return;
+        };
+        let mut buf: Vec<dtx_input::midi::MidiEvent> = Vec::new();
+        src.poll(&mut buf);
+        for ev in buf {
+            virt.push(ev);
+        }
     }
 
     fn poll_midi(
         mut source: ResMut<VirtualSource>,
+        resolver: Res<crate::bindings::BindResolver>,
         chart: Res<ActiveChart>,
         clock: Res<GameplayClock>,
         mut hits: MessageWriter<LaneHit>,
+        mut last: ResMut<LastMidiHit>,
     ) {
         if source.is_empty() {
             return;
@@ -324,13 +419,36 @@ mod midi_consumer {
         if !clock.is_ready() {
             return;
         }
-        let mut buf: Vec<dtx_input::LaneHit> = Vec::new();
+        let mut buf: Vec<dtx_input::midi::MidiEvent> = Vec::new();
         (*source).poll(&mut buf);
-        for h in buf {
+        for ev in buf {
+            // NoteOff / CC ignored (HH pedal CC handling is v2).
+            let dtx_input::midi::MidiEvent::NoteOn {
+                note,
+                velocity,
+                audio_ms,
+            } = ev
+            else {
+                continue;
+            };
+            // Capture the last hit before the threshold gate so the meter +
+            // capture see soft (ignored) hits too.
+            *last = LastMidiHit {
+                note,
+                velocity,
+                below_threshold: velocity <= resolver.velocity_threshold,
+                at: Some(std::time::Instant::now()),
+            };
+            if velocity == 0 || velocity <= resolver.velocity_threshold {
+                continue;
+            }
+            let Some(lane) = resolver.lane_for_note(note) else {
+                continue;
+            };
             hits.write(LaneHit {
-                lane: h.lane,
-                audio_ms: if h.audio_ms != 0 {
-                    h.audio_ms
+                lane,
+                audio_ms: if audio_ms != 0 {
+                    audio_ms
                 } else {
                     clock.current_ms
                 },
@@ -338,6 +456,8 @@ mod midi_consumer {
         }
     }
 }
+
+pub use midi_consumer::LastMidiHit;
 
 /// Re-export as struct form for callers that prefer `add_plugins(...)` syntax.
 pub use plugin as DrumsPlugin;

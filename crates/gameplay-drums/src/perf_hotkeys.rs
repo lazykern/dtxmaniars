@@ -107,6 +107,10 @@ pub(super) fn plugin(app: &mut App) {
         )
         .add_systems(
             Update,
+            reload_draft_on_editor_close.run_if(in_state(AppState::Performance)),
+        )
+        .add_systems(
+            Update,
             (handle_perf_hotkeys, debounced_persist_perf_hotkeys)
                 .chain()
                 .run_if(in_state(AppState::Performance))
@@ -125,6 +129,21 @@ fn drums_mode_active(mode: Res<EGameMode>) -> bool {
 fn init_perf_hotkey_draft(mut draft: ResMut<PerfHotkeyDraft>, show: Res<ShowPerfInfo>) {
     draft.reload();
     draft.cfg.system.show_perf_info = show.0;
+}
+
+/// The Customize surface saves its own config draft on close; the perf-hotkey
+/// draft (loaded at song start) is stale then — the next arrow-key press would
+/// persist stale config over the Customize edits. Reload it when the surface
+/// closes.
+fn reload_draft_on_editor_close(
+    open: Res<crate::editor::EditorOpen>,
+    mut draft: ResMut<PerfHotkeyDraft>,
+    show: Res<ShowPerfInfo>,
+) {
+    if open.is_changed() && !open.0 {
+        draft.reload();
+        draft.cfg.system.show_perf_info = show.0;
+    }
 }
 
 fn toggle_perf_info(

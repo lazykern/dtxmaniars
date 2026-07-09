@@ -5,9 +5,8 @@ use dtx_scoring::JudgmentKind;
 use dtx_ui::{
     theme::REF_WIDTH,
     widget::{
-        combo_display::ComboDisplay, frame_chrome, hud_ref::HudRefRect, judgment_popup,
-        live_graph, now_playing, perf_combo, phrase_meter, playfield_speed, score_detailed,
-        song_progress,
+        combo_display::ComboDisplay, frame_chrome, hud_ref::HudRefRect, judgment_popup, live_graph,
+        now_playing, perf_combo, phrase_meter, playfield_speed, score_detailed, song_progress,
     },
     ThemeResource,
 };
@@ -16,10 +15,10 @@ use game_shell::{AppState, EGameMode};
 use dtx_layout::WidgetKind;
 
 use crate::components::LastJudgment;
-use crate::widget_layout::WidgetContainer;
 use crate::derived::ChartDerived;
 use crate::hud_cache::{set_text_if_changed, HudDisplayCache};
 use crate::keyboard_viz;
+use crate::widget_layout::WidgetContainer;
 
 pub use crate::lane_map::LANE_COUNT;
 use crate::layout::PlayfieldLayout;
@@ -141,6 +140,11 @@ fn spawn_hud(
                 height: Val::Percent(100.0),
                 ..default()
             },
+            // Single stage transform (identity in normal play). The Customize
+            // surface shrinks the whole scene — playfield + every HUD widget,
+            // all children of this root — into a miniature via this one
+            // transform (`stage_rect::apply_stage_transform`).
+            bevy::ui::UiTransform::default(),
             BackgroundColor(Color::srgb(0.0, 0.0, 0.0)),
         ))
         .id();
@@ -255,8 +259,20 @@ fn apply_hit_line_layout(
 
 fn apply_progress_layout(
     layout: Res<PlayfieldLayout>,
-    mut track: Query<&mut Node, (With<song_progress::SongProgressTrack>, Without<song_progress::SongProgressFill>)>,
-    mut fill: Query<&mut Node, (With<song_progress::SongProgressFill>, Without<song_progress::SongProgressTrack>)>,
+    mut track: Query<
+        &mut Node,
+        (
+            With<song_progress::SongProgressTrack>,
+            Without<song_progress::SongProgressFill>,
+        ),
+    >,
+    mut fill: Query<
+        &mut Node,
+        (
+            With<song_progress::SongProgressFill>,
+            Without<song_progress::SongProgressTrack>,
+        ),
+    >,
 ) {
     for mut node in &mut track {
         node.left = Val::Px(layout.progress_bar_left());
@@ -274,7 +290,7 @@ fn apply_speed_layout(
     mut speed: Query<(&HudRefRect, &mut Node), With<playfield_speed::PlayfieldSpeedText>>,
 ) {
     for (rect, mut node) in &mut speed {
-        rect.apply(layout.scale, &mut node);
+        rect.apply(layout.scale, layout.origin, &mut node);
     }
 }
 
@@ -294,7 +310,7 @@ fn apply_hud_ref_layout(
     >,
 ) {
     for (rect, mut node) in &mut q {
-        rect.apply(layout.scale, &mut node);
+        rect.apply(layout.scale, layout.origin, &mut node);
     }
 }
 
@@ -504,7 +520,12 @@ fn sync_now_playing(
     if !chart.is_changed() {
         return;
     }
-    let title = chart.chart.metadata.title.as_deref().unwrap_or("— no chart —");
+    let title = chart
+        .chart
+        .metadata
+        .title
+        .as_deref()
+        .unwrap_or("— no chart —");
     let artist = chart.chart.metadata.artist.as_deref().unwrap_or("");
     let maker = chart.chart.metadata.maker.as_deref().unwrap_or("");
     for mut t in &mut q_title {
@@ -580,8 +601,8 @@ fn sync_phrase_meter(
     let cur = ((head_from_top * blocks) as usize).min(phrase_meter::PHRASE_BLOCKS - 1);
     for (sec, rect, mut node, mut color) in &mut q {
         let units = derived.phrase.block_units(sec.index);
-        node.left = Val::Px(rect.left * s);
-        node.top = Val::Px(rect.top * s);
+        node.left = Val::Px(rect.left * s + layout.origin.x);
+        node.top = Val::Px(rect.top * s + layout.origin.y);
         node.height = Val::Px(rect.height * s);
         node.width = Val::Px(unit_w * units as f32 * s);
         let center_from_top = (sec.index as f32 + 0.5) / blocks;
@@ -610,8 +631,8 @@ fn sync_phrase_playhead(
     let bar_h = phrase_meter::PHRASE_BAR_H;
     let y = (1.0 - frac) * bar_h;
     for (rect, mut n) in &mut q {
-        n.top = Val::Px(y * layout.scale);
-        n.left = Val::Px(rect.left * layout.scale);
+        n.top = Val::Px(y * layout.scale + layout.origin.y);
+        n.left = Val::Px(rect.left * layout.scale + layout.origin.x);
         n.width = Val::Px(rect.width * layout.scale);
         n.height = Val::Px(rect.height * layout.scale);
     }
@@ -644,15 +665,15 @@ fn sync_live_graph(
     for (bar, rect, mut node) in &mut q {
         // Bars are excluded from apply_hud_ref_layout, so re-apply x/width here
         // too or they detach from the panel on a window-scale change.
-        node.left = Val::Px(rect.left * s);
+        node.left = Val::Px(rect.left * s + layout.origin.x);
         node.width = Val::Px(rect.width.max(1.0) * s);
         let Some(acc) = history.samples.get(bar.slot).copied().flatten() else {
-            node.top = Val::Px(rect.top * s);
+            node.top = Val::Px(rect.top * s + layout.origin.y);
             node.height = Val::Px(0.0);
             continue;
         };
         let h = live_graph::bar_height(acc, bar_area_h);
-        node.top = Val::Px((rect.top - h) * s);
+        node.top = Val::Px((rect.top - h) * s + layout.origin.y);
         node.height = Val::Px(h * s);
     }
 }

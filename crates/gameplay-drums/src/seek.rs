@@ -262,7 +262,7 @@ pub fn start_pending_bgm(
             &sound.path.to_string_lossy(),
             sound.volume,
             sound.pan,
-            settings.master_volume * settings.bgm_volume,
+            settings.bgm_gain(),
             p.start_seconds,
             0,
         );
@@ -274,8 +274,8 @@ pub fn start_pending_bgm(
             &mut instances,
             &p.path,
             p.start_seconds,
+            settings.bgm_gain(),
             0,
-            settings.master_volume * settings.bgm_volume,
         );
     }
 }

@@ -126,23 +126,40 @@ pub fn spawn_stepper(
             (
                 StepperBtn(-1),
                 Button,
-                Node { padding: UiRect::axes(Val::Px(6.0), Val::Px(1.0)), ..default() },
+                Node {
+                    padding: UiRect::axes(Val::Px(6.0), Val::Px(1.0)),
+                    ..default()
+                },
                 BackgroundColor(Color::srgb(0.14, 0.14, 0.18)),
-                children![(Text::new("-"), Theme::font(12.0), TextColor(theme.text_primary))],
+                children![(
+                    Text::new("-"),
+                    Theme::font(12.0),
+                    TextColor(theme.text_primary)
+                )],
             ),
             (
                 StepperLabel,
                 Text::new(""),
                 Theme::font(12.0),
                 TextColor(theme.text_primary),
-                Node { min_width: Val::Px(44.0), ..default() },
+                Node {
+                    min_width: Val::Px(44.0),
+                    ..default()
+                },
             ),
             (
                 StepperBtn(1),
                 Button,
-                Node { padding: UiRect::axes(Val::Px(6.0), Val::Px(1.0)), ..default() },
+                Node {
+                    padding: UiRect::axes(Val::Px(6.0), Val::Px(1.0)),
+                    ..default()
+                },
                 BackgroundColor(Color::srgb(0.14, 0.14, 0.18)),
-                children![(Text::new("+"), Theme::font(12.0), TextColor(theme.text_primary))],
+                children![(
+                    Text::new("+"),
+                    Theme::font(12.0),
+                    TextColor(theme.text_primary)
+                )],
             ),
         ],
     ))
@@ -176,7 +193,13 @@ pub fn spawn_toggle(p: &mut ChildSpawnerCommands, theme: &Theme, value: bool) ->
 }
 
 /// Pure: slider value from a cursor x within the track rect.
-pub fn slider_value_at(min: f32, max: f32, track_left: f32, track_width: f32, cursor_x: f32) -> f32 {
+pub fn slider_value_at(
+    min: f32,
+    max: f32,
+    track_left: f32,
+    track_width: f32,
+    cursor_x: f32,
+) -> f32 {
     if track_width <= f32::EPSILON {
         return min;
     }
@@ -215,7 +238,9 @@ fn drive_sliders(
     }
     let Some(active_e) = active.0 else { return };
     let Ok(window) = windows.single() else { return };
-    let Some(cursor) = window.cursor_position() else { return };
+    let Some(cursor) = window.cursor_position() else {
+        return;
+    };
     if let Ok((_, spec, mut value, _, cn, gt)) = sliders.get_mut(active_e) {
         let inv = cn.inverse_scale_factor();
         let center = gt.translation * inv;

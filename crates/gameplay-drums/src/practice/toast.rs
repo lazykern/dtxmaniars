@@ -68,7 +68,7 @@ pub fn toast_ui(
                 row_gap: Val::Px(4.0),
                 ..default()
             },
-            GlobalZIndex(1100),
+            GlobalZIndex(crate::ui_z::TOAST),
         ))
         .with_children(|col| {
             for t in &queue.0 {

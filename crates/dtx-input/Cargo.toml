@@ -22,4 +22,4 @@ bevy = { workspace = true, default-features = false, features = ["serialize", "k
 dtx-core = { workspace = true }
 serde = { version = "1", features = ["derive"] }
 thiserror = { workspace = true }
-midir = { version = "0.9", optional = true }
+midir = { version = "0.10", optional = true }

@@ -546,8 +546,8 @@ fn play_nowloading(
         bgm,
         instances,
         &path.to_string_lossy(),
-        0,
         cfg.audio.master_volume * cfg.audio.bgm_volume,
+        0,
     );
 }
 

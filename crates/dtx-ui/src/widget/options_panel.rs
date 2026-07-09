@@ -5,8 +5,8 @@
 //!
 //! Per user request this is a read-only display of the current settings.
 
-use bevy::prelude::*;
 use crate::theme::Theme;
+use bevy::prelude::*;
 
 /// Marker for each option row text.
 #[derive(Component, Copy, Clone)]

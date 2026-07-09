@@ -101,9 +101,7 @@ fn on_enter_performance(
     bgm_adjust.song_ms = chart
         .source_path
         .as_ref()
-        .map(|p| {
-            dtx_scoring::score_ini::read_bgm_adjust(dtx_scoring::score_ini::score_ini_path(p))
-        })
+        .map(|p| dtx_scoring::score_ini::read_bgm_adjust(dtx_scoring::score_ini::score_ini_path(p)))
         .unwrap_or(0);
     info!(
         "Guitar stage enter: bgm_adjust total = {}ms (common={}, song={})",

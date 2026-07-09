@@ -10,6 +10,12 @@ description = "Drums gameplay vertical slice: chart → scroll → judge → sco
 [lints.rust]
 unsafe_code = "forbid"
 
+[features]
+default = []
+# Forward to dtx-input's real-device MIDI source (midir). Off by default so the
+# workspace test suite stays hardware-free; the desktop app enables it.
+midi = ["dtx-input/midi"]
+
 [dependencies]
 bevy = { workspace = true, default-features = true }
 bevy_kira_audio = { workspace = true }

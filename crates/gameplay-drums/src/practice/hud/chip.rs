@@ -68,7 +68,7 @@ pub fn spawn_chip(
             ..default()
         },
         BackgroundColor(Color::srgba(0.0, 0.0, 0.0, 0.55)),
-        GlobalZIndex(900),
+        GlobalZIndex(crate::ui_z::PRACTICE),
     ));
 }
 

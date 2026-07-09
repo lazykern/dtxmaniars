@@ -50,11 +50,11 @@ impl Default for Theme {
             gauge_fill: Color::srgb(0.298, 0.851, 0.392),
             gauge_track: Color::srgba(0.0, 0.0, 0.0, 0.5),
             selection_highlight: Color::srgba(0.0, 0.831, 0.667, 0.15),
-            stage_bg: Color::srgb(0.02, 0.02, 0.02),                 // #050505
+            stage_bg: Color::srgb(0.02, 0.02, 0.02), // #050505
             stage_panel_bg: Color::srgba(0.051, 0.051, 0.051, 0.93), // #0d0d0dee
-            stage_panel_border: Color::srgb(0.267, 0.267, 0.267),    // #444444
-            select_yellow: Color::srgb(1.0, 0.8, 0.0),               // #ffcc00
-            clear_green: Color::srgb(0.0, 0.8, 0.533),               // #00cc88
+            stage_panel_border: Color::srgb(0.267, 0.267, 0.267), // #444444
+            select_yellow: Color::srgb(1.0, 0.8, 0.0), // #ffcc00
+            clear_green: Color::srgb(0.0, 0.8, 0.533), // #00cc88
             skill_bar_fill: Color::srgb(1.0, 0.8, 0.0),
         }
     }
