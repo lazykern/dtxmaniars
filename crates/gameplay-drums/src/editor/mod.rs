@@ -135,8 +135,24 @@ fn close_editor_on_exit(
     mut hovered: ResMut<picking::Hovered>,
     mut selection: ResMut<drag::Selection>,
     mut session: ResMut<game_shell::EditorSession>,
+    layouts: Res<crate::widget_layout::WidgetLayouts>,
+    lanes: Res<crate::lanes::Lanes>,
+    draft: Res<tabs::ConfigDraft>,
+    live_bindings: Res<crate::bindings::LiveBindings>,
 ) {
     if open.0 {
+        let file = save::layout_file_from(&layouts, &lanes);
+        if let Err(e) = dtx_layout::save(&dtx_layout::default_path(), &file) {
+            warn!("layout save on exit failed: {e}");
+        }
+        if let Err(e) = dtx_config::save(&dtx_config::default_path(), &draft.0) {
+            warn!("config save on exit failed: {e}");
+        }
+        if let Err(e) =
+            dtx_config::save_bindings(&dtx_config::default_bindings_path(), &live_bindings.0)
+        {
+            warn!("bindings save on exit failed: {e}");
+        }
         autoplay.0 = prev.0;
         open.0 = false;
     }

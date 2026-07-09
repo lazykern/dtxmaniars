@@ -18,10 +18,26 @@ pub fn layout_file_from(layouts: &WidgetLayouts, lanes: &Lanes) -> LayoutFile {
 pub fn plugin(app: &mut App) {
     app.add_systems(
         Update,
-        save_hotkey
-            .run_if(super::editor_open)
-            .run_if(in_state(game_shell::AppState::Performance)),
+        (
+            save_hotkey
+                .run_if(super::editor_open)
+                .run_if(in_state(game_shell::AppState::Performance)),
+            save_layout_on_close.run_if(in_state(game_shell::AppState::Performance)),
+        ),
     );
+}
+
+/// Layout auto-saves when the surface closes (EditorOpen true→false while still
+/// in Performance — the Esc route), matching the config/bindings auto-save
+/// contract. The song-ended route is covered by `close_editor_on_exit`.
+fn save_layout_on_close(open: Res<super::EditorOpen>, layouts: Res<WidgetLayouts>, lanes: Res<Lanes>) {
+    if !open.is_changed() || open.0 {
+        return;
+    }
+    let file = layout_file_from(&layouts, &lanes);
+    if let Err(e) = dtx_layout::save(&dtx_layout::default_path(), &file) {
+        warn!("layout auto-save failed: {e}");
+    }
 }
 
 /// Ctrl+S writes layout.toml.
