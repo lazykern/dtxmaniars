@@ -219,6 +219,17 @@ static GAMEPLAY_ITEMS: LazyLock<Vec<SettingItem>> = LazyLock::new(|| {
 static AUDIO_ITEMS: LazyLock<Vec<SettingItem>> = LazyLock::new(|| {
     vec![
         SettingItem {
+            label: "BGM Sound",
+            value: |c| bool_label(c.audio.bgm_enabled).to_string(),
+            adjust: |c, _| c.audio.bgm_enabled ^= true,
+            desc: "Play chart background music.",
+            group: "",
+            control: SettingControl::Stepper,
+            raw: |_| 0.0,
+            set: |_, _| {},
+            reset: |c, d| c.audio.bgm_enabled = d.audio.bgm_enabled,
+        },
+        SettingItem {
             label: "Drum Hit Sound",
             value: |c| bool_label(c.audio.drum_sound_enabled).to_string(),
             adjust: |c, _| c.audio.drum_sound_enabled ^= true,
@@ -245,6 +256,23 @@ static AUDIO_ITEMS: LazyLock<Vec<SettingItem>> = LazyLock::new(|| {
             raw: |c| c.audio.master_volume,
             set: |c, v| c.audio.master_volume = v.clamp(0.0, 1.0),
             reset: |c, d| c.audio.master_volume = d.audio.master_volume,
+        },
+        SettingItem {
+            label: "BGM Volume",
+            value: |c| format!("{}%", (c.audio.bgm_volume * 100.0).round() as i32),
+            adjust: |c, d| {
+                c.audio.bgm_volume = (c.audio.bgm_volume + 0.05 * d as f32).clamp(0.0, 1.0);
+            },
+            desc: "Chart background music volume.",
+            group: "LEVELS",
+            control: SettingControl::Slider {
+                min: 0.0,
+                max: 1.0,
+                step: 0.05,
+            },
+            raw: |c| c.audio.bgm_volume,
+            set: |c, v| c.audio.bgm_volume = v.clamp(0.0, 1.0),
+            reset: |c, d| c.audio.bgm_volume = d.audio.bgm_volume,
         },
         SettingItem {
             label: "Drum Volume",

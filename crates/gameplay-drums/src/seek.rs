@@ -250,6 +250,9 @@ pub fn start_pending_bgm(
     let Some(p) = pending.0.take() else {
         return;
     };
+    if !settings.bgm_enabled {
+        return;
+    }
     if let Some(sound) = sound_bank.get(p.wav_slot) {
         dtx_audio::play_bgm_handle_with_mix_from_seconds(
             &audio,
@@ -259,18 +262,19 @@ pub fn start_pending_bgm(
             &sound.path.to_string_lossy(),
             sound.volume,
             sound.pan,
-            settings.master_volume,
+            settings.bgm_gain(),
             p.start_seconds,
             0,
         );
     } else {
-        dtx_audio::play_bgm_from_seconds(
+        dtx_audio::play_bgm_from_seconds_with_volume(
             &audio,
             &asset_server,
             &mut bgm,
             &mut instances,
             &p.path,
             p.start_seconds,
+            settings.bgm_gain(),
             0,
         );
     }

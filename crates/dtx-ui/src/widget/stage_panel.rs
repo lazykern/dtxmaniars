@@ -16,7 +16,13 @@ fn selected_glow(theme: &Theme) -> BoxShadow {
 }
 
 fn no_shadow() -> BoxShadow {
-    BoxShadow::new(Color::NONE, Val::Px(0.0), Val::Px(0.0), Val::Px(0.0), Val::Px(0.0))
+    BoxShadow::new(
+        Color::NONE,
+        Val::Px(0.0),
+        Val::Px(0.0),
+        Val::Px(0.0),
+        Val::Px(0.0),
+    )
 }
 
 /// Base panel: #0d0d0dee fill, 1px #444 border. Carries a no-op

@@ -10,12 +10,18 @@ use crate::seek::SeekToChartTime;
 /// Outcome of one finished loop pass while the ramp is armed.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum RampDecision {
-    StepUp { new_rate: f32 },
-    StepDown { new_rate: f32 },
+    StepUp {
+        new_rate: f32,
+    },
+    StepDown {
+        new_rate: f32,
+    },
     /// First fail at a step: keep the rate, remember the fail.
     Hold,
     /// Target reached: rate pinned to target, ramp disarms.
-    Complete { new_rate: f32 },
+    Complete {
+        new_rate: f32,
+    },
 }
 
 /// Pure ramp protocol. Pass (accuracy ≥ threshold) → step up, completing
@@ -52,7 +58,9 @@ pub fn ramp_step_index(cfg: &RampConfig, rate: f32) -> (u32, u32) {
     if cfg.step <= 0.0 {
         return (0, 0);
     }
-    let total = ((cfg.target_rate - cfg.start_rate) / cfg.step).round().max(0.0) as u32;
+    let total = ((cfg.target_rate - cfg.start_rate) / cfg.step)
+        .round()
+        .max(0.0) as u32;
     let cur = (((rate - cfg.start_rate) / cfg.step).round() as i64).clamp(0, total as i64) as u32;
     (cur, total)
 }

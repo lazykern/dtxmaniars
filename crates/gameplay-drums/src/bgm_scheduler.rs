@@ -45,8 +45,11 @@ pub fn bootstrap_primary_bgm_chip(
     bgm: &mut dtx_audio::BgmHandle,
     instances: &mut Assets<AudioInstance>,
     sound_bank: &dtx_audio::ChartSoundBank,
-    master_volume: f32,
+    settings: DrumAudioSettings,
 ) -> bool {
+    if !settings.bgm_enabled {
+        return false;
+    }
     if bgm.instance.is_some() {
         return true;
     }
@@ -70,19 +73,20 @@ pub fn bootstrap_primary_bgm_chip(
             &sound.path.to_string_lossy(),
             sound.volume,
             sound.pan,
-            master_volume,
+            settings.bgm_gain(),
             // Bootstrap is called from OnEnter(Performance) → start_bgm_on_enter;
             // pass the screen-fade duration so the BGM fades in aligned
             // with the visual fade-in (matches osu's seamless feel).
             dtx_ui::SCREEN_TRANSITION_MS as u32,
         );
     } else {
-        dtx_audio::play_bgm(
+        dtx_audio::play_bgm_with_volume(
             audio,
             asset_server,
             bgm,
             instances,
             &path,
+            settings.bgm_gain(),
             dtx_ui::SCREEN_TRANSITION_MS as u32,
         );
     }
@@ -164,7 +168,7 @@ fn schedule_bgm_chips(
     mut played: ResMut<PlayedBgmChips>,
     mut active: ResMut<ActiveDrumSounds>,
 ) {
-    if !gameplay_clock.is_started() {
+    if !gameplay_clock.is_started() || !settings.bgm_enabled {
         return;
     }
     let now = gameplay_clock.current_ms;
@@ -217,12 +221,20 @@ fn schedule_bgm_chips(
                     &sound.path.to_string_lossy(),
                     sound.volume,
                     sound.pan,
-                    settings.master_volume,
+                    settings.bgm_gain(),
                     // Subsequent chip swaps: no fade-in (already in Performance).
                     0,
                 );
             } else {
-                dtx_audio::play_bgm(&audio, &asset_server, &mut bgm, &mut instances, &path, 0);
+                dtx_audio::play_bgm_with_volume(
+                    &audio,
+                    &asset_server,
+                    &mut bgm,
+                    &mut instances,
+                    &path,
+                    settings.bgm_gain(),
+                    0,
+                );
             }
         } else {
             let vol = chart.chart.assets.wav.volume(chip.wav_slot);
@@ -233,7 +245,7 @@ fn schedule_bgm_chips(
                     sound.handle.clone(),
                     sound.volume,
                     sound.pan,
-                    settings.master_volume,
+                    settings.bgm_gain(),
                     1.0,
                 )
             } else {
@@ -243,7 +255,7 @@ fn schedule_bgm_chips(
                     &path,
                     vol,
                     pan,
-                    settings.master_volume,
+                    settings.bgm_gain(),
                     1.0,
                 )
             };
@@ -269,7 +281,7 @@ fn recover_primary_bgm(
     sound_bank: Res<dtx_audio::ChartSoundBank>,
     mut recovery: ResMut<BgmRecoveryState>,
 ) {
-    if completion.end_requested || !gameplay_clock.is_ready() {
+    if completion.end_requested || !gameplay_clock.is_ready() || !settings.bgm_enabled {
         return;
     }
     let Some(handle) = bgm.instance.as_ref() else {
@@ -314,19 +326,20 @@ fn recover_primary_bgm(
             &sound.path.to_string_lossy(),
             sound.volume,
             sound.pan,
-            settings.master_volume,
+            settings.bgm_gain(),
             start_seconds,
             // Recovery restart mid-performance: no fade-in.
             0,
         );
     } else {
-        dtx_audio::play_bgm_from_seconds(
+        dtx_audio::play_bgm_from_seconds_with_volume(
             &audio,
             &asset_server,
             &mut bgm,
             &mut instances,
             &path,
             start_seconds,
+            settings.bgm_gain(),
             0,
         );
     }

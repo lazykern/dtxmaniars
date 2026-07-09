@@ -1,8 +1,8 @@
 //! Input bindings — `bindings.toml` schema + runtime types.
 //!
 //! Design: docs/superpowers/specs/2026-07-07-customize-surface-design.md §3.
-//! One source (key or MIDI note) maps to exactly one channel; one channel may
-//! have many sources. File schema keys channels by dtx-core short names.
+//! One keyboard key may map to multiple channels; MIDI notes stay exclusive.
+//! File schema keys channels by dtx-core short names.
 
 use std::collections::{BTreeMap, HashMap};
 use std::path::{Path, PathBuf};
@@ -82,7 +82,8 @@ impl Default for BindingsFile {
 pub struct InputBindings {
     /// MIDI device options.
     pub midi: MidiDeviceConfig,
-    /// Channel → sources. One source appears under at most one channel.
+    /// Channel → sources. Keyboard sources may appear under multiple channels;
+    /// MIDI sources appear under at most one channel.
     pub map: HashMap<EChannel, Vec<BindSource>>,
 }
 
@@ -180,21 +181,28 @@ impl Default for InputBindings {
 }
 
 impl InputBindings {
-    /// Channel for a keyboard key, if bound.
+    /// First channel for a keyboard key, if bound.
     pub fn channel_for_key(&self, key: KeyCode) -> Option<EChannel> {
-        self.channel_for(BindSource::Key(key))
+        self.channels_for(BindSource::Key(key)).into_iter().next()
+    }
+
+    /// All channels for a keyboard key, in bindable lane order.
+    pub fn channels_for_key(&self, key: KeyCode) -> Vec<EChannel> {
+        self.channels_for(BindSource::Key(key))
     }
 
     /// Channel for a MIDI note, if bound.
     pub fn channel_for_note(&self, note: u8) -> Option<EChannel> {
-        self.channel_for(BindSource::Midi { note })
+        self.channels_for(BindSource::Midi { note })
+            .into_iter()
+            .next()
     }
 
-    fn channel_for(&self, src: BindSource) -> Option<EChannel> {
-        self.map
-            .iter()
-            .find(|(_, v)| v.contains(&src))
-            .map(|(ch, _)| *ch)
+    fn channels_for(&self, src: BindSource) -> Vec<EChannel> {
+        BINDABLE_CHANNELS
+            .into_iter()
+            .filter(|ch| self.map.get(ch).is_some_and(|v| v.contains(&src)))
+            .collect()
     }
 
     /// Bind `src` to `channel`, removing it from any other channel first
@@ -203,7 +211,18 @@ impl InputBindings {
         for v in self.map.values_mut() {
             v.retain(|s| *s != src);
         }
-        self.map.entry(channel).or_default().push(src);
+        let entry = self.map.entry(channel).or_default();
+        if !entry.contains(&src) {
+            entry.push(src);
+        }
+    }
+
+    /// Bind `src` to `channel` without removing it from other channels.
+    pub fn bind_shared(&mut self, channel: EChannel, src: BindSource) {
+        let entry = self.map.entry(channel).or_default();
+        if !entry.contains(&src) {
+            entry.push(src);
+        }
     }
 
     /// Serialize to the on-disk schema.
@@ -224,10 +243,10 @@ impl InputBindings {
 
 impl BindingsFile {
     /// Resolve to runtime bindings. Unknown channel names are skipped with a
-    /// warning; duplicate sources keep the first occurrence (BTreeMap order).
+    /// warning; duplicate MIDI notes keep the first occurrence (BTreeMap order).
     pub fn resolve(&self) -> InputBindings {
         let mut map: HashMap<EChannel, Vec<BindSource>> = HashMap::new();
-        let mut seen: Vec<BindSource> = Vec::new();
+        let mut seen_midi: Vec<BindSource> = Vec::new();
         for (name, sources) in &self.map {
             let Some(ch) = EChannel::from_short_name(name) else {
                 eprintln!("dtx-config: bindings.toml unknown channel {name:?}; skipped");
@@ -235,12 +254,18 @@ impl BindingsFile {
             };
             let entry = map.entry(ch).or_default();
             for src in sources {
-                if seen.contains(src) {
-                    eprintln!("dtx-config: bindings.toml duplicate source {src:?}; kept first");
-                    continue;
+                if matches!(src, BindSource::Midi { .. }) {
+                    if seen_midi.contains(src) {
+                        eprintln!(
+                            "dtx-config: bindings.toml duplicate MIDI source {src:?}; kept first"
+                        );
+                        continue;
+                    }
+                    seen_midi.push(*src);
                 }
-                seen.push(*src);
-                entry.push(*src);
+                if !entry.contains(src) {
+                    entry.push(*src);
+                }
             }
         }
         InputBindings {
@@ -361,6 +386,16 @@ mod tests {
     }
 
     #[test]
+    fn bind_shared_allows_one_key_on_multiple_channels() {
+        let mut b = InputBindings::default();
+        b.bind_shared(EChannel::Snare, BindSource::Key(KeyCode::KeyX));
+        assert_eq!(
+            b.channels_for_key(KeyCode::KeyX),
+            vec![EChannel::HiHatClose, EChannel::Snare]
+        );
+    }
+
+    #[test]
     fn unknown_channel_name_skipped() {
         let raw = r#"
 version = 1
@@ -389,7 +424,7 @@ HH = [{ key = "KeyX" }]
     }
 
     #[test]
-    fn duplicate_source_in_file_keeps_first() {
+    fn duplicate_key_in_file_maps_multiple_channels() {
         let raw = r#"
 version = 1
 [map]
@@ -397,7 +432,23 @@ BD = [{ key = "Space" }]
 SD = [{ key = "Space" }]
 "#;
         let b = parse_with_migrations(raw).resolve();
-        assert_eq!(b.channel_for_key(KeyCode::Space), Some(EChannel::BassDrum));
+        assert_eq!(
+            b.channels_for_key(KeyCode::Space),
+            vec![EChannel::Snare, EChannel::BassDrum]
+        );
+    }
+
+    #[test]
+    fn duplicate_midi_in_file_keeps_first() {
+        let raw = r#"
+version = 1
+[map]
+BD = [{ midi = { note = 36 } }]
+SD = [{ midi = { note = 36 } }]
+"#;
+        let b = parse_with_migrations(raw).resolve();
+        assert_eq!(b.channel_for_note(36), Some(EChannel::BassDrum));
+        assert!(!b.map[&EChannel::Snare].contains(&BindSource::Midi { note: 36 }));
     }
 
     #[test]

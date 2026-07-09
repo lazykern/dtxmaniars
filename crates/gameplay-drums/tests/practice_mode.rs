@@ -506,8 +506,7 @@ fn toggle_ramp_without_loop_is_a_noop_error_toast() {
     let mut app = build_app();
     add_ramp_wiring(&mut app);
     enter_performance(&mut app, chart_with_measures(8));
-    app.world_mut()
-        .insert_resource(PracticeSession::default());
+    app.world_mut().insert_resource(PracticeSession::default());
     send_practice_action(&mut app, PracticeAction::ToggleRamp);
     app.update();
     let session = app.world().resource::<PracticeSession>();
@@ -515,7 +514,9 @@ fn toggle_ramp_without_loop_is_a_noop_error_toast() {
         !session.ramp.armed,
         "arming without an A/B loop must be a no-op"
     );
-    let toasts = app.world().resource::<gameplay_drums::practice::toast::ToastQueue>();
+    let toasts = app
+        .world()
+        .resource::<gameplay_drums::practice::toast::ToastQueue>();
     assert!(
         !toasts.0.is_empty(),
         "arming without a loop must push an error toast"

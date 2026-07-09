@@ -68,7 +68,10 @@ mod tests {
         layouts.0.get_mut(&WidgetKind::Combo).unwrap().offset = (12.0, 34.0);
         let lanes = Lanes::default();
         let file = layout_file_from(&layouts, &lanes);
-        assert_eq!(file.scene.resolve()[&WidgetKind::Combo].offset, (12.0, 34.0));
+        assert_eq!(
+            file.scene.resolve()[&WidgetKind::Combo].offset,
+            (12.0, 34.0)
+        );
     }
 
     #[test]

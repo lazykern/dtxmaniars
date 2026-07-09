@@ -117,7 +117,10 @@ mod tests {
         let (l0, n0) = snap(0.0);
         stack.push(&l0, &n0);
         let (l1, n1) = snap(50.0);
-        let cur_b = Snapshot { layouts: l1, lanes: n1 };
+        let cur_b = Snapshot {
+            layouts: l1,
+            lanes: n1,
+        };
         let restored_a = stack.undo(cur_b.clone()).unwrap();
         assert_eq!(restored_a.layouts.get(WidgetKind::Combo).offset, (0.0, 0.0));
         let back_b = stack.redo(restored_a).unwrap();
@@ -128,7 +131,12 @@ mod tests {
     fn undo_empty_is_none() {
         let mut stack = UndoStack::default();
         let (l, n) = snap(1.0);
-        assert!(stack.undo(Snapshot { layouts: l, lanes: n }).is_none());
+        assert!(stack
+            .undo(Snapshot {
+                layouts: l,
+                lanes: n
+            })
+            .is_none());
     }
 
     #[test]
@@ -136,7 +144,10 @@ mod tests {
         let mut stack = UndoStack::default();
         let (l, n) = snap(0.0);
         stack.push(&l, &n);
-        let _ = stack.undo(Snapshot { layouts: l.clone(), lanes: n.clone() });
+        let _ = stack.undo(Snapshot {
+            layouts: l.clone(),
+            lanes: n.clone(),
+        });
         assert!(stack.can_redo());
         stack.push(&l, &n);
         assert!(!stack.can_redo());

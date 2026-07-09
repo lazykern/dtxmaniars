@@ -3,7 +3,7 @@
 //! `+` on a channel row (bindings_panel) arms `CaptureState::Capturing(ch)`.
 //! From there `capture_binding` listens for the first input (keyboard key or
 //! MIDI NoteOn), refuses reserved keys, and either binds immediately or
-//! — when the source already belongs to another channel — routes through a
+//! — when a MIDI note already belongs to another channel — routes through a
 //! `ConfirmSteal` step so no bind is stolen silently (Enter steals, Esc cancels).
 //!
 //! Esc while `Capturing`/`ConfirmSteal` cancels capture WITHOUT closing the
@@ -102,12 +102,19 @@ fn modifier_held(keys: &ButtonInput<KeyCode>) -> bool {
         || keys.pressed(KeyCode::SuperRight)
 }
 
-/// Channel that currently owns `src`, if any (dispatch over the public lookups
-/// since `InputBindings::channel_for` is private).
+/// Channel that currently owns exclusive `src`, if any. Keyboard binds are
+/// intentionally non-exclusive, so only MIDI can conflict.
 fn owner_of(bindings: &InputBindings, src: BindSource) -> Option<dtx_core::EChannel> {
     match src {
-        BindSource::Key(k) => bindings.channel_for_key(k),
+        BindSource::Key(_) => None,
         BindSource::Midi { note } => bindings.channel_for_note(note),
+    }
+}
+
+fn bind_captured(bindings: &mut InputBindings, channel: dtx_core::EChannel, src: BindSource) {
+    match src {
+        BindSource::Key(_) => bindings.bind_shared(channel, src),
+        BindSource::Midi { .. } => bindings.bind(channel, src),
     }
 }
 
@@ -170,7 +177,7 @@ fn capture_binding(
                         };
                     }
                     _ => {
-                        live.0.bind(channel, src);
+                        bind_captured(&mut live.0, channel, src);
                         rev.0 = rev.0.wrapping_add(1);
                         *capture = CaptureState::Idle;
                     }
@@ -181,7 +188,7 @@ fn capture_binding(
             channel, source, ..
         } => {
             if keys.just_pressed(KeyCode::Enter) {
-                live.0.bind(channel, source);
+                bind_captured(&mut live.0, channel, source);
                 rev.0 = rev.0.wrapping_add(1);
                 *capture = CaptureState::Idle;
             } else if keys.just_pressed(KeyCode::Escape) {
@@ -258,18 +265,16 @@ mod tests {
     }
 
     #[test]
-    fn steal_detection_finds_prior_owner() {
+    fn steal_detection_only_applies_to_midi() {
         let mut ib = InputBindings::default();
         ib.bind(
             dtx_core::EChannel::HiHatClose,
-            BindSource::Key(KeyCode::KeyX),
+            BindSource::Midi { note: 99 },
         );
-        // KeyX now owned by HiHatClose: a fresh bind attempt from another
-        // channel must detect the conflict for the steal-confirm flow.
+        assert_eq!(owner_of(&ib, BindSource::Key(KeyCode::KeyX)), None);
         assert_eq!(
-            owner_of(&ib, BindSource::Key(KeyCode::KeyX)),
+            owner_of(&ib, BindSource::Midi { note: 99 }),
             Some(dtx_core::EChannel::HiHatClose)
         );
-        assert_eq!(owner_of(&ib, BindSource::Key(KeyCode::KeyQ)), None);
     }
 }

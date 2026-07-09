@@ -11,7 +11,7 @@ use bevy::prelude::*;
 use dtx_layout::WidgetKind;
 
 use crate::layout::PlayfieldLayout;
-use crate::widget_layout::{WidgetLayouts, widget_visible};
+use crate::widget_layout::{widget_visible, WidgetLayouts};
 
 /// SCENE-space (full-window logical px, pre stage-transform) AABB per widget,
 /// rebuilt each frame while the editor is open. Entries persist across frames

@@ -12,7 +12,7 @@ use bevy::prelude::*;
 use bevy_kira_audio::prelude::AudioInstance;
 use dtx_audio::{BgmHandle, DrumPolyphony};
 use dtx_ui::theme::Theme;
-use game_shell::{AppState, PauseState, TransitionRequest, request_transition};
+use game_shell::{request_transition, AppState, PauseState, TransitionRequest};
 
 use crate::resources::ActiveDrumSounds;
 

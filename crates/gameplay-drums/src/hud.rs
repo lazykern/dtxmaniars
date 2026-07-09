@@ -3,12 +3,12 @@
 use bevy::prelude::*;
 use dtx_scoring::JudgmentKind;
 use dtx_ui::{
-    ThemeResource,
     theme::REF_WIDTH,
     widget::{
         combo_display::ComboDisplay, frame_chrome, hud_ref::HudRefRect, judgment_popup, live_graph,
         now_playing, perf_combo, phrase_meter, playfield_speed, score_detailed, song_progress,
     },
+    ThemeResource,
 };
 use game_shell::{AppState, EGameMode};
 
@@ -16,7 +16,7 @@ use dtx_layout::WidgetKind;
 
 use crate::components::LastJudgment;
 use crate::derived::ChartDerived;
-use crate::hud_cache::{HudDisplayCache, set_text_if_changed};
+use crate::hud_cache::{set_text_if_changed, HudDisplayCache};
 use crate::keyboard_viz;
 use crate::widget_layout::WidgetContainer;
 

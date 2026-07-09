@@ -357,6 +357,9 @@ mod tests {
         let s = toml::to_string_pretty(&file).unwrap();
         let back: LayoutFile = toml::from_str(&s).unwrap();
         assert_eq!(back, file);
-        assert_eq!(back.scene.resolve()[&crate::WidgetKind::Combo].offset, (7.0, 8.0));
+        assert_eq!(
+            back.scene.resolve()[&crate::WidgetKind::Combo].offset,
+            (7.0, 8.0)
+        );
     }
 }

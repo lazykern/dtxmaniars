@@ -6,10 +6,10 @@
 use bevy::prelude::*;
 use dtx_ui::theme::Theme;
 use dtx_ui::widget::density_strip::{spawn_density_strip, time_to_pct};
-use game_shell::{AppState, PauseState, TransitionRequest, request_transition};
+use game_shell::{request_transition, AppState, PauseState, TransitionRequest};
 
 use super::format_chart_time;
-use crate::practice::session::{PracticeSession, preroll_target};
+use crate::practice::session::{preroll_target, PracticeSession};
 use crate::resources::GameplayClock;
 use crate::seek::SeekToChartTime;
 use crate::timeline::ChipTimeline;

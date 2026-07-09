@@ -7,7 +7,7 @@
 //! bump `BindingsRev`, which re-triggers the left-panel rebuild so chips repaint.
 
 use bevy::prelude::*;
-use dtx_config::{BINDABLE_CHANNELS, BindSource};
+use dtx_config::{BindSource, BINDABLE_CHANNELS};
 
 use super::bindings_capture::CaptureState;
 use crate::bindings::LiveBindings;

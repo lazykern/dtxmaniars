@@ -297,10 +297,13 @@ mod tests {
         let parent = (100.0, 50.0, 800.0, 600.0);
         for anchor in Anchor9::ALL {
             for origin in Anchor9::ALL {
-                let offset = offset_for_top_left(anchor, origin, (120.0, 40.0), 1.5, (300.0, 200.0), parent);
+                let offset =
+                    offset_for_top_left(anchor, origin, (120.0, 40.0), 1.5, (300.0, 200.0), parent);
                 let tl = resolve_top_left(anchor, origin, (120.0, 40.0), 1.5, offset, parent);
-                assert!((tl.0 - 300.0).abs() < 0.001 && (tl.1 - 200.0).abs() < 0.001,
-                    "{anchor:?}/{origin:?}");
+                assert!(
+                    (tl.0 - 300.0).abs() < 0.001 && (tl.1 - 200.0).abs() < 0.001,
+                    "{anchor:?}/{origin:?}"
+                );
             }
         }
     }

@@ -53,18 +53,13 @@ fn build_app(cyclic: bool) -> App {
         )
             .chain(),
     )
-    .add_systems(
-        FixedUpdate,
-        apply_seek_stub.before(update_audio_clock_stub),
-    )
+    .add_systems(FixedUpdate, apply_seek_stub.before(update_audio_clock_stub))
     .add_systems(FixedUpdate, judge_stub.in_set(DrumsSets::Judge));
 
     if cyclic {
         app.add_systems(
             FixedUpdate,
-            track_attempt_stub
-                .after(judge_stub)
-                .before(apply_seek_stub),
+            track_attempt_stub.after(judge_stub).before(apply_seek_stub),
         );
     } else {
         app.add_systems(

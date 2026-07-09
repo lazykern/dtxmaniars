@@ -8,8 +8,11 @@
 //! preloaded sound bank. No judgment, no scoring — just a flash + sound so the
 //! player can verify a freshly bound key/pad reaches the right lane.
 
+use std::collections::HashSet;
+
 use bevy::prelude::*;
 use bevy_kira_audio::prelude::*;
+use bevy_kira_audio::AudioSource as KiraAudioSource;
 
 use crate::events::LaneHit;
 use crate::lane_map::lane_channel;
@@ -33,8 +36,10 @@ fn play_hit_voice_on_lane_hit(
     mut instances: ResMut<Assets<AudioInstance>>,
     mut polyphony: ResMut<dtx_audio::DrumPolyphony>,
     sound_bank: Res<dtx_audio::ChartSoundBank>,
+    sources: Res<Assets<KiraAudioSource>>,
+    mut logged_long_slots: Local<HashSet<u32>>,
 ) {
-    if !settings.enabled || chart.chart.assets.wav.is_empty() {
+    if !settings.drum_enabled || chart.chart.assets.wav.is_empty() {
         // Nothing loaded to play — drain so events don't pile up.
         for _ in hits.read() {}
         return;
@@ -50,15 +55,32 @@ fn play_hit_voice_on_lane_hit(
         let Some(wav_slot) = representative_wav_slot(&chart, hit.lane) else {
             continue;
         };
-        debug!(
-            "hit_feedback: lane {} audio_ms {} → wav {wav_slot}",
-            hit.lane, hit.audio_ms
-        );
         let vol = chart.chart.assets.wav.volume(wav_slot);
         let pan = chart.chart.assets.wav.pan(wav_slot);
-        // Reuse hit_sound.rs's exact voice-playing mechanism: preloaded handle
-        // when the bank has it, else stream from the resolved WAV path.
+        // Editor feedback is for short kit voices only. Some charts put long
+        // stems/full-song audio on playable lanes; replaying those on each pad
+        // press sounds like the song multiplying.
         if let Some(sound) = sound_bank.get(wav_slot) {
+            if let Some(src) = sources.get(&sound.handle) {
+                let duration = src.sound.duration().as_secs_f64();
+                if feedback_wav_is_too_long(duration) {
+                    if logged_long_slots.insert(wav_slot) {
+                        warn!(
+                            "hit_feedback: skipped long editor feedback wav slot {wav_slot} ({:.2}s) path={} lane={}",
+                            duration,
+                            sound.path.display(),
+                            hit.lane
+                        );
+                    }
+                    continue;
+                }
+            }
+            debug!(
+                "hit_feedback: lane {} audio_ms {} → wav {wav_slot} path={}",
+                hit.lane,
+                hit.audio_ms,
+                sound.path.display()
+            );
             dtx_audio::play_drum_hit_handle(
                 &audio,
                 &mut instances,
@@ -71,6 +93,10 @@ fn play_hit_voice_on_lane_hit(
                 settings.drum_volume,
             );
         } else if let Some(path) = wav_path(&chart.chart, wav_slot, source_dir.as_deref()) {
+            debug!(
+                "hit_feedback: lane {} audio_ms {} → wav {wav_slot} path={}",
+                hit.lane, hit.audio_ms, path
+            );
             dtx_audio::play_drum_hit(
                 &audio,
                 &asset_server,
@@ -85,6 +111,10 @@ fn play_hit_voice_on_lane_hit(
             );
         }
     }
+}
+
+fn feedback_wav_is_too_long(duration_secs: f64) -> bool {
+    duration_secs > 2.0
 }
 
 /// First chart chip on the lane's channel that carries a WAV slot, else any
@@ -123,4 +153,15 @@ fn wav_path(
         Some(dir) => dir.join(filename).to_string_lossy().to_string(),
         None => filename.to_string(),
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn editor_feedback_skips_long_audio() {
+        assert!(!feedback_wav_is_too_long(1.99));
+        assert!(feedback_wav_is_too_long(2.01));
+    }
 }

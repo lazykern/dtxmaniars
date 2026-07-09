@@ -6,7 +6,7 @@
 //! ÷scale) to the selected widget's offset.
 
 use bevy::prelude::*;
-use dtx_layout::{MAX_WIDGET_SCALE, MIN_WIDGET_SCALE, WidgetKind};
+use dtx_layout::{WidgetKind, MAX_WIDGET_SCALE, MIN_WIDGET_SCALE};
 
 use crate::widget_layout::WidgetLayouts;
 

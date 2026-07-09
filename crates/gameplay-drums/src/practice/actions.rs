@@ -49,11 +49,7 @@ impl Default for PracticeBindings {
 
 /// Pure: the action bound to `key`, if any.
 pub fn action_for(bindings: &PracticeBindings, key: KeyCode) -> Option<PracticeAction> {
-    bindings
-        .0
-        .iter()
-        .find(|(k, _)| *k == key)
-        .map(|(_, a)| *a)
+    bindings.0.iter().find(|(k, _)| *k == key).map(|(_, a)| *a)
 }
 
 /// Quick tier only (Running): translate just-pressed keys into actions.
@@ -149,14 +145,23 @@ mod tests {
             action_for(&b, KeyCode::Backspace),
             Some(PracticeAction::ClearLoop)
         );
-        assert_eq!(action_for(&b, KeyCode::Minus), Some(PracticeAction::RateDown));
+        assert_eq!(
+            action_for(&b, KeyCode::Minus),
+            Some(PracticeAction::RateDown)
+        );
         assert_eq!(action_for(&b, KeyCode::Equal), Some(PracticeAction::RateUp));
         assert_eq!(
             action_for(&b, KeyCode::KeyR),
             Some(PracticeAction::RestartLoop)
         );
-        assert_eq!(action_for(&b, KeyCode::KeyT), Some(PracticeAction::ToggleRamp));
-        assert_eq!(action_for(&b, KeyCode::Tab), Some(PracticeAction::OpenFullHud));
+        assert_eq!(
+            action_for(&b, KeyCode::KeyT),
+            Some(PracticeAction::ToggleRamp)
+        );
+        assert_eq!(
+            action_for(&b, KeyCode::Tab),
+            Some(PracticeAction::OpenFullHud)
+        );
         assert_eq!(action_for(&b, KeyCode::KeyQ), None);
     }
 }

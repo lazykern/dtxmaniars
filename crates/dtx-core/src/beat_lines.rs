@@ -98,7 +98,8 @@ pub fn expand_timing_lines(chart: &Chart) -> Vec<TimingLine> {
     tick384 = 0;
     while tick384 < end_of_song {
         let mut shift_in_measure = 0;
-        while c1_idx < beat_shift_chips.len() && beat_shift_chips[c1_idx].0 < tick384 + TICKS_PER_MEASURE
+        while c1_idx < beat_shift_chips.len()
+            && beat_shift_chips[c1_idx].0 < tick384 + TICKS_PER_MEASURE
         {
             if beat_shift_chips[c1_idx].0 >= tick384 {
                 shift_in_measure = beat_shift_chips[c1_idx].1;
@@ -121,10 +122,7 @@ pub fn expand_timing_lines(chart: &Chart) -> Vec<TimingLine> {
             if (tick_beat + shift_in_measure) % TICKS_PER_MEASURE == 0 {
                 continue;
             }
-            raw.push((
-                tick384 + tick_beat + shift_in_measure,
-                TimingLineKind::Beat,
-            ));
+            raw.push((tick384 + tick_beat + shift_in_measure, TimingLineKind::Beat));
         }
 
         tick384 += TICKS_PER_MEASURE;
@@ -153,10 +151,8 @@ fn apply_display_visibility(lines: &mut [TimingLine], display_events: &[(i32, bo
         return;
     }
 
-    let mut events: Vec<(i32, bool, u8)> = display_events
-        .iter()
-        .map(|&(t, v)| (t, v, 0u8))
-        .collect();
+    let mut events: Vec<(i32, bool, u8)> =
+        display_events.iter().map(|&(t, v)| (t, v, 0u8)).collect();
     for line in lines.iter() {
         events.push((line.tick, false, 1));
     }

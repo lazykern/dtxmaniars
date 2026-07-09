@@ -244,8 +244,10 @@ fn apply_config_on_enter(
     let cfg = load(&default_path());
     *scroll = resources::ScrollSettings::from_scroll_speed(cfg.gameplay.scroll_speed);
     scroll.play_speed = play_speed_multiplier(cfg.gameplay.play_speed);
-    audio.enabled = cfg.audio.drum_sound_enabled;
+    audio.bgm_enabled = cfg.audio.bgm_enabled;
+    audio.drum_enabled = cfg.audio.drum_sound_enabled;
     audio.master_volume = cfg.audio.master_volume;
+    audio.bgm_volume = cfg.audio.bgm_volume;
     audio.drum_volume = cfg.audio.drum_volume;
     gauge.damage_level = map_damage_level(cfg.gameplay.damage_level);
     input_offset.0 = cfg.gameplay.input_offset_ms;
@@ -268,8 +270,10 @@ fn load_drum_audio_settings(
     use dtx_config::{default_path, load};
     let cfg = load(&default_path());
     *settings = resources::DrumAudioSettings {
-        enabled: cfg.audio.drum_sound_enabled,
+        bgm_enabled: cfg.audio.bgm_enabled,
+        drum_enabled: cfg.audio.drum_sound_enabled,
         master_volume: cfg.audio.master_volume,
+        bgm_volume: cfg.audio.bgm_volume,
         drum_volume: cfg.audio.drum_volume,
     };
     drum_cfg.config = cfg.drums.clone();
@@ -321,7 +325,10 @@ mod midi_consumer {
     /// the main thread only.
     #[cfg(feature = "midi")]
     #[derive(Default)]
-    struct MidiConnection(Option<dtx_input::midi::RealMidiSource>);
+    struct MidiConnection {
+        source: Option<dtx_input::midi::RealMidiSource>,
+        port_filter: Option<String>,
+    }
 
     pub(super) fn plugin(app: &mut App) {
         app.init_resource::<LastMidiHit>().add_systems(
@@ -361,15 +368,20 @@ mod midi_consumer {
         mut conn: NonSendMut<MidiConnection>,
         live: Res<crate::bindings::LiveBindings>,
     ) {
-        let filter = live.0.midi.port.as_deref();
-        match dtx_input::midi::RealMidiSource::connect(filter) {
+        let filter = live.0.midi.port.clone();
+        if conn.source.is_some() && conn.port_filter == filter {
+            return;
+        }
+        match dtx_input::midi::RealMidiSource::connect(filter.as_deref()) {
             Ok((src, name)) => {
                 info!("MIDI connected: {name}");
-                conn.0 = Some(src);
+                conn.source = Some(src);
+                conn.port_filter = filter;
             }
             Err(e) => {
                 warn!("MIDI connect failed: {e}");
-                conn.0 = None;
+                conn.source = None;
+                conn.port_filter = filter;
             }
         }
     }
@@ -380,7 +392,7 @@ mod midi_consumer {
     /// `GameplayClock`. Non-send: runs on the main thread only.
     #[cfg(feature = "midi")]
     fn drain_real_midi(mut conn: NonSendMut<MidiConnection>, mut virt: ResMut<VirtualSource>) {
-        let Some(src) = conn.0.as_mut() else {
+        let Some(src) = conn.source.as_mut() else {
             return;
         };
         let mut buf: Vec<dtx_input::midi::MidiEvent> = Vec::new();

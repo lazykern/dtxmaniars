@@ -1408,9 +1408,7 @@ fn bgm_preview_on_change(
         return;
     };
 
-    // Clear gameplay BGM before starting preview. If the tracked
-    // handle is stale, `stop_bgm` may fall back to `audio.stop()`;
-    // doing it first avoids killing the newly-started preview.
+    // Clear gameplay BGM before starting preview; stale handles are no-ops.
     if bgm.instance.is_some() {
         info!("SongSelect preview: stopping stale BgmHandle before preview");
         dtx_audio::stop_bgm(&audio, &mut bgm, &mut instances);

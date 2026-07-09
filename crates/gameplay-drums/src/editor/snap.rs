@@ -4,12 +4,12 @@
 //! rewrite recomputes the offset so the resolved position never jumps.
 
 use bevy::prelude::*;
-use dtx_layout::{Placement, WidgetKind, nearest_anchor};
+use dtx_layout::{nearest_anchor, Placement, WidgetKind};
 
 use super::drag::{ActiveGesture, Gesture, Selection};
 use super::selection_box::EditorOverlay;
 use crate::layout::PlayfieldLayout;
-use crate::widget_layout::{WidgetGeoms, WidgetLayouts, parent_rect_px, transform_point};
+use crate::widget_layout::{parent_rect_px, transform_point, WidgetGeoms, WidgetLayouts};
 
 /// Guide line at a parent-space third (spawned once with the overlay).
 #[derive(Component)]
@@ -187,7 +187,7 @@ fn sync_snap_guides(
 
 #[cfg(test)]
 mod tests {
-    use dtx_layout::{Anchor9, nearest_anchor};
+    use dtx_layout::{nearest_anchor, Anchor9};
 
     #[test]
     fn snap_rewrite_is_no_jump() {

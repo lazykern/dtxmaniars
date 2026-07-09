@@ -10,10 +10,10 @@ mod performance;
 mod transition;
 
 pub use states::{
-    despawn_stage, AppState, CustomizeTab, EGameMode, EditorSession, PauseState,
-    PendingCustomizeTab, PracticeIntent, StageEntity,
+    AppState, CustomizeTab, EGameMode, EditorSession, PauseState, PendingCustomizeTab,
+    PracticeIntent, StageEntity, despawn_stage,
 };
-pub use transition::{request_transition, TransitionRequest};
+pub use transition::{TransitionRequest, request_transition};
 
 /// Root plugin. Registers AppState + transitions + Performance wiring.
 pub struct GameShellPlugin;

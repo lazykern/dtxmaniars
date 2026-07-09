@@ -1,13 +1,13 @@
 //! Runtime bind resolution: `InputBindings` → per-frame lookup tables.
 //!
-//! `BindResolver` flattens channel-keyed bindings into KeyCode→LaneId and
+//! `BindResolver` flattens channel-keyed bindings into KeyCode→LaneIds and
 //! note→LaneId maps using the fixed BocuD lane order (`lane_map::lane_of`).
 //! Rebuilt on Performance enter (config may have changed on disk).
 
 use std::collections::HashMap;
 
 use bevy::prelude::*;
-use dtx_config::{BindSource, InputBindings};
+use dtx_config::{BindSource, InputBindings, BINDABLE_CHANNELS};
 
 use crate::lane_map::{lane_of, LaneId};
 
@@ -39,7 +39,7 @@ impl Default for LiveBindings {
 /// Flattened lookup tables derived from `InputBindings`.
 #[derive(Resource, Debug, Clone)]
 pub struct BindResolver {
-    key_to_lane: HashMap<KeyCode, LaneId>,
+    key_to_lanes: HashMap<KeyCode, Vec<LaneId>>,
     note_to_lane: HashMap<u8, LaneId>,
     /// NoteOn velocities at or below this are ignored.
     pub velocity_threshold: u8,
@@ -54,14 +54,17 @@ impl Default for BindResolver {
 impl BindResolver {
     /// Build lookup tables from channel-keyed bindings.
     pub fn from_bindings(b: &InputBindings) -> Self {
-        let mut key_to_lane = HashMap::new();
+        let mut key_to_lanes = HashMap::new();
         let mut note_to_lane = HashMap::new();
-        for (ch, sources) in &b.map {
-            let Some(lane) = lane_of(*ch) else { continue };
+        for ch in BINDABLE_CHANNELS {
+            let Some(lane) = lane_of(ch) else { continue };
+            let Some(sources) = b.map.get(&ch) else {
+                continue;
+            };
             for src in sources {
                 match src {
                     BindSource::Key(k) => {
-                        key_to_lane.insert(*k, lane);
+                        key_to_lanes.entry(*k).or_insert_with(Vec::new).push(lane);
                     }
                     BindSource::Midi { note } => {
                         note_to_lane.insert(*note, lane);
@@ -70,15 +73,25 @@ impl BindResolver {
             }
         }
         Self {
-            key_to_lane,
+            key_to_lanes,
             note_to_lane,
             velocity_threshold: b.midi.velocity_threshold,
         }
     }
 
-    /// Lane for a keyboard key, if bound.
+    /// First lane for a keyboard key, if bound.
     pub fn lane_for_key(&self, key: KeyCode) -> Option<LaneId> {
-        self.key_to_lane.get(&key).copied()
+        self.key_to_lanes
+            .get(&key)
+            .and_then(|lanes| lanes.first().copied())
+    }
+
+    /// Lanes for a keyboard key, if bound.
+    pub fn lanes_for_key(&self, key: KeyCode) -> impl Iterator<Item = LaneId> + '_ {
+        self.key_to_lanes
+            .get(&key)
+            .into_iter()
+            .flat_map(|lanes| lanes.iter().copied())
     }
 
     /// Lane for a MIDI note, if bound.
@@ -151,6 +164,17 @@ mod tests {
         b.bind(EChannel::Snare, dtx_config::BindSource::Key(KeyCode::KeyX));
         let r = BindResolver::from_bindings(&b);
         assert_eq!(r.lane_for_key(KeyCode::KeyX), Some(1)); // now SD
+    }
+
+    #[test]
+    fn shared_key_binding_maps_to_multiple_lanes() {
+        let mut b = InputBindings::default();
+        b.bind_shared(EChannel::Snare, dtx_config::BindSource::Key(KeyCode::KeyX));
+        let r = BindResolver::from_bindings(&b);
+        assert_eq!(
+            r.lanes_for_key(KeyCode::KeyX).collect::<Vec<_>>(),
+            vec![0, 1]
+        );
     }
 
     #[test]

@@ -10,7 +10,7 @@
 
 use bevy::prelude::*;
 use dtx_ui::theme::Theme;
-use game_shell::{AppState, TransitionRequest, request_transition};
+use game_shell::{request_transition, AppState, TransitionRequest};
 
 use crate::gauge::StageGauge;
 use crate::orchestrator::DrumsStageCompletion;

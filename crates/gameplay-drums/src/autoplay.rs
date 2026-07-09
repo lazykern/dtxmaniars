@@ -11,8 +11,8 @@
 use bevy::prelude::*;
 
 use crate::events::LaneHit;
-use crate::judge::{BarLengthChangeList, BpmChangeList, JudgedChips, chip_target_ms};
-use crate::lane_map::{LaneId, lane_of};
+use crate::judge::{chip_target_ms, BarLengthChangeList, BpmChangeList, JudgedChips};
+use crate::lane_map::{lane_of, LaneId};
 use crate::resources::{ActiveChart, GameplayClock};
 use dtx_timing::math::ChartTiming;
 

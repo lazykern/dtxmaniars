@@ -10,7 +10,7 @@ use dtx_layout::WidgetKind;
 
 use super::drag::Selection;
 use super::picking::{Hovered, WidgetAabbs};
-use crate::widget_layout::{WidgetLayouts, widget_visible};
+use crate::widget_layout::{widget_visible, WidgetLayouts};
 
 /// Every editor-overlay entity (cleanup marker).
 #[derive(Component)]

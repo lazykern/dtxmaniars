@@ -1,6 +1,7 @@
 //! Customize-surface tab state + settings draft lifecycle.
 
 use bevy::prelude::*;
+use bevy_kira_audio::prelude::*;
 use game_shell::{CustomizeTab, PendingCustomizeTab};
 
 pub(super) fn plugin(app: &mut App) {
@@ -64,18 +65,37 @@ fn save_draft_on_close(open: Res<super::EditorOpen>, draft: Res<ConfigDraft>) {
     }
 }
 
-/// Draft edits with a live runtime resource apply immediately while the
-/// surface is open (scroll speed, input offset, common BGM adjust). Everything
-/// else still takes effect via save-on-close.
+/// Draft edits with a live runtime resource apply immediately while open.
 fn apply_draft_live(
     draft: Res<ConfigDraft>,
+    audio: Res<Audio>,
     mut scroll: ResMut<crate::resources::ScrollSettings>,
     mut input_offset: ResMut<crate::resources::InputOffsetMs>,
     mut bgm_adjust: ResMut<crate::resources::BgmAdjustState>,
+    mut audio_settings: ResMut<crate::resources::DrumAudioSettings>,
+    mut bgm: ResMut<dtx_audio::BgmHandle>,
+    mut instances: ResMut<Assets<AudioInstance>>,
 ) {
     *scroll = crate::resources::ScrollSettings::from_scroll_speed(draft.0.gameplay.scroll_speed);
     input_offset.0 = draft.0.gameplay.input_offset_ms;
     bgm_adjust.common_ms = draft.0.gameplay.bgm_adjust_ms;
+
+    let next_audio = crate::resources::DrumAudioSettings {
+        bgm_enabled: draft.0.audio.bgm_enabled,
+        drum_enabled: draft.0.audio.drum_sound_enabled,
+        master_volume: draft.0.audio.master_volume,
+        bgm_volume: draft.0.audio.bgm_volume,
+        drum_volume: draft.0.audio.drum_volume,
+    };
+    if *audio_settings == next_audio {
+        return;
+    }
+    *audio_settings = next_audio;
+    if audio_settings.bgm_enabled {
+        dtx_audio::set_bgm_volume(&bgm, &mut instances, audio_settings.bgm_gain());
+    } else {
+        dtx_audio::stop_bgm(&audio, &mut bgm, &mut instances);
+    }
 }
 
 #[cfg(test)]

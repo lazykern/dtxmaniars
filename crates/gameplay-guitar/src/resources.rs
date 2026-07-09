@@ -57,7 +57,10 @@ pub struct BgmAdjustState {
 
 impl Default for BgmAdjustState {
     fn default() -> Self {
-        Self { common_ms: 0, song_ms: 0 }
+        Self {
+            common_ms: 0,
+            song_ms: 0,
+        }
     }
 }
 

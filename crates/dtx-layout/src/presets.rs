@@ -84,8 +84,8 @@ fn arrangement_from(
                 .find(|l| l.id == *id)
                 .cloned()
                 .unwrap_or_else(|| {
-                    let primary = channel_from_short(id)
-                        .expect("preset lane ids are channel short names");
+                    let primary =
+                        channel_from_short(id).expect("preset lane ids are channel short names");
                     DisplayLane {
                         id: (*id).to_string(),
                         label: (*id).to_string(),
@@ -215,9 +215,12 @@ mod tests {
     #[test]
     fn preset_serde_names_are_kebab() {
         assert_eq!(
-            toml::to_string(&std::collections::BTreeMap::from([("p", LanePreset::NxTypeB)]))
-                .unwrap()
-                .trim(),
+            toml::to_string(&std::collections::BTreeMap::from([(
+                "p",
+                LanePreset::NxTypeB
+            )]))
+            .unwrap()
+            .trim(),
             r#"p = "nx-type-b""#
         );
     }

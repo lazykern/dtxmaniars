@@ -3,12 +3,12 @@
 //! `WidgetLayouts` (single mutation path — undo/save cover it).
 
 use bevy::prelude::*;
-use dtx_layout::{Anchor9, MAX_WIDGET_SCALE, MIN_WIDGET_SCALE, WidgetKind};
+use dtx_layout::{Anchor9, WidgetKind, MAX_WIDGET_SCALE, MIN_WIDGET_SCALE};
 use dtx_ui::widget::controls::{self, ControlBool, ControlValue, Slider, Stepper};
 
-use super::EditorOpen;
 use super::drag::Selection;
 use super::picking::EditorChrome;
+use super::EditorOpen;
 use crate::lanes::Lanes;
 use crate::widget_layout::WidgetLayouts;
 

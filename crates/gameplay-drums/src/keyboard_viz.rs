@@ -5,8 +5,8 @@ use dtx_ui::theme::Theme;
 use game_shell::AppState;
 
 use crate::events::{JudgmentEvent, LaneHit};
-use crate::lanes::Lanes;
 use crate::lane_map::lane_channel;
+use crate::lanes::Lanes;
 use crate::layout::PlayfieldLayout;
 
 #[derive(Component)]

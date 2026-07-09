@@ -142,7 +142,11 @@ pub fn ease_rect(current: StageRect, target: StageRect, dt: f32) -> StageRect {
     // Snap when close to kill the long tail.
     let close =
         (next.origin - target.origin).length() < 0.5 && (next.size - target.size).length() < 0.5;
-    if close { target } else { next }
+    if close {
+        target
+    } else {
+        next
+    }
 }
 
 /// Move `StageRect` toward `StageTarget` with a frame-rate-independent ease-out.

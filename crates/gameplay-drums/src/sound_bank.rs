@@ -115,9 +115,9 @@ mod tests {
         use super::{collect_deferred_wav_slots, collect_immediate_wav_slots};
         let chart = Chart {
             chips: vec![
-                Chip::with_wav(0, EChannel::BGM, 0.0, 1),      // deferred
-                Chip::with_wav(0, EChannel::Snare, 0.5, 2),    // immediate (lane)
-                Chip::with_wav(0, EChannel::SE01, 0.75, 3),    // deferred (non-lane)
+                Chip::with_wav(0, EChannel::BGM, 0.0, 1),       // deferred
+                Chip::with_wav(0, EChannel::Snare, 0.5, 2),     // immediate (lane)
+                Chip::with_wav(0, EChannel::SE01, 0.75, 3),     // deferred (non-lane)
                 Chip::with_wav(0, EChannel::BassDrum, 0.25, 4), // immediate (lane)
             ],
             empty_hit_events: vec![EmptyHitEvent {

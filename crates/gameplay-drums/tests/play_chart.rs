@@ -31,6 +31,7 @@ fn build_app() -> App {
         .init_resource::<BpmChangeList>()
         .init_resource::<BarLengthChangeList>()
         .init_resource::<AutoplayEnabled>()
+        .init_resource::<gameplay_drums::editor::EditorOpen>()
         .add_message::<LaneHit>()
         .add_message::<gameplay_drums::events::JudgmentEvent>()
         .add_systems(Update, autoplay_system);

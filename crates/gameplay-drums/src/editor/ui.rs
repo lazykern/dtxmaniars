@@ -3,8 +3,8 @@
 use bevy::prelude::*;
 use dtx_layout::WidgetKind;
 
-use super::EditorOpen;
 use super::drag::Selection;
+use super::EditorOpen;
 
 #[derive(Component)]
 struct EditorUiRoot;

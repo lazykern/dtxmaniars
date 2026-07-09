@@ -47,7 +47,7 @@ fn schedule_se_chips(
     mut active: ResMut<ActiveDrumSounds>,
     mut played: ResMut<PlayedSeChips>,
 ) {
-    if !clock.is_ready() || !settings.enabled {
+    if !clock.is_ready() || !settings.drum_enabled {
         return;
     }
     if chart.chart.assets.wav.is_empty() {

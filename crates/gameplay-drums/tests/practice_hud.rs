@@ -75,7 +75,10 @@ fn full_hud_absent_without_practice_session() {
 fn normal_pause_overlay_suppressed_in_practice() {
     let mut app = build_app();
     app.init_resource::<gameplay_drums::pause::PauseSelection>()
-        .add_systems(OnEnter(PauseState::Paused), gameplay_drums::pause::spawn_overlay);
+        .add_systems(
+            OnEnter(PauseState::Paused),
+            gameplay_drums::pause::spawn_overlay,
+        );
     app.world_mut().insert_resource(PracticeSession::default());
     set_paused(&mut app, true);
     let overlays = app
@@ -106,15 +109,15 @@ fn real_hud_plugin_schedule_builds_headlessly() {
         bevy::state::app::StatesPlugin,
         bevy::input::InputPlugin,
     ))
-        .init_state::<AppState>()
-        .init_state::<PauseState>()
-        .add_message::<game_shell::TransitionRequest>()
-        .add_message::<gameplay_drums::seek::SeekToChartTime>()
-        .add_message::<gameplay_drums::practice::actions::PracticeAction>()
-        .init_resource::<GameplayClock>()
-        .init_resource::<ChipTimeline>()
-        .world_mut()
-        .insert_resource(PracticeSession::default());
+    .init_state::<AppState>()
+    .init_state::<PauseState>()
+    .add_message::<game_shell::TransitionRequest>()
+    .add_message::<gameplay_drums::seek::SeekToChartTime>()
+    .add_message::<gameplay_drums::practice::actions::PracticeAction>()
+    .init_resource::<GameplayClock>()
+    .init_resource::<ChipTimeline>()
+    .world_mut()
+    .insert_resource(PracticeSession::default());
 
     gameplay_drums::practice::hud::plugin(&mut app);
 
@@ -173,7 +176,10 @@ fn quick_tier_entities_spawn_on_entering_performance() {
         .query::<&gameplay_drums::practice::hud::mini_strip::MiniStripRoot>()
         .iter(app.world())
         .count();
-    assert_eq!(mini_strips, 1, "mini strip must spawn on entering Performance");
+    assert_eq!(
+        mini_strips, 1,
+        "mini strip must spawn on entering Performance"
+    );
 
     let chips = app
         .world_mut()
@@ -204,9 +210,8 @@ fn next_bar_button_moves_scrub_cursor() {
     };
     let bpm = gameplay_drums::judge::BpmChangeList::from_chart(&chart);
     let bar = gameplay_drums::judge::BarLengthChangeList::from_chart(&chart);
-    app.world_mut().insert_resource(ChipTimeline::from_chart(
-        &chart, &bpm, &bar, 0, 4_000,
-    ));
+    app.world_mut()
+        .insert_resource(ChipTimeline::from_chart(&chart, &bpm, &bar, 0, 4_000));
     app.world_mut().insert_resource(PracticeSession {
         scrub_cursor_ms: Some(0),
         ..Default::default()
@@ -215,9 +220,7 @@ fn next_bar_button_moves_scrub_cursor() {
         .spawn((Interaction::Pressed, TransportButton::NextBar));
     app.update();
     assert_eq!(
-        app.world()
-            .resource::<PracticeSession>()
-            .scrub_cursor_ms,
+        app.world().resource::<PracticeSession>().scrub_cursor_ms,
         Some(2_000),
         "next-bar button advances the scrub cursor one bar"
     );

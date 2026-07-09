@@ -88,7 +88,7 @@ fn play_judgment_sounds(
     sound_bank: Res<dtx_audio::ChartSoundBank>,
     mut active: ResMut<ActiveDrumSounds>,
 ) {
-    if !settings.enabled || chart.chart.assets.wav.is_empty() {
+    if !settings.drum_enabled || chart.chart.assets.wav.is_empty() {
         return;
     }
     let source_dir = chart
@@ -170,7 +170,7 @@ fn play_empty_hit_sounds(
     sound_bank: Res<dtx_audio::ChartSoundBank>,
     mut active: ResMut<ActiveDrumSounds>,
 ) {
-    if !settings.enabled || chart.chart.assets.wav.is_empty() {
+    if !settings.drum_enabled || chart.chart.assets.wav.is_empty() {
         return;
     }
     let source_dir = chart
@@ -328,7 +328,7 @@ fn wav_path(
 
 fn maybe_mute_hh_on_close(
     channel: EChannel,
-    audio: &Audio,
+    _audio: &Audio,
     instances: &mut Assets<AudioInstance>,
     active: &mut ActiveDrumSounds,
 ) {
@@ -338,8 +338,6 @@ fn maybe_mute_hh_on_close(
     for handle in active.hh_open_instances.drain(..) {
         if let Some(mut inst) = instances.get_mut(&handle) {
             inst.stop(AudioTween::default());
-        } else {
-            audio.stop();
         }
     }
 }

@@ -61,11 +61,9 @@ fn capture_key_to_lane_input(
         return;
     }
     for key in keys.get_just_pressed() {
-        if let Some(lane) = resolver.lane_for_key(*key) {
-            pending.events.push(CapturedLaneInput {
-                lane,
-                captured_at: Instant::now(),
-            });
+        let captured_at = Instant::now();
+        for lane in resolver.lanes_for_key(*key) {
+            pending.events.push(CapturedLaneInput { lane, captured_at });
         }
     }
 }
