@@ -26,7 +26,11 @@ pub fn plugin(app: &mut App) {
             (handle_buttons, handle_tab_buttons, highlight_selection).run_if(super::editor_open),
             close_on_escape
                 .run_if(super::editor_open)
-                .run_if(not(super::bindings_capture::capture_active)),
+                .run_if(not(super::bindings_capture::capture_active))
+                // Must observe CalibrationState before calibration flips it to
+                // Idle on the same Escape, else one Esc both cancels calibration
+                // and closes the surface.
+                .before(super::calibration::confirm_or_cancel),
         )
             .run_if(in_state(game_shell::AppState::Performance)),
     )

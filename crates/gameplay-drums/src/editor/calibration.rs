@@ -27,9 +27,12 @@ pub fn median(samples: &[i32]) -> i32 {
     v[v.len() / 2]
 }
 
-/// Suggested input offset from the median tap error: cancel the latency.
+/// Suggested input offset from the median tap error. The judge computes
+/// `delta = (audio_ms - input_offset) - target`, and the beat grid the taps are
+/// measured against is the chip-target grid, so the measured median error
+/// (`audio_ms - target`) IS the offset that zeroes delta — apply it directly.
 pub fn suggested_offset(median_err: i32, clamp: i32) -> i32 {
-    (-median_err).clamp(-clamp, clamp)
+    median_err.clamp(-clamp, clamp)
 }
 
 /// Tap-test lifecycle. Idle by default.
@@ -137,7 +140,7 @@ fn collect_taps(
     }
 }
 
-fn confirm_or_cancel(
+pub(super) fn confirm_or_cancel(
     keys: Res<ButtonInput<KeyCode>>,
     mut state: ResMut<CalibrationState>,
     mut draft: ResMut<super::tabs::ConfigDraft>,
@@ -246,7 +249,9 @@ mod tests {
     }
     #[test]
     fn suggested_offset_cancels_and_clamps() {
-        assert_eq!(suggested_offset(40, 300), -40);
-        assert_eq!(suggested_offset(-500, 300), 300);
+        // A consistently-late player (+40ms vs the beat) needs a +40ms offset,
+        // because the judge subtracts input_offset from the hit time.
+        assert_eq!(suggested_offset(40, 300), 40);
+        assert_eq!(suggested_offset(-500, 300), -300);
     }
 }
