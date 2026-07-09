@@ -1337,9 +1337,15 @@ fn handle_calibrate_button(
     mut state: ResMut<super::calibration::CalibrationState>,
     mut metronome_on: ResMut<crate::resources::MetronomeEnabled>,
     mut timing_lines: ResMut<crate::resources::ShowTimingLines>,
+    mut autoplay: ResMut<crate::autoplay::AutoplayEnabled>,
 ) {
     if q.iter().any(|i| *i == Interaction::Pressed) {
-        super::calibration::start_calibration(&mut state, &mut metronome_on, &mut timing_lines);
+        super::calibration::start_calibration(
+            &mut state,
+            &mut metronome_on,
+            &mut timing_lines,
+            &mut autoplay,
+        );
     }
 }
 

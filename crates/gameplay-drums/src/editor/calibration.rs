@@ -41,11 +41,13 @@ pub enum CalibrationState {
         samples: Vec<i32>,
         prev_metronome: bool,
         prev_timing_lines: bool,
+        prev_autoplay: bool,
     },
     Done {
         median: i32,
         prev_metronome: bool,
         prev_timing_lines: bool,
+        prev_autoplay: bool,
     },
 }
 
@@ -70,11 +72,14 @@ pub(super) fn plugin(app: &mut App) {
 }
 
 /// Called by the panel Calibrate button: enter Collecting, forcing metronome +
-/// timing lines on (the tick fires only on line crossings).
+/// timing lines on (the tick fires only on line crossings) and autoplay OFF
+/// (the editor session forces autoplay on; its perfect on-target LaneHits would
+/// otherwise auto-fill the tap test instead of the player's own taps).
 pub fn start_calibration(
     state: &mut CalibrationState,
     metronome_on: &mut crate::resources::MetronomeEnabled,
     timing_lines: &mut crate::resources::ShowTimingLines,
+    autoplay: &mut crate::autoplay::AutoplayEnabled,
 ) {
     if !matches!(state, CalibrationState::Idle) {
         return;
@@ -83,30 +88,31 @@ pub fn start_calibration(
         samples: Vec::new(),
         prev_metronome: metronome_on.0,
         prev_timing_lines: timing_lines.0,
+        prev_autoplay: autoplay.0,
     };
     metronome_on.0 = true;
     timing_lines.0 = true;
+    autoplay.0 = false;
 }
 
 fn collect_taps(
     mut state: ResMut<CalibrationState>,
-    clock: Res<crate::resources::GameplayClock>,
     chart: Res<crate::resources::ActiveChart>,
     mut hits: MessageReader<crate::events::LaneHit>,
-    input_offset: Res<crate::resources::InputOffsetMs>,
 ) {
     let CalibrationState::Collecting { samples, .. } = &mut *state else {
         return;
     };
-    let now = clock.current_ms as f64 - input_offset.0 as f64;
     let bpm = chart.chart.metadata.bpm.unwrap_or(120.0) as f64;
     if bpm <= 0.0 {
         return;
     }
     let beat_ms = 60_000.0 / bpm;
     let mut got = false;
-    for _ in hits.read() {
-        let e = error_ms(now, beat_ms, 0.0);
+    // Each hit's own raw timestamp (pre input-offset) vs the nearest beat is the
+    // latency to cancel; the frame clock would smear all hits in a frame together.
+    for hit in hits.read() {
+        let e = error_ms(hit.audio_ms as f64, beat_ms, 0.0);
         if e.abs() <= beat_ms / 2.0 {
             samples.push(e.round() as i32);
             got = true;
@@ -117,6 +123,7 @@ fn collect_taps(
         if let CalibrationState::Collecting {
             prev_metronome,
             prev_timing_lines,
+            prev_autoplay,
             ..
         } = *state
         {
@@ -124,6 +131,7 @@ fn collect_taps(
                 median: m,
                 prev_metronome,
                 prev_timing_lines,
+                prev_autoplay,
             };
         }
     }
@@ -135,17 +143,20 @@ fn confirm_or_cancel(
     mut draft: ResMut<super::tabs::ConfigDraft>,
     mut metronome_on: ResMut<crate::resources::MetronomeEnabled>,
     mut timing_lines: ResMut<crate::resources::ShowTimingLines>,
+    mut autoplay: ResMut<crate::autoplay::AutoplayEnabled>,
 ) {
     match &*state {
         CalibrationState::Idle => {}
         CalibrationState::Collecting {
             prev_metronome,
             prev_timing_lines,
+            prev_autoplay,
             ..
         } => {
             if keys.just_pressed(KeyCode::Escape) {
                 metronome_on.0 = *prev_metronome;
                 timing_lines.0 = *prev_timing_lines;
+                autoplay.0 = *prev_autoplay;
                 *state = CalibrationState::Idle;
             }
         }
@@ -153,16 +164,18 @@ fn confirm_or_cancel(
             median,
             prev_metronome,
             prev_timing_lines,
+            prev_autoplay,
         } => {
-            if keys.just_pressed(KeyCode::Enter) {
-                let off = suggested_offset(*median, dtx_config::INPUT_OFFSET_CLAMP_MS);
-                draft.0.gameplay.input_offset_ms = off;
+            let apply = keys.just_pressed(KeyCode::Enter);
+            let cancel = keys.just_pressed(KeyCode::Escape);
+            if apply || cancel {
+                if apply {
+                    let off = suggested_offset(*median, dtx_config::INPUT_OFFSET_CLAMP_MS);
+                    draft.0.gameplay.input_offset_ms = off;
+                }
                 metronome_on.0 = *prev_metronome;
                 timing_lines.0 = *prev_timing_lines;
-                *state = CalibrationState::Idle;
-            } else if keys.just_pressed(KeyCode::Escape) {
-                metronome_on.0 = *prev_metronome;
-                timing_lines.0 = *prev_timing_lines;
+                autoplay.0 = *prev_autoplay;
                 *state = CalibrationState::Idle;
             }
         }
