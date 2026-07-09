@@ -100,6 +100,9 @@ pub struct SettingSlider(pub usize);
 #[derive(Component)]
 pub struct ResetTabButton;
 
+#[derive(Component)]
+pub struct CalibrateButton;
+
 fn preset_name(p: dtx_layout::LanePreset) -> &'static str {
     match p {
         dtx_layout::LanePreset::Classic => "classic",
@@ -147,6 +150,7 @@ pub fn plugin(app: &mut App) {
                 handle_settings_adjust,
                 apply_settings_sliders,
                 handle_reset_tab,
+                handle_calibrate_button,
                 refresh_settings_values,
                 update_hovered_desc,
             )
@@ -680,6 +684,23 @@ fn spawn_settings_block(
                 dtx_ui::theme::Theme::font(13.0),
                 TextColor(t.text_primary),
             ));
+            if tab == game_shell::CustomizeTab::Gameplay {
+                h.spawn((
+                    CalibrateButton,
+                    Button,
+                    Node {
+                        padding: UiRect::axes(Val::Px(8.0), Val::Px(3.0)),
+                        margin: UiRect::right(Val::Px(6.0)),
+                        ..default()
+                    },
+                    BackgroundColor(Color::srgb(0.16, 0.24, 0.30)),
+                    children![(
+                        Text::new("Calibrate"),
+                        dtx_ui::theme::Theme::font(10.0),
+                        TextColor(t.text_primary),
+                    )],
+                ));
+            }
             h.spawn((
                 ResetTabButton,
                 Button,
@@ -1307,6 +1328,18 @@ fn handle_reset_tab(
     let d = dtx_config::Config::default();
     for item in crate::editor::settings_data::settings_items(active.0) {
         (item.reset)(&mut draft.0, &d);
+    }
+}
+
+/// Calibrate click: start the input-offset tap-test overlay.
+fn handle_calibrate_button(
+    q: Query<&Interaction, (With<CalibrateButton>, Changed<Interaction>)>,
+    mut state: ResMut<super::calibration::CalibrationState>,
+    mut metronome_on: ResMut<crate::resources::MetronomeEnabled>,
+    mut timing_lines: ResMut<crate::resources::ShowTimingLines>,
+) {
+    if q.iter().any(|i| *i == Interaction::Pressed) {
+        super::calibration::start_calibration(&mut state, &mut metronome_on, &mut timing_lines);
     }
 }
 

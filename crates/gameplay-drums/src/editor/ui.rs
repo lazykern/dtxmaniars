@@ -215,7 +215,11 @@ fn close_on_escape(
     mut autoplay: ResMut<crate::autoplay::AutoplayEnabled>,
     mut session: ResMut<game_shell::EditorSession>,
     mut requests: MessageWriter<game_shell::TransitionRequest>,
+    calib: Res<super::calibration::CalibrationState>,
 ) {
+    if !matches!(*calib, super::calibration::CalibrationState::Idle) {
+        return;
+    }
     if keys.just_pressed(KeyCode::Escape) {
         if selection.0.is_some() {
             selection.0 = None;

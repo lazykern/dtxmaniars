@@ -12,6 +12,7 @@ use game_shell::AppState;
 pub mod bindings_capture;
 pub mod bindings_panel;
 pub mod bindings_spatial;
+pub mod calibration;
 pub mod chrome;
 pub mod drag;
 pub mod footer;
@@ -121,6 +122,7 @@ pub fn plugin(app: &mut App) {
             session::plugin,
             tabs::plugin,
             footer::plugin,
+            calibration::plugin,
         ));
 }
 
