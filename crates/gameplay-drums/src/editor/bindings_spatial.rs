@@ -113,9 +113,16 @@ fn spawn_overlay_on_open(
             Node {
                 position_type: PositionType::Absolute,
                 justify_content: JustifyContent::Center,
+                padding: UiRect::axes(Val::Px(4.0), Val::Px(1.0)),
+                border_radius: BorderRadius::all(Val::Px(3.0)),
                 ..default()
             },
+            BackgroundColor(Color::srgba(0.0, 0.0, 0.0, 0.72)),
             Text::new(String::new()),
+            TextLayout {
+                linebreak: bevy::text::LineBreak::NoWrap,
+                ..default()
+            },
             dtx_ui::theme::Theme::font(12.0),
             TextColor(Color::WHITE),
             Visibility::Hidden,
@@ -188,16 +195,22 @@ fn sync_bind_overlay(
     *o_border = BorderColor::all(accent);
     *o_vis = Visibility::Inherited;
 
-    // Bound sources drawn at the lane bottom (just under the judge line).
+    // Bound sources drawn at the lane bottom (just under the judge line). Cap
+    // the count so the auto-width pill stays narrow (rightmost lanes would run
+    // off the playfield otherwise); the full list lives in the left panel.
     let sources = live.0.map.get(&ch).cloned().unwrap_or_default();
-    let text: String = sources
+    let shown = 3;
+    let mut text: String = sources
         .iter()
+        .take(shown)
         .map(source_label)
         .collect::<Vec<_>>()
         .join("  ");
+    if sources.len() > shown {
+        text.push_str(&format!("  +{}", sources.len() - shown));
+    }
     l_node.left = Val::Px(left);
     l_node.top = Val::Px(top + height + 2.0);
-    l_node.width = Val::Px(width.max(1.0));
     l_text.0 = text;
     *l_color = TextColor(accent);
     *l_vis = Visibility::Inherited;

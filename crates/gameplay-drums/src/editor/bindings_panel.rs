@@ -174,6 +174,10 @@ pub fn spawn_bindings_block(
                     Text::new(port_label),
                     dtx_ui::theme::Theme::font(11.0),
                     TextColor(t.text_primary),
+                    TextLayout {
+                        linebreak: bevy::text::LineBreak::NoWrap,
+                        ..default()
+                    },
                     Node {
                         max_width: Val::Px(150.0),
                         justify_content: JustifyContent::Center,
@@ -460,6 +464,17 @@ fn handle_capture_start(
     }
 }
 
+/// Truncate a long device name to `max` chars with a trailing ellipsis.
+fn truncate_label(s: &str, max: usize) -> String {
+    if s.chars().count() <= max {
+        s.to_string()
+    } else {
+        let mut out: String = s.chars().take(max.saturating_sub(1)).collect();
+        out.push('…');
+        out
+    }
+}
+
 /// Text shown in the port row: the selected port, or a placeholder when the
 /// selection is unset / the device list is empty.
 fn port_display_label(selected: &Option<String>, list: &[String]) -> String {
@@ -467,7 +482,7 @@ fn port_display_label(selected: &Option<String>, list: &[String]) -> String {
         return "(no MIDI devices)".to_string();
     }
     match selected {
-        Some(p) => p.clone(),
+        Some(p) => truncate_label(p, 22),
         None => "(first available)".to_string(),
     }
 }
@@ -589,6 +604,15 @@ mod tests {
         assert_eq!(port_cycle_index(Some(0), -1, 3), 2);
         assert_eq!(port_cycle_index(None, 1, 3), 1);
         assert_eq!(port_cycle_index(None, -1, 3), 2);
+    }
+
+    #[test]
+    fn truncate_label_adds_ellipsis() {
+        assert_eq!(truncate_label("short", 22), "short");
+        let long = "NUX NTK-61:NUX NTK-61 Midi 32:0";
+        let out = truncate_label(long, 22);
+        assert_eq!(out.chars().count(), 22);
+        assert!(out.ends_with('…'));
     }
 
     #[test]
