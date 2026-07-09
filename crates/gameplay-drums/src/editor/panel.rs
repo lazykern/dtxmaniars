@@ -763,6 +763,10 @@ fn spawn_settings_block(
                             Text::new((item.value)(&draft.0)),
                             dtx_ui::theme::Theme::font(12.0),
                             TextColor(t.text_primary),
+                            TextLayout {
+                                linebreak: bevy::text::LineBreak::NoWrap,
+                                ..default()
+                            },
                             Node {
                                 min_width: Val::Px(52.0),
                                 ..default()
@@ -774,7 +778,7 @@ fn spawn_settings_block(
                             SettingAdjust { index: i, dir: -1 },
                             Button,
                             Node {
-                                padding: UiRect::axes(Val::Px(6.0), Val::Px(1.0)),
+                                padding: UiRect::axes(Val::Px(5.0), Val::Px(1.0)),
                                 ..default()
                             },
                             BackgroundColor(Color::srgb(0.14, 0.14, 0.18)),
@@ -789,8 +793,13 @@ fn spawn_settings_block(
                             Text::new((item.value)(&draft.0)),
                             dtx_ui::theme::Theme::font(12.0),
                             TextColor(t.text_primary),
+                            TextLayout {
+                                linebreak: bevy::text::LineBreak::NoWrap,
+                                ..default()
+                            },
                             Node {
-                                min_width: Val::Px(60.0),
+                                min_width: Val::Px(96.0),
+                                justify_content: JustifyContent::Center,
                                 ..default()
                             },
                         ));
@@ -798,7 +807,7 @@ fn spawn_settings_block(
                             SettingAdjust { index: i, dir: 1 },
                             Button,
                             Node {
-                                padding: UiRect::axes(Val::Px(6.0), Val::Px(1.0)),
+                                padding: UiRect::axes(Val::Px(5.0), Val::Px(1.0)),
                                 ..default()
                             },
                             BackgroundColor(Color::srgb(0.14, 0.14, 0.18)),
