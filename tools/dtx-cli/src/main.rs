@@ -36,6 +36,21 @@ enum Cmd {
         /// Path to the .dtx file.
         path: PathBuf,
     },
+    /// Score store utilities.
+    Scores {
+        /// Score utility command.
+        #[command(subcommand)]
+        cmd: ScoresCmd,
+    },
+}
+
+#[derive(Subcommand, Debug)]
+enum ScoresCmd {
+    /// Import DTXManiaNX .dtx.score.ini files from a song tree.
+    ImportNx {
+        /// Root song directory to scan.
+        songs_dir: PathBuf,
+    },
 }
 
 fn main() -> ExitCode {
@@ -54,6 +69,9 @@ fn run(cli: Cli) -> Result<()> {
         Cmd::Validate { path } => validate(&path),
         Cmd::Inspect { path } => inspect(&path),
         Cmd::PlayChart { path } => play_chart(&path),
+        Cmd::Scores { cmd } => match cmd {
+            ScoresCmd::ImportNx { songs_dir } => import_nx_scores_cli(&songs_dir),
+        },
     }
 }
 
@@ -105,6 +123,28 @@ fn print_metadata(chart: &dtx_core::Chart) {
     if let Some(v) = m.blevel {
         println!("  blevel:   {v}");
     }
+}
+
+fn import_nx_scores_cli(songs_dir: &PathBuf) -> Result<()> {
+    use dtx_scoring::nx_import::{import_nx_scores, ImportOptions};
+    use dtx_scoring::ScoreStore;
+
+    let mut store = ScoreStore::with_path(ScoreStore::default_path());
+    store.load().context("loading score store")?;
+    let report = import_nx_scores(
+        &mut store,
+        ImportOptions {
+            root: songs_dir.clone(),
+        },
+    )
+    .context("importing DTXManiaNX scores")?;
+    store.save().context("saving score store")?;
+
+    println!("scanned score.ini files: {}", report.scanned_score_inis);
+    println!("imported entries: {}", report.imported_entries);
+    println!("missing paired charts: {}", report.missing_charts);
+    println!("malformed score.ini files: {}", report.skipped_malformed);
+    Ok(())
 }
 
 /// Headless play-through (Phase G end-to-end verification).

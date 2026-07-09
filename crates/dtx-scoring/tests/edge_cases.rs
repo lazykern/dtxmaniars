@@ -9,8 +9,9 @@ use dtx_scoring::gauge::{
 use dtx_scoring::hit_ranges::{
     classify_with_difficulty, classify_with_ranges, Difficulty, HitRanges,
 };
+use dtx_scoring::identity::ChartIdentity;
 use dtx_scoring::JudgmentKind;
-use dtx_scoring::{Rank, ScoreEntry, ScoreStore};
+use dtx_scoring::{JudgmentTotals, Rank, ScoreEntry, ScoreSource, ScoreStore};
 
 #[test]
 fn rank_s_lower_bound() {
@@ -77,59 +78,31 @@ fn rank_clone_copy() {
 
 #[test]
 fn score_entry_default_total() {
-    let e = ScoreEntry {
-        chart_hash: "h".into(),
-        title: "T".into(),
-        artist: "A".into(),
-        score: 0,
-        max_combo: 0,
-        perfect: 0,
-        great: 0,
-        good: 0,
-        ok: 0,
-        miss: 0,
-        rank: Rank::E,
-        played_at: 0,
-    };
+    let mut e = make_entry("h", 0);
+    e.rank = Rank::E;
     assert_eq!(e.total(), 0);
     assert_eq!(e.perfect_pct(), 0.0);
 }
 
 #[test]
 fn score_entry_perfect_pct_full() {
-    let e = ScoreEntry {
-        chart_hash: "h".into(),
-        title: "T".into(),
-        artist: "A".into(),
-        score: 0,
-        max_combo: 100,
-        perfect: 100,
-        great: 0,
-        good: 0,
-        ok: 0,
-        miss: 0,
-        rank: Rank::S,
-        played_at: 0,
-    };
+    let mut e = make_entry("h", 0);
+    e.max_combo = 100;
+    e.judgments.perfect = 100;
     assert!((e.perfect_pct() - 100.0).abs() < 0.01);
 }
 
 #[test]
 fn score_entry_perfect_pct_mixed() {
-    let e = ScoreEntry {
-        chart_hash: "h".into(),
-        title: "T".into(),
-        artist: "A".into(),
-        score: 0,
-        max_combo: 0,
+    let mut e = make_entry("h", 0);
+    e.judgments = JudgmentTotals {
         perfect: 50,
         great: 30,
         good: 10,
-        ok: 5,
+        poor: 5,
         miss: 5,
-        rank: Rank::B,
-        played_at: 0,
     };
+    e.rank = Rank::B;
     // 50/100 = 50%
     assert!((e.perfect_pct() - 50.0).abs() < 0.01);
     assert_eq!(e.total(), 100);
@@ -140,20 +113,11 @@ fn score_store_add_save_load() {
     let tmp = std::env::temp_dir().join("dtx_scoring_test_save.json");
     let _ = std::fs::remove_file(&tmp);
     let mut s = ScoreStore::with_path(tmp.clone());
-    s.add(ScoreEntry {
-        chart_hash: "abc".into(),
-        title: "T".into(),
-        artist: "A".into(),
-        score: 1000,
-        max_combo: 50,
-        perfect: 50,
-        great: 0,
-        good: 0,
-        ok: 0,
-        miss: 0,
-        rank: Rank::S,
-        played_at: 100,
-    });
+    let mut entry = make_entry("abc", 1000);
+    entry.max_combo = 50;
+    entry.judgments.perfect = 50;
+    entry.played_at = 100;
+    s.add(entry);
     s.save().unwrap();
     let mut s2 = ScoreStore::with_path(tmp.clone());
     s2.load().unwrap();
@@ -165,48 +129,12 @@ fn score_store_add_save_load() {
 #[test]
 fn score_store_best_for_chart() {
     let mut s = ScoreStore::default();
-    s.add(ScoreEntry {
-        chart_hash: "a".into(),
-        title: "T".into(),
-        artist: "A".into(),
-        score: 1000,
-        max_combo: 0,
-        perfect: 0,
-        great: 0,
-        good: 0,
-        ok: 0,
-        miss: 0,
-        rank: Rank::S,
-        played_at: 0,
-    });
-    s.add(ScoreEntry {
-        chart_hash: "a".into(),
-        title: "T".into(),
-        artist: "A".into(),
-        score: 2000,
-        max_combo: 0,
-        perfect: 0,
-        great: 0,
-        good: 0,
-        ok: 0,
-        miss: 0,
-        rank: Rank::S,
-        played_at: 0,
-    });
-    s.add(ScoreEntry {
-        chart_hash: "b".into(),
-        title: "T2".into(),
-        artist: "A".into(),
-        score: 500,
-        max_combo: 0,
-        perfect: 0,
-        great: 0,
-        good: 0,
-        ok: 0,
-        miss: 0,
-        rank: Rank::A,
-        played_at: 0,
-    });
+    s.add(make_entry("a", 1000));
+    s.add(make_entry("a", 2000));
+    let mut other = make_entry("b", 500);
+    other.title = "T2".into();
+    other.rank = Rank::A;
+    s.add(other);
     let best = s.best_for("a").unwrap();
     assert_eq!(best.score, 2000);
     assert!(s.best_for("nonexistent").is_none());
@@ -226,18 +154,17 @@ fn score_store_chart_count() {
 
 fn make_entry(hash: &str, score: u32) -> ScoreEntry {
     ScoreEntry {
-        chart_hash: hash.into(),
+        id: format!("{hash}:{score}"),
+        chart: ChartIdentity::new(hash.into(), None, None),
         title: "T".into(),
         artist: "A".into(),
         score,
         max_combo: 0,
-        perfect: 0,
-        great: 0,
-        good: 0,
-        ok: 0,
-        miss: 0,
+        judgments: JudgmentTotals::default(),
         rank: Rank::S,
         played_at: 0,
+        source: ScoreSource::Native,
+        replay_ref: None,
     }
 }
 
@@ -377,40 +304,14 @@ fn difficulty_as_str_all() {
 
 #[test]
 fn score_entry_equality() {
-    let a = ScoreEntry {
-        chart_hash: "h".into(),
-        title: "T".into(),
-        artist: "A".into(),
-        score: 100,
-        max_combo: 0,
-        perfect: 0,
-        great: 0,
-        good: 0,
-        ok: 0,
-        miss: 0,
-        rank: Rank::S,
-        played_at: 0,
-    };
+    let a = make_entry("h", 100);
     let b = a.clone();
     assert_eq!(a, b);
 }
 
 #[test]
 fn score_entry_clone() {
-    let a = ScoreEntry {
-        chart_hash: "h".into(),
-        title: "T".into(),
-        artist: "A".into(),
-        score: 100,
-        max_combo: 0,
-        perfect: 0,
-        great: 0,
-        good: 0,
-        ok: 0,
-        miss: 0,
-        rank: Rank::S,
-        played_at: 0,
-    };
+    let a = make_entry("h", 100);
     let b = a.clone();
     assert_eq!(a.score, b.score);
     assert_eq!(a.title, b.title);
