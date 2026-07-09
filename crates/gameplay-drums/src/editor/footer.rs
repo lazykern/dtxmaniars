@@ -88,6 +88,12 @@ fn spawn_footer_on_open(
             Text::new(desc_text(&desc)),
             dtx_ui::theme::Theme::font(12.0),
             TextColor(t.text_primary),
+            Node {
+                margin: UiRect::left(Val::Px(
+                    super::chrome::RAIL_WIDTH + super::chrome::LEFT_PANEL_WIDTH,
+                )),
+                ..default()
+            },
         ));
         p.spawn((
             Text::new(LEGEND),

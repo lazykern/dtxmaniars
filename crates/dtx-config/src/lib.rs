@@ -191,7 +191,7 @@ pub struct GameplayConfig {
     pub tight: bool,
     /// `bReverse.Drums` — reverse scroll direction (CActConfigList.Gameplay.cs).
     pub reverse: bool,
-    /// Scroll speed multiplier 0.5..4.0.
+    /// Scroll speed multiplier 0.5..9.0.
     pub scroll_speed: f32,
     /// `bDark` — hide notes / show only judgment (CActConfigList.Gameplay.cs).
     pub dark_mode: bool,
