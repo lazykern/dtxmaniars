@@ -113,11 +113,24 @@ pub struct AttemptStats {
     pub overhits: u32,
     pub error_sum_ms: i64,
     pub error_count: u32,
+    /// Notes cleared while halted in wait mode (tempo-free, not judged).
+    pub waited: u32,
 }
 
 impl AttemptStats {
     pub fn accuracy_pct(&self) -> f32 {
         self.counts.achievement_pct()
+    }
+
+    /// Notes cleared without halting / all notes seen (%). The wait-mode
+    /// analogue of achievement%.
+    pub fn flow_pct(&self) -> f32 {
+        let total = self.counts.total() + self.waited;
+        if total == 0 {
+            0.0
+        } else {
+            self.counts.total() as f32 / total as f32 * 100.0
+        }
     }
 
     pub fn mean_error_ms(&self) -> f32 {
@@ -129,7 +142,7 @@ impl AttemptStats {
     }
 
     pub fn has_data(&self) -> bool {
-        self.counts.total() > 0
+        self.counts.total() > 0 || self.waited > 0
     }
 }
 
@@ -143,6 +156,8 @@ pub struct AttemptRecord {
     pub overhits: u32,
     pub accuracy_pct: f32,
     pub mean_error_ms: f32,
+    pub waited: u32,
+    pub flow_pct: f32,
 }
 
 /// Transport state: what/where/how-fast the player chose. Only user
@@ -179,6 +194,8 @@ impl Default for PracticeTransport {
 pub struct PracticeTrainer {
     pub ramp_config: RampConfig,
     pub ramp: RampState,
+    /// Wait mode: halt at unhit notes (mutually exclusive with the ramp).
+    pub wait_enabled: bool,
 }
 
 /// Present only while the stage runs in practice mode. Absence = normal
@@ -234,6 +251,8 @@ impl PracticeSession {
                 overhits: a.overhits,
                 accuracy_pct: a.accuracy_pct(),
                 mean_error_ms: a.mean_error_ms(),
+                waited: a.waited,
+                flow_pct: a.flow_pct(),
             };
             self.attempt_history.push(record.clone());
             if self.attempt_history.len() > MAX_ATTEMPT_HISTORY {
@@ -302,6 +321,31 @@ mod tests {
     fn metronome_defaults_on() {
         let s = PracticeSession::default();
         assert!(s.transport.metronome);
+    }
+
+    #[test]
+    fn wait_defaults_off_and_flow_pct_computes() {
+        let s = PracticeSession::default();
+        assert!(!s.trainer.wait_enabled);
+
+        let mut a = AttemptStats::default();
+        a.counts.perfect = 3;
+        a.waited = 1;
+        assert_eq!(a.flow_pct(), 75.0);
+
+        let empty = AttemptStats::default();
+        assert_eq!(empty.flow_pct(), 0.0);
+    }
+
+    #[test]
+    fn roll_attempt_carries_waited_and_flow() {
+        let mut s = PracticeSession::default();
+        s.current_attempt.counts.perfect = 3;
+        s.current_attempt.waited = 1;
+        let rec = s.roll_attempt(4_000, 0).unwrap();
+        assert_eq!(rec.waited, 1);
+        assert_eq!(rec.flow_pct, 75.0);
+        assert_eq!(s.current_attempt.waited, 0, "fresh attempt starts clean");
     }
 
     #[test]

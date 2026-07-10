@@ -691,6 +691,8 @@ mod tests {
             max_combo: 0,
             accuracy_pct: acc,
             mean_error_ms: 0.0,
+            waited: 0,
+            flow_pct: 0.0,
         }
     }
 

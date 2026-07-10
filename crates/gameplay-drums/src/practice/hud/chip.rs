@@ -130,6 +130,8 @@ mod tests {
             overhits: 0,
             accuracy_pct: 94.2,
             mean_error_ms: -3.0,
+            waited: 0,
+            flow_pct: 0.0,
         });
         s.attempt_history.push(AttemptRecord {
             start_ms: 999,
@@ -140,6 +142,8 @@ mod tests {
             overhits: 0,
             accuracy_pct: 11.0,
             mean_error_ms: -3.0,
+            waited: 0,
+            flow_pct: 0.0,
         });
         assert_eq!(chip_text(&s, &bar_ms), "0.85× · loop 2–4 · 94%");
     }
