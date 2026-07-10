@@ -54,11 +54,12 @@ pub enum RailItem {
     RampStep,
     RampThreshold,
     RampStreak,
+    WaitMode,
     ExitPractice,
 }
 
 impl RailItem {
-    pub const ORDER: [RailItem; 17] = [
+    pub const ORDER: [RailItem; 18] = [
         RailItem::Resume,
         RailItem::Scrub,
         RailItem::RestartSection,
@@ -75,6 +76,7 @@ impl RailItem {
         RailItem::RampStep,
         RailItem::RampThreshold,
         RailItem::RampStreak,
+        RailItem::WaitMode,
         RailItem::ExitPractice,
     ];
 }
@@ -144,6 +146,13 @@ pub fn rail_label(item: RailItem, session: &PracticeSession, exit_armed: bool) -
             "Ramp streak  ◀ ×{} ▶",
             session.trainer.ramp_config.required_successes
         ),
+        RailItem::WaitMode => {
+            if session.trainer.wait_enabled {
+                "Wait  ON".into()
+            } else {
+                "Wait  off  (Enter: on)".into()
+            }
+        }
         RailItem::ExitPractice => {
             if exit_armed {
                 "Exit practice — Enter again to confirm".into()
@@ -591,6 +600,12 @@ pub fn full_hud_input(
             RailItem::RampArm => {
                 practice_actions.write(crate::practice::actions::PracticeAction::ToggleRamp);
             }
+            RailItem::WaitMode => {
+                session.trainer.wait_enabled = !session.trainer.wait_enabled;
+                if session.trainer.wait_enabled && session.trainer.ramp.armed {
+                    session.trainer.ramp.armed = false;
+                }
+            }
             RailItem::RampStart
             | RailItem::RampTarget
             | RailItem::RampStep
@@ -694,6 +709,17 @@ mod tests {
             waited: 0,
             flow_pct: 0.0,
         }
+    }
+
+    #[test]
+    fn wait_rail_label_reflects_toggle() {
+        let mut s = PracticeSession::default();
+        assert_eq!(
+            rail_label(RailItem::WaitMode, &s, false),
+            "Wait  off  (Enter: on)"
+        );
+        s.trainer.wait_enabled = true;
+        assert_eq!(rail_label(RailItem::WaitMode, &s, false), "Wait  ON");
     }
 
     #[test]
