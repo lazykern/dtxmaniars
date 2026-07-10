@@ -109,6 +109,7 @@ fn native_score_entry(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn spawn_result(
     mut commands: Commands,
     theme: Res<ThemeResource>,
@@ -117,6 +118,7 @@ fn spawn_result(
     counts: Res<JudgmentCounts>,
     chart: Res<ActiveChart>,
     scoring: Res<DrumScoring>,
+    midi: Option<Res<game_shell::MidiConnected>>,
 ) {
     commands.insert_resource(ResultReveal { elapsed_ms: 0.0 });
 
@@ -249,6 +251,12 @@ fn spawn_result(
             commands.entity(inner).add_child(row);
         }
     }
+
+    if midi.is_some_and(|m| m.0) {
+        commands.entity(inner).with_children(|p| {
+            dtx_ui::widget::nav_legend::spawn_nav_legend(p, &t, &[("BD", "continue")]);
+        });
+    }
 }
 
 fn animate_staggered_reveal(
@@ -267,8 +275,18 @@ fn animate_staggered_reveal(
     }
 }
 
-fn result_input(keys: Res<ButtonInput<KeyCode>>, mut requests: MessageWriter<TransitionRequest>) {
-    if keys.just_pressed(KeyCode::Escape) || keys.just_pressed(KeyCode::Enter) {
+fn result_input(
+    keys: Res<ButtonInput<KeyCode>>,
+    mut actions: MessageReader<game_shell::NavAction>,
+    mut requests: MessageWriter<TransitionRequest>,
+) {
+    use game_shell::NavVerb;
+    // Either pad verb continues; the mapper's screen-enter grace keeps the
+    // song's last note from skipping this screen.
+    let pad = actions
+        .read()
+        .any(|a| matches!(a.verb, NavVerb::Confirm | NavVerb::Back));
+    if pad || keys.just_pressed(KeyCode::Escape) || keys.just_pressed(KeyCode::Enter) {
         request_transition(&mut requests, AppState::SongSelect);
     }
 }

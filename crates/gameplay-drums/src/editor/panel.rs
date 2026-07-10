@@ -206,7 +206,7 @@ fn rebuild_left_content(
     rev: Res<super::bindings_panel::BindingsRev>,
     ports: Res<super::bindings_panel::MidiPortList>,
     theme: Res<dtx_ui::ThemeResource>,
-    midi: Res<game_shell::MidiConnected>,
+    midi: Option<Res<game_shell::MidiConnected>>,
     existing: Query<Entity, With<LeftContentRoot>>,
     mut last_sig: Local<Option<(bool, String, game_shell::CustomizeTab, u64)>>,
 ) {
@@ -248,7 +248,7 @@ fn rebuild_left_content(
         .id();
 
     // Pads can reach these tabs on the rail but cannot work their content.
-    if midi.0 && super::keyboard_nav::pad_excluded(active.0) {
+    if midi.is_some_and(|m| m.0) && super::keyboard_nav::pad_excluded(active.0) {
         commands.entity(root).with_children(|p| {
             p.spawn((
                 Text::new("keyboard/mouse required — pads: SD to go back"),
@@ -928,7 +928,7 @@ fn level_key(level: &super::keyboard_nav::NavLevel) -> u8 {
 /// entirely when no MIDI device is connected.
 fn update_editor_legend(
     mut commands: Commands,
-    midi: Res<game_shell::MidiConnected>,
+    midi: Option<Res<game_shell::MidiConnected>>,
     level: Res<super::keyboard_nav::NavLevel>,
     active: Res<super::tabs::ActiveTab>,
     theme: Res<dtx_ui::ThemeResource>,
@@ -936,8 +936,9 @@ fn update_editor_legend(
     legends: Query<Entity, With<dtx_ui::widget::nav_legend::NavLegend>>,
     mut last_sig: Local<Option<(u8, bool, game_shell::CustomizeTab)>>,
 ) {
-    let sig = (level_key(&level), midi.0, active.0);
-    let missing = midi.0 && legends.is_empty();
+    let connected = midi.is_some_and(|m| m.0);
+    let sig = (level_key(&level), connected, active.0);
+    let missing = connected && legends.is_empty();
     if last_sig.as_ref() == Some(&sig) && !missing {
         return;
     }
@@ -945,7 +946,7 @@ fn update_editor_legend(
     for e in &legends {
         commands.entity(e).despawn();
     }
-    if !midi.0 {
+    if !connected {
         return;
     }
     let Ok(root) = roots.single() else {
