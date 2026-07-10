@@ -174,6 +174,7 @@ pub fn plugin(app: &mut App) {
                 handle_calibrate_button,
                 refresh_settings_values,
                 update_hovered_desc,
+                update_editor_legend.after(rebuild_left_content),
             )
                 .run_if(super::editor_open),
         )
@@ -205,6 +206,7 @@ fn rebuild_left_content(
     rev: Res<super::bindings_panel::BindingsRev>,
     ports: Res<super::bindings_panel::MidiPortList>,
     theme: Res<dtx_ui::ThemeResource>,
+    midi: Res<game_shell::MidiConnected>,
     existing: Query<Entity, With<LeftContentRoot>>,
     mut last_sig: Local<Option<(bool, String, game_shell::CustomizeTab, u64)>>,
 ) {
@@ -244,6 +246,21 @@ fn rebuild_left_content(
             GlobalZIndex(crate::ui_z::EDITOR_CHROME),
         ))
         .id();
+
+    // Pads can reach these tabs on the rail but cannot work their content.
+    if midi.0 && super::keyboard_nav::pad_excluded(active.0) {
+        commands.entity(root).with_children(|p| {
+            p.spawn((
+                Text::new("keyboard/mouse required — pads: SD to go back"),
+                dtx_ui::theme::Theme::font(10.0),
+                TextColor(Color::srgba(1.0, 0.8, 0.3, 0.9)),
+                Node {
+                    margin: UiRect::bottom(Val::Px(6.0)),
+                    ..default()
+                },
+            ));
+        });
+    }
 
     // The Bindings tab is a settings-group tab (Offset preset) but renders its
     // own block, so branch on it BEFORE the generic settings-rows path.
@@ -868,6 +885,76 @@ fn spawn_settings_block(
                 });
             });
         }
+    });
+}
+
+/// Legend verbs for the current pad nav level.
+fn legend_items(level: &super::keyboard_nav::NavLevel) -> &'static [(&'static str, &'static str)] {
+    use super::keyboard_nav::NavLevel;
+    match level {
+        NavLevel::Rail => &[
+            ("HH", "prev tab"),
+            ("CY", "next tab"),
+            ("BD", "enter"),
+            ("SD", "close"),
+        ],
+        NavLevel::Rows => &[
+            ("HH", "up"),
+            ("CY", "down"),
+            ("BD", "adjust"),
+            ("SD", "tabs"),
+        ],
+        NavLevel::Adjust { .. } => &[
+            ("HH", "−"),
+            ("CY", "+"),
+            ("BD", "confirm"),
+            ("SD", "cancel"),
+        ],
+    }
+}
+
+/// Discriminant of the nav level, for change detection without cloning `saved`.
+fn level_key(level: &super::keyboard_nav::NavLevel) -> u8 {
+    use super::keyboard_nav::NavLevel;
+    match level {
+        NavLevel::Rail => 0,
+        NavLevel::Rows => 1,
+        NavLevel::Adjust { .. } => 2,
+    }
+}
+
+/// Rebuild the legend bar at the panel bottom whenever the nav level, tab, or
+/// MIDI presence changes — or whenever a panel rebuild despawned it. Hidden
+/// entirely when no MIDI device is connected.
+fn update_editor_legend(
+    mut commands: Commands,
+    midi: Res<game_shell::MidiConnected>,
+    level: Res<super::keyboard_nav::NavLevel>,
+    active: Res<super::tabs::ActiveTab>,
+    theme: Res<dtx_ui::ThemeResource>,
+    roots: Query<Entity, With<LeftContentRoot>>,
+    legends: Query<Entity, With<dtx_ui::widget::nav_legend::NavLegend>>,
+    mut last_sig: Local<Option<(u8, bool, game_shell::CustomizeTab)>>,
+) {
+    let sig = (level_key(&level), midi.0, active.0);
+    let missing = midi.0 && legends.is_empty();
+    if last_sig.as_ref() == Some(&sig) && !missing {
+        return;
+    }
+    *last_sig = Some(sig);
+    for e in &legends {
+        commands.entity(e).despawn();
+    }
+    if !midi.0 {
+        return;
+    }
+    let Ok(root) = roots.single() else {
+        return;
+    };
+    let t = theme.0;
+    let items = legend_items(&level);
+    commands.entity(root).with_children(|p| {
+        dtx_ui::widget::nav_legend::spawn_nav_legend(p, &t, items);
     });
 }
 
