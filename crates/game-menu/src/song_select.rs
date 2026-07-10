@@ -47,7 +47,9 @@ use dtx_ui::widget::difficulty_grid::{
 use dtx_ui::widget::song_wheel::{SongWheel, VISIBLE_HALF, WheelRow, WheelSpring, row_geometry};
 use dtx_ui::widget::stage_background::spawn_stage_background;
 use dtx_ui::widget::stage_panel::{BadgeValueText, panel, set_panel_selected, spawn_badge_row};
-use game_shell::{AppState, PracticeIntent, TransitionRequest, despawn_stage, request_transition};
+use game_shell::{
+    AppState, NavAction, PracticeIntent, TransitionRequest, despawn_stage, request_transition,
+};
 
 // ===== Layout constants =====
 
@@ -407,6 +409,7 @@ pub fn plugin(app: &mut App) {
         .init_resource::<SongSelectSelection>()
         .init_resource::<CommandHistory>()
         .init_resource::<Selection>()
+        .init_resource::<PadWheelLevel>()
         .add_systems(
             OnEnter(AppState::SongSelect),
             (
@@ -414,6 +417,7 @@ pub fn plugin(app: &mut App) {
                 reset_search,
                 recompute_visible,
                 reset_wheel_spring,
+                reset_pad_wheel_level,
                 spawn_song_select,
             )
                 .chain(),
@@ -431,7 +435,9 @@ pub fn plugin(app: &mut App) {
             Update,
             (
                 maybe_recompute_visible,
-                song_select_navigation,
+                song_select_hotkeys,
+                (song_select_kb_emit, song_select_nav_consumer).chain(),
+                update_song_select_legend,
                 search_input,
                 respawn_wheel_on_change,
                 wheel_layout_system,
@@ -1204,62 +1210,115 @@ fn format_song_detail(song: &dtx_library::SongInfo) -> String {
     detail
 }
 
-fn song_select_navigation(
+/// Pad two-level song select: the wheel (folders), then difficulty. Keyboard
+/// stays flat (Up/Down = folder, Left/Right = difficulty) and never reads this.
+#[derive(Resource, Debug, Default, Clone, Copy, PartialEq, Eq)]
+pub enum PadWheelLevel {
+    /// HH/CY move folders, BD descends to difficulty, SD leaves for Title.
+    #[default]
+    Wheel,
+    /// HH/CY cycle difficulty, BD plays, FT practices, SD returns to the wheel.
+    Difficulty,
+}
+
+impl PadWheelLevel {
+    fn on_verb(self, verb: game_shell::NavVerb) -> Self {
+        use game_shell::NavVerb;
+        match (self, verb) {
+            (PadWheelLevel::Wheel, NavVerb::Confirm) => PadWheelLevel::Difficulty,
+            (PadWheelLevel::Difficulty, NavVerb::Back) => PadWheelLevel::Wheel,
+            (level, _) => level,
+        }
+    }
+}
+
+fn reset_pad_wheel_level(mut level: ResMut<PadWheelLevel>) {
+    *level = PadWheelLevel::Wheel;
+}
+
+/// Wrapper holding the pad legend, so rebuilds despawn the whole bar and never
+/// orphan empty parents.
+#[derive(Component)]
+struct SongSelectLegendBar;
+
+/// Pad legend above the keyboard hint bar; hidden when no MIDI device is on.
+fn update_song_select_legend(
+    mut commands: Commands,
+    midi: Option<Res<game_shell::MidiConnected>>,
+    level: Res<PadWheelLevel>,
+    theme: Res<dtx_ui::ThemeResource>,
+    bars: Query<Entity, With<SongSelectLegendBar>>,
+    mut last_sig: Local<Option<(PadWheelLevel, bool)>>,
+) {
+    let connected = midi.is_some_and(|m| m.0);
+    let sig = (*level, connected);
+    let missing = connected && bars.is_empty();
+    if last_sig.as_ref() == Some(&sig) && !missing {
+        return;
+    }
+    *last_sig = Some(sig);
+    for e in &bars {
+        commands.entity(e).despawn();
+    }
+    if !connected {
+        return;
+    }
+    let items: &[(&str, &str)] = match *level {
+        PadWheelLevel::Wheel => &[
+            ("HH", "up"),
+            ("CY", "down"),
+            ("BD", "difficulty"),
+            ("SD", "title"),
+        ],
+        PadWheelLevel::Difficulty => &[
+            ("HH", "prev diff"),
+            ("CY", "next diff"),
+            ("BD", "play"),
+            ("FT", "practice"),
+            ("SD", "songs"),
+        ],
+    };
+    let t = theme.0;
+    commands
+        .spawn((
+            SongSelectEntity,
+            SongSelectLegendBar,
+            Node {
+                position_type: PositionType::Absolute,
+                bottom: Val::Px(34.0),
+                left: Val::Px(0.0),
+                width: Val::Percent(100.0),
+                ..default()
+            },
+        ))
+        .with_children(|p| {
+            dtx_ui::widget::nav_legend::spawn_nav_legend(p, &t, items);
+        });
+}
+
+/// Raw keyboard affordances with no pad equivalent: sort, customize, rescan.
+fn song_select_hotkeys(
     keys: Res<ButtonInput<KeyCode>>,
     mut db: ResMut<SongDb>,
-    mut selection: ResMut<Selection>,
+    selection: Res<Selection>,
     mut selection_state: ResMut<SongSelectSelection>,
     mut selected_song: ResMut<SelectedSong>,
     mut requests: MessageWriter<TransitionRequest>,
-    mut practice_intent: ResMut<PracticeIntent>,
     mut pending: ResMut<game_shell::PendingCustomizeTab>,
     mut session: ResMut<game_shell::EditorSession>,
 ) {
-    if selection_state.visible.is_empty() {
-        if keys.just_pressed(KeyCode::F5)
-            && let Err(e) = db.rescan(&default_song_dir())
-        {
+    if keys.just_pressed(KeyCode::F5) {
+        if let Err(e) = db.rescan(&default_song_dir()) {
             warn!("SongSelect: refresh failed: {}", e);
         }
         return;
     }
-    if keys.just_pressed(KeyCode::ArrowDown) {
-        let max = selection_state.visible.len() - 1;
-        selection.folder = (selection.folder + 1).min(max);
-        selection.clamp_to_visible(&selection_state);
-    } else if keys.just_pressed(KeyCode::ArrowUp) {
-        selection.folder = selection.folder.saturating_sub(1);
-        selection.clamp_to_visible(&selection_state);
-    } else if keys.just_pressed(KeyCode::ArrowRight) {
-        if let Some(folder) = selection_state.visible.get(selection.folder) {
-            let count = folder.difficulty_count();
-            if count > 0 {
-                let max = (count - 1) as u8;
-                selection.difficulty = (selection.difficulty + 1).min(max);
-            }
-        }
-    } else if keys.just_pressed(KeyCode::ArrowLeft) {
-        selection.difficulty = selection.difficulty.saturating_sub(1);
-    } else if keys.just_pressed(KeyCode::Tab) {
+    if selection_state.visible.is_empty() {
+        return;
+    }
+    if keys.just_pressed(KeyCode::Tab) {
         selection_state.sort_mode = selection_state.sort_mode.next();
         selection_state.dirty = true;
-    } else if keys.just_pressed(KeyCode::Enter) {
-        if let Some(chart_idx) = selection.chart_index(&selection_state)
-            && let Some(song) = db.songs.get(chart_idx)
-        {
-            let practice = keys.pressed(KeyCode::ShiftLeft) || keys.pressed(KeyCode::ShiftRight);
-            practice_intent.0 = practice;
-            info!(
-                "SongSelect: selected {} ({}){}",
-                song.title,
-                SongFolderView::difficulty_label(selection.difficulty),
-                if practice { " [practice]" } else { "" }
-            );
-            selected_song.0 = Some(song.path.clone());
-            request_transition(&mut requests, AppState::SongLoading);
-        }
-    } else if keys.just_pressed(KeyCode::Escape) {
-        request_transition(&mut requests, AppState::Title);
     } else if keys.just_pressed(KeyCode::F1) {
         if let Some(chart_idx) = selection.chart_index(&selection_state)
             && let Some(song) = db.songs.get(chart_idx)
@@ -1271,10 +1330,117 @@ fn song_select_navigation(
         } else {
             warn!("customize: no song highlighted");
         }
-    } else if keys.just_pressed(KeyCode::F5)
-        && let Err(e) = db.rescan(&default_song_dir())
-    {
-        warn!("SongSelect: refresh failed: {}", e);
+    }
+}
+
+/// Keyboard → `NavAction`. Shift+Enter is Practice, plain Enter is Confirm.
+fn song_select_kb_emit(keys: Res<ButtonInput<KeyCode>>, mut out: MessageWriter<NavAction>) {
+    use game_shell::{NavSource, NavVerb};
+    let shift = keys.pressed(KeyCode::ShiftLeft) || keys.pressed(KeyCode::ShiftRight);
+    let verb = if keys.just_pressed(KeyCode::ArrowDown) {
+        NavVerb::Down
+    } else if keys.just_pressed(KeyCode::ArrowUp) {
+        NavVerb::Up
+    } else if keys.just_pressed(KeyCode::ArrowRight) {
+        NavVerb::Inc
+    } else if keys.just_pressed(KeyCode::ArrowLeft) {
+        NavVerb::Dec
+    } else if keys.just_pressed(KeyCode::Enter) {
+        if shift { NavVerb::Practice } else { NavVerb::Confirm }
+    } else if keys.just_pressed(KeyCode::Escape) {
+        NavVerb::Back
+    } else {
+        return;
+    };
+    out.write(NavAction {
+        verb,
+        source: NavSource::Keyboard,
+        coarse: false,
+    });
+}
+
+fn song_select_nav_consumer(
+    mut actions: MessageReader<NavAction>,
+    mut level: ResMut<PadWheelLevel>,
+    db: Res<SongDb>,
+    mut selection: ResMut<Selection>,
+    selection_state: Res<SongSelectSelection>,
+    mut selected_song: ResMut<SelectedSong>,
+    mut requests: MessageWriter<TransitionRequest>,
+    mut practice_intent: ResMut<PracticeIntent>,
+) {
+    use game_shell::{NavSource, NavVerb};
+    if selection_state.visible.is_empty() {
+        actions.clear();
+        return;
+    }
+    for action in actions.read() {
+        // Keyboard is flat; pads move whichever axis the current level owns.
+        let (folder_step, diff_step) = match (action.source, *level, action.verb) {
+            (_, _, NavVerb::Dec) => (0, -1),
+            (_, _, NavVerb::Inc) => (0, 1),
+            (NavSource::Keyboard, _, NavVerb::Up) => (-1, 0),
+            (NavSource::Keyboard, _, NavVerb::Down) => (1, 0),
+            (NavSource::Pad, PadWheelLevel::Wheel, NavVerb::Up) => (-1, 0),
+            (NavSource::Pad, PadWheelLevel::Wheel, NavVerb::Down) => (1, 0),
+            (NavSource::Pad, PadWheelLevel::Difficulty, NavVerb::Up) => (0, -1),
+            (NavSource::Pad, PadWheelLevel::Difficulty, NavVerb::Down) => (0, 1),
+            _ => (0, 0),
+        };
+        if folder_step > 0 {
+            let max = selection_state.visible.len() - 1;
+            selection.folder = (selection.folder + 1).min(max);
+            selection.clamp_to_visible(&selection_state);
+        } else if folder_step < 0 {
+            selection.folder = selection.folder.saturating_sub(1);
+            selection.clamp_to_visible(&selection_state);
+        }
+        if diff_step > 0 {
+            if let Some(folder) = selection_state.visible.get(selection.folder) {
+                let count = folder.difficulty_count();
+                if count > 0 {
+                    selection.difficulty = (selection.difficulty + 1).min((count - 1) as u8);
+                }
+            }
+        } else if diff_step < 0 {
+            selection.difficulty = selection.difficulty.saturating_sub(1);
+        }
+
+        // Pads only start a song from the difficulty level; keyboard from anywhere.
+        let pad_at_difficulty =
+            action.source == NavSource::Keyboard || *level == PadWheelLevel::Difficulty;
+        let start = match action.verb {
+            NavVerb::Confirm if pad_at_difficulty => Some(false),
+            NavVerb::Practice if pad_at_difficulty => Some(true),
+            _ => None,
+        };
+        if let Some(practice) = start
+            && let Some(chart_idx) = selection.chart_index(&selection_state)
+            && let Some(song) = db.songs.get(chart_idx)
+        {
+            practice_intent.0 = practice;
+            info!(
+                "SongSelect: selected {} ({}){}",
+                song.title,
+                SongFolderView::difficulty_label(selection.difficulty),
+                if practice { " [practice]" } else { "" }
+            );
+            selected_song.0 = Some(song.path.clone());
+            request_transition(&mut requests, AppState::SongLoading);
+        }
+
+        let leaves = matches!(
+            (action.source, *level, action.verb),
+            (NavSource::Keyboard, _, NavVerb::Back)
+                | (NavSource::Pad, PadWheelLevel::Wheel, NavVerb::Back)
+        );
+        if leaves {
+            request_transition(&mut requests, AppState::Title);
+        }
+
+        if action.source == NavSource::Pad {
+            *level = level.on_verb(action.verb);
+        }
     }
 }
 
@@ -1491,6 +1657,31 @@ fn maybe_recompute_visible(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn pad_wheel_levels() {
+        use game_shell::NavVerb;
+        let mut level = PadWheelLevel::Wheel;
+        level = level.on_verb(NavVerb::Confirm);
+        assert_eq!(level, PadWheelLevel::Difficulty);
+        level = level.on_verb(NavVerb::Back);
+        assert_eq!(level, PadWheelLevel::Wheel);
+        // Back at the wheel exits to Title; the level itself is unchanged.
+        assert_eq!(
+            PadWheelLevel::Wheel.on_verb(NavVerb::Back),
+            PadWheelLevel::Wheel
+        );
+        // Moves never change level.
+        assert_eq!(
+            PadWheelLevel::Difficulty.on_verb(NavVerb::Down),
+            PadWheelLevel::Difficulty
+        );
+        // Confirm at difficulty starts the song, staying put.
+        assert_eq!(
+            PadWheelLevel::Difficulty.on_verb(NavVerb::Confirm),
+            PadWheelLevel::Difficulty
+        );
+    }
 
     fn make_song(title: &str, artist: &str) -> SongInfo {
         SongInfo {

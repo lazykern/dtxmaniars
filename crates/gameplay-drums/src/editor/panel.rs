@@ -71,9 +71,30 @@ pub struct PresetCycleBtn(pub i32);
 #[derive(Component)]
 pub struct PresetLabel;
 
+/// Settings rows are sized for readability from behind the kit, not just for a
+/// mouse at desk distance.
+const ROW_PAD_V: f32 = 8.0;
+const ROW_GAP: f32 = 4.0;
+const ROW_LABEL_FONT: f32 = 14.0;
+const ROW_VALUE_FONT: f32 = 15.0;
+const STEP_PAD_H: f32 = 11.0;
+const STEP_PAD_V: f32 = 4.0;
+
+/// Ring around the row holding nav focus.
+pub const FOCUS_RING: Color = Color::srgb(0.89, 0.20, 0.20);
+/// Ring around the row being adjusted (pad adjust mode).
+pub const ADJUST_RING: Color = Color::srgb(0.16, 0.62, 0.36);
+
 /// Tags a settings row control with its index into the active tab's item list.
 #[derive(Component, Clone, Copy)]
 pub struct SettingRow(pub usize);
+
+/// Tags a stepper's glyph text so adjust mode can swap `<`/`>` for `−`/`+`.
+#[derive(Component, Clone, Copy)]
+pub struct StepperGlyph {
+    pub row: usize,
+    pub dir: i32,
+}
 
 /// Carries a settings row's one-line description, surfaced in the footer while
 /// the row is hovered.
@@ -153,6 +174,7 @@ pub fn plugin(app: &mut App) {
                 handle_calibrate_button,
                 refresh_settings_values,
                 update_hovered_desc,
+                update_editor_legend.after(rebuild_left_content),
             )
                 .run_if(super::editor_open),
         )
@@ -184,6 +206,7 @@ fn rebuild_left_content(
     rev: Res<super::bindings_panel::BindingsRev>,
     ports: Res<super::bindings_panel::MidiPortList>,
     theme: Res<dtx_ui::ThemeResource>,
+    midi: Option<Res<game_shell::MidiConnected>>,
     existing: Query<Entity, With<LeftContentRoot>>,
     mut last_sig: Local<Option<(bool, String, game_shell::CustomizeTab, u64)>>,
 ) {
@@ -223,6 +246,21 @@ fn rebuild_left_content(
             GlobalZIndex(crate::ui_z::EDITOR_CHROME),
         ))
         .id();
+
+    // Pads can reach these tabs on the rail but cannot work their content.
+    if midi.is_some_and(|m| m.0) && super::keyboard_nav::pad_excluded(active.0) {
+        commands.entity(root).with_children(|p| {
+            p.spawn((
+                Text::new("keyboard/mouse required — pads: SD to go back"),
+                dtx_ui::theme::Theme::font(10.0),
+                TextColor(Color::srgba(1.0, 0.8, 0.3, 0.9)),
+                Node {
+                    margin: UiRect::bottom(Val::Px(6.0)),
+                    ..default()
+                },
+            ));
+        });
+    }
 
     // The Bindings tab is a settings-group tab (Offset preset) but renders its
     // own block, so branch on it BEFORE the generic settings-rows path.
@@ -738,10 +776,13 @@ fn spawn_settings_block(
                 SettingRow(i),
                 RowDesc(item.desc),
                 Interaction::default(),
+                Outline::new(Val::Px(0.0), Val::Px(2.0), Color::NONE),
                 Node {
                     flex_direction: FlexDirection::Row,
                     justify_content: JustifyContent::SpaceBetween,
                     align_items: AlignItems::Center,
+                    padding: UiRect::axes(Val::Px(6.0), Val::Px(ROW_PAD_V)),
+                    margin: UiRect::bottom(Val::Px(ROW_GAP)),
                     ..default()
                 },
             ))
@@ -764,7 +805,7 @@ fn spawn_settings_block(
                     }
                     l.spawn((
                         Text::new(item.label),
-                        dtx_ui::theme::Theme::font(11.0),
+                        dtx_ui::theme::Theme::font(ROW_LABEL_FONT),
                         TextColor(t.text_secondary),
                     ));
                 });
@@ -782,7 +823,7 @@ fn spawn_settings_block(
                         c.spawn((
                             SettingValueText(i),
                             Text::new((item.value)(&draft.0)),
-                            dtx_ui::theme::Theme::font(12.0),
+                            dtx_ui::theme::Theme::font(ROW_VALUE_FONT),
                             TextColor(t.text_primary),
                             TextLayout {
                                 linebreak: bevy::text::LineBreak::NoWrap,
@@ -799,20 +840,21 @@ fn spawn_settings_block(
                             SettingAdjust { index: i, dir: -1 },
                             Button,
                             Node {
-                                padding: UiRect::axes(Val::Px(5.0), Val::Px(1.0)),
+                                padding: UiRect::axes(Val::Px(STEP_PAD_H), Val::Px(STEP_PAD_V)),
                                 ..default()
                             },
                             BackgroundColor(Color::srgb(0.14, 0.14, 0.18)),
                             children![(
+                                StepperGlyph { row: i, dir: -1 },
                                 Text::new("<"),
-                                dtx_ui::theme::Theme::font(12.0),
+                                dtx_ui::theme::Theme::font(ROW_VALUE_FONT),
                                 TextColor(t.text_primary)
                             )],
                         ));
                         c.spawn((
                             SettingValueText(i),
                             Text::new((item.value)(&draft.0)),
-                            dtx_ui::theme::Theme::font(12.0),
+                            dtx_ui::theme::Theme::font(ROW_VALUE_FONT),
                             TextColor(t.text_primary),
                             TextLayout {
                                 linebreak: bevy::text::LineBreak::NoWrap,
@@ -828,13 +870,14 @@ fn spawn_settings_block(
                             SettingAdjust { index: i, dir: 1 },
                             Button,
                             Node {
-                                padding: UiRect::axes(Val::Px(5.0), Val::Px(1.0)),
+                                padding: UiRect::axes(Val::Px(STEP_PAD_H), Val::Px(STEP_PAD_V)),
                                 ..default()
                             },
                             BackgroundColor(Color::srgb(0.14, 0.14, 0.18)),
                             children![(
+                                StepperGlyph { row: i, dir: 1 },
                                 Text::new(">"),
-                                dtx_ui::theme::Theme::font(12.0),
+                                dtx_ui::theme::Theme::font(ROW_VALUE_FONT),
                                 TextColor(t.text_primary)
                             )],
                         ));
@@ -842,6 +885,77 @@ fn spawn_settings_block(
                 });
             });
         }
+    });
+}
+
+/// Legend verbs for the current pad nav level.
+fn legend_items(level: &super::keyboard_nav::NavLevel) -> &'static [(&'static str, &'static str)] {
+    use super::keyboard_nav::NavLevel;
+    match level {
+        NavLevel::Rail => &[
+            ("HH", "prev tab"),
+            ("CY", "next tab"),
+            ("BD", "enter"),
+            ("SD", "close"),
+        ],
+        NavLevel::Rows => &[
+            ("HH", "up"),
+            ("CY", "down"),
+            ("BD", "adjust"),
+            ("SD", "tabs"),
+        ],
+        NavLevel::Adjust { .. } => &[
+            ("HH", "−"),
+            ("CY", "+"),
+            ("BD", "confirm"),
+            ("SD", "cancel"),
+        ],
+    }
+}
+
+/// Discriminant of the nav level, for change detection without cloning `saved`.
+fn level_key(level: &super::keyboard_nav::NavLevel) -> u8 {
+    use super::keyboard_nav::NavLevel;
+    match level {
+        NavLevel::Rail => 0,
+        NavLevel::Rows => 1,
+        NavLevel::Adjust { .. } => 2,
+    }
+}
+
+/// Rebuild the legend bar at the panel bottom whenever the nav level, tab, or
+/// MIDI presence changes — or whenever a panel rebuild despawned it. Hidden
+/// entirely when no MIDI device is connected.
+fn update_editor_legend(
+    mut commands: Commands,
+    midi: Option<Res<game_shell::MidiConnected>>,
+    level: Res<super::keyboard_nav::NavLevel>,
+    active: Res<super::tabs::ActiveTab>,
+    theme: Res<dtx_ui::ThemeResource>,
+    roots: Query<Entity, With<LeftContentRoot>>,
+    legends: Query<Entity, With<dtx_ui::widget::nav_legend::NavLegend>>,
+    mut last_sig: Local<Option<(u8, bool, game_shell::CustomizeTab)>>,
+) {
+    let connected = midi.is_some_and(|m| m.0);
+    let sig = (level_key(&level), connected, active.0);
+    let missing = connected && legends.is_empty();
+    if last_sig.as_ref() == Some(&sig) && !missing {
+        return;
+    }
+    *last_sig = Some(sig);
+    for e in &legends {
+        commands.entity(e).despawn();
+    }
+    if !connected {
+        return;
+    }
+    let Ok(root) = roots.single() else {
+        return;
+    };
+    let t = theme.0;
+    let items = legend_items(&level);
+    commands.entity(root).with_children(|p| {
+        dtx_ui::widget::nav_legend::spawn_nav_legend(p, &t, items);
     });
 }
 

@@ -4,11 +4,13 @@
 
 use bevy::prelude::*;
 
+pub mod nav;
 pub mod states;
 
 mod performance;
 mod transition;
 
+pub use nav::{MidiConnected, NavAction, NavSource, NavVerb};
 pub use states::{
     AppState, CustomizeTab, EGameMode, EditorSession, PauseState, PendingCustomizeTab,
     PracticeIntent, StageEntity, despawn_stage,
@@ -25,6 +27,11 @@ impl Plugin for GameShellPlugin {
             .init_resource::<states::PracticeIntent>()
             .init_resource::<states::EditorSession>()
             .init_resource::<states::PendingCustomizeTab>()
-            .add_plugins((dtx_ui::plugin, transition::plugin, performance::plugin));
+            .add_plugins((
+                dtx_ui::plugin,
+                nav::plugin,
+                transition::plugin,
+                performance::plugin,
+            ));
     }
 }

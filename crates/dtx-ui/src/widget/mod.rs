@@ -12,6 +12,7 @@ pub mod hud_ref;
 pub mod judgment_popup;
 pub mod lane_flush;
 pub mod live_graph;
+pub mod nav_legend;
 pub mod now_playing;
 pub mod options_panel;
 pub mod pad_chips;

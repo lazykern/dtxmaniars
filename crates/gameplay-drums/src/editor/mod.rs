@@ -34,6 +34,10 @@ pub mod undo;
 #[derive(Resource, Debug, Default, Clone, Copy, PartialEq, Eq)]
 pub struct EditorOpen(pub bool);
 
+/// Request to close the overlay through the same save-on-close path as Esc.
+#[derive(Debug, Clone, Copy, Message)]
+pub struct EditorCloseRequest;
+
 /// Remembers the autoplay flag from before the editor forced it on.
 #[derive(Resource, Debug, Default, Clone, Copy)]
 pub struct PrevAutoplay(pub bool);
@@ -89,7 +93,8 @@ pub struct EditorPickSet;
 pub struct EditorGestureSet;
 
 pub fn plugin(app: &mut App) {
-    app.init_resource::<EditorOpen>()
+    app.add_message::<EditorCloseRequest>()
+        .init_resource::<EditorOpen>()
         .init_resource::<PrevAutoplay>()
         .init_resource::<PreviewState>()
         .init_resource::<drag::Selection>()

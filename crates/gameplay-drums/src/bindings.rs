@@ -14,6 +14,8 @@ use crate::lane_map::{lane_of, LaneId};
 pub(super) fn plugin(app: &mut App) {
     app.init_resource::<BindResolver>()
         .init_resource::<LiveBindings>()
+        // Seeded at boot too: pads navigate menus before any Performance enter.
+        .add_systems(Startup, reload_bindings)
         .add_systems(OnEnter(game_shell::AppState::Performance), reload_bindings)
         .add_systems(
             Update,

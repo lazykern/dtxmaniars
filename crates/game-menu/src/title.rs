@@ -113,13 +113,18 @@ fn spawn_title(mut commands: Commands, theme: Res<ThemeResource>) {
 
 fn title_input(
     keys: Res<ButtonInput<KeyCode>>,
+    mut actions: MessageReader<game_shell::NavAction>,
     mut requests: MessageWriter<TransitionRequest>,
     mut session: ResMut<game_shell::EditorSession>,
     mut selected: ResMut<crate::song_select::SelectedSong>,
     mut db: ResMut<dtx_library::SongDb>,
     mut pending: ResMut<game_shell::PendingCustomizeTab>,
 ) {
-    if keys.just_pressed(KeyCode::Enter) {
+    // BD confirms from the kit, so a pads-only player is never stranded here.
+    let pad_confirm = actions
+        .read()
+        .any(|a| a.verb == game_shell::NavVerb::Confirm);
+    if pad_confirm || keys.just_pressed(KeyCode::Enter) {
         request_transition(&mut requests, AppState::SongSelect);
     } else if keys.just_pressed(KeyCode::F1) {
         match pick_editor_song(&mut db) {

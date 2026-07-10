@@ -213,6 +213,7 @@ fn highlight_selection(
 /// (pause is gated off while open).
 fn close_on_escape(
     keys: Res<ButtonInput<KeyCode>>,
+    mut close_requests: MessageReader<super::EditorCloseRequest>,
     mut selection: ResMut<Selection>,
     mut open: ResMut<EditorOpen>,
     prev: Res<super::PrevAutoplay>,
@@ -222,9 +223,11 @@ fn close_on_escape(
     calib: Res<super::calibration::CalibrationState>,
 ) {
     if !matches!(*calib, super::calibration::CalibrationState::Idle) {
+        close_requests.clear();
         return;
     }
-    if keys.just_pressed(KeyCode::Escape) {
+    let requested = close_requests.read().next().is_some();
+    if requested || keys.just_pressed(KeyCode::Escape) {
         if selection.0.is_some() {
             selection.0 = None;
         } else {

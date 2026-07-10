@@ -66,7 +66,9 @@ pub(super) fn plugin(app: &mut App) {
         )
         .add_systems(
             Update,
-            pause_menu_input.run_if(in_state(PauseState::Paused)),
+            (pause_kb_emit, pause_menu_input)
+                .chain()
+                .run_if(in_state(PauseState::Paused)),
         );
 }
 
@@ -117,6 +119,7 @@ pub fn spawn_overlay(
     mut commands: Commands,
     mut selection: ResMut<PauseSelection>,
     practice: Option<Res<crate::practice::PracticeSession>>,
+    midi: Option<Res<game_shell::MidiConnected>>,
 ) {
     if practice.is_some() {
         return; // practice pause panel owns the overlay
@@ -157,6 +160,18 @@ pub fn spawn_overlay(
                     TextColor(theme.text_secondary),
                 ));
             }
+            if midi.is_some_and(|m| m.0) {
+                dtx_ui::widget::nav_legend::spawn_nav_legend(
+                    root,
+                    &theme,
+                    &[
+                        ("HH", "up"),
+                        ("CY", "down"),
+                        ("BD", "select"),
+                        ("SD", "resume"),
+                    ],
+                );
+            }
         });
 }
 
@@ -166,24 +181,51 @@ fn despawn_overlay(mut commands: Commands, overlays: Query<Entity, With<PauseOve
     }
 }
 
+/// Keyboard → `NavAction` for the pause overlay. Esc keeps its own toggle path.
+fn pause_kb_emit(keys: Res<ButtonInput<KeyCode>>, mut out: MessageWriter<game_shell::NavAction>) {
+    use game_shell::{NavAction, NavSource, NavVerb};
+    let verb = if keys.just_pressed(KeyCode::ArrowDown) {
+        NavVerb::Down
+    } else if keys.just_pressed(KeyCode::ArrowUp) {
+        NavVerb::Up
+    } else if keys.just_pressed(KeyCode::Enter) || keys.just_pressed(KeyCode::Space) {
+        NavVerb::Confirm
+    } else {
+        return;
+    };
+    out.write(NavAction {
+        verb,
+        source: NavSource::Keyboard,
+        coarse: false,
+    });
+}
+
 #[allow(clippy::too_many_arguments)]
 fn pause_menu_input(
-    keys: Res<ButtonInput<KeyCode>>,
+    mut actions: MessageReader<game_shell::NavAction>,
     mut selection: ResMut<PauseSelection>,
     mut next_pause: ResMut<NextState<PauseState>>,
     mut requests: MessageWriter<TransitionRequest>,
     mut rows: Query<(&PauseItem, &mut TextColor)>,
     practice: Option<Res<crate::practice::PracticeSession>>,
 ) {
+    use game_shell::NavVerb;
     if practice.is_some() {
+        actions.clear();
         return;
     }
     let count = PauseItem::ORDER.len();
-    if keys.just_pressed(KeyCode::ArrowDown) {
-        selection.0 = (selection.0 + 1) % count;
-    }
-    if keys.just_pressed(KeyCode::ArrowUp) {
-        selection.0 = (selection.0 + count - 1) % count;
+    let mut confirm = false;
+    let mut resume = false;
+    for action in actions.read() {
+        match action.verb {
+            NavVerb::Down => selection.0 = (selection.0 + 1) % count,
+            NavVerb::Up => selection.0 = (selection.0 + count - 1) % count,
+            NavVerb::Confirm => confirm = true,
+            // SD resumes: the pad equivalent of Esc.
+            NavVerb::Back => resume = true,
+            _ => {}
+        }
     }
 
     let theme = Theme::default();
@@ -196,7 +238,11 @@ fn pause_menu_input(
         };
     }
 
-    if keys.just_pressed(KeyCode::Enter) || keys.just_pressed(KeyCode::Space) {
+    if resume {
+        next_pause.set(PauseState::Running);
+        return;
+    }
+    if confirm {
         match selected {
             PauseItem::Resume => next_pause.set(PauseState::Running),
             PauseItem::Retry => {
