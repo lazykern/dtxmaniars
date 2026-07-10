@@ -35,6 +35,7 @@ pub mod keyboard_viz;
 pub mod lane_map;
 pub mod lanes;
 pub mod layout;
+pub mod menu_nav;
 pub mod miss;
 pub mod orchestrator;
 pub mod pause;
@@ -198,6 +199,7 @@ pub fn plugin(app: &mut App) {
         practice::plugin,
         editor::plugin,
         hit_feedback::plugin,
+        menu_nav::plugin,
     ));
 }
 
