@@ -416,6 +416,7 @@ pub fn plugin(app: &mut App) {
                 ensure_song_db_loaded,
                 reset_search,
                 recompute_visible,
+                restore_last_selection_on_enter,
                 reset_wheel_spring,
                 reset_pad_wheel_level,
                 spawn_song_select,
@@ -436,7 +437,12 @@ pub fn plugin(app: &mut App) {
             (
                 maybe_recompute_visible,
                 song_select_hotkeys,
-                (song_select_kb_emit, song_select_nav_consumer).chain(),
+                (
+                    song_select_kb_emit,
+                    song_select_nav_consumer,
+                    persist_hovered_selection,
+                )
+                    .chain(),
                 update_song_select_legend,
                 search_input,
                 respawn_wheel_on_change,
@@ -507,6 +513,80 @@ fn reset_search(mut sel: ResMut<SongSelectSelection>) {
 /// previous visit to this screen.
 fn reset_wheel_spring(selection: Res<Selection>, mut spring: ResMut<WheelSpring>) {
     spring.0 = dtx_ui::motion::SpringValue::wheel(selection.folder as f32);
+}
+
+fn restore_last_selection_on_enter(
+    mut selection: ResMut<Selection>,
+    selection_state: Res<SongSelectSelection>,
+) {
+    let cfg = dtx_config::load(&dtx_config::default_path());
+    restore_last_selection(&mut selection, &selection_state, &cfg);
+}
+
+fn restore_last_selection(
+    selection: &mut Selection,
+    selection_state: &SongSelectSelection,
+    cfg: &dtx_config::Config,
+) {
+    let Some(path) = cfg.gameplay.last_selected.as_ref() else {
+        return;
+    };
+    let Some(folder) = path.parent() else {
+        return;
+    };
+    let Some((folder_index, folder_view)) = selection_state
+        .visible
+        .iter()
+        .enumerate()
+        .find(|(_, view)| view.folder == folder)
+    else {
+        return;
+    };
+    selection.folder = folder_index;
+    selection.difficulty = cfg.gameplay.last_selected_difficulty;
+    if folder_view.difficulty_count() == 0 {
+        selection.difficulty = 0;
+    } else {
+        selection.difficulty = selection
+            .difficulty
+            .min((folder_view.difficulty_count() - 1) as u8);
+    }
+}
+
+fn persist_hovered_selection(
+    selection: Res<Selection>,
+    selection_state: Res<SongSelectSelection>,
+    db: Res<SongDb>,
+) {
+    if !selection.is_changed() {
+        return;
+    }
+    let Some(chart_idx) = selection.chart_index(&selection_state) else {
+        return;
+    };
+    let Some(song) = db.songs.get(chart_idx) else {
+        return;
+    };
+    let cfg_path = dtx_config::default_path();
+    let mut cfg = dtx_config::load(&cfg_path);
+    if cfg.gameplay.last_selected.as_ref() == Some(&song.path)
+        && cfg.gameplay.last_selected_difficulty == selection.difficulty
+    {
+        return;
+    }
+    update_hovered_selection(&mut cfg, &song.path, selection.difficulty);
+    if let Err(e) = dtx_config::save(&cfg_path, &cfg) {
+        warn!("failed to persist last_selected: {e}");
+    }
+}
+
+fn update_hovered_selection(
+    cfg: &mut dtx_config::Config,
+    path: &Path,
+    difficulty: u8,
+) {
+    cfg.gameplay.last_selected = Some(path.to_path_buf());
+    cfg.gameplay.last_selected_difficulty = difficulty;
 }
 
 fn spawn_song_select(
@@ -1932,6 +2012,67 @@ mod tests {
     }
 
     // Tests from old song_select.rs (preserved in merge).
+
+    #[test]
+    fn restores_hovered_song_and_difficulty_from_config() {
+        let mut other_song = make_song("B", "Y");
+        other_song.path = std::path::PathBuf::from("/songs/B/B.dtx");
+        let songs = vec![
+            SongInfo {
+                path: std::path::PathBuf::from("/songs/A/bsc.dtx"),
+                title: "A".into(),
+                artist: "X".into(),
+                bpm: Some(120.0),
+                dlevel: Some(50),
+                bgm_path: None,
+                preview_path: None,
+                preview_is_loopable: false,
+                preimage_path: None,
+            },
+            SongInfo {
+                path: std::path::PathBuf::from("/songs/A/mas.dtx"),
+                title: "A".into(),
+                artist: "X".into(),
+                bpm: Some(120.0),
+                dlevel: Some(95),
+                bgm_path: None,
+                preview_path: None,
+                preview_is_loopable: false,
+                preimage_path: None,
+            },
+            other_song,
+        ];
+        let mut visible = SongSelectSelection::default();
+        visible.recompute(&songs);
+        let mut cfg = dtx_config::Config::default();
+        cfg.gameplay.last_selected = Some(std::path::PathBuf::from("/songs/A/mas.dtx"));
+        cfg.gameplay.last_selected_difficulty = 1;
+        let mut cursor = Selection::default();
+
+        restore_last_selection(&mut cursor, &visible, &cfg);
+
+        assert_eq!(cursor.folder, 0);
+        assert_eq!(cursor.difficulty, 1);
+        assert_eq!(cursor.chart_index(&visible), Some(1));
+    }
+
+    #[test]
+    fn hovered_selection_persistence_does_not_depend_on_play() {
+        let mut cfg = dtx_config::Config::default();
+        cfg.gameplay.last_played = Some(std::path::PathBuf::from("/songs/played.dtx"));
+
+        update_hovered_selection(&mut cfg, Path::new("/songs/A/mas.dtx"), 1);
+
+        assert_eq!(
+            cfg.gameplay.last_selected,
+            Some(std::path::PathBuf::from("/songs/A/mas.dtx"))
+        );
+        assert_eq!(cfg.gameplay.last_selected_difficulty, 1);
+        assert_eq!(
+            cfg.gameplay.last_played,
+            Some(std::path::PathBuf::from("/songs/played.dtx"))
+        );
+    }
 
     #[test]
     fn selected_song_resource_starts_empty() {

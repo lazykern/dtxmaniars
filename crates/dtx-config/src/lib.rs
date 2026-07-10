@@ -220,6 +220,12 @@ pub struct GameplayConfig {
     /// Path of the last song entered in normal play (editor session uses it).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub last_played: Option<PathBuf>,
+    /// Path of the last chart hovered in song select.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_selected: Option<PathBuf>,
+    /// Difficulty index of the last chart hovered in song select.
+    #[serde(default)]
+    pub last_selected_difficulty: u8,
 }
 
 impl Default for GameplayConfig {
@@ -237,6 +243,8 @@ impl Default for GameplayConfig {
             damage_level: default_damage_level(),
             lane_display: LaneDisplay::default(),
             last_played: None,
+            last_selected: None,
+            last_selected_difficulty: 0,
         }
     }
 }
@@ -387,9 +395,13 @@ mod tests {
         let mut cfg = Config::default();
         assert_eq!(cfg.gameplay.last_played, None);
         cfg.gameplay.last_played = Some(std::path::PathBuf::from("/tmp/x.dtx"));
+        cfg.gameplay.last_selected = Some(std::path::PathBuf::from("/tmp/y.dtx"));
+        cfg.gameplay.last_selected_difficulty = 3;
         let s = toml::to_string_pretty(&cfg).unwrap();
         let back: Config = toml::from_str(&s).unwrap();
         assert_eq!(back.gameplay.last_played, cfg.gameplay.last_played);
+        assert_eq!(back.gameplay.last_selected, cfg.gameplay.last_selected);
+        assert_eq!(back.gameplay.last_selected_difficulty, 3);
     }
 
     #[test]
