@@ -8,6 +8,7 @@
 pub mod ab_loop;
 pub mod actions;
 pub mod hud;
+pub mod metronome;
 pub mod ramp;
 pub mod rate;
 pub mod session;
