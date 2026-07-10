@@ -15,6 +15,7 @@ pub mod rate;
 pub mod session;
 pub mod stats;
 pub mod toast;
+pub mod wait;
 
 use bevy::prelude::*;
 use game_shell::{AppState, PracticeIntent};
