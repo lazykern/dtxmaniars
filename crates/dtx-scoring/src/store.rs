@@ -1,6 +1,6 @@
 //! Versioned score store and legacy migration.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
@@ -232,6 +232,23 @@ impl ScoreStore {
     /// Backward-compatible alias for best score lookup.
     pub fn best_for(&self, canonical_hash: &str) -> Option<&ScoreEntry> {
         self.best_for_chart(canonical_hash)
+    }
+
+    /// Plays whose `source_path_hint` matches `path`, best score first
+    /// (ties: most recent first), truncated to `limit`.
+    pub fn history_for_path(&self, path: &Path, limit: usize) -> Vec<&ScoreEntry> {
+        let mut hits: Vec<&ScoreEntry> = self
+            .entries
+            .iter()
+            .filter(|e| e.chart.source_path_hint.as_deref() == Some(path))
+            .collect();
+        hits.sort_by(|a, b| {
+            b.score
+                .cmp(&a.score)
+                .then(b.played_at.cmp(&a.played_at))
+        });
+        hits.truncate(limit);
+        hits
     }
 
     /// Number of distinct canonical chart hashes in the store.
