@@ -32,6 +32,8 @@ pub struct HudLoopFill;
 pub struct HudTimeText;
 #[derive(Component)]
 pub struct AttemptHistoryText;
+#[derive(Component)]
+pub struct LaneDiagnosisText;
 
 /// One selectable right-rail row.
 #[derive(Component, Clone, Copy, PartialEq, Eq)]
@@ -315,6 +317,16 @@ pub fn spawn_full_hud(
                         ..default()
                     },
                 ));
+                rail.spawn((
+                    LaneDiagnosisText,
+                    Text::new(crate::practice::diagnosis::diagnosis_text(&session.lane_diag)),
+                    Theme::label_font(),
+                    TextColor(theme.text_secondary),
+                    Node {
+                        margin: UiRect::top(Val::Px(12.0)),
+                        ..default()
+                    },
+                ));
             });
 
             // Bottom timeline row: time text + density strip.
@@ -451,6 +463,14 @@ pub fn full_hud_input(
     mut practice_actions: MessageWriter<crate::practice::actions::PracticeAction>,
     mut rows: Query<(&RailItem, &mut Text, &mut TextColor)>,
     mut history: Query<&mut Text, (With<AttemptHistoryText>, Without<RailItem>)>,
+    mut diag_text: Query<
+        &mut Text,
+        (
+            With<LaneDiagnosisText>,
+            Without<RailItem>,
+            Without<AttemptHistoryText>,
+        ),
+    >,
 ) {
     let count = RailItem::ORDER.len();
     if keys.just_pressed(KeyCode::ArrowDown) {
@@ -598,6 +618,9 @@ pub fn full_hud_input(
     }
     if let Ok(mut t) = history.single_mut() {
         t.0 = attempt_history_text(&session, timeline.end_ms);
+    }
+    if let Ok(mut t) = diag_text.single_mut() {
+        t.0 = crate::practice::diagnosis::diagnosis_text(&session.lane_diag);
     }
 }
 
