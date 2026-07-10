@@ -12,8 +12,8 @@ use dtx_scoring::ScoreStore;
 use dtx_timing as dtx_timing_plugin;
 use dtx_ui::REF_HEIGHT;
 use game_menu::GameMenuPlugin;
-use game_results::{GameResultsPlugin, ScoreStoreResource};
-use game_shell::{AppState, EGameMode, GameShellPlugin};
+use game_results::GameResultsPlugin;
+use game_shell::{AppState, EGameMode, GameShellPlugin, ScoreStoreResource};
 use gameplay_drums::DrumsPlugin;
 use gameplay_guitar::GuitarPlugin;
 

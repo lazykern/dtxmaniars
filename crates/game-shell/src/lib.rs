@@ -5,12 +5,14 @@
 use bevy::prelude::*;
 
 pub mod nav;
+pub mod score_store;
 pub mod states;
 
 mod performance;
 mod transition;
 
 pub use nav::{MidiConnected, NavAction, NavSource, NavVerb};
+pub use score_store::ScoreStoreResource;
 pub use states::{
     AppState, CustomizeTab, EGameMode, EditorSession, PauseState, PendingCustomizeTab,
     PracticeIntent, StageEntity, despawn_stage,

@@ -2,9 +2,11 @@
 
 use bevy::prelude::*;
 use dtx_scoring::identity::{canonical_chart_hash, raw_file_sha256, ChartIdentity};
-use dtx_scoring::{JudgmentTotals, Rank, ScoreEntry, ScoreSource, ScoreStore};
+use dtx_scoring::{JudgmentTotals, Rank, ScoreEntry, ScoreSource};
 use dtx_ui::{theme::Theme, ThemeResource};
-use game_shell::{despawn_stage, request_transition, AppState, TransitionRequest};
+use game_shell::{
+    despawn_stage, request_transition, AppState, ScoreStoreResource, TransitionRequest,
+};
 use gameplay_drums::resources::{ActiveChart, Combo, DrumScoring, JudgmentCounts, Score};
 use gameplay_drums::stage_end::LastStageOutcome;
 
@@ -24,10 +26,6 @@ struct StatRow {
 struct ResultReveal {
     elapsed_ms: f32,
 }
-
-/// Bevy wrapper around `dtx_scoring::ScoreStore`.
-#[derive(Resource, Deref, DerefMut, Default, Debug, Clone)]
-pub struct ScoreStoreResource(pub ScoreStore);
 
 pub struct GameResultsPlugin;
 

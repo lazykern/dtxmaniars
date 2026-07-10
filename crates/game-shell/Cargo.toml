@@ -14,3 +14,4 @@ dtx-ui = { path = "../dtx-ui" }
 # ADR-0015 deferred item (c): game-shell publishes ScreenFadeTransition
 # events that dtx-audio consumes. Game→Engine is allowed.
 dtx-audio = { path = "../dtx-audio" }
+dtx-scoring = { path = "../dtx-scoring" }

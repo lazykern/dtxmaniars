@@ -96,6 +96,7 @@ pub fn plugin(app: &mut App) {
     app.init_resource::<ThemeResource>()
         .init_resource::<widget::density_graph::DensityData>()
         .init_resource::<widget::difficulty_grid::DifficultyGridData>()
+        .init_resource::<widget::play_history::PlayHistoryData>()
         .init_resource::<widget::song_wheel::WheelSpring>()
         .add_plugins((
             transition::plugin,
