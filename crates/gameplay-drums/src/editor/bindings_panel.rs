@@ -62,8 +62,27 @@ pub struct MidiPortList(pub Vec<String>);
 #[derive(Resource, Debug, Default, Clone, Copy)]
 pub struct BindingsRev(pub u64);
 
+/// Reset confirmation for the Bindings tab. Kept separate from capture so Esc
+/// continues to cancel capture without also altering a pending reset.
+#[derive(Resource, Debug, Default, Clone, Copy, PartialEq, Eq)]
+pub enum BindingsResetState {
+    #[default]
+    Idle,
+    Confirming,
+}
+
+#[derive(Component)]
+pub struct ResetBindingsButton;
+
+#[derive(Component)]
+pub struct ConfirmResetBindingsButton;
+
+#[derive(Component)]
+pub struct CancelResetBindingsButton;
+
 pub fn plugin(app: &mut App) {
     app.init_resource::<BindingsRev>()
+        .init_resource::<BindingsResetState>()
         .init_resource::<MidiPortList>()
         .add_systems(
             Update,
@@ -79,6 +98,7 @@ pub fn plugin(app: &mut App) {
                 handle_capture_start,
                 handle_port_cycle,
                 handle_rescan,
+                handle_bindings_reset,
                 update_velocity_meter,
             )
                 .run_if(in_state(game_shell::AppState::Performance))
@@ -145,17 +165,89 @@ pub fn spawn_bindings_block(
     live: &LiveBindings,
     lanes: &Lanes,
     ports: &MidiPortList,
+    reset: BindingsResetState,
 ) {
     let t = theme;
     let threshold = live.0.midi.velocity_threshold;
     let port_label = port_display_label(&live.0.midi.port, &ports.0);
     let mark_pct = threshold as f32 / 127.0 * 100.0;
     commands.entity(root).with_children(|p| {
-        p.spawn((
-            Text::new("Bindings"),
-            dtx_ui::theme::Theme::font(13.0),
-            TextColor(t.text_primary),
-        ));
+        p.spawn(Node {
+            flex_direction: FlexDirection::Row,
+            justify_content: JustifyContent::SpaceBetween,
+            align_items: AlignItems::Center,
+            ..default()
+        })
+        .with_children(|header| {
+            header.spawn((
+                Text::new("Bindings"),
+                dtx_ui::theme::Theme::font(13.0),
+                TextColor(t.text_primary),
+            ));
+            header.spawn(Node {
+                flex_direction: FlexDirection::Row,
+                column_gap: Val::Px(4.0),
+                align_items: AlignItems::Center,
+                ..default()
+            })
+            .with_children(|actions| {
+                if bindings_modified(&live.0) {
+                    actions.spawn((
+                        Text::new("MODIFIED"),
+                        dtx_ui::theme::Theme::font(9.0),
+                        TextColor(Color::srgb(0.85, 0.6, 0.1)),
+                    ));
+                }
+                match reset {
+                    BindingsResetState::Idle => {
+                        actions.spawn((
+                            ResetBindingsButton,
+                            Button,
+                            Node {
+                                padding: UiRect::axes(Val::Px(6.0), Val::Px(2.0)),
+                                ..default()
+                            },
+                            BackgroundColor(Color::srgb(0.3, 0.14, 0.14)),
+                            children![(
+                                Text::new("RESET TAB"),
+                                dtx_ui::theme::Theme::font(9.0),
+                                TextColor(t.text_primary),
+                            )],
+                        ));
+                    }
+                    BindingsResetState::Confirming => {
+                        actions.spawn((
+                            ConfirmResetBindingsButton,
+                            Button,
+                            Node {
+                                padding: UiRect::axes(Val::Px(6.0), Val::Px(2.0)),
+                                ..default()
+                            },
+                            BackgroundColor(Color::srgb(0.45, 0.22, 0.12)),
+                            children![(
+                                Text::new("CONFIRM RESET"),
+                                dtx_ui::theme::Theme::font(9.0),
+                                TextColor(t.text_primary),
+                            )],
+                        ));
+                        actions.spawn((
+                            CancelResetBindingsButton,
+                            Button,
+                            Node {
+                                padding: UiRect::axes(Val::Px(6.0), Val::Px(2.0)),
+                                ..default()
+                            },
+                            BackgroundColor(Color::srgb(0.14, 0.14, 0.18)),
+                            children![(
+                                Text::new("CANCEL"),
+                                dtx_ui::theme::Theme::font(9.0),
+                                TextColor(t.text_primary),
+                            )],
+                        ));
+                    }
+                }
+            });
+        });
 
         // DEVICE sub-section: port selector, velocity threshold, velocity meter.
         p.spawn((
@@ -466,6 +558,49 @@ fn handle_velocity_adjust(
     }
 }
 
+fn bindings_modified(bindings: &dtx_config::InputBindings) -> bool {
+    bindings != &dtx_config::InputBindings::default()
+}
+
+fn reset_bindings(live: &mut LiveBindings, rev: &mut BindingsRev) {
+    live.0 = dtx_config::InputBindings::default();
+    rev.0 = rev.0.wrapping_add(1);
+}
+
+fn cancel_bindings_reset(state: &mut BindingsResetState) {
+    *state = BindingsResetState::Idle;
+}
+
+fn handle_bindings_reset(
+    reset: Query<&Interaction, (With<ResetBindingsButton>, Changed<Interaction>)>,
+    confirm: Query<&Interaction, (With<ConfirmResetBindingsButton>, Changed<Interaction>)>,
+    cancel: Query<&Interaction, (With<CancelResetBindingsButton>, Changed<Interaction>)>,
+    mut state: ResMut<BindingsResetState>,
+    mut live: ResMut<LiveBindings>,
+    mut rev: ResMut<BindingsRev>,
+) {
+    if reset.iter().any(|interaction| *interaction == Interaction::Pressed) {
+        *state = BindingsResetState::Confirming;
+        rev.0 = rev.0.wrapping_add(1);
+        return;
+    }
+    if confirm
+        .iter()
+        .any(|interaction| *interaction == Interaction::Pressed)
+    {
+        reset_bindings(&mut live, &mut rev);
+        *state = BindingsResetState::Idle;
+        return;
+    }
+    if cancel
+        .iter()
+        .any(|interaction| *interaction == Interaction::Pressed)
+    {
+        cancel_bindings_reset(&mut state);
+        rev.0 = rev.0.wrapping_add(1);
+    }
+}
+
 /// `×` on a chip: drop that source from the channel's list (bounds-checked).
 fn handle_bind_chip_remove(
     q: Query<(&Interaction, &BindChipRemove), Changed<Interaction>>,
@@ -698,5 +833,32 @@ mod tests {
         let lp = rows.iter().position(|&row| row == EChannel::LeftPedal);
         let lbd = rows.iter().position(|&row| row == EChannel::LeftBassDrum);
         assert_eq!(lbd, lp.map(|index| index + 1));
+    }
+
+    #[test]
+    fn reset_bindings_restores_all_defaults() {
+        use dtx_core::EChannel;
+
+        let mut live = LiveBindings(dtx_config::InputBindings::default());
+        live.0.midi.port = Some("test-port".into());
+        live.0.midi.velocity_threshold = 64;
+        live.0.bind(EChannel::Snare, BindSource::Key(KeyCode::KeyQ));
+        let mut rev = BindingsRev(7);
+
+        assert!(bindings_modified(&live.0));
+        reset_bindings(&mut live, &mut rev);
+
+        assert_eq!(live.0, dtx_config::InputBindings::default());
+        assert_eq!(rev.0, 8);
+        assert!(!bindings_modified(&live.0));
+    }
+
+    #[test]
+    fn cancel_reset_leaves_bindings_unchanged() {
+        let mut state = BindingsResetState::Confirming;
+
+        cancel_bindings_reset(&mut state);
+
+        assert_eq!(state, BindingsResetState::Idle);
     }
 }

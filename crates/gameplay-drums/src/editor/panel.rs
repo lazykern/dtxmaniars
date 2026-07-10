@@ -182,6 +182,7 @@ fn rebuild_left_content(
     draft: Res<super::tabs::ConfigDraft>,
     live: Res<crate::bindings::LiveBindings>,
     rev: Res<super::bindings_panel::BindingsRev>,
+    bindings_reset: Res<super::bindings_panel::BindingsResetState>,
     ports: Res<super::bindings_panel::MidiPortList>,
     theme: Res<dtx_ui::ThemeResource>,
     existing: Query<Entity, With<LeftContentRoot>>,
@@ -227,7 +228,15 @@ fn rebuild_left_content(
     // The Bindings tab is a settings-group tab (Offset preset) but renders its
     // own block, so branch on it BEFORE the generic settings-rows path.
     if active.0 == game_shell::CustomizeTab::Bindings {
-        super::bindings_panel::spawn_bindings_block(&mut commands, root, &t, &live, &lanes, &ports);
+        super::bindings_panel::spawn_bindings_block(
+            &mut commands,
+            root,
+            &t,
+            &live,
+            &lanes,
+            &ports,
+            *bindings_reset,
+        );
         return;
     }
     if active.0.is_settings() {
