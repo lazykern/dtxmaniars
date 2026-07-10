@@ -73,6 +73,7 @@ pub fn track_attempt_stats(
     mut session: ResMut<PracticeSession>,
     mut combo: ResMut<Combo>,
     mut finalized: ResMut<LastFinalizedAttempt>,
+    wait_state: Option<Res<crate::practice::wait::WaitState>>,
 ) {
     for ev in judgments.read() {
         let judge_ms = timeline
@@ -82,6 +83,13 @@ pub fn track_attempt_stats(
             .unwrap_or(i64::MIN);
         if judge_ms < session.current_attempt.start_ms {
             continue; // pre-roll chip: audible feedback only
+        }
+        if wait_state
+            .as_ref()
+            .is_some_and(|w| w.waited_chips.contains(&ev.chip_idx))
+        {
+            session.current_attempt.waited += 1;
+            continue; // cleared while halted: tempo-free, not timing-judged
         }
         apply_judgment(&mut session.current_attempt, ev.kind, ev.delta_ms);
         session.lane_diag.apply_judgment(ev.lane, ev.kind, ev.delta_ms);
@@ -136,10 +144,17 @@ pub fn wrap_micro_report(
         .iter()
         .filter(|a| a.start_ms == done.region_start_ms)
         .count();
-    toasts.push(format!(
-        "pass {n} · {:.1}% · {} miss · {:+.0}ms",
-        att.accuracy_pct, att.counts.miss, att.mean_error_ms
-    ));
+    if session.trainer.wait_enabled {
+        toasts.push(format!(
+            "pass {n} · flow {:.0}% · {} waited",
+            att.flow_pct, att.waited
+        ));
+    } else {
+        toasts.push(format!(
+            "pass {n} · {:.1}% · {} miss · {:+.0}ms",
+            att.accuracy_pct, att.counts.miss, att.mean_error_ms
+        ));
+    }
 }
 
 #[cfg(test)]
@@ -158,6 +173,16 @@ mod tests {
         assert_eq!(a.max_combo, 3);
         assert_eq!(a.error_count, 3);
         assert_eq!(a.error_sum_ms, 0);
+    }
+
+    #[test]
+    fn waited_reclassification_precedes_apply_judgment() {
+        let src = include_str!("stats.rs");
+        let waited = src.find("session.current_attempt.waited += 1").unwrap();
+        let apply = src
+            .find("apply_judgment(&mut session.current_attempt, ev.kind, ev.delta_ms)")
+            .unwrap();
+        assert!(waited < apply, "waited check must gate apply_judgment");
     }
 
     #[test]
