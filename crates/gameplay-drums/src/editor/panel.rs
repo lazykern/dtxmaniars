@@ -137,7 +137,7 @@ pub use super::chrome::INSPECTOR_WIDTH as PANEL_WIDTH;
 
 use super::chrome::LEFT_PANEL_WIDTH;
 
-use super::chrome::RAIL_WIDTH;
+use super::chrome::TAB_BAR_HEIGHT;
 
 pub fn plugin(app: &mut App) {
     app.add_systems(
@@ -233,10 +233,10 @@ fn rebuild_left_content(
             EditorChrome,
             Node {
                 position_type: PositionType::Absolute,
-                left: Val::Px(RAIL_WIDTH),
-                top: Val::Px(0.0),
+                left: Val::Px(0.0),
+                top: Val::Px(TAB_BAR_HEIGHT),
+                bottom: Val::Px(0.0),
                 width: Val::Px(LEFT_PANEL_WIDTH),
-                height: Val::Percent(100.0),
                 flex_direction: FlexDirection::Column,
                 padding: UiRect::all(Val::Px(8.0)),
                 row_gap: Val::Px(6.0),

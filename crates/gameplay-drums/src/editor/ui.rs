@@ -1,4 +1,5 @@
-//! Editor overlay UI: left rail of SETTINGS/KIT tab buttons, spawned while open.
+//! Editor overlay UI: horizontal top bar of SETTINGS/KIT tab buttons, spawned
+//! while open.
 
 use bevy::prelude::*;
 use dtx_layout::WidgetKind;
@@ -9,7 +10,7 @@ use super::EditorOpen;
 #[derive(Component)]
 struct EditorUiRoot;
 
-/// A rail button that activates a Customize tab.
+/// A tab-bar button that activates a Customize tab.
 #[derive(Component, Clone, Copy)]
 pub struct TabButton(pub game_shell::CustomizeTab);
 
@@ -37,7 +38,7 @@ pub fn plugin(app: &mut App) {
     .add_systems(OnExit(game_shell::AppState::Performance), despawn_editor_ui);
 }
 
-/// Despawn the sidebar when leaving Performance (covers the song-ended-mid-edit
+/// Despawn the tab bar when leaving Performance (covers the song-ended-mid-edit
 /// path; `close_editor_on_exit` in mod.rs clears the editor state alongside).
 fn despawn_editor_ui(mut commands: Commands, existing: Query<Entity, With<EditorUiRoot>>) {
     for e in &existing {
@@ -45,12 +46,12 @@ fn despawn_editor_ui(mut commands: Commands, existing: Query<Entity, With<Editor
     }
 }
 
-/// Rebuild the sidebar when the editor opens/closes or the active tab changes.
+/// Rebuild the tab bar when the editor opens/closes or the active tab changes.
 fn ui_needs_respawn(open: Res<EditorOpen>, active: Res<super::tabs::ActiveTab>) -> bool {
     open.is_changed() || active.is_changed()
 }
 
-/// Spawn the sidebar when the editor opens; despawn when it closes.
+/// Spawn the tab bar when the editor opens; despawn when it closes.
 fn spawn_ui_on_open(
     mut commands: Commands,
     open: Res<EditorOpen>,
@@ -73,10 +74,11 @@ fn spawn_ui_on_open(
                 position_type: PositionType::Absolute,
                 left: Val::Px(0.0),
                 top: Val::Px(0.0),
-                width: Val::Px(super::chrome::RAIL_WIDTH),
-                height: Val::Percent(100.0),
+                width: Val::Px(super::chrome::LEFT_PANEL_WIDTH),
+                height: Val::Px(super::chrome::TAB_BAR_HEIGHT),
                 flex_direction: FlexDirection::Column,
-                padding: UiRect::all(Val::Px(8.0)),
+                justify_content: JustifyContent::Center,
+                padding: UiRect::axes(Val::Px(8.0), Val::Px(6.0)),
                 row_gap: Val::Px(4.0),
                 ..default()
             },
@@ -87,13 +89,29 @@ fn spawn_ui_on_open(
 
     let active_tab = active.0;
     commands.entity(root).with_children(|p| {
-        spawn_label(p, &t, "SETTINGS");
-        for tab in game_shell::CustomizeTab::SETTINGS {
-            spawn_tab_button(p, &t, tab, tab == active_tab);
-        }
-        spawn_label(p, &t, "KIT");
-        for tab in game_shell::CustomizeTab::KIT {
-            spawn_tab_button(p, &t, tab, tab == active_tab);
+        spawn_tab_row(p, &t, "SETTINGS", &game_shell::CustomizeTab::SETTINGS, active_tab);
+        spawn_tab_row(p, &t, "KIT", &game_shell::CustomizeTab::KIT, active_tab);
+    });
+}
+
+/// One horizontal tab-bar row: a group label followed by its tab buttons.
+fn spawn_tab_row(
+    p: &mut ChildSpawnerCommands,
+    theme: &dtx_ui::theme::Theme,
+    label: &str,
+    tabs: &[game_shell::CustomizeTab],
+    active_tab: game_shell::CustomizeTab,
+) {
+    p.spawn(Node {
+        flex_direction: FlexDirection::Row,
+        align_items: AlignItems::Center,
+        column_gap: Val::Px(4.0),
+        ..default()
+    })
+    .with_children(|row| {
+        spawn_label(row, theme, label);
+        for tab in tabs {
+            spawn_tab_button(row, theme, *tab, *tab == active_tab);
         }
     });
 }
@@ -103,6 +121,10 @@ fn spawn_label(p: &mut ChildSpawnerCommands, theme: &dtx_ui::theme::Theme, text:
         Text::new(text.to_string()),
         dtx_ui::theme::Theme::font(13.0),
         TextColor(theme.text_secondary),
+        Node {
+            min_width: Val::Px(72.0),
+            ..default()
+        },
     ));
 }
 
@@ -129,7 +151,9 @@ pub(super) fn spawn_button(
     .id()
 }
 
-/// Spawn a tab-rail button; `active` gets the brighter selected tint.
+/// Spawn a tab-bar button; `active` gets the brighter selected tint. The
+/// `Outline` is driven by `keyboard_nav::update_tab_bar_focus` while nav
+/// focus sits on the bar.
 fn spawn_tab_button(
     p: &mut ChildSpawnerCommands,
     theme: &dtx_ui::theme::Theme,
@@ -149,6 +173,11 @@ fn spawn_tab_button(
             ..default()
         },
         BackgroundColor(bg),
+        Outline {
+            width: Val::Px(0.0),
+            offset: Val::Px(1.0),
+            color: Color::NONE,
+        },
         children![(
             Text::new(tab.label().to_string()),
             dtx_ui::theme::Theme::font(12.0),
@@ -157,7 +186,7 @@ fn spawn_tab_button(
     ));
 }
 
-/// Handle tab-rail clicks: activate the clicked Customize tab.
+/// Handle tab-bar clicks: activate the clicked Customize tab.
 fn handle_tab_buttons(
     q: Query<(&Interaction, &TabButton), Changed<Interaction>>,
     mut active: ResMut<super::tabs::ActiveTab>,

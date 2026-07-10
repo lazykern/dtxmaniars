@@ -1,8 +1,8 @@
 //! Nav for Customize settings tabs.
 //!
-//! Keyboard keeps its flat model (arrows move the focused row and adjust it in
-//! place). Pads use a two-level model: the tab rail, then the row list, then an
-//! adjust mode on the focused row. Both feed `NavAction`; one consumer owns all
+//! Keyboard and pads share the two-level model: the top tab bar, then the row
+//! list. Pads add a third adjust mode on the focused row (keyboard adjusts rows
+//! in place with Left/Right). Both feed `NavAction`; one consumer owns all
 //! mutation.
 
 use bevy::prelude::*;
@@ -12,11 +12,11 @@ use game_shell::{CustomizeTab, NavAction, NavSource, NavVerb};
 #[derive(Resource, Default)]
 pub struct FocusedRow(pub usize);
 
-/// Pad navigation level inside the Customize surface. Keyboard stays flat and
-/// ignores this except for the focus ring.
+/// Navigation level inside the Customize surface, shared by keyboard and pads.
 #[derive(Resource, Default)]
 pub enum NavLevel {
-    /// HH/CY switch tabs, BD enters the tab, SD closes the overlay.
+    /// Focus on the top tab bar. Pads: HH/CY switch tabs, BD enters, SD closes
+    /// the overlay. Keyboard: ←/→ switch tabs, ↓/Enter enters.
     #[default]
     Rail,
     /// HH/CY move row focus, BD enters adjust, SD returns to the rail.
@@ -33,9 +33,14 @@ pub fn pad_excluded(tab: CustomizeTab) -> bool {
     matches!(tab, CustomizeTab::Bindings | CustomizeTab::Widgets)
 }
 
-/// Can pads descend from the rail into this tab's rows?
+/// Can pads descend from the tab bar into this tab's rows?
 fn pad_can_enter(tab: CustomizeTab) -> bool {
     tab.is_settings() && !pad_excluded(tab)
+}
+
+/// Can the keyboard descend from the tab bar into this tab's rows?
+fn keyboard_can_enter(tab: CustomizeTab) -> bool {
+    tab.is_settings()
 }
 
 /// Delta a verb applies to the focused row, if any. Pads reuse Up/Down as −/+
@@ -57,6 +62,7 @@ pub(super) fn plugin(app: &mut App) {
                 keyboard_emit_nav,
                 settings_nav_consumer,
                 update_focus_rings,
+                update_tab_bar_focus,
                 update_stepper_glyphs,
             )
                 .chain()
@@ -65,19 +71,39 @@ pub(super) fn plugin(app: &mut App) {
         );
 }
 
-/// Red ring on the focused row; green while that row is in adjust mode.
+/// Red ring on the focused row; green while that row is in adjust mode. No row
+/// ring while focus sits on the tab bar (the bar button carries it instead).
 fn update_focus_rings(
     focused: Res<FocusedRow>,
     level: Res<NavLevel>,
     mut rows: Query<(&super::panel::SettingRow, &mut Outline)>,
 ) {
+    let at_rail = matches!(*level, NavLevel::Rail);
     for (row, mut outline) in &mut rows {
-        if row.0 == focused.0 {
+        if row.0 == focused.0 && !at_rail {
             outline.width = Val::Px(3.0);
             outline.color = match *level {
                 NavLevel::Adjust { .. } => super::panel::ADJUST_RING,
                 _ => super::panel::FOCUS_RING,
             };
+        } else {
+            outline.width = Val::Px(0.0);
+            outline.color = Color::NONE;
+        }
+    }
+}
+
+/// Red ring on the active tab-bar button while nav focus is on the bar.
+fn update_tab_bar_focus(
+    active: Res<super::tabs::ActiveTab>,
+    level: Res<NavLevel>,
+    mut tabs: Query<(&super::ui::TabButton, &mut Outline)>,
+) {
+    let at_rail = matches!(*level, NavLevel::Rail);
+    for (tab, mut outline) in &mut tabs {
+        if at_rail && tab.0 == active.0 {
+            outline.width = Val::Px(2.0);
+            outline.color = super::panel::FOCUS_RING;
         } else {
             outline.width = Val::Px(0.0);
             outline.color = Color::NONE;
@@ -106,8 +132,8 @@ fn update_stepper_glyphs(
     }
 }
 
-/// Keyboard → `NavAction`. Tab switching (PageUp/PageDown) stays a raw
-/// keyboard affordance; pads switch tabs from the rail level instead.
+/// Keyboard → `NavAction`. PageUp/PageDown stay a raw tab-switch shortcut from
+/// any level; ←/→ switch tabs only while focus is on the bar (Rail level).
 fn keyboard_emit_nav(
     keys: Res<ButtonInput<KeyCode>>,
     mut active: ResMut<super::tabs::ActiveTab>,
@@ -133,6 +159,8 @@ fn keyboard_emit_nav(
         NavVerb::Inc
     } else if keys.just_pressed(KeyCode::ArrowLeft) {
         NavVerb::Dec
+    } else if keys.just_pressed(KeyCode::Enter) {
+        NavVerb::Confirm
     } else {
         return;
     };
@@ -153,30 +181,58 @@ fn settings_nav_consumer(
 ) {
     if active.is_changed() {
         focused.0 = 0;
-        *level = NavLevel::Rail;
+        // Tab switched while working the rows (PgUp/PgDn, mouse click): stay at
+        // row level when the new tab has rows; otherwise fall back to the bar.
+        let keep_rows = matches!(*level, NavLevel::Rows)
+            && active.0.is_settings()
+            && !crate::editor::settings_data::settings_items(active.0).is_empty();
+        *level = if keep_rows {
+            NavLevel::Rows
+        } else {
+            NavLevel::Rail
+        };
     }
     for action in actions.read() {
         let items = crate::editor::settings_data::settings_items(active.0);
         match action.source {
-            NavSource::Keyboard => {
-                if !active.0.is_settings() || items.is_empty() {
-                    continue;
-                }
-                let reps = if action.coarse { 10 } else { 1 };
-                match action.verb {
-                    NavVerb::Down => focused.0 = (focused.0 + 1).min(items.len() - 1),
-                    NavVerb::Up => focused.0 = focused.0.saturating_sub(1),
-                    verb => {
-                        if let (Some(delta), Some(item)) =
-                            (adjust_delta(verb, NavSource::Keyboard), items.get(focused.0))
-                        {
-                            for _ in 0..reps {
-                                (item.adjust)(&mut draft.0, delta);
+            NavSource::Keyboard => match &mut *level {
+                NavLevel::Rail => match action.verb {
+                    NavVerb::Dec => active.0 = active.0.prev(),
+                    NavVerb::Inc => active.0 = active.0.next(),
+                    NavVerb::Down | NavVerb::Confirm => {
+                        if keyboard_can_enter(active.0) && !items.is_empty() {
+                            focused.0 = 0;
+                            *level = NavLevel::Rows;
+                        }
+                    }
+                    _ => {}
+                },
+                _ => {
+                    if !active.0.is_settings() || items.is_empty() {
+                        continue;
+                    }
+                    let reps = if action.coarse { 10 } else { 1 };
+                    match action.verb {
+                        NavVerb::Down => focused.0 = (focused.0 + 1).min(items.len() - 1),
+                        NavVerb::Up => {
+                            if focused.0 == 0 {
+                                *level = NavLevel::Rail;
+                            } else {
+                                focused.0 -= 1;
+                            }
+                        }
+                        verb => {
+                            if let (Some(delta), Some(item)) =
+                                (adjust_delta(verb, NavSource::Keyboard), items.get(focused.0))
+                            {
+                                for _ in 0..reps {
+                                    (item.adjust)(&mut draft.0, delta);
+                                }
                             }
                         }
                     }
                 }
-            }
+            },
             NavSource::Pad => match &mut *level {
                 NavLevel::Rail => match action.verb {
                     NavVerb::Up => active.0 = active.0.prev(),
@@ -230,22 +286,46 @@ fn settings_nav_consumer(
 mod tests {
     use super::*;
 
-    /// Mirrors the keyboard arm of `settings_nav_consumer` so the flat keyboard
-    /// model is asserted without booting an App. Must stay in lockstep with it.
+    /// Mirrors the keyboard arm of `settings_nav_consumer` so the two-level
+    /// keyboard model is asserted without booting an App. Must stay in lockstep
+    /// with it. `at_rail` mirrors `NavLevel::Rail` vs `NavLevel::Rows`.
+    #[allow(clippy::too_many_arguments)]
     fn apply_keyboard(
-        items: &[crate::editor::settings_data::SettingItem],
+        active: &mut CustomizeTab,
         focused: &mut usize,
+        at_rail: &mut bool,
         draft: &mut dtx_config::Config,
         verb: NavVerb,
         coarse: bool,
     ) {
-        if items.is_empty() {
+        let items = crate::editor::settings_data::settings_items(*active);
+        if *at_rail {
+            match verb {
+                NavVerb::Dec => *active = active.prev(),
+                NavVerb::Inc => *active = active.next(),
+                NavVerb::Down | NavVerb::Confirm => {
+                    if keyboard_can_enter(*active) && !items.is_empty() {
+                        *focused = 0;
+                        *at_rail = false;
+                    }
+                }
+                _ => {}
+            }
+            return;
+        }
+        if !active.is_settings() || items.is_empty() {
             return;
         }
         let reps = if coarse { 10 } else { 1 };
         match verb {
             NavVerb::Down => *focused = (*focused + 1).min(items.len() - 1),
-            NavVerb::Up => *focused = focused.saturating_sub(1),
+            NavVerb::Up => {
+                if *focused == 0 {
+                    *at_rail = true;
+                } else {
+                    *focused -= 1;
+                }
+            }
             v => {
                 if let (Some(delta), Some(item)) =
                     (adjust_delta(v, NavSource::Keyboard), items.get(*focused))
@@ -282,21 +362,116 @@ mod tests {
     }
 
     #[test]
-    fn keyboard_focus_moves_and_clamps_like_before() {
+    fn keyboard_two_level_moves_rows_and_returns_to_bar() {
         let items = crate::editor::settings_data::settings_items(CustomizeTab::Gameplay);
         assert!(items.len() >= 2, "gameplay tab must have rows");
         let mut draft = dtx_config::Config::default();
+        let mut active = CustomizeTab::Gameplay;
         let mut focused = 0usize;
-        apply_keyboard(items, &mut focused, &mut draft, NavVerb::Down, false);
-        assert_eq!(focused, 1);
-        apply_keyboard(items, &mut focused, &mut draft, NavVerb::Up, false);
+        let mut at_rail = true;
+        apply_keyboard(
+            &mut active,
+            &mut focused,
+            &mut at_rail,
+            &mut draft,
+            NavVerb::Down,
+            false,
+        );
+        assert!(!at_rail, "Down from the bar enters the rows");
         assert_eq!(focused, 0);
-        apply_keyboard(items, &mut focused, &mut draft, NavVerb::Up, false);
-        assert_eq!(focused, 0, "clamps at top");
+        apply_keyboard(
+            &mut active,
+            &mut focused,
+            &mut at_rail,
+            &mut draft,
+            NavVerb::Down,
+            false,
+        );
+        assert_eq!(focused, 1);
+        apply_keyboard(
+            &mut active,
+            &mut focused,
+            &mut at_rail,
+            &mut draft,
+            NavVerb::Up,
+            false,
+        );
+        assert_eq!(focused, 0);
+        apply_keyboard(
+            &mut active,
+            &mut focused,
+            &mut at_rail,
+            &mut draft,
+            NavVerb::Up,
+            false,
+        );
+        assert!(at_rail, "Up on the first row returns focus to the bar");
+        apply_keyboard(
+            &mut active,
+            &mut focused,
+            &mut at_rail,
+            &mut draft,
+            NavVerb::Confirm,
+            false,
+        );
+        assert!(!at_rail, "Enter on the bar re-enters the rows");
         for _ in 0..items.len() + 5 {
-            apply_keyboard(items, &mut focused, &mut draft, NavVerb::Down, false);
+            apply_keyboard(
+                &mut active,
+                &mut focused,
+                &mut at_rail,
+                &mut draft,
+                NavVerb::Down,
+                false,
+            );
         }
         assert_eq!(focused, items.len() - 1, "clamps at bottom");
+    }
+
+    #[test]
+    fn keyboard_bar_left_right_switch_tabs() {
+        let mut draft = dtx_config::Config::default();
+        let mut active = CustomizeTab::Gameplay;
+        let mut focused = 0usize;
+        let mut at_rail = true;
+        apply_keyboard(
+            &mut active,
+            &mut focused,
+            &mut at_rail,
+            &mut draft,
+            NavVerb::Inc,
+            false,
+        );
+        assert_eq!(active, CustomizeTab::Audio);
+        assert!(at_rail, "switching tabs keeps focus on the bar");
+        apply_keyboard(
+            &mut active,
+            &mut focused,
+            &mut at_rail,
+            &mut draft,
+            NavVerb::Dec,
+            false,
+        );
+        assert_eq!(active, CustomizeTab::Gameplay);
+    }
+
+    #[test]
+    fn keyboard_cannot_descend_into_rowless_tabs() {
+        let mut draft = dtx_config::Config::default();
+        let mut focused = 0usize;
+        for tab in [CustomizeTab::Lanes, CustomizeTab::Widgets] {
+            let mut active = tab;
+            let mut at_rail = true;
+            apply_keyboard(
+                &mut active,
+                &mut focused,
+                &mut at_rail,
+                &mut draft,
+                NavVerb::Down,
+                false,
+            );
+            assert!(at_rail, "{tab:?} has no settings rows to enter");
+        }
     }
 
     #[test]
@@ -309,10 +484,19 @@ mod tests {
         let base = dtx_config::Config::default();
         let mut fine = base.clone();
         let mut coarse = base.clone();
+        let mut active = CustomizeTab::Gameplay;
+        let mut at_rail = false;
         let mut f = scroll;
         let mut c = scroll;
-        apply_keyboard(items, &mut f, &mut fine, NavVerb::Inc, false);
-        apply_keyboard(items, &mut c, &mut coarse, NavVerb::Inc, true);
+        apply_keyboard(&mut active, &mut f, &mut at_rail, &mut fine, NavVerb::Inc, false);
+        apply_keyboard(
+            &mut active,
+            &mut c,
+            &mut at_rail,
+            &mut coarse,
+            NavVerb::Inc,
+            true,
+        );
 
         let one = (items[scroll].raw)(&fine) - (items[scroll].raw)(&base);
         let ten = (items[scroll].raw)(&coarse) - (items[scroll].raw)(&base);

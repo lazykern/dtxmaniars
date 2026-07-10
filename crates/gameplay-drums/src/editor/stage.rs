@@ -1,6 +1,6 @@
 //! Customize stage-transform presets: map ActiveTab → target StageRect.
 
-use super::chrome::{INSPECTOR_WIDTH, LEFT_PANEL_WIDTH, RAIL_WIDTH};
+use super::chrome::{INSPECTOR_WIDTH, LEFT_PANEL_WIDTH};
 use crate::stage_rect::{StageRect, StageTarget};
 use bevy::prelude::*;
 use bevy::window::PrimaryWindow;
@@ -10,8 +10,8 @@ const TOP_MARGIN: f32 = 24.0;
 /// Breathing room between the chrome and the shrunk stage.
 const GAP: f32 = 16.0;
 /// The left content panel is present on ALL tabs now, so the left chrome is
-/// always rail + left panel; the inspector reserves the right chrome.
-const LEFT_CHROME: f32 = RAIL_WIDTH + LEFT_PANEL_WIDTH;
+/// the left column (tab bar + panel); the inspector reserves the right chrome.
+const LEFT_CHROME: f32 = LEFT_PANEL_WIDTH;
 
 /// Whether the tab shrinks the whole screen into a framed miniature. Only the
 /// Widgets tab does: it needs the true screen edges visible for WYSIWYG anchor
@@ -225,7 +225,7 @@ fn peek_stage(
 mod tests {
     use super::*;
 
-    // Left chrome = rail(132) + left panel(348) = 480; inspector = 236.
+    // Left chrome = left column (tab bar + panel) = 480; inspector = 236.
     #[test]
     fn settings_tab_shifts_full_screen_into_gap() {
         // Settings: no shrink — full window shifted right by half the chrome.

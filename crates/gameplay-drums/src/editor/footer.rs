@@ -21,7 +21,8 @@ struct FooterDescText;
 const HINT: &str = "Hover a setting for details.";
 
 /// Static key legend for the right-hand side of the footer.
-const LEGEND: &str = "↑↓ row   ←→ adjust (Shift=coarse)   PgUp/Dn tab   Tab peek   Ctrl+S save   Esc close";
+const LEGEND: &str =
+    "↑↓ row (↑ to tabs)   ←→ adjust / switch tab (Shift=coarse)   PgUp/Dn tab   Tab peek   Ctrl+S save   Esc close";
 
 pub(super) fn plugin(app: &mut App) {
     app.init_resource::<HoveredDesc>()
@@ -89,9 +90,7 @@ fn spawn_footer_on_open(
             dtx_ui::theme::Theme::font(12.0),
             TextColor(t.text_primary),
             Node {
-                margin: UiRect::left(Val::Px(
-                    super::chrome::RAIL_WIDTH + super::chrome::LEFT_PANEL_WIDTH,
-                )),
+                margin: UiRect::left(Val::Px(super::chrome::LEFT_PANEL_WIDTH)),
                 ..default()
             },
         ));
