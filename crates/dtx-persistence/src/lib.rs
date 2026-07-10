@@ -17,7 +17,10 @@ pub enum PersistenceError {
 }
 
 pub fn replace_bytes(path: &Path, bytes: &[u8]) -> Result<(), PersistenceError> {
-    if let Some(parent) = path.parent() {
+    if let Some(parent) = path
+        .parent()
+        .filter(|parent| !parent.as_os_str().is_empty())
+    {
         std::fs::create_dir_all(parent).map_err(|source| PersistenceError::CreateParent {
             path: path.to_path_buf(),
             source,
@@ -64,6 +67,24 @@ mod tests {
 
         assert_eq!(fs::read(&path).expect("replacement exists"), b"contents");
         let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn replace_bytes_writes_single_component_relative_path() {
+        let path = PathBuf::from(format!(
+            "dtx-persistence-single-component-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .expect("system time is after epoch")
+                .as_nanos(),
+        ));
+        assert_eq!(path.parent(), Some(std::path::Path::new("")));
+
+        replace_bytes(&path, b"contents").expect("replacement succeeds");
+
+        assert_eq!(fs::read(&path).expect("replacement exists"), b"contents");
+        fs::remove_file(&path).expect("test file cleanup succeeds");
     }
 
     #[test]
