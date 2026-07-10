@@ -113,6 +113,10 @@ pub fn handle_toggle_ramp(
             success_streak: 0,
             fail_streak: 0,
         };
+        if session.trainer.wait_enabled {
+            session.trainer.wait_enabled = false;
+            toasts.push("wait off (ramp armed)");
+        }
         let a_ms = session
             .transport
             .loop_region
