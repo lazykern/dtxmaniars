@@ -40,6 +40,7 @@ Current gaps:
 | Profile relationship | Keyboard, MIDI, and lane profiles remain independent. |
 | Navigation | Replace Bindings with one Controls tab containing `Keyboard | MIDI`. |
 | Storage | Use one versioned TOML registry per profile type. |
+| Persistence helper | Add pure `dtx-persistence` crate wrapping `atomicwrites`; keep platform unsafe code outside project crates. |
 | Save model | Edit drafts, then use Save or Save As. |
 | Built-ins | Keep built-ins immutable in code. |
 | Binding target | Store profiles by `EChannel`, then compose them to the existing fixed logical `LaneId`; lane profiles cannot change judgment routing. |
@@ -76,6 +77,8 @@ active LaneProfile -> EChannel -> display lane
 ```
 
 ### Crate ownership
+
+`dtx-persistence` owns safe byte replacement only. It exposes one small path-plus-bytes API over `atomicwrites` and contains no TOML, profile, migration, or config-directory logic. Both profile crates depend on it; sibling profile crates do not depend on each other.
 
 `dtx-config` owns keyboard and MIDI profile schemas, built-in defaults, registry loading and saving, and migration from `bindings.toml`.
 
@@ -275,20 +278,18 @@ The app cannot prompt after a process crash or forced OS termination. Crash-reco
 
 ## Persistence safety
 
-Registry writes use one shared, vetted cross-platform safe-write helper. The implementation plan must select and verify its replacement semantics instead of hand-rolling a delete-then-rename sequence.
+Registry writes use one shared helper in a new pure `dtx-persistence` crate. The helper wraps `atomicwrites` with overwrite enabled. Project crates do not call Win32 APIs or contain unsafe blocks. Direct `ReplaceFileW` backup-state recovery is outside version 1 because the workspace forbids unsafe code and no vetted safe wrapper provides that contract.
 
 The helper contract:
 
 1. Validate the draft and profile name, then serialize a cloned complete registry.
-2. Create a unique temporary file in the destination directory with exclusive creation and restrictive permissions.
-3. Write all bytes and call `sync_all` on the temporary file.
-4. Replace the destination atomically on supported local filesystems without deleting the old destination first.
-5. Sync the parent directory where the platform supports it.
-6. Clean the temporary file after failure and clean stale helper-owned temporary files on startup.
-7. Report unsupported replacement semantics as a save failure rather than perform a non-atomic swap.
-8. Mark the draft clean and mutate active runtime state only after the helper succeeds.
+2. Ask `atomicwrites` to create its unique temporary file on the destination filesystem.
+3. Write all bytes through the callback and propagate callback or replacement errors.
+4. Use the crate's overwrite replacement path; never delete the destination first in project code.
+5. Let the crate perform its documented file sync and platform replacement behavior, including parent-directory sync where its platform implementation supports it.
+6. Mark the draft clean and mutate active runtime state only after the helper returns success.
 
-A failed write leaves the prior registry intact. The UI keeps the draft and reports the path and error without exposing a false success state.
+Atomic replacement prevents readers from seeing a partially written TOML file. Filesystem, power-loss, and Windows sharing semantics can still produce a replacement error. On any error, the UI retains the draft and prior runtime selection, reports the path and cause, and re-reads the canonical registry before the next persistence action. It does not infer success from a temporary file or delete recovery artifacts. This design does not claim recoverable Windows backup semantics beyond `atomicwrites` guarantees.
 
 Missing registries load built-ins and create no error. New registries and legacy migration sources use checked parsers that distinguish missing files from malformed files. A corrupt file never falls back to defaults and then gets overwritten. The UI enters read-only built-in mode and offers `Back up and reset`. That confirmed action moves the corrupt file to a timestamped backup through a checked operation before creating a default registry.
 
@@ -339,7 +340,7 @@ Keyboard capture consumes keys only while armed. MIDI capture consumes NoteOn me
 | Condition | Behavior |
 |---|---|
 | Duplicate, reserved, or blank name | Keep name field open and show inline error. |
-| Registry transaction failure | Keep old file, active selection, and draft exactly as they were before the action. |
+| Registry transaction failure | Keep runtime selection and draft unchanged, report the error, then re-read the canonical file before another write. |
 | Corrupt registry | Use built-ins read-only; offer confirmed backup and reset. |
 | Missing MIDI device | Keep selected MIDI profile; show disconnected state. |
 | MIDI note conflict | Ask to steal or cancel. |
