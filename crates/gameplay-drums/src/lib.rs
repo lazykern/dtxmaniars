@@ -309,7 +309,7 @@ mod midi_consumer {
     use dtx_input::midi::{MidiSource, VirtualSource};
 
     use super::events::LaneHit;
-    use crate::resources::{ActiveChart, GameplayClock};
+    use crate::resources::GameplayClock;
 
     /// Last MIDI NoteOn observed by `poll_midi`, written before the threshold
     /// gate. Drives the bindings-tab velocity meter and MIDI note capture,
@@ -333,42 +333,36 @@ mod midi_consumer {
     }
 
     pub(super) fn plugin(app: &mut App) {
-        app.init_resource::<LastMidiHit>().add_systems(
-            FixedUpdate,
-            poll_midi
-                .in_set(super::DrumsSets::Input)
-                .run_if(in_state(game_shell::AppState::Performance)),
-        );
+        // Not state-gated: pads navigate menus outside Performance too.
+        app.init_resource::<LastMidiHit>()
+            .add_systems(FixedUpdate, poll_midi.in_set(super::DrumsSets::Input));
 
         #[cfg(feature = "midi")]
         {
             app.insert_non_send(MidiConnection::default())
-                .add_systems(OnEnter(game_shell::AppState::Performance), connect_midi)
+                .add_systems(Startup, connect_midi)
                 .add_systems(
                     Update,
-                    connect_midi.run_if(
-                        resource_changed::<crate::bindings::LiveBindings>
-                            .and_then(in_state(game_shell::AppState::Performance)),
-                    ),
+                    connect_midi.run_if(resource_changed::<crate::bindings::LiveBindings>),
                 )
                 .add_systems(
                     FixedUpdate,
                     drain_real_midi
                         .in_set(super::DrumsSets::Input)
-                        .before(poll_midi)
-                        .run_if(in_state(game_shell::AppState::Performance)),
+                        .before(poll_midi),
                 );
         }
     }
 
     /// Connect (or reconnect) the real MIDI source using the port filter from
-    /// `LiveBindings`. Runs on Performance enter and whenever the bindings
-    /// (hence the selected port) change. Reconnect overwrites, dropping the old
+    /// `LiveBindings`. Runs at startup and whenever the bindings (hence the
+    /// selected port) change. Reconnect overwrites, dropping the old
     /// connection. Non-send: runs on the main thread only.
     #[cfg(feature = "midi")]
     fn connect_midi(
         mut conn: NonSendMut<MidiConnection>,
         live: Res<crate::bindings::LiveBindings>,
+        mut connected: ResMut<game_shell::MidiConnected>,
     ) {
         let filter = live.0.midi.port.clone();
         if conn.source.is_some() && conn.port_filter == filter {
@@ -379,11 +373,13 @@ mod midi_consumer {
                 info!("MIDI connected: {name}");
                 conn.source = Some(src);
                 conn.port_filter = filter;
+                connected.0 = true;
             }
             Err(e) => {
                 warn!("MIDI connect failed: {e}");
                 conn.source = None;
                 conn.port_filter = filter;
+                connected.0 = false;
             }
         }
     }
@@ -404,21 +400,24 @@ mod midi_consumer {
         }
     }
 
+    /// Timestamp for an emitted `LaneHit`: the event's own stamp if it has one,
+    /// else the gameplay clock, else 0 (menus don't care about timing).
+    pub(crate) fn stamp_audio_ms(clock_ms: Option<i64>, event_ms: i64) -> i64 {
+        if event_ms != 0 {
+            event_ms
+        } else {
+            clock_ms.unwrap_or(0)
+        }
+    }
+
     fn poll_midi(
         mut source: ResMut<VirtualSource>,
         resolver: Res<crate::bindings::BindResolver>,
-        chart: Res<ActiveChart>,
         clock: Res<GameplayClock>,
         mut hits: MessageWriter<LaneHit>,
         mut last: ResMut<LastMidiHit>,
     ) {
         if source.is_empty() {
-            return;
-        }
-        if chart.chart.chips.is_empty() {
-            return;
-        }
-        if !clock.is_ready() {
             return;
         }
         let mut buf: Vec<dtx_input::midi::MidiEvent> = Vec::new();
@@ -449,11 +448,7 @@ mod midi_consumer {
             };
             hits.write(LaneHit {
                 lane,
-                audio_ms: if audio_ms != 0 {
-                    audio_ms
-                } else {
-                    clock.current_ms
-                },
+                audio_ms: stamp_audio_ms(clock.is_ready().then(|| clock.current_ms), audio_ms),
             });
         }
     }
@@ -469,5 +464,14 @@ mod tests {
     #[test]
     fn drums_fixed_timestep_is_60hz() {
         assert_eq!(super::DRUMS_FIXED_TIMESTEP_HZ, 60.0);
+    }
+
+    #[test]
+    fn menu_hits_are_stamped_even_without_clock() {
+        use super::midi_consumer::stamp_audio_ms;
+        assert_eq!(stamp_audio_ms(None, 123), 123);
+        assert_eq!(stamp_audio_ms(None, 0), 0);
+        assert_eq!(stamp_audio_ms(Some(5000), 0), 5000);
+        assert_eq!(stamp_audio_ms(Some(5000), 123), 123);
     }
 }
