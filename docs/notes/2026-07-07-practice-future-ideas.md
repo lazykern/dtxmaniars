@@ -12,16 +12,15 @@ judgment; lane is discarded today. Candidate for a **normal-game widget
 too** (dtx-layout WidgetKind), not practice-only — post-song per-lane
 breakdown on results, live version in practice full HUD.
 
-## Limb layering / lane isolation
+## ~~Limb layering / lane isolation~~ (dropped 2026-07-11)
 
-Select lanes to play; unselected lanes autoplay (keysound fires, not
-judged). Kick+snare first, add hihat, add fills — how drummers actually
-learn. DTX keysound model makes autoplay-per-lane natural.
+Decided not to build. Select-lanes-to-play with autoplay for the rest —
+cut from the backlog.
 
-## Auto-suggest practice sections
+## ~~Auto-suggest practice sections~~ (dropped 2026-07-11)
 
-Mine miss/accuracy history for worst bars → one-button "practice this
-fill" (pre-set A/B + rate). Needs persistence (phase 0) to be useful.
+Decided not to build. Mine-miss-history → one-button section suggestion —
+cut from the backlog.
 
 ## Wait mode
 
