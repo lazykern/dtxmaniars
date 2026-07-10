@@ -86,10 +86,15 @@ struct LoadingAdvanceGate(bool);
 #[derive(Resource, Default)]
 struct ChartParseTask(Option<Task<Result<Chart, String>>>);
 
-/// Immediate-tier WAV handles the loader blocks on before starting gameplay
-/// (deferred BGM/SE handles decode in the background — see `sound_bank`).
+/// Chart WAV handles the loader blocks on before starting gameplay.
+/// BocuD loads every used WAV before entering Performance
+/// (`CStageSongLoading.cs:700-708`).
 #[derive(Resource, Default)]
 struct RequiredAudio(Vec<Handle<KiraAudioSource>>);
+
+fn required_audio_slots(chart: &Chart) -> std::collections::BTreeSet<u32> {
+    gameplay_drums::sound_bank::collect_preload_wav_slots(chart)
+}
 
 pub fn plugin(app: &mut App) {
     app.init_resource::<LoadingProgress>()
@@ -226,22 +231,13 @@ fn poll_chart_parse(
                 bpm: chart.metadata.bpm.unwrap_or(120.0),
                 events,
             });
-            // Tiered preload (mirrors dtxpt setup.rs:72-90): request the
-            // immediate note-referenced WAVs and wait on them; fire-and-forget
-            // the deferred BGM/SE stems so they decode in the background while
-            // gameplay begins.
+            // BocuD loads every used WAV before entering Performance
+            // (CStageSongLoading.cs:700-708). Waiting prevents unloaded BGM/SE
+            // play commands from releasing together as an audible burst.
             use gameplay_drums::sound_bank;
-            let immediate = sound_bank::collect_immediate_wav_slots(&chart);
-            let deferred = sound_bank::collect_deferred_wav_slots(&chart);
-            required.0 =
-                sound_bank::preload_slots(&drums_chart, &asset_server, &mut bank, &immediate);
-            let deferred_handles =
-                sound_bank::preload_slots(&drums_chart, &asset_server, &mut bank, &deferred);
-            info!(
-                "SongLoading: waiting on {} immediate WAVs, {} deferred in background",
-                required.0.len(),
-                deferred_handles.len()
-            );
+            let slots = required_audio_slots(&chart);
+            required.0 = sound_bank::preload_slots(&drums_chart, &asset_server, &mut bank, &slots);
+            info!("SongLoading: waiting on {} chart WAVs", required.0.len());
             // Read the perfect-drums ghost (BocuD CStageSongLoading.cs:535-580).
             // Stored for later replay-lane wiring; reverse-score computation is
             // M14+ (needs judgement classifier integration).
@@ -678,5 +674,25 @@ mod tests {
     #[test]
     fn loading_progress_default_is_zero() {
         assert_eq!(LoadingProgress::default().0, 0.0);
+    }
+
+    #[test]
+    fn required_audio_includes_bgm_and_auto_se() {
+        use dtx_core::{Chip, EChannel};
+
+        let chart = Chart {
+            chips: vec![
+                Chip::with_wav(0, EChannel::BGM, 0.0, 1),
+                Chip::with_wav(0, EChannel::SE01, 0.0, 2),
+                Chip::with_wav(0, EChannel::Snare, 0.0, 3),
+            ],
+            ..Default::default()
+        };
+
+        let required = required_audio_slots(&chart);
+
+        assert!(required.contains(&1), "BGM WAV must finish loading");
+        assert!(required.contains(&2), "auto-SE WAV must finish loading");
+        assert!(required.contains(&3), "drum WAV must finish loading");
     }
 }

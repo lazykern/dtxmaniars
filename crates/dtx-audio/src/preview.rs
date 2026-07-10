@@ -270,17 +270,16 @@ pub fn preview_tick_system(
             *elapsed_ms = elapsed_ms.saturating_add(delta_ms);
 
             if !*fade_in_started && *elapsed_ms >= PREVIEW_FADE_DELAY_MS {
-                start_fade_in_with_delay_to_db(
+                *fade_in_started = start_fade_in_with_delay_to_db(
                     &mut instances,
                     new,
                     PREVIEW_FADE_IN_MS,
                     /* delay = */ 0,
                     *target_db,
                 );
-                *fade_in_started = true;
             }
 
-            if *elapsed_ms >= PREVIEW_FADE_DELAY_MS + PREVIEW_FADE_IN_MS {
+            if *fade_in_started && *elapsed_ms >= PREVIEW_FADE_DELAY_MS + PREVIEW_FADE_IN_MS {
                 Some(PreviewState::Playing {
                     current: new.clone(),
                 })
@@ -661,5 +660,33 @@ mod tests {
         player.reset();
         assert!(player.current_path.is_none());
         assert!(player.pending_path.is_none());
+    }
+
+    #[test]
+    fn crossfade_waits_for_audio_instance_before_finishing() {
+        let mut app = App::new();
+        app.insert_resource(Time::<()>::default());
+        app.insert_resource(Assets::<AudioInstance>::default());
+        app.insert_resource(PreviewPlayer {
+            state: PreviewState::Crossfading {
+                old: None,
+                new: Handle::<AudioInstance>::default(),
+                elapsed_ms: PREVIEW_FADE_DELAY_MS + PREVIEW_FADE_IN_MS,
+                fade_in_started: false,
+                target_db: 0.0,
+            },
+            ..Default::default()
+        });
+        app.add_systems(Update, preview_tick_system);
+
+        app.update();
+
+        assert!(matches!(
+            app.world().resource::<PreviewPlayer>().state,
+            PreviewState::Crossfading {
+                fade_in_started: false,
+                ..
+            }
+        ));
     }
 }

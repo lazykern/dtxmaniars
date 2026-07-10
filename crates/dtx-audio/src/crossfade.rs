@@ -84,14 +84,14 @@ pub fn start_fade_out(
 /// the [`crate::preview::PreviewState`] state machine at the exact
 /// `delay_ms` tick boundary.
 ///
-/// No-op if the instance no longer exists in `instances`.
+/// Returns `false` if the instance does not exist yet, allowing callers to retry.
 pub fn start_fade_in_with_delay(
     instances: &mut Assets<AudioInstance>,
     handle: &Handle<AudioInstance>,
     fade_ms: u32,
     delay_ms: u32,
-) {
-    start_fade_in_with_delay_to_db(instances, handle, fade_ms, delay_ms, 0.0);
+) -> bool {
+    start_fade_in_with_delay_to_db(instances, handle, fade_ms, delay_ms, 0.0)
 }
 
 pub fn start_fade_in_with_delay_to_db(
@@ -100,11 +100,13 @@ pub fn start_fade_in_with_delay_to_db(
     fade_ms: u32,
     delay_ms: u32,
     target_db: f32,
-) {
-    if let Some(mut instance) = instances.get_mut(handle) {
-        let total = Duration::from_millis(delay_ms as u64 + fade_ms as u64);
-        instance.set_decibels(target_db, AudioTween::linear(total));
-    }
+) -> bool {
+    let Some(mut instance) = instances.get_mut(handle) else {
+        return false;
+    };
+    let total = Duration::from_millis(delay_ms as u64 + fade_ms as u64);
+    instance.set_decibels(target_db, AudioTween::linear(total));
+    true
 }
 
 /// Mute an audio instance using the project's "instant" convention.

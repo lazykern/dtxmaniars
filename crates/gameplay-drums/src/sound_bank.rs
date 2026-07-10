@@ -2,7 +2,10 @@ use std::collections::BTreeSet;
 
 use bevy::prelude::*;
 use bevy_kira_audio::prelude::AudioSource as KiraAudioSource;
-use dtx_core::{Chart, EChannel};
+use dtx_core::{
+    chip_classify::{classify, ChipClass},
+    Chart, EChannel,
+};
 
 use crate::lane_map::lane_of;
 use crate::resources::ActiveChart;
@@ -32,19 +35,33 @@ pub fn collect_immediate_wav_slots(chart: &Chart) -> BTreeSet<u32> {
         .collect()
 }
 
-/// Tier 2 (deferred): WAV slots only referenced by non-lane channels (BGM
-/// stems, auto-SE). These are scheduled later in the song, so their decode can
-/// finish in the background after gameplay begins — the loader does not block
-/// on them.
+/// Tier 2: WAV slots referenced by audio-bearing non-lane channels (BGM,
+/// auto-SE, guitar). Kept separate for preload priority; SongLoading waits for
+/// both tiers before gameplay starts.
 pub fn collect_deferred_wav_slots(chart: &Chart) -> BTreeSet<u32> {
     let immediate = collect_immediate_wav_slots(chart);
     chart
         .chips
         .iter()
         .filter(|chip| lane_of(chip.channel).is_none())
+        .filter(|chip| channel_uses_wav(chip.channel))
         .filter_map(|chip| (chip.wav_slot != 0).then_some(chip.wav_slot))
         .filter(|slot| !immediate.contains(slot))
         .collect()
+}
+
+const fn channel_uses_wav(channel: EChannel) -> bool {
+    matches!(
+        classify(channel),
+        ChipClass::Drum
+            | ChipClass::OpenNote
+            | ChipClass::Guitar
+            | ChipClass::Bass
+            | ChipClass::LongNote
+            | ChipClass::Wailing
+            | ChipClass::BGM
+            | ChipClass::SE
+    )
 }
 
 /// Preload a specific set of WAV slots into the shared audio bank, returning
@@ -159,5 +176,20 @@ mod tests {
         let slots = collect_preload_wav_slots(&chart);
 
         assert_eq!(slots, [1, 2, 3, 4].into_iter().collect::<BTreeSet<_>>());
+    }
+
+    #[test]
+    fn collect_preload_wav_slots_ignores_bpm_ids() {
+        let chart = Chart {
+            chips: vec![
+                Chip::with_wav(0, EChannel::BPMEx, 0.0, 1),
+                Chip::with_wav(0, EChannel::BGM, 0.0, 2),
+            ],
+            ..Default::default()
+        };
+
+        let slots = collect_preload_wav_slots(&chart);
+
+        assert_eq!(slots, [2].into_iter().collect::<BTreeSet<_>>());
     }
 }
