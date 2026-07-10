@@ -40,7 +40,7 @@ Current gaps:
 | Profile relationship | Keyboard, MIDI, and lane profiles remain independent. |
 | Navigation | Replace Bindings with one Controls tab containing `Keyboard | MIDI`. |
 | Storage | Use one versioned TOML registry per profile type. |
-| Persistence helper | Add pure `dtx-persistence` crate wrapping `atomicwrites`; keep platform unsafe code outside project crates. |
+| Shared profile primitives | Add pure `dtx-persistence` crate for safe replacement and profile-name rules; keep platform unsafe code outside project crates. |
 | Save model | Edit drafts, then use Save or Save As. |
 | Built-ins | Keep built-ins immutable in code. |
 | Binding target | Store profiles by `EChannel`, then compose them to the existing fixed logical `LaneId`; lane profiles cannot change judgment routing. |
@@ -78,7 +78,7 @@ active LaneProfile -> EChannel -> display lane
 
 ### Crate ownership
 
-`dtx-persistence` owns safe byte replacement only. It exposes one small path-plus-bytes API over `atomicwrites` and contains no TOML, profile, migration, or config-directory logic. Both profile crates depend on it; sibling profile crates do not depend on each other.
+`dtx-persistence` owns safe byte replacement plus the shared `ProfileName` validation/comparison/suggestion value. It contains no TOML schemas, profile registries, migrations, config-directory logic, or domain-specific built-ins. Both profile crates depend on it; sibling profile crates do not depend on each other.
 
 `dtx-config` owns keyboard and MIDI profile schemas, built-in defaults, registry loading and saving, and migration from `bindings.toml`.
 
