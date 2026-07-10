@@ -1236,23 +1236,28 @@ fn reset_pad_wheel_level(mut level: ResMut<PadWheelLevel>) {
     *level = PadWheelLevel::Wheel;
 }
 
+/// Wrapper holding the pad legend, so rebuilds despawn the whole bar and never
+/// orphan empty parents.
+#[derive(Component)]
+struct SongSelectLegendBar;
+
 /// Pad legend above the keyboard hint bar; hidden when no MIDI device is on.
 fn update_song_select_legend(
     mut commands: Commands,
     midi: Option<Res<game_shell::MidiConnected>>,
     level: Res<PadWheelLevel>,
     theme: Res<dtx_ui::ThemeResource>,
-    legends: Query<Entity, With<dtx_ui::widget::nav_legend::NavLegend>>,
+    bars: Query<Entity, With<SongSelectLegendBar>>,
     mut last_sig: Local<Option<(PadWheelLevel, bool)>>,
 ) {
     let connected = midi.is_some_and(|m| m.0);
     let sig = (*level, connected);
-    let missing = connected && legends.is_empty();
+    let missing = connected && bars.is_empty();
     if last_sig.as_ref() == Some(&sig) && !missing {
         return;
     }
     *last_sig = Some(sig);
-    for e in &legends {
+    for e in &bars {
         commands.entity(e).despawn();
     }
     if !connected {
@@ -1277,6 +1282,7 @@ fn update_song_select_legend(
     commands
         .spawn((
             SongSelectEntity,
+            SongSelectLegendBar,
             Node {
                 position_type: PositionType::Absolute,
                 bottom: Val::Px(34.0),
