@@ -44,11 +44,16 @@ use dtx_ui::widget::difficulty_grid::{
     DifficultySlotPanel, DifficultySlotScore, GRID_MAX_SLOTS, level_text, score_text,
     spawn_difficulty_grid,
 };
+use dtx_ui::widget::play_history::{
+    HISTORY_MAX_ROWS, HistoryEmptyText, HistoryRow, HistoryRowText, PlayHistoryData,
+    format_unix_date, history_row_line, spawn_play_history,
+};
 use dtx_ui::widget::song_wheel::{SongWheel, VISIBLE_HALF, WheelRow, WheelSpring, row_geometry};
 use dtx_ui::widget::stage_background::spawn_stage_background;
 use dtx_ui::widget::stage_panel::{BadgeValueText, panel, set_panel_selected, spawn_badge_row};
 use game_shell::{
-    AppState, NavAction, PracticeIntent, TransitionRequest, despawn_stage, request_transition,
+    AppState, NavAction, PracticeIntent, ScoreStoreResource, TransitionRequest, despawn_stage,
+    request_transition,
 };
 
 // ===== Layout constants =====
@@ -443,6 +448,7 @@ pub fn plugin(app: &mut App) {
                 wheel_layout_system,
                 update_left_cluster,
                 render_difficulty_grid,
+                render_play_history,
                 bgm_preview_on_change,
                 update_album_art_image,
                 scale_song_select_stage,
@@ -634,6 +640,17 @@ fn spawn_song_select(
                         ))
                         .with_children(|p| {
                             spawn_badge_row(p, &t, "BPM", "---", false);
+                        });
+                        left.spawn(panel(
+                            &t,
+                            Node {
+                                width: Val::Percent(100.0),
+                                flex_direction: FlexDirection::Column,
+                                ..default()
+                            },
+                        ))
+                        .with_children(|p| {
+                            spawn_play_history(p, &t);
                         });
                     });
 
@@ -1019,6 +1036,8 @@ fn update_left_cluster(
             Without<SortChipText>,
         ),
     >,
+    store: Res<ScoreStoreResource>,
+    mut history: ResMut<PlayHistoryData>,
 ) {
     if !selection.is_changed() && !selection_state.is_changed() {
         return;
@@ -1089,6 +1108,30 @@ fn update_left_cluster(
     for mut text in &mut artist_text {
         *text = Text::new(artist.clone());
     }
+
+    // play history for the selected chart, best score first
+    let rows: Vec<HistoryRow> = selection
+        .chart_index(&selection_state)
+        .and_then(|i| db.songs.get(i))
+        .map(|song| {
+            store
+                .history_for_path(&song.path, HISTORY_MAX_ROWS)
+                .into_iter()
+                .map(|e| HistoryRow {
+                    rank: match e.rank {
+                        dtx_scoring::Rank::Unknown => "--".into(),
+                        ref r => r.to_string(),
+                    },
+                    score: e.score,
+                    perfect_pct: e.perfect_pct(),
+                    date: format_unix_date(e.played_at),
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+    if history.rows != rows {
+        history.rows = rows;
+    }
 }
 
 /// Write grid slot data into the widget's text/border entities.
@@ -1156,6 +1199,41 @@ fn render_difficulty_grid(
     }
     for (score, mut text) in &mut scores {
         *text = Text::new(score_text(&grid.slots[score.0]));
+    }
+}
+
+/// Write play-history rows into the panel's text entities. Top row
+/// (best score) gets the selection yellow; the empty-state label
+/// shows only when there are no rows.
+fn render_play_history(
+    data: Res<PlayHistoryData>,
+    theme: Res<ThemeResource>,
+    mut rows: Query<(&HistoryRowText, &mut Text, &mut TextColor)>,
+    mut empty: Query<&mut Node, (With<HistoryEmptyText>, Without<HistoryRowText>)>,
+) {
+    if !data.is_changed() {
+        return;
+    }
+    let t = theme.0;
+    for (row, mut text, mut color) in &mut rows {
+        match data.rows.get(row.0) {
+            Some(r) => {
+                *text = Text::new(history_row_line(r));
+                color.0 = if row.0 == 0 {
+                    t.select_yellow
+                } else {
+                    t.text_primary
+                };
+            }
+            None => *text = Text::new(""),
+        }
+    }
+    for mut node in &mut empty {
+        node.display = if data.rows.is_empty() {
+            Display::Flex
+        } else {
+            Display::None
+        };
     }
 }
 
