@@ -172,6 +172,14 @@ mod tests {
     }
 
     #[test]
+    fn profile_name_allows_current_name_case_insensitively() {
+        let name = validate_profile_name("  Studio Kit  ", [], ["studio kit"], Some("Studio Kit"))
+            .expect("current name is valid");
+
+        assert_eq!(name.0, "Studio Kit");
+    }
+
+    #[test]
     fn comparison_key_does_not_normalize_unicode() {
         assert_ne!(comparison_key("é"), comparison_key("e\u{301}"));
     }
@@ -182,6 +190,11 @@ mod tests {
             suggest_copy_name("Studio kit", ["Studio kit", "Studio kit 2", "Studio kit 3"],),
             "Studio kit 4"
         );
+    }
+
+    #[test]
+    fn copy_name_strips_trailing_numeric_suffix_before_suggesting() {
+        assert_eq!(suggest_copy_name("Studio kit 7", []), "Studio kit 2");
     }
 
     #[test]
