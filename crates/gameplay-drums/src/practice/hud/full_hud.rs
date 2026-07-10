@@ -45,6 +45,7 @@ pub enum RailItem {
     Rate,
     Snap,
     Preroll,
+    Metronome,
     RampArm,
     RampStart,
     RampTarget,
@@ -55,13 +56,14 @@ pub enum RailItem {
 }
 
 impl RailItem {
-    pub const ORDER: [RailItem; 16] = [
+    pub const ORDER: [RailItem; 17] = [
         RailItem::Resume,
         RailItem::Scrub,
         RailItem::RestartSection,
         RailItem::Rate,
         RailItem::Snap,
         RailItem::Preroll,
+        RailItem::Metronome,
         RailItem::SetA,
         RailItem::SetB,
         RailItem::ClearLoop,
@@ -106,6 +108,10 @@ pub fn rail_label(item: RailItem, session: &PracticeSession, exit_armed: bool) -
         }
         RailItem::Snap => format!("Snap  ◀ {} ▶", session.transport.snap.label()),
         RailItem::Preroll => format!("Pre-roll  ◀ {} ▶", session.transport.preroll.label()),
+        RailItem::Metronome => format!(
+            "Count-in  {}",
+            if session.transport.metronome { "on" } else { "off" }
+        ),
         RailItem::RampArm => {
             if session.trainer.ramp.armed {
                 let (cur, total) = crate::practice::ramp::ramp_step_index(
@@ -277,8 +283,8 @@ pub fn spawn_full_hud(
                 for (idx, item) in RailItem::ORDER.iter().enumerate() {
                     let header = match idx {
                         0 => Some("TRANSPORT"),
-                        6 => Some("LOOP"),
-                        9 => Some("TRAINER"),
+                        7 => Some("LOOP"),
+                        10 => Some("TRAINER"),
                         _ => None,
                     };
                     if let Some(h) = header {
@@ -558,6 +564,9 @@ pub fn full_hud_input(
                 session.set_loop_end(ms);
             }
             RailItem::ClearLoop => session.clear_loop(),
+            RailItem::Metronome => {
+                session.transport.metronome = !session.transport.metronome;
+            }
             RailItem::Rate | RailItem::Snap | RailItem::Preroll => {}
             RailItem::RampArm => {
                 practice_actions.write(crate::practice::actions::PracticeAction::ToggleRamp);
@@ -660,6 +669,14 @@ mod tests {
             accuracy_pct: acc,
             mean_error_ms: 0.0,
         }
+    }
+
+    #[test]
+    fn metronome_rail_label_reflects_toggle() {
+        let mut s = PracticeSession::default();
+        assert_eq!(rail_label(RailItem::Metronome, &s, false), "Count-in  on");
+        s.transport.metronome = false;
+        assert_eq!(rail_label(RailItem::Metronome, &s, false), "Count-in  off");
     }
 
     #[test]
