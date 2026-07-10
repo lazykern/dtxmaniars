@@ -1,19 +1,22 @@
 //! Drum pads → `NavAction`: pads navigate menus.
 //!
-//! Consumes this crate's resolved [`LaneHit`]s (velocity threshold and bindings
-//! already applied by the producers) and emits `game_shell::NavAction` with
-//! `NavSource::Pad` while a menu context is active. During live play — and
-//! while bindings capture or the calibration overlay owns raw hits — pads stay
-//! gameplay input and no actions are emitted.
+//! Consumes [`PadNavHit`] — real MIDI pad hits only, after the velocity
+//! threshold and bindings resolution — and emits `game_shell::NavAction` with
+//! `NavSource::Pad` while a menu context is active. It deliberately does NOT
+//! read `LaneHit`: autoplay (which the Customize surface forces on) and
+//! keyboard lane keys also write those, and neither should steer a menu.
+//!
+//! During live play — and while bindings capture or the calibration overlay
+//! owns raw hits — pads stay gameplay input and no actions are emitted.
 
 use std::time::{Duration, Instant};
 
 use bevy::prelude::*;
 use game_shell::{AppState, NavAction, NavSource, NavVerb, PauseState};
 
+use crate::PadNavHit;
 use crate::editor::bindings_capture::CaptureState;
 use crate::editor::calibration::CalibrationState;
-use crate::events::LaneHit;
 
 /// Minimum gap between accepted pad nav actions (double-trigger/flam guard).
 const DEBOUNCE: Duration = Duration::from_millis(80);
@@ -129,7 +132,7 @@ fn pad_nav_mapper(
     editor_open: Res<crate::editor::EditorOpen>,
     capture: Res<CaptureState>,
     calibration: Res<CalibrationState>,
-    mut hits: MessageReader<LaneHit>,
+    mut hits: MessageReader<PadNavHit>,
     mut guard: ResMut<NavGuard>,
     mut out: MessageWriter<NavAction>,
 ) {
@@ -203,6 +206,27 @@ mod tests {
         assert!(g.accept(t1 + std::time::Duration::from_millis(100)));
         g.enter_context(NavContext::Result, t1 + std::time::Duration::from_millis(200));
         assert!(!g.accept(t1 + std::time::Duration::from_millis(300)));
+    }
+
+    /// The mapper must read `PadNavHit`, never `LaneHit` — autoplay (forced on
+    /// by the Customize surface) and keyboard lane keys write `LaneHit`, and a
+    /// chart's autoplay notes would otherwise navigate and close the overlay.
+    #[test]
+    fn mapper_consumes_pad_nav_hits_not_lane_hits() {
+        let src = include_str!("menu_nav.rs");
+        let body = src
+            .split("fn pad_nav_mapper(")
+            .nth(1)
+            .expect("pad_nav_mapper exists");
+        let signature = body.split(") {").next().unwrap();
+        assert!(
+            signature.contains("MessageReader<PadNavHit>"),
+            "mapper must read PadNavHit"
+        );
+        assert!(
+            !signature.contains("MessageReader<LaneHit>"),
+            "mapper must not read LaneHit (autoplay + keyboard write those)"
+        );
     }
 
     #[test]

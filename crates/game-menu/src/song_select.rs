@@ -437,6 +437,7 @@ pub fn plugin(app: &mut App) {
                 maybe_recompute_visible,
                 song_select_hotkeys,
                 (song_select_kb_emit, song_select_nav_consumer).chain(),
+                update_song_select_legend,
                 search_input,
                 respawn_wheel_on_change,
                 wheel_layout_system,
@@ -1233,6 +1234,60 @@ impl PadWheelLevel {
 
 fn reset_pad_wheel_level(mut level: ResMut<PadWheelLevel>) {
     *level = PadWheelLevel::Wheel;
+}
+
+/// Pad legend above the keyboard hint bar; hidden when no MIDI device is on.
+fn update_song_select_legend(
+    mut commands: Commands,
+    midi: Option<Res<game_shell::MidiConnected>>,
+    level: Res<PadWheelLevel>,
+    theme: Res<dtx_ui::ThemeResource>,
+    legends: Query<Entity, With<dtx_ui::widget::nav_legend::NavLegend>>,
+    mut last_sig: Local<Option<(PadWheelLevel, bool)>>,
+) {
+    let connected = midi.is_some_and(|m| m.0);
+    let sig = (*level, connected);
+    let missing = connected && legends.is_empty();
+    if last_sig.as_ref() == Some(&sig) && !missing {
+        return;
+    }
+    *last_sig = Some(sig);
+    for e in &legends {
+        commands.entity(e).despawn();
+    }
+    if !connected {
+        return;
+    }
+    let items: &[(&str, &str)] = match *level {
+        PadWheelLevel::Wheel => &[
+            ("HH", "up"),
+            ("CY", "down"),
+            ("BD", "difficulty"),
+            ("SD", "title"),
+        ],
+        PadWheelLevel::Difficulty => &[
+            ("HH", "prev diff"),
+            ("CY", "next diff"),
+            ("BD", "play"),
+            ("FT", "practice"),
+            ("SD", "songs"),
+        ],
+    };
+    let t = theme.0;
+    commands
+        .spawn((
+            SongSelectEntity,
+            Node {
+                position_type: PositionType::Absolute,
+                bottom: Val::Px(34.0),
+                left: Val::Px(0.0),
+                width: Val::Percent(100.0),
+                ..default()
+            },
+        ))
+        .with_children(|p| {
+            dtx_ui::widget::nav_legend::spawn_nav_legend(p, &t, items);
+        });
 }
 
 /// Raw keyboard affordances with no pad equivalent: sort, customize, rescan.

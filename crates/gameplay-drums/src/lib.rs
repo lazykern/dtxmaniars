@@ -335,6 +335,7 @@ mod midi_consumer {
     pub(super) fn plugin(app: &mut App) {
         // Not state-gated: pads navigate menus outside Performance too.
         app.init_resource::<LastMidiHit>()
+            .add_message::<PadNavHit>()
             .add_systems(FixedUpdate, poll_midi.in_set(super::DrumsSets::Input));
 
         #[cfg(feature = "midi")]
@@ -400,6 +401,17 @@ mod midi_consumer {
         }
     }
 
+    /// A resolved hit from a real pad, for menu navigation only.
+    ///
+    /// Separate from `LaneHit` on purpose: `LaneHit` is also written by autoplay
+    /// (which the Customize surface forces on) and by keyboard lane keys, and
+    /// neither should ever steer a menu.
+    #[derive(Debug, Clone, Copy, Message)]
+    pub struct PadNavHit {
+        /// Lane id per `crate::lane_map::LANE_ORDER`.
+        pub lane: u8,
+    }
+
     /// Timestamp for an emitted `LaneHit`: the event's own stamp if it has one,
     /// else the gameplay clock, else 0 (menus don't care about timing).
     pub(crate) fn stamp_audio_ms(clock_ms: Option<i64>, event_ms: i64) -> i64 {
@@ -415,6 +427,7 @@ mod midi_consumer {
         resolver: Res<crate::bindings::BindResolver>,
         clock: Res<GameplayClock>,
         mut hits: MessageWriter<LaneHit>,
+        mut nav_hits: MessageWriter<PadNavHit>,
         mut last: ResMut<LastMidiHit>,
     ) {
         if source.is_empty() {
@@ -450,11 +463,12 @@ mod midi_consumer {
                 lane,
                 audio_ms: stamp_audio_ms(clock.is_ready().then(|| clock.current_ms), audio_ms),
             });
+            nav_hits.write(PadNavHit { lane });
         }
     }
 }
 
-pub use midi_consumer::LastMidiHit;
+pub use midi_consumer::{LastMidiHit, PadNavHit};
 
 /// Re-export as struct form for callers that prefer `add_plugins(...)` syntax.
 pub use plugin as DrumsPlugin;
