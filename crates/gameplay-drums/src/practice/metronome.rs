@@ -3,10 +3,13 @@
 //! Spec: docs/superpowers/specs/2026-07-11-practice-count-in-metronome-design.md
 
 use bevy::prelude::*;
-use bevy_kira_audio::prelude::{Frame, StaticSoundData, StaticSoundSettings};
+use bevy_kira_audio::prelude::{Audio, Frame, StaticSoundData, StaticSoundSettings};
 use bevy_kira_audio::AudioSource as KiraAudioSource;
+use game_shell::{AppState, PauseState};
 
-use super::session::{preroll_target, PrerollSetting};
+use super::session::{preroll_target, PracticeSession, PrerollSetting};
+use crate::resources::{DrumAudioSettings, GameplayClock};
+use crate::seek::SeekToChartTime;
 use crate::timeline::ChipTimeline;
 
 /// One scheduled count-in click.
@@ -103,6 +106,109 @@ pub fn build_metronome_sounds(
     sounds.tick = sources.add(click_source(TICK_HZ));
 }
 
+/// The schedule for the current pre-roll, plus how far it has fired.
+#[derive(Resource, Debug, Default)]
+pub struct ActiveClickSchedule {
+    pub schedule: ClickSchedule,
+    pub cursor: usize,
+}
+
+/// What the countdown UI shows right now.
+#[derive(Resource, Debug, Default)]
+pub struct CountdownDisplay {
+    /// `Some((beats_remaining, accent, wall_seconds_shown_at))`.
+    pub current: Option<(u8, bool, f64)>,
+}
+
+/// Clicks whose time has come at `clock_ms`, advancing `cursor` past them.
+pub fn due_clicks<'a>(
+    schedule: &'a ClickSchedule,
+    cursor: &'a mut usize,
+    clock_ms: i64,
+) -> impl Iterator<Item = Click> + 'a {
+    std::iter::from_fn(move || {
+        let click = schedule.clicks.get(*cursor)?;
+        if click.at_ms <= clock_ms {
+            *cursor += 1;
+            Some(*click)
+        } else {
+            None
+        }
+    })
+}
+
+/// Rebuild the schedule whenever a practice seek lands. Runs after
+/// `apply_seek_system` so it sees the same coalesced last-seek.
+pub fn rebuild_click_schedule(
+    mut seeks: MessageReader<SeekToChartTime>,
+    session: Res<PracticeSession>,
+    timeline: Res<ChipTimeline>,
+    mut active: ResMut<ActiveClickSchedule>,
+    mut display: ResMut<CountdownDisplay>,
+) {
+    let Some(seek) = seeks.read().last().copied() else {
+        return;
+    };
+    display.current = None;
+    if !session.transport.metronome {
+        *active = ActiveClickSchedule::default();
+        return;
+    }
+    let intent = seek.attempt_start_ms.unwrap_or(seek.target_ms);
+    active.schedule = build_preroll_schedule(&timeline, session.transport.preroll, intent);
+    active.cursor = 0;
+}
+
+/// Fire due clicks: play the sample, update the countdown display.
+pub fn fire_clicks(
+    clock: Res<GameplayClock>,
+    sounds: Res<MetronomeSounds>,
+    audio: Res<Audio>,
+    settings: Res<DrumAudioSettings>,
+    time: Res<Time>,
+    mut active: ResMut<ActiveClickSchedule>,
+    mut display: ResMut<CountdownDisplay>,
+) {
+    if !clock.is_ready() {
+        return;
+    }
+    let ActiveClickSchedule { schedule, cursor } = &mut *active;
+    let mut last = None;
+    for click in due_clicks(schedule, cursor, clock.current_ms) {
+        let source = if click.accent {
+            sounds.accent.clone()
+        } else {
+            sounds.tick.clone()
+        };
+        dtx_audio::play_sfx_handle(&audio, source, 100, 0, settings.master_volume, 1.0);
+        last = Some(click);
+    }
+    if let Some(click) = last {
+        display.current = Some((click.beats_remaining, click.accent, time.elapsed_secs_f64()));
+    }
+}
+
+pub(crate) fn plugin(app: &mut App) {
+    app.init_resource::<MetronomeSounds>()
+        .init_resource::<ActiveClickSchedule>()
+        .init_resource::<CountdownDisplay>()
+        .add_systems(
+            OnEnter(AppState::Performance),
+            build_metronome_sounds.run_if(resource_exists::<PracticeSession>),
+        )
+        .add_systems(
+            FixedUpdate,
+            (
+                rebuild_click_schedule.after(crate::seek::apply_seek_system),
+                fire_clicks.after(crate::DrumsSets::ClockSync),
+            )
+                .chain()
+                .run_if(in_state(AppState::Performance))
+                .run_if(in_state(PauseState::Running))
+                .run_if(resource_exists::<PracticeSession>),
+        );
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -177,6 +283,25 @@ mod tests {
         // preroll_target clamps to 0 == intent → empty window.
         let s = build_preroll_schedule(&tl, PrerollSetting::OneBar, 0);
         assert!(s.clicks.is_empty());
+    }
+
+    #[test]
+    fn due_clicks_advance_cursor_and_stop_at_clock() {
+        let s = ClickSchedule {
+            clicks: vec![
+                Click { at_ms: 2_000, accent: true, beats_remaining: 2 },
+                Click { at_ms: 2_500, accent: false, beats_remaining: 1 },
+            ],
+        };
+        let mut cursor = 0usize;
+        let first: Vec<Click> = due_clicks(&s, &mut cursor, 2_010).collect();
+        assert_eq!(first.len(), 1);
+        assert_eq!(first[0].at_ms, 2_000);
+        assert_eq!(cursor, 1);
+        // Nothing new until the clock reaches the next click.
+        assert_eq!(due_clicks(&s, &mut cursor, 2_499).count(), 0);
+        assert_eq!(due_clicks(&s, &mut cursor, 2_500).count(), 1);
+        assert_eq!(cursor, 2);
     }
 
     #[test]

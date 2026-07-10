@@ -57,6 +57,7 @@ pub(super) fn plugin(app: &mut App) {
     .add_plugins((
         ab_loop::plugin,
         hud::plugin,
+        metronome::plugin,
         ramp::plugin,
         rate::plugin,
         stats::plugin,
