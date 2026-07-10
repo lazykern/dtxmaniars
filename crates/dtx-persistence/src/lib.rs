@@ -9,6 +9,12 @@ use thiserror::Error;
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ProfileName(String);
 
+impl ProfileName {
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
 #[derive(Debug, Error, PartialEq, Eq)]
 pub enum ProfileNameError {
     #[error("profile name is blank")]
@@ -177,6 +183,13 @@ mod tests {
             .expect("current name is valid");
 
         assert_eq!(name.0, "Studio Kit");
+    }
+
+    #[test]
+    fn profile_name_exposes_validated_text() {
+        let name = validate_profile_name("  Studio Kit  ", [], [], None).expect("name is valid");
+
+        assert_eq!(name.as_str(), "Studio Kit");
     }
 
     #[test]
