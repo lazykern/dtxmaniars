@@ -53,11 +53,57 @@ pub(super) fn plugin(app: &mut App) {
         .init_resource::<NavLevel>()
         .add_systems(
             Update,
-            (keyboard_emit_nav, settings_nav_consumer)
+            (
+                keyboard_emit_nav,
+                settings_nav_consumer,
+                update_focus_rings,
+                update_stepper_glyphs,
+            )
                 .chain()
                 .run_if(in_state(game_shell::AppState::Performance))
                 .run_if(super::editor_open),
         );
+}
+
+/// Red ring on the focused row; green while that row is in adjust mode.
+fn update_focus_rings(
+    focused: Res<FocusedRow>,
+    level: Res<NavLevel>,
+    mut rows: Query<(&super::panel::SettingRow, &mut Outline)>,
+) {
+    for (row, mut outline) in &mut rows {
+        if row.0 == focused.0 {
+            outline.width = Val::Px(3.0);
+            outline.color = match *level {
+                NavLevel::Adjust { .. } => super::panel::ADJUST_RING,
+                _ => super::panel::FOCUS_RING,
+            };
+        } else {
+            outline.width = Val::Px(0.0);
+            outline.color = Color::NONE;
+        }
+    }
+}
+
+/// In adjust mode the focused row's steppers read `−` / `+`, not `<` / `>`.
+fn update_stepper_glyphs(
+    focused: Res<FocusedRow>,
+    level: Res<NavLevel>,
+    mut glyphs: Query<(&super::panel::StepperGlyph, &mut Text)>,
+) {
+    let adjusting = matches!(*level, NavLevel::Adjust { .. });
+    for (glyph, mut text) in &mut glyphs {
+        let active = adjusting && glyph.row == focused.0;
+        let want = match (active, glyph.dir) {
+            (true, d) if d < 0 => "−",
+            (true, _) => "+",
+            (false, d) if d < 0 => "<",
+            (false, _) => ">",
+        };
+        if text.0 != want {
+            *text = Text::new(want);
+        }
+    }
 }
 
 /// Keyboard → `NavAction`. Tab switching (PageUp/PageDown) stays a raw

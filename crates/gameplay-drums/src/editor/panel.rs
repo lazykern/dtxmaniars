@@ -71,9 +71,30 @@ pub struct PresetCycleBtn(pub i32);
 #[derive(Component)]
 pub struct PresetLabel;
 
+/// Settings rows are sized for readability from behind the kit, not just for a
+/// mouse at desk distance.
+const ROW_PAD_V: f32 = 8.0;
+const ROW_GAP: f32 = 4.0;
+const ROW_LABEL_FONT: f32 = 14.0;
+const ROW_VALUE_FONT: f32 = 15.0;
+const STEP_PAD_H: f32 = 11.0;
+const STEP_PAD_V: f32 = 4.0;
+
+/// Ring around the row holding nav focus.
+pub const FOCUS_RING: Color = Color::srgb(0.89, 0.20, 0.20);
+/// Ring around the row being adjusted (pad adjust mode).
+pub const ADJUST_RING: Color = Color::srgb(0.16, 0.62, 0.36);
+
 /// Tags a settings row control with its index into the active tab's item list.
 #[derive(Component, Clone, Copy)]
 pub struct SettingRow(pub usize);
+
+/// Tags a stepper's glyph text so adjust mode can swap `<`/`>` for `−`/`+`.
+#[derive(Component, Clone, Copy)]
+pub struct StepperGlyph {
+    pub row: usize,
+    pub dir: i32,
+}
 
 /// Carries a settings row's one-line description, surfaced in the footer while
 /// the row is hovered.
@@ -738,10 +759,13 @@ fn spawn_settings_block(
                 SettingRow(i),
                 RowDesc(item.desc),
                 Interaction::default(),
+                Outline::new(Val::Px(0.0), Val::Px(2.0), Color::NONE),
                 Node {
                     flex_direction: FlexDirection::Row,
                     justify_content: JustifyContent::SpaceBetween,
                     align_items: AlignItems::Center,
+                    padding: UiRect::axes(Val::Px(6.0), Val::Px(ROW_PAD_V)),
+                    margin: UiRect::bottom(Val::Px(ROW_GAP)),
                     ..default()
                 },
             ))
@@ -764,7 +788,7 @@ fn spawn_settings_block(
                     }
                     l.spawn((
                         Text::new(item.label),
-                        dtx_ui::theme::Theme::font(11.0),
+                        dtx_ui::theme::Theme::font(ROW_LABEL_FONT),
                         TextColor(t.text_secondary),
                     ));
                 });
@@ -782,7 +806,7 @@ fn spawn_settings_block(
                         c.spawn((
                             SettingValueText(i),
                             Text::new((item.value)(&draft.0)),
-                            dtx_ui::theme::Theme::font(12.0),
+                            dtx_ui::theme::Theme::font(ROW_VALUE_FONT),
                             TextColor(t.text_primary),
                             TextLayout {
                                 linebreak: bevy::text::LineBreak::NoWrap,
@@ -799,20 +823,21 @@ fn spawn_settings_block(
                             SettingAdjust { index: i, dir: -1 },
                             Button,
                             Node {
-                                padding: UiRect::axes(Val::Px(5.0), Val::Px(1.0)),
+                                padding: UiRect::axes(Val::Px(STEP_PAD_H), Val::Px(STEP_PAD_V)),
                                 ..default()
                             },
                             BackgroundColor(Color::srgb(0.14, 0.14, 0.18)),
                             children![(
+                                StepperGlyph { row: i, dir: -1 },
                                 Text::new("<"),
-                                dtx_ui::theme::Theme::font(12.0),
+                                dtx_ui::theme::Theme::font(ROW_VALUE_FONT),
                                 TextColor(t.text_primary)
                             )],
                         ));
                         c.spawn((
                             SettingValueText(i),
                             Text::new((item.value)(&draft.0)),
-                            dtx_ui::theme::Theme::font(12.0),
+                            dtx_ui::theme::Theme::font(ROW_VALUE_FONT),
                             TextColor(t.text_primary),
                             TextLayout {
                                 linebreak: bevy::text::LineBreak::NoWrap,
@@ -828,13 +853,14 @@ fn spawn_settings_block(
                             SettingAdjust { index: i, dir: 1 },
                             Button,
                             Node {
-                                padding: UiRect::axes(Val::Px(5.0), Val::Px(1.0)),
+                                padding: UiRect::axes(Val::Px(STEP_PAD_H), Val::Px(STEP_PAD_V)),
                                 ..default()
                             },
                             BackgroundColor(Color::srgb(0.14, 0.14, 0.18)),
                             children![(
+                                StepperGlyph { row: i, dir: 1 },
                                 Text::new(">"),
-                                dtx_ui::theme::Theme::font(12.0),
+                                dtx_ui::theme::Theme::font(ROW_VALUE_FONT),
                                 TextColor(t.text_primary)
                             )],
                         ));
