@@ -6,6 +6,80 @@ use std::{
 use atomicwrites::{AtomicFile, Error as AtomicWriteError, OverwriteBehavior};
 use thiserror::Error;
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ProfileName(String);
+
+#[derive(Debug, Error, PartialEq, Eq)]
+pub enum ProfileNameError {
+    #[error("profile name is blank")]
+    Blank,
+    #[error("profile name exceeds 48 characters")]
+    TooLong,
+    #[error("profile name contains a control character")]
+    ControlCharacter,
+    #[error("profile name is reserved")]
+    Reserved,
+    #[error("profile name already exists")]
+    Duplicate,
+}
+
+pub fn comparison_key(name: &str) -> String {
+    name.trim().chars().flat_map(char::to_lowercase).collect()
+}
+
+pub fn validate_profile_name<'a>(
+    raw: &str,
+    reserved: impl IntoIterator<Item = &'a str>,
+    existing: impl IntoIterator<Item = &'a str>,
+    current: Option<&str>,
+) -> Result<ProfileName, ProfileNameError> {
+    let name = raw.trim();
+    if name.is_empty() {
+        return Err(ProfileNameError::Blank);
+    }
+    if name.chars().count() > 48 {
+        return Err(ProfileNameError::TooLong);
+    }
+    if raw.chars().any(char::is_control) {
+        return Err(ProfileNameError::ControlCharacter);
+    }
+
+    let key = comparison_key(name);
+    if reserved.into_iter().any(|name| comparison_key(name) == key) {
+        return Err(ProfileNameError::Reserved);
+    }
+    if current.is_none_or(|name| comparison_key(name) != key)
+        && existing.into_iter().any(|name| comparison_key(name) == key)
+    {
+        return Err(ProfileNameError::Duplicate);
+    }
+
+    Ok(ProfileName(name.to_owned()))
+}
+
+pub fn suggest_copy_name<'a>(base: &str, existing: impl IntoIterator<Item = &'a str>) -> String {
+    let base = base.trim();
+    let stem = base
+        .rsplit_once(' ')
+        .filter(|(_, suffix)| {
+            !suffix.is_empty() && suffix.chars().all(|char| char.is_ascii_digit())
+        })
+        .map_or(base, |(stem, _)| stem);
+    let existing: Vec<_> = existing.into_iter().map(comparison_key).collect();
+
+    for suffix in 2.. {
+        let candidate = format!("{stem} {suffix}");
+        if !existing
+            .iter()
+            .any(|name| name == &comparison_key(&candidate))
+        {
+            return candidate;
+        }
+    }
+
+    unreachable!("finite existing names leave a copy suffix available")
+}
+
 #[derive(Debug, Error)]
 pub enum PersistenceError {
     #[error("cannot create parent directory for {path}: {source}")]
@@ -43,7 +117,10 @@ pub fn replace_bytes(path: &Path, bytes: &[u8]) -> Result<(), PersistenceError> 
 
 #[cfg(test)]
 mod tests {
-    use super::{replace_bytes, PersistenceError};
+    use super::{
+        comparison_key, replace_bytes, suggest_copy_name, validate_profile_name, PersistenceError,
+        ProfileNameError,
+    };
     use std::{fs, path::PathBuf};
 
     fn temp_path(name: &str) -> PathBuf {
@@ -51,6 +128,60 @@ mod tests {
             .join("dtx-persistence-tests")
             .join(std::process::id().to_string())
             .join(name)
+    }
+
+    #[test]
+    fn profile_name_trims_and_accepts_48_scalars() {
+        let raw = format!("  {}  ", "é".repeat(48));
+
+        let name = validate_profile_name(&raw, [], [], None).expect("name is valid");
+
+        assert_eq!(name.0, "é".repeat(48));
+    }
+
+    #[test]
+    fn profile_name_rejects_blank_control_and_49_scalars() {
+        assert!(matches!(
+            validate_profile_name("  \t", [], [], None),
+            Err(ProfileNameError::Blank)
+        ));
+        assert!(matches!(
+            validate_profile_name("\tkit", [], [], None),
+            Err(ProfileNameError::ControlCharacter)
+        ));
+        assert!(matches!(
+            validate_profile_name(&"é".repeat(49), [], [], None),
+            Err(ProfileNameError::TooLong)
+        ));
+    }
+
+    #[test]
+    fn profile_name_rejects_reserved_case_insensitively() {
+        assert!(matches!(
+            validate_profile_name("  ADMIN  ", ["admin"], [], None),
+            Err(ProfileNameError::Reserved)
+        ));
+    }
+
+    #[test]
+    fn profile_name_rejects_duplicate_case_insensitively() {
+        assert!(matches!(
+            validate_profile_name("  Studio Kit  ", [], ["studio kit"], None),
+            Err(ProfileNameError::Duplicate)
+        ));
+    }
+
+    #[test]
+    fn comparison_key_does_not_normalize_unicode() {
+        assert_ne!(comparison_key("é"), comparison_key("e\u{301}"));
+    }
+
+    #[test]
+    fn copy_name_increments_numeric_suffix() {
+        assert_eq!(
+            suggest_copy_name("Studio kit", ["Studio kit", "Studio kit 2", "Studio kit 3"],),
+            "Studio kit 4"
+        );
     }
 
     #[test]
