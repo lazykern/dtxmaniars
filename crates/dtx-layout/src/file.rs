@@ -1,6 +1,6 @@
 //! `layout.toml` schema + resolution to runtime types.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use serde::{Deserialize, Serialize};
 
@@ -39,17 +39,22 @@ impl LanesSection {
 
         let base = classic();
 
+        let mut seen = HashSet::new();
         let order: Vec<String> = self
             .order
             .clone()
             .unwrap_or_else(|| base.lanes.iter().map(|l| l.id.clone()).collect())
             .into_iter()
             .filter(|id| {
-                let known = channel_from_short(id).is_some();
-                if !known {
+                if channel_from_short(id).is_none() {
                     eprintln!("dtx-layout: unknown lane id {id:?} dropped");
+                    return false;
                 }
-                known
+                if !seen.insert(id.clone()) {
+                    eprintln!("dtx-layout: duplicate lane id {id:?} dropped");
+                    return false;
+                }
+                true
             })
             .collect();
         let order = if order.is_empty() {
@@ -267,6 +272,21 @@ mod tests {
         let arr = section.resolve();
         assert!(arr.lanes.iter().all(|l| l.id != "NOPE"));
         assert!(arr.lane_index_of(EChannel::Cymbal).is_some());
+    }
+
+    #[test]
+    fn duplicate_custom_lane_ids_keep_first_occurrence() {
+        let section = LanesSection {
+            preset: crate::presets::LanePreset::Custom,
+            order: Some(vec!["HH".into(), "SD".into(), "HH".into(), "BD".into()]),
+            ..Default::default()
+        };
+
+        let arr = section.resolve();
+        let ids: Vec<&str> = arr.lanes.iter().map(|lane| lane.id.as_str()).collect();
+
+        assert_eq!(ids, ["HH", "SD", "BD"]);
+        assert_eq!(arr.lane_index_of(EChannel::HiHatClose), Some(0));
     }
 
     #[test]
