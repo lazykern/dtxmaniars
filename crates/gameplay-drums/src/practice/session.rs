@@ -189,6 +189,8 @@ pub struct PracticeSession {
     pub trainer: PracticeTrainer,
     pub current_attempt: AttemptStats,
     pub attempt_history: Vec<AttemptRecord>,
+    /// Per-lane diagnosis for the current loop region (full-HUD panel).
+    pub lane_diag: super::diagnosis::LaneDiagnosis,
 }
 
 impl PracticeSession {
@@ -205,6 +207,7 @@ impl PracticeSession {
     /// Clear the A/B loop (disarms the ramp — the ramp is a claim about
     /// one specific section).
     pub fn clear_loop(&mut self) {
+        self.lane_diag.clear();
         self.transport.loop_region = None;
         self.trainer.ramp.armed = false;
     }
@@ -250,6 +253,7 @@ impl PracticeSession {
     /// Set the A marker; keeps the region valid (swap, min length is
     /// enforced by the caller against bar data).
     pub fn set_loop_start(&mut self, ms: i64) {
+        self.lane_diag.clear();
         self.trainer.ramp.armed = false;
         let end = self.transport.loop_region.map(|r| r.end_ms);
         self.transport.loop_region = Some(match end {
@@ -265,6 +269,7 @@ impl PracticeSession {
     }
 
     pub fn set_loop_end(&mut self, ms: i64) {
+        self.lane_diag.clear();
         self.trainer.ramp.armed = false;
         let start = self.transport.loop_region.map(|r| r.start_ms).unwrap_or(0);
         self.transport.loop_region = Some(if ms > start {
@@ -297,6 +302,23 @@ mod tests {
     fn metronome_defaults_on() {
         let s = PracticeSession::default();
         assert!(s.transport.metronome);
+    }
+
+    #[test]
+    fn region_change_clears_lane_diag() {
+        use dtx_scoring::JudgmentKind;
+        let mut s = PracticeSession::default();
+        s.lane_diag.apply_judgment(0, JudgmentKind::Perfect, 0);
+        s.set_loop_start(2_000);
+        assert!(s.lane_diag.lanes.is_empty(), "Set A must clear diagnosis");
+
+        s.lane_diag.apply_judgment(0, JudgmentKind::Perfect, 0);
+        s.set_loop_end(6_000);
+        assert!(s.lane_diag.lanes.is_empty(), "Set B must clear diagnosis");
+
+        s.lane_diag.apply_judgment(0, JudgmentKind::Perfect, 0);
+        s.clear_loop();
+        assert!(s.lane_diag.lanes.is_empty(), "Clear loop must clear diagnosis");
     }
 
     #[test]

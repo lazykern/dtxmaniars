@@ -194,6 +194,7 @@ pub fn timeline_mouse(
                 session.trainer.ramp.armed = false;
                 toasts.push("ramp off (loop changed)");
             }
+            session.lane_diag.clear();
             session.transport.loop_region = Some(drag_region(&timeline, anchor_ms, cursor_ms));
         }
     }
