@@ -5,6 +5,7 @@
 use bevy::prelude::*;
 use bevy_kira_audio::prelude::{Audio, Frame, StaticSoundData, StaticSoundSettings};
 use bevy_kira_audio::AudioSource as KiraAudioSource;
+use dtx_ui::theme::Theme;
 use game_shell::{AppState, PauseState};
 
 use super::session::{preroll_target, PracticeSession, PrerollSetting};
@@ -188,14 +189,70 @@ pub fn fire_clicks(
     }
 }
 
+#[derive(Component)]
+pub struct CountdownText;
+
+const COUNTDOWN_FADE_S: f64 = 0.4;
+
+pub fn spawn_countdown(mut commands: Commands) {
+    let theme = Theme::default();
+    commands.spawn((
+        CountdownText,
+        Text::new(""),
+        Theme::title_font(),
+        TextColor(theme.text_primary),
+        Node {
+            position_type: PositionType::Absolute,
+            bottom: Val::Px(24.0),
+            left: Val::Percent(50.0),
+            ..default()
+        },
+        GlobalZIndex(crate::ui_z::PRACTICE),
+        Visibility::Hidden,
+    ));
+}
+
+pub fn despawn_countdown(mut commands: Commands, q: Query<Entity, With<CountdownText>>) {
+    for e in &q {
+        commands.entity(e).despawn();
+    }
+}
+
+pub fn update_countdown(
+    display: Res<CountdownDisplay>,
+    time: Res<Time>,
+    mut q: Query<(&mut Text, &mut TextColor, &mut Visibility), With<CountdownText>>,
+) {
+    let Ok((mut text, mut color, mut vis)) = q.single_mut() else {
+        return;
+    };
+    match display.current {
+        Some((n, accent, shown_at)) => {
+            let age = time.elapsed_secs_f64() - shown_at;
+            if age > COUNTDOWN_FADE_S {
+                *vis = Visibility::Hidden;
+                return;
+            }
+            text.0 = n.to_string();
+            let theme = Theme::default();
+            let base = if accent { theme.accent } else { theme.text_primary };
+            color.0 = base.with_alpha(1.0 - (age / COUNTDOWN_FADE_S) as f32);
+            *vis = Visibility::Visible;
+        }
+        None => *vis = Visibility::Hidden,
+    }
+}
+
 pub(crate) fn plugin(app: &mut App) {
     app.init_resource::<MetronomeSounds>()
         .init_resource::<ActiveClickSchedule>()
         .init_resource::<CountdownDisplay>()
         .add_systems(
             OnEnter(AppState::Performance),
-            build_metronome_sounds.run_if(resource_exists::<PracticeSession>),
+            (build_metronome_sounds, spawn_countdown)
+                .run_if(resource_exists::<PracticeSession>),
         )
+        .add_systems(OnExit(AppState::Performance), despawn_countdown)
         .add_systems(
             FixedUpdate,
             (
@@ -203,6 +260,13 @@ pub(crate) fn plugin(app: &mut App) {
                 fire_clicks.after(crate::DrumsSets::ClockSync),
             )
                 .chain()
+                .run_if(in_state(AppState::Performance))
+                .run_if(in_state(PauseState::Running))
+                .run_if(resource_exists::<PracticeSession>),
+        )
+        .add_systems(
+            Update,
+            update_countdown
                 .run_if(in_state(AppState::Performance))
                 .run_if(in_state(PauseState::Running))
                 .run_if(resource_exists::<PracticeSession>),
