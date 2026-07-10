@@ -1129,9 +1129,7 @@ fn update_left_cluster(
                 .collect()
         })
         .unwrap_or_default();
-    if history.rows != rows {
-        history.rows = rows;
-    }
+    history.rows = rows;
 }
 
 /// Write grid slot data into the widget's text/border entities.
