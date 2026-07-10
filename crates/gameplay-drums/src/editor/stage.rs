@@ -13,17 +13,23 @@ const GAP: f32 = 16.0;
 /// always rail + left panel; the inspector reserves the right chrome.
 const LEFT_CHROME: f32 = RAIL_WIDTH + LEFT_PANEL_WIDTH;
 
+/// Whether the tab shrinks the whole screen into a framed miniature. Only the
+/// Widgets tab does: it needs the true screen edges visible for WYSIWYG anchor
+/// placement. Bindings/Lanes preview like the SETTINGS tabs — full-size, shifted.
+fn shrinks_stage(tab: CustomizeTab) -> bool {
+    matches!(tab, CustomizeTab::Widgets)
+}
+
 /// Preset stage rect per tab (osu SetCustomRect target; `stage_xform` derives the
 /// actual scale/offset). Two modes, matching the prototype:
-///   - SETTINGS tabs: NO shrink. Rect = full window shifted right by half the
-///     left chrome, so the full-size playfield centers in the visible gap
-///     (`stage_xform` → scale 1, translate ≈ (chrome/2, 0)). HUD stays hidden
-///     (P0), so only lanes+notes show.
-///   - KIT tabs (Bindings/Lanes/Widgets): the whole screen shrinks into the gap
-///     between the left chrome and the right inspector, centered. The inspector
-///     only reserves space on the Widgets tab with a selection.
+///   - SETTINGS tabs + Bindings/Lanes: NO shrink. Rect = full window shifted
+///     right by half the left chrome, so the full-size playfield centers in the
+///     visible gap (`stage_xform` → scale 1, translate ≈ (chrome/2, 0)).
+///   - Widgets: the whole screen shrinks into the gap between the left chrome
+///     and the right inspector, centered. The inspector only reserves space
+///     when a widget is selected.
 pub fn preset_rect(tab: CustomizeTab, window: Vec2, has_inspector: bool) -> StageRect {
-    if tab.is_settings() {
+    if !shrinks_stage(tab) {
         return StageRect {
             origin: Vec2::new(LEFT_CHROME / 2.0, 0.0),
             size: window,
@@ -168,10 +174,9 @@ fn sync_stage_outline(
     node.top = Val::Px(rect.origin.y);
     node.width = Val::Px(rect.size.x);
     node.height = Val::Px(rect.size.y);
-    // Bounds outline only frames the shrunk miniature on KIT tabs (matches the
-    // prototype's `.shrunk` outline). Settings tabs shift the full-size
-    // playfield without a box; peek hides all chrome.
-    let show = !state.peeking && !state.tab.is_settings();
+    // Bounds outline only frames the shrunk miniature (Widgets). Other tabs
+    // shift the full-size playfield without a box; peek hides all chrome.
+    let show = !state.peeking && shrinks_stage(state.tab);
     *vis = if show {
         Visibility::Inherited
     } else {
@@ -228,6 +233,16 @@ mod tests {
         let r = preset_rect(CustomizeTab::Gameplay, win, false);
         assert_eq!(r.origin, Vec2::new(240.0, 0.0));
         assert_eq!(r.size, win);
+    }
+
+    #[test]
+    fn bindings_and_lanes_preview_like_settings() {
+        let win = Vec2::new(1600.0, 900.0);
+        for tab in [CustomizeTab::Bindings, CustomizeTab::Lanes] {
+            let r = preset_rect(tab, win, false);
+            assert_eq!(r.origin, Vec2::new(240.0, 0.0));
+            assert_eq!(r.size, win);
+        }
     }
 
     #[test]

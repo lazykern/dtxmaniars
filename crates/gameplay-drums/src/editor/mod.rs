@@ -96,7 +96,10 @@ pub fn plugin(app: &mut App) {
         .init_resource::<undo::UndoStack>()
         .add_systems(
             Update,
-            update_preview_state
+            (
+                update_preview_state,
+                clear_canvas_interaction_outside_widgets.run_if(editor_open),
+            )
                 .before(EditorPickSet)
                 .run_if(in_state(AppState::Performance)),
         )
@@ -166,9 +169,26 @@ fn close_editor_on_exit(
     session.0 = false;
 }
 
+fn clear_canvas_interaction_outside_widgets(
+    active: Res<tabs::ActiveTab>,
+    mut gesture: ResMut<drag::ActiveGesture>,
+    mut hovered: ResMut<picking::Hovered>,
+) {
+    if active.0 == game_shell::CustomizeTab::Widgets {
+        return;
+    }
+    gesture.0 = drag::Gesture::None;
+    hovered.0 = None;
+}
+
 /// Run condition: editor is open.
 pub fn editor_open(open: Res<EditorOpen>) -> bool {
     open.0
+}
+
+/// Run condition: the Widgets layout tab is active.
+pub fn widgets_tab_active(active: Res<tabs::ActiveTab>) -> bool {
+    active.0 == game_shell::CustomizeTab::Widgets
 }
 
 /// Run condition: editor is closed (for gating gameplay systems).

@@ -218,10 +218,11 @@ fn spawn_overlay_on_open(
 /// The selected widget's kind + AABB, or None (nothing selected / no AABB).
 fn selected_aabb(
     open: &super::EditorOpen,
+    active: &super::tabs::ActiveTab,
     selection: &Selection,
     aabbs: &WidgetAabbs,
 ) -> Option<(WidgetKind, Rect)> {
-    if !open.0 {
+    if !open.0 || active.0 != game_shell::CustomizeTab::Widgets {
         return None;
     }
     let kind = selection.0?;
@@ -247,6 +248,7 @@ fn parent_rect(
 
 fn sync_selection_border(
     open: Res<super::EditorOpen>,
+    active: Res<super::tabs::ActiveTab>,
     selection: Res<Selection>,
     aabbs: Res<WidgetAabbs>,
     layouts: Res<WidgetLayouts>,
@@ -258,7 +260,7 @@ fn sync_selection_border(
     let Ok((mut node, mut vis, mut border)) = box_q.single_mut() else {
         return;
     };
-    let Some((kind, aabb)) = selected_aabb(&open, &selection, &aabbs) else {
+    let Some((kind, aabb)) = selected_aabb(&open, &active, &selection, &aabbs) else {
         *vis = Visibility::Hidden;
         return;
     };
@@ -293,6 +295,7 @@ fn sync_selection_border(
 
 fn sync_anchor_viz(
     open: Res<super::EditorOpen>,
+    active: Res<super::tabs::ActiveTab>,
     selection: Res<Selection>,
     aabbs: Res<WidgetAabbs>,
     layouts: Res<WidgetLayouts>,
@@ -304,7 +307,7 @@ fn sync_anchor_viz(
         Query<(&mut Node, &mut Visibility), With<OriginDot>>,
     )>,
 ) {
-    let sel = selected_aabb(&open, &selection, &aabbs);
+    let sel = selected_aabb(&open, &active, &selection, &aabbs);
     let Some((kind, aabb)) = sel else {
         if let Ok((_, mut v, _)) = viz.p0().single_mut() {
             *v = Visibility::Hidden;
@@ -359,6 +362,7 @@ fn sync_anchor_viz(
 
 fn sync_hover_outline(
     open: Res<super::EditorOpen>,
+    active: Res<super::tabs::ActiveTab>,
     hovered: Res<Hovered>,
     selection: Res<Selection>,
     aabbs: Res<WidgetAabbs>,
@@ -367,7 +371,10 @@ fn sync_hover_outline(
     let Ok((mut node, mut vis)) = q.single_mut() else {
         return;
     };
-    let show = open.0 && hovered.0.is_some() && hovered.0 != selection.0;
+    let show = open.0
+        && active.0 == game_shell::CustomizeTab::Widgets
+        && hovered.0.is_some()
+        && hovered.0 != selection.0;
     let Some(aabb) = hovered
         .0
         .and_then(|k| aabbs.0.get(&k).copied())

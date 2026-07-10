@@ -104,6 +104,7 @@ pub fn plugin(app: &mut App) {
                 .chain()
                 .in_set(super::EditorPickSet)
                 .run_if(super::editor_open)
+                .run_if(super::widgets_tab_active)
                 .run_if(in_state(game_shell::AppState::Performance)),
         );
 }
