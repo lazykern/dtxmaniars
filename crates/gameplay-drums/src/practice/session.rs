@@ -154,6 +154,8 @@ pub struct PracticeTransport {
     pub user_tempo: f32,
     pub snap: SnapDivisor,
     pub preroll: PrerollSetting,
+    /// Count-in click during pre-roll (spec: count-in metronome).
+    pub metronome: bool,
     pub loop_region: Option<LoopRegion>,
     /// Scrub cursor while paused (chart ms). None = cursor at playhead.
     pub scrub_cursor_ms: Option<i64>,
@@ -165,6 +167,7 @@ impl Default for PracticeTransport {
             user_tempo: 1.0,
             snap: SnapDivisor::Bar,
             preroll: PrerollSetting::OneBar,
+            metronome: true,
             loop_region: None,
             scrub_cursor_ms: None,
         }
@@ -289,6 +292,12 @@ impl PracticeSession {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn metronome_defaults_on() {
+        let s = PracticeSession::default();
+        assert!(s.transport.metronome);
+    }
 
     #[test]
     fn rate_step_quantized_and_clamped() {
