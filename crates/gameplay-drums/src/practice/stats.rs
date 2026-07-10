@@ -84,6 +84,7 @@ pub fn track_attempt_stats(
             continue; // pre-roll chip: audible feedback only
         }
         apply_judgment(&mut session.current_attempt, ev.kind, ev.delta_ms);
+        session.lane_diag.apply_judgment(ev.lane, ev.kind, ev.delta_ms);
     }
     for m in missed.read() {
         let judge_ms = timeline
@@ -96,9 +97,11 @@ pub fn track_attempt_stats(
         }
         session.current_attempt.counts.miss += 1;
         session.current_attempt.combo = 0;
+        session.lane_diag.apply_miss(m.lane);
     }
-    for _ in empty_hits.read() {
+    for eh in empty_hits.read() {
         session.current_attempt.overhits += 1;
+        session.lane_diag.apply_overhit(eh.lane);
     }
     if let Some(seek) = seeks.read().last() {
         // Pre-seek clock, captured by apply_seek_system earlier this tick.
@@ -155,6 +158,18 @@ mod tests {
         assert_eq!(a.max_combo, 3);
         assert_eq!(a.error_count, 3);
         assert_eq!(a.error_sum_ms, 0);
+    }
+
+    #[test]
+    fn preroll_gate_also_guards_lane_diag() {
+        // The pre-roll `continue` sits before BOTH apply_judgment calls;
+        // this pins that ordering at the source level.
+        let src = include_str!("stats.rs");
+        let gate = src
+            .find("continue; // pre-roll chip: audible feedback only")
+            .unwrap();
+        let diag = src.find("session.lane_diag.apply_judgment").unwrap();
+        assert!(gate < diag, "lane_diag feed must come after the pre-roll gate");
     }
 
     #[test]
