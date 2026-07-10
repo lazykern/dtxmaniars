@@ -6,6 +6,8 @@
 //! Edits mutate `crate::bindings::LiveBindings` (the resolver + disk follow) and
 //! bump `BindingsRev`, which re-triggers the left-panel rebuild so chips repaint.
 
+use std::collections::HashSet;
+
 use bevy::prelude::*;
 use dtx_config::{BindSource, BINDABLE_CHANNELS};
 
@@ -104,6 +106,36 @@ fn source_label(src: &BindSource) -> String {
         BindSource::Key(k) => key_label(*k),
         BindSource::Midi { note } => format!("N{note}"),
     }
+}
+
+/// Bindings are shown in the active display arrangement, while retaining the
+/// canonical logical-pad order for secondary channels sharing a column.
+fn channels_in_display_order(lanes: &Lanes) -> Vec<dtx_core::EChannel> {
+    let mut channels = Vec::with_capacity(BINDABLE_CHANNELS.len());
+    let mut seen = HashSet::new();
+
+    for (col, lane) in lanes.0.lanes.iter().enumerate() {
+        let primary = lane.primary;
+        if BINDABLE_CHANNELS.contains(&primary)
+            && lanes.col_of(primary) == Some(col)
+            && seen.insert(primary)
+        {
+            channels.push(primary);
+        }
+        for channel in BINDABLE_CHANNELS {
+            if lanes.col_of(channel) == Some(col) && seen.insert(channel) {
+                channels.push(channel);
+            }
+        }
+    }
+
+    for channel in BINDABLE_CHANNELS {
+        if seen.insert(channel) {
+            channels.push(channel);
+        }
+    }
+
+    channels
 }
 
 pub fn spawn_bindings_block(
@@ -325,7 +357,7 @@ pub fn spawn_bindings_block(
                 ..default()
             },
         ));
-        for ch in BINDABLE_CHANNELS {
+        for ch in channels_in_display_order(lanes) {
             let swatch = lanes
                 .col_of(ch)
                 .map(|c| lanes.column_color(c))
@@ -626,5 +658,45 @@ mod tests {
             port_display_label(&Some("Kit".to_string()), &["Kit".to_string()]),
             "Kit"
         );
+    }
+
+    #[test]
+    fn binding_rows_follow_classic_display_order() {
+        use dtx_core::EChannel;
+
+        let lanes = Lanes(dtx_layout::classic());
+        assert_eq!(
+            channels_in_display_order(&lanes),
+            [
+                EChannel::LeftCymbal,
+                EChannel::HiHatClose,
+                EChannel::HiHatOpen,
+                EChannel::LeftPedal,
+                EChannel::Snare,
+                EChannel::HighTom,
+                EChannel::BassDrum,
+                EChannel::LeftBassDrum,
+                EChannel::LowTom,
+                EChannel::FloorTom,
+                EChannel::Cymbal,
+                EChannel::RideCymbal,
+            ]
+        );
+    }
+
+    #[test]
+    fn binding_rows_group_type_b_pedals_once() {
+        use dtx_core::EChannel;
+
+        let lanes = Lanes(dtx_layout::nx_type_b());
+        let rows = channels_in_display_order(&lanes);
+
+        assert_eq!(rows.len(), BINDABLE_CHANNELS.len());
+        for channel in BINDABLE_CHANNELS {
+            assert_eq!(rows.iter().filter(|&&row| row == channel).count(), 1);
+        }
+        let lp = rows.iter().position(|&row| row == EChannel::LeftPedal);
+        let lbd = rows.iter().position(|&row| row == EChannel::LeftBassDrum);
+        assert_eq!(lbd, lp.map(|index| index + 1));
     }
 }
