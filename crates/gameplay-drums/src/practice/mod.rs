@@ -7,6 +7,7 @@
 
 pub mod ab_loop;
 pub mod actions;
+pub mod diagnosis;
 pub mod hud;
 pub mod metronome;
 pub mod ramp;
