@@ -53,6 +53,103 @@ pub fn is_cleared(set: &WaitSet, judged: &HashSet<usize>) -> bool {
     set.chips.iter().all(|c| judged.contains(c))
 }
 
+use bevy::prelude::*;
+use bevy_kira_audio::prelude::AudioInstance;
+use dtx_audio::{BgmHandle, DrumPolyphony};
+use game_shell::{AppState, PauseState};
+
+use super::session::PracticeSession;
+use crate::judge::JudgedChips;
+use crate::resources::{ActiveDrumSounds, GameplayClock};
+use crate::seek::SeekToChartTime;
+
+/// Runtime wait state. `waited_chips` accumulates the chips of every
+/// halt this attempt; stats reclassify their judgments as "waited".
+#[derive(Resource, Debug, Default)]
+pub struct WaitState {
+    pub phase: WaitPhase,
+    pub waited_chips: HashSet<usize>,
+}
+
+impl WaitState {
+    pub fn halted(&self) -> bool {
+        matches!(self.phase, WaitPhase::Halted(_))
+    }
+}
+
+/// Run condition for the clock-sync chain: tick only while not halted.
+pub fn wait_flowing(state: Option<Res<WaitState>>) -> bool {
+    state.is_none_or(|s| !s.halted())
+}
+
+/// Drive halt/resume. Runs after Judge so this tick's hits are already
+/// in `JudgedChips` (no one-tick spurious halts on exact hits).
+#[allow(clippy::too_many_arguments)]
+pub fn wait_watcher(
+    session: Res<PracticeSession>,
+    timeline: Res<crate::timeline::ChipTimeline>,
+    judged: Res<JudgedChips>,
+    clock: Res<GameplayClock>,
+    mut state: ResMut<WaitState>,
+    bgm: Res<BgmHandle>,
+    polyphony: Res<DrumPolyphony>,
+    active: Res<ActiveDrumSounds>,
+    mut instances: ResMut<Assets<AudioInstance>>,
+) {
+    if !clock.is_ready() {
+        return;
+    }
+    if !session.trainer.wait_enabled {
+        if state.halted() {
+            crate::pause::resume_all_chart_audio(&bgm, &polyphony, &active, &mut instances);
+            state.phase = WaitPhase::Flowing;
+        }
+        return;
+    }
+    // Clone the phase before matching: matching on `&state.phase` would
+    // hold a borrow of `state` across the arm bodies (E0502).
+    match state.phase.clone() {
+        WaitPhase::Flowing => {
+            let span_start = session.current_attempt.start_ms;
+            if let Some(set) = check_halt(&timeline, &judged.0, clock.current_ms, span_start) {
+                state.waited_chips.extend(set.chips.iter().copied());
+                crate::pause::pause_all_chart_audio(&bgm, &polyphony, &active, &mut instances);
+                state.phase = WaitPhase::Halted(set);
+            }
+        }
+        WaitPhase::Halted(set) => {
+            if is_cleared(&set, &judged.0) {
+                crate::pause::resume_all_chart_audio(&bgm, &polyphony, &active, &mut instances);
+                state.phase = WaitPhase::Flowing;
+            }
+        }
+    }
+}
+
+/// Any seek resets to Flowing (audio ownership passes back to the seek
+/// engine, which stops/restarts instances itself) and starts a fresh
+/// waited-chip set for the new attempt.
+pub fn reset_wait_on_seek(mut seeks: MessageReader<SeekToChartTime>, mut state: ResMut<WaitState>) {
+    if seeks.read().last().is_some() {
+        state.phase = WaitPhase::Flowing;
+        state.waited_chips.clear();
+    }
+}
+
+pub(crate) fn plugin(app: &mut App) {
+    app.init_resource::<WaitState>().add_systems(
+        FixedUpdate,
+        (
+            reset_wait_on_seek.after(crate::seek::apply_seek_system),
+            wait_watcher.after(crate::judge::judge_lane_hit_system),
+        )
+            .chain()
+            .run_if(in_state(AppState::Performance))
+            .run_if(in_state(PauseState::Running))
+            .run_if(resource_exists::<PracticeSession>),
+    );
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

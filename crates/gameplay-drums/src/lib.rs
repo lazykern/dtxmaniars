@@ -153,8 +153,9 @@ pub fn plugin(app: &mut App) {
         )
             .chain()
             .run_if(in_state(game_shell::AppState::Performance))
-            // Freeze the gameplay clock while paused.
-            .run_if(in_state(game_shell::PauseState::Running)),
+            // Freeze the gameplay clock while paused or wait-halted.
+            .run_if(in_state(game_shell::PauseState::Running))
+            .run_if(practice::wait::wait_flowing),
     )
     .add_systems(
         FixedUpdate,

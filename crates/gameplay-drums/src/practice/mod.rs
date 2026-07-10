@@ -63,6 +63,7 @@ pub(super) fn plugin(app: &mut App) {
         ramp::plugin,
         rate::plugin,
         stats::plugin,
+        wait::plugin,
     ));
 }
 
