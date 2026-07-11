@@ -259,11 +259,9 @@ pub fn spawn_lane_block(
                 }),
             ))
             .with_children(|r| {
-                r.spawn((
-                    Text::new("\u{2261}"), // ≡ decorative — reorder drags the pad in the preview (lane_drag), not this row
-                    dtx_ui::theme::Theme::font(11.0),
-                    TextColor(chrome::TEXT_MUTED),
-                ));
+                // No drag-handle glyph: the row is select-only. Reorder is by
+                // dragging the pad in the preview (`lane_drag`), so a ≡ handle
+                // here would falsely imply the row itself drags.
                 panel_kit::spawn_channel_dot(r, lanes.column_color(i));
                 r.spawn((
                     Text::new(lane.id.clone()),

@@ -53,6 +53,10 @@ enum LaneDrag {
         edge: Edge,
         start_px: f32,
         start_cursor_x: f32,
+        /// True once this drag pushed its undo snapshot — one per drag, not
+        /// one per frame (mirrors `apply_lane_width_sliders`'s
+        /// `snapped_this_hold`).
+        pushed: bool,
     },
 }
 
@@ -120,18 +124,18 @@ pub(super) fn plugin(app: &mut App) {
 /// Left-press on a pad: within `EDGE_GRAB` of an edge arms a Resize,
 /// otherwise arms a Reorder. Either way the pad's lane is selected
 /// immediately (mirrors the Widgets-tab body drag selecting on press).
-#[allow(clippy::too_many_arguments)]
+/// No undo snapshot here — a plain select-only click must not wipe the
+/// redo stack; the snapshot is pushed lazily by `update_lane_drag` only
+/// once the drag actually mutates the arrangement.
 fn begin_lane_drag(
     buttons: Res<ButtonInput<MouseButton>>,
     windows: Query<&Window>,
     rect: Res<StageRect>,
     pfl: Res<PlayfieldLayout>,
     lanes: Res<Lanes>,
-    layouts: Res<WidgetLayouts>,
     chrome: Query<(&ComputedNode, &bevy::ui::UiGlobalTransform), With<EditorChrome>>,
     mut drag: ResMut<LaneDrag>,
     mut selected: ResMut<SelectedLane>,
-    mut undo: ResMut<UndoStack>,
 ) {
     if !buttons.just_pressed(MouseButton::Left) {
         return;
@@ -156,7 +160,6 @@ fn begin_lane_drag(
 
     let (left, right, ..) = pad_bounds(&pfl, col);
     selected.0 = Some(col);
-    undo.push(&layouts, &lanes);
 
     *drag = if (pos.x - left).abs() <= EDGE_GRAB {
         LaneDrag::Resize {
@@ -164,6 +167,7 @@ fn begin_lane_drag(
             edge: Edge::Left,
             start_px: lanes.0.lanes[col].width,
             start_cursor_x: pos.x,
+            pushed: false,
         }
     } else if (right - pos.x).abs() <= EDGE_GRAB {
         LaneDrag::Resize {
@@ -171,6 +175,7 @@ fn begin_lane_drag(
             edge: Edge::Right,
             start_px: lanes.0.lanes[col].width,
             start_cursor_x: pos.x,
+            pushed: false,
         }
     } else {
         LaneDrag::Reorder {
@@ -187,9 +192,11 @@ fn update_lane_drag(
     windows: Query<&Window>,
     rect: Res<StageRect>,
     pfl: Res<PlayfieldLayout>,
+    layouts: Res<WidgetLayouts>,
     mut lanes: ResMut<Lanes>,
     mut selected: ResMut<SelectedLane>,
     mut drag: ResMut<LaneDrag>,
+    mut undo: ResMut<UndoStack>,
 ) {
     let Ok(window) = windows.single() else { return };
     let win_size = Vec2::new(window.width(), window.height());
@@ -202,6 +209,8 @@ fn update_lane_drag(
         {
             if let Some(win_pos) = window.cursor_position() {
                 let pos = window_to_scene(win_pos, *rect, win_size);
+                // Sub-slop release = plain click (already selected on press):
+                // no reorder, and crucially no undo push (would clobber redo).
                 if (pos.x - start_cursor_x).abs() >= CLICK_SLOP {
                     let centers: Vec<f32> = (0..lanes.0.lanes.len())
                         .map(|i| {
@@ -210,8 +219,11 @@ fn update_lane_drag(
                         })
                         .collect();
                     let target = drop_index(&centers, pos.x);
-                    move_lane_to(&mut lanes.0, from, target);
-                    selected.0 = Some(target);
+                    if target != from {
+                        undo.push(&layouts, &lanes);
+                        move_lane_to(&mut lanes.0, from, target);
+                        selected.0 = Some(target);
+                    }
                 }
             }
         }
@@ -229,6 +241,7 @@ fn update_lane_drag(
         edge,
         start_px,
         start_cursor_x,
+        pushed,
     } = *drag
     {
         let raw_dx = pos.x - start_cursor_x;
@@ -240,6 +253,17 @@ fn update_lane_drag(
         };
         let dx_ref = signed_dx / pfl.scale.max(f32::EPSILON);
         let new_width = edge_width(start_px, dx_ref);
+        // One snapshot per drag, taken just before the first real mutation.
+        if !pushed && (new_width - lanes.0.lanes[index].width).abs() > f32::EPSILON {
+            undo.push(&layouts, &lanes);
+            *drag = LaneDrag::Resize {
+                index,
+                edge,
+                start_px,
+                start_cursor_x,
+                pushed: true,
+            };
+        }
         dtx_layout::set_lane_width(&mut lanes.0, index, new_width);
     }
 }
@@ -269,6 +293,21 @@ mod tests {
         let id0 = arr.lanes[0].id.clone();
         move_lane_to(&mut arr, 0, 3);
         assert_eq!(arr.lanes[3].id, id0, "lane 0 walked to index 3");
+    }
+
+    #[test]
+    fn move_lane_to_walks_backward_and_shifts_others_right() {
+        let mut arr = dtx_layout::classic();
+        let id3 = arr.lanes[3].id.clone();
+        let id0 = arr.lanes[0].id.clone();
+        let id1 = arr.lanes[1].id.clone();
+        let id2 = arr.lanes[2].id.clone();
+        move_lane_to(&mut arr, 3, 0);
+        assert_eq!(arr.lanes[0].id, id3, "lane 3 walked to index 0");
+        // The three it passed each shifted one slot right.
+        assert_eq!(arr.lanes[1].id, id0);
+        assert_eq!(arr.lanes[2].id, id1);
+        assert_eq!(arr.lanes[3].id, id2);
     }
 
     #[test]
