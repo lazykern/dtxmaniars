@@ -231,6 +231,24 @@ fn second_import_same_name_skipped() {
 }
 
 #[test]
+fn sevenz_wrapper_imported() {
+    let dir = test_dir("sevenz");
+    // Build a source tree, then compress it with the crate's own writer
+    // (dev-dependency has the `compress` feature).
+    let src = dir.join("src/My7zSong");
+    write_file(&src.join("mas.dtx"), DTX);
+    write_file(&src.join("kick.ogg"), b"ogg");
+    let archive = dir.join("My7zSong.7z");
+    sevenz_rust2::compress_to_path(dir.join("src"), &archive).unwrap();
+
+    let root = dir.join("songs");
+    let out = import_archive(&archive, &root).unwrap();
+    assert_eq!(out.dest_name, "My7zSong");
+    assert_eq!(out.chart_count, 1);
+    assert!(root.join("My7zSong/mas.dtx").is_file());
+}
+
+#[test]
 fn rejects_rar_by_magic() {
     let dir = test_dir("rar");
     let archive = dir.join("pack.zip"); // wrong extension on purpose: magic wins
