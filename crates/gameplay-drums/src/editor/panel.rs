@@ -263,8 +263,8 @@ fn rebuild_left_content(
         });
     }
 
-    // The Bindings tab is a settings-group tab (Offset preset) but renders its
-    // own block, so branch on it BEFORE the generic settings-rows path.
+    // The Controls tab renders its own block, so branch on it BEFORE the
+    // generic settings-rows path.
     if active.0 == game_shell::CustomizeTab::Controls {
         super::bindings_panel::spawn_bindings_block(
             &mut commands,

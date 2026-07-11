@@ -21,6 +21,8 @@ pub mod hotkeys;
 pub mod keyboard_nav;
 pub mod panel;
 pub mod picking;
+pub mod profile_bar;
+pub mod profile_dialog;
 pub mod profile_state;
 pub mod save;
 pub mod selection_box;
