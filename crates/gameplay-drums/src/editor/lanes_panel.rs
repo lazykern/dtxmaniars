@@ -260,7 +260,7 @@ pub fn spawn_lane_block(
             ))
             .with_children(|r| {
                 r.spawn((
-                    Text::new("\u{2261}"), // ≡ drag handle glyph; drag wiring is Task 9
+                    Text::new("\u{2261}"), // ≡ decorative — reorder drags the pad in the preview (lane_drag), not this row
                     dtx_ui::theme::Theme::font(11.0),
                     TextColor(chrome::TEXT_MUTED),
                 ));

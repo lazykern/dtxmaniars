@@ -21,6 +21,7 @@ pub mod drag;
 pub mod footer;
 pub mod hotkeys;
 pub mod keyboard_nav;
+pub mod lane_drag;
 pub mod lanes_panel;
 pub mod panel;
 pub mod panel_kit;
@@ -143,6 +144,7 @@ pub fn plugin(app: &mut App) {
                 profile_bar_ui::plugin,
                 profile_dialog_ui::plugin,
                 lanes_panel::plugin,
+                lane_drag::plugin,
             ),
             hotkeys::plugin,
             keyboard_nav::plugin,
@@ -600,6 +602,11 @@ pub fn editor_open(open: Res<EditorOpen>) -> bool {
 /// Run condition: the Widgets layout tab is active.
 pub fn widgets_tab_active(active: Res<tabs::ActiveTab>) -> bool {
     active.0 == game_shell::CustomizeTab::Widgets
+}
+
+/// Run condition: the Lanes tab is active.
+pub fn lanes_tab_active(active: Res<tabs::ActiveTab>) -> bool {
+    active.0 == game_shell::CustomizeTab::Lanes
 }
 
 /// Run condition: editor is closed (for gating gameplay systems).
