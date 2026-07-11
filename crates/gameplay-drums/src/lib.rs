@@ -118,6 +118,8 @@ pub fn plugin(app: &mut App) {
     .init_resource::<timeline::ChipTimeline>()
     .init_resource::<seek::PendingBgmStart>()
     .init_resource::<seek::LastSeekFrom>()
+    .init_resource::<dtx_bga::BgaClock>()
+    .init_resource::<dtx_bga::BgaSettings>()
     .add_systems(
         Startup,
         (
@@ -133,6 +135,12 @@ pub fn plugin(app: &mut App) {
     .add_systems(
         OnEnter(game_shell::AppState::Performance),
         timeline::build_chip_timeline.after(orchestrator::DrumsEnterSet),
+    )
+    .add_systems(
+        Update,
+        sync_bga_clock
+            .before(dtx_bga::BgaSystems)
+            .run_if(in_state(game_shell::AppState::Performance)),
     )
     .add_message::<events::LaneHit>()
     .add_message::<events::JudgmentEvent>()
@@ -246,10 +254,12 @@ fn apply_config_on_enter(
     mut show_perf_info: ResMut<resources::ShowPerfInfo>,
     mut metronome_on: ResMut<resources::MetronomeEnabled>,
     mut show_timing_lines: ResMut<resources::ShowTimingLines>,
+    mut bga_settings: ResMut<dtx_bga::BgaSettings>,
     chart: Res<resources::ActiveChart>,
 ) {
     use dtx_config::{default_path, load, play_speed_multiplier};
     let cfg = load(&default_path());
+    *bga_settings = dtx_bga::BgaSettings::from(&cfg.system);
     *scroll = resources::ScrollSettings::from_scroll_speed(cfg.gameplay.scroll_speed);
     scroll.play_speed = play_speed_multiplier(cfg.gameplay.play_speed);
     audio.bgm_enabled = cfg.audio.bgm_enabled;
@@ -286,6 +296,15 @@ fn load_drum_audio_settings(
     };
     drum_cfg.config = cfg.drums.clone();
     polyphony.set_voices(cfg.drums.polyphonic_sounds);
+}
+
+/// Mirror the authoritative gameplay chart time into `dtx_bga::BgaClock` so
+/// visual playback follows pause and practice seeks without a second clock.
+fn sync_bga_clock(
+    gameplay: Res<resources::GameplayClock>,
+    mut visuals: ResMut<dtx_bga::BgaClock>,
+) {
+    visuals.current_ms = gameplay.current_ms;
 }
 
 fn sync_gameplay_clock(

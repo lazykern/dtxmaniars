@@ -16,3 +16,4 @@ dtx-core = { workspace = true }
 dtx-config = { workspace = true }
 dtx-timing = { workspace = true }
 thiserror = { workspace = true }
+video-rs = { workspace = true }

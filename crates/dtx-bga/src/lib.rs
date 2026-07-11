@@ -53,6 +53,22 @@ impl Default for BgaSettings {
     }
 }
 
+impl From<&dtx_config::SystemConfig> for BgaSettings {
+    fn from(value: &dtx_config::SystemConfig) -> Self {
+        Self {
+            images_enabled: value.bga_enabled,
+            movie_enabled: value.movie_enabled,
+            image_alpha: value.bg_alpha as f32 / 255.0,
+            movie_alpha: value.movie_alpha as f32 / 255.0,
+        }
+    }
+}
+
+/// System set wrapping the per-frame visual tick, so a Game crate can order its
+/// clock-bridge system before `dtx-bga` consumes `BgaClock`.
+#[derive(SystemSet, Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct BgaSystems;
+
 /// BGA player runtime state for the active chart.
 #[derive(Resource, Debug, Default, Clone)]
 pub struct BgaPlayer {
@@ -105,7 +121,32 @@ pub fn plugin(app: &mut App) {
     app.init_resource::<BgaPlayer>()
         .init_resource::<BgaClock>()
         .init_resource::<BgaSettings>()
-        .add_systems(Update, tick_bga_visuals);
+        .add_systems(
+            Update,
+            (tick_bga_visuals, apply_image_settings)
+                .chain()
+                .in_set(BgaSystems),
+        );
+}
+
+/// Live-apply visual settings to existing image overlays without respawning:
+/// toggle visibility from `images_enabled` and set alpha from `image_alpha`.
+fn apply_image_settings(
+    settings: Res<BgaSettings>,
+    mut overlays: Query<(&mut Visibility, &mut ImageNode), With<BgaLayerOverlay>>,
+) {
+    if !settings.is_changed() {
+        return;
+    }
+    let vis = if settings.images_enabled {
+        Visibility::Inherited
+    } else {
+        Visibility::Hidden
+    };
+    for (mut visibility, mut image) in overlays.iter_mut() {
+        *visibility = vis;
+        image.color = Color::WHITE.with_alpha(settings.image_alpha);
+    }
 }
 
 /// Per-frame: advance through timed visual events whose `target_ms` has been
@@ -133,9 +174,6 @@ fn tick_bga_visuals(
         player.next_event_idx += 1;
         if event.layer.is_movie() {
             // Movie rendering handled by the movie subsystem.
-            continue;
-        }
-        if !settings.images_enabled {
             continue;
         }
         apply_image_event(
@@ -179,6 +217,11 @@ fn apply_image_event(
     }
 
     let (x, y, w, h) = image_layer_geometry(event.layer);
+    let visibility = if settings.images_enabled {
+        Visibility::Inherited
+    } else {
+        Visibility::Hidden
+    };
     commands.spawn((
         BgaLayerOverlay {
             layer: event.layer,
@@ -197,6 +240,7 @@ fn apply_image_event(
             color: Color::WHITE.with_alpha(settings.image_alpha),
             ..default()
         },
+        visibility,
         ZIndex(-100),
     ));
 }
@@ -247,6 +291,22 @@ mod tests {
         assert!(p.warned_missing.is_empty());
         assert!(p.active_movie.is_none());
         assert_eq!(p.movie_start_ms, 0);
+    }
+
+    #[test]
+    fn bga_settings_map_existing_config_fields() {
+        let system = dtx_config::SystemConfig {
+            bga_enabled: false,
+            movie_enabled: true,
+            bg_alpha: 128,
+            movie_alpha: 64,
+            ..Default::default()
+        };
+        let settings = BgaSettings::from(&system);
+        assert!(!settings.images_enabled);
+        assert!(settings.movie_enabled);
+        assert!((settings.image_alpha - 128.0 / 255.0).abs() < f32::EPSILON);
+        assert!((settings.movie_alpha - 64.0 / 255.0).abs() < f32::EPSILON);
     }
 
     #[test]

@@ -76,6 +76,64 @@ static SYSTEM_ITEMS: LazyLock<Vec<SettingItem>> = LazyLock::new(|| {
             set: |_, _| {},
             reset: |c, d| c.system.metronome = d.system.metronome,
         },
+        SettingItem {
+            label: "BGA Images",
+            value: |c| bool_label(c.system.bga_enabled).to_string(),
+            adjust: |c, _| c.system.bga_enabled ^= true,
+            desc: "Show chart-authored #BMP background images during gameplay.",
+            group: "VISUALS",
+            control: SettingControl::Stepper,
+            raw: |_| 0.0,
+            set: |_, _| {},
+            reset: |c, d| c.system.bga_enabled = d.system.bga_enabled,
+        },
+        SettingItem {
+            label: "Chart Movie",
+            value: |c| bool_label(c.system.movie_enabled).to_string(),
+            adjust: |c, _| c.system.movie_enabled ^= true,
+            desc: "Play chart-authored #AVI movies behind lanes and HUD.",
+            group: "VISUALS",
+            control: SettingControl::Stepper,
+            raw: |_| 0.0,
+            set: |_, _| {},
+            reset: |c, d| c.system.movie_enabled = d.system.movie_enabled,
+        },
+        SettingItem {
+            label: "BGA Opacity",
+            value: |c| format!("{}%", (c.system.bg_alpha as f32 / 255.0 * 100.0).round() as i32),
+            adjust: |c, d| {
+                c.system.bg_alpha =
+                    (c.system.bg_alpha as i32 + d * 13).clamp(0, 255) as u8;
+            },
+            desc: "Opacity of static #BMP image layers.",
+            group: "VISUALS",
+            control: SettingControl::Slider {
+                min: 0.0,
+                max: 255.0,
+                step: 1.0,
+            },
+            raw: |c| c.system.bg_alpha as f32,
+            set: |c, v| c.system.bg_alpha = v.round().clamp(0.0, 255.0) as u8,
+            reset: |c, d| c.system.bg_alpha = d.system.bg_alpha,
+        },
+        SettingItem {
+            label: "Movie Opacity",
+            value: |c| format!("{}%", (c.system.movie_alpha as f32 / 255.0 * 100.0).round() as i32),
+            adjust: |c, d| {
+                c.system.movie_alpha =
+                    (c.system.movie_alpha as i32 + d * 13).clamp(0, 255) as u8;
+            },
+            desc: "Opacity of #AVI movie playback.",
+            group: "VISUALS",
+            control: SettingControl::Slider {
+                min: 0.0,
+                max: 255.0,
+                step: 1.0,
+            },
+            raw: |c| c.system.movie_alpha as f32,
+            set: |c, v| c.system.movie_alpha = v.round().clamp(0.0, 255.0) as u8,
+            reset: |c, d| c.system.movie_alpha = d.system.movie_alpha,
+        },
     ]
 });
 
@@ -594,5 +652,44 @@ mod tests {
         assert_ne!((scroll.value)(&cfg), (scroll.value)(&def));
         (scroll.reset)(&mut cfg, &def);
         assert_eq!((scroll.value)(&cfg), (scroll.value)(&def));
+    }
+
+    #[test]
+    fn system_has_all_four_visual_rows() {
+        let items = settings_items(game_shell::CustomizeTab::System);
+        for label in ["BGA Images", "Chart Movie", "BGA Opacity", "Movie Opacity"] {
+            assert!(
+                items.iter().any(|i| i.label == label),
+                "missing System row {label}"
+            );
+        }
+    }
+
+    #[test]
+    fn visual_toggles_mutate_expected_bools() {
+        let mut cfg = dtx_config::Config::default();
+        let items = settings_items(game_shell::CustomizeTab::System);
+
+        let bga = items.iter().find(|i| i.label == "BGA Images").unwrap();
+        let before = cfg.system.bga_enabled;
+        (bga.adjust)(&mut cfg, 1);
+        assert_ne!(cfg.system.bga_enabled, before);
+
+        let movie = items.iter().find(|i| i.label == "Chart Movie").unwrap();
+        let before = cfg.system.movie_enabled;
+        (movie.adjust)(&mut cfg, 1);
+        assert_ne!(cfg.system.movie_enabled, before);
+    }
+
+    #[test]
+    fn opacity_sliders_clamp_and_round_to_u8() {
+        let mut cfg = dtx_config::Config::default();
+        let items = settings_items(game_shell::CustomizeTab::System);
+        let bg = items.iter().find(|i| i.label == "BGA Opacity").unwrap();
+        (bg.set)(&mut cfg, 300.0);
+        assert_eq!(cfg.system.bg_alpha, 255);
+        (bg.set)(&mut cfg, 127.6);
+        assert_eq!(cfg.system.bg_alpha, 128);
+        assert_eq!((bg.raw)(&cfg), 128.0);
     }
 }

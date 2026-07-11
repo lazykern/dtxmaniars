@@ -27,6 +27,7 @@ dtx-persistence = { workspace = true }
 dtx-scoring = { workspace = true }
 dtx-timing = { workspace = true }
 dtx-audio = { workspace = true }
+dtx-bga = { path = "../dtx-bga" }
 dtx-ui = { workspace = true }
 game-shell = { path = "../game-shell" }
 

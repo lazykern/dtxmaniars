@@ -84,24 +84,31 @@ fn apply_draft_live(
     mut bgm_adjust: ResMut<crate::resources::BgmAdjustState>,
     mut audio_settings: ResMut<crate::resources::DrumAudioSettings>,
     mut gauge: ResMut<crate::gauge::StageGauge>,
-    mut show_perf_info: ResMut<crate::resources::ShowPerfInfo>,
-    mut metronome_on: ResMut<crate::resources::MetronomeEnabled>,
-    mut show_timing_lines: ResMut<crate::resources::ShowTimingLines>,
+    mut toggles: (
+        ResMut<crate::resources::ShowPerfInfo>,
+        ResMut<crate::resources::MetronomeEnabled>,
+        ResMut<crate::resources::ShowTimingLines>,
+    ),
     mut drum_cfg: ResMut<crate::resources::DrumGameplaySettings>,
     mut polyphony: ResMut<dtx_audio::DrumPolyphony>,
     mut windows: Query<&mut bevy::window::Window, With<bevy::window::PrimaryWindow>>,
     mut bgm: ResMut<dtx_audio::BgmHandle>,
     mut instances: ResMut<Assets<AudioInstance>>,
+    mut bga_settings: ResMut<dtx_bga::BgaSettings>,
 ) {
+    let next_bga = dtx_bga::BgaSettings::from(&draft.0.system);
+    if *bga_settings != next_bga {
+        *bga_settings = next_bga;
+    }
     let g = &draft.0.gameplay;
     *scroll = crate::resources::ScrollSettings::from_scroll_speed(g.scroll_speed);
     scroll.play_speed = dtx_config::play_speed_multiplier(g.play_speed);
     input_offset.0 = g.input_offset_ms;
     bgm_adjust.common_ms = g.bgm_adjust_ms;
     gauge.damage_level = crate::map_damage_level(g.damage_level);
-    show_timing_lines.0 = g.lane_display.shows_timing_lines();
-    show_perf_info.0 = draft.0.system.show_perf_info;
-    metronome_on.0 = draft.0.system.metronome;
+    toggles.2 .0 = g.lane_display.shows_timing_lines();
+    toggles.0 .0 = draft.0.system.show_perf_info;
+    toggles.1 .0 = draft.0.system.metronome;
 
     if drum_cfg.config != draft.0.drums {
         drum_cfg.config = draft.0.drums.clone();
