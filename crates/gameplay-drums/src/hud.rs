@@ -38,6 +38,13 @@ pub struct HudRoot;
 #[derive(Component)]
 struct PlayfieldBackboard;
 
+/// Alpha of the dark strip behind the lanes that keeps notes readable over
+/// bright BGA frames.
+const LANE_BACKDROP_ALPHA: f32 = 0.55;
+
+#[derive(Component)]
+struct LaneBackdrop;
+
 #[derive(Component)]
 struct HitLine;
 
@@ -165,9 +172,26 @@ fn spawn_hud(
                 ..default()
             },
             BackgroundColor(Color::BLACK),
-            // Backmost HudRoot child: BGA movie (-2) and images (-1) render on
-            // top of this black board, notes/HUD (>=0) on top of the BGA.
-            ZIndex(-3),
+            // Backmost HudRoot child: BGA movie (-3) and images (-2) render on
+            // top of this black board, the lane backdrop (-1) dims the strip,
+            // notes/HUD (>=0) on top of everything.
+            ZIndex(-4),
+        ));
+
+        // Semi-opaque dark strip over the BGA so notes stay readable against
+        // bright video frames.
+        root.spawn((
+            LaneBackdrop,
+            Node {
+                position_type: PositionType::Absolute,
+                left: Val::Px(layout.strip_left()),
+                top: Val::Px(layout.backboard_top()),
+                width: Val::Px(layout.strip_width()),
+                height: Val::Px(layout.backboard_height()),
+                ..default()
+            },
+            BackgroundColor(Color::BLACK.with_alpha(LANE_BACKDROP_ALPHA)),
+            ZIndex(-1),
         ));
 
         root.spawn((
@@ -244,11 +268,18 @@ fn spawn_hud(
 fn apply_backboard_layout(
     layout: Res<PlayfieldLayout>,
     mut backboards: Query<&mut Node, With<PlayfieldBackboard>>,
+    mut backdrops: Query<&mut Node, (With<LaneBackdrop>, Without<PlayfieldBackboard>)>,
 ) {
     for mut node in &mut backboards {
         node.left = Val::Px(layout.backboard_left());
         node.top = Val::Px(layout.backboard_top());
         node.width = Val::Px(layout.backboard_width());
+        node.height = Val::Px(layout.backboard_height());
+    }
+    for mut node in &mut backdrops {
+        node.left = Val::Px(layout.strip_left());
+        node.top = Val::Px(layout.backboard_top());
+        node.width = Val::Px(layout.strip_width());
         node.height = Val::Px(layout.backboard_height());
     }
 }

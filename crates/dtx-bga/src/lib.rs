@@ -425,8 +425,9 @@ fn spawn_image_overlay(
                 ..default()
             },
             visibility,
-            // Above the movie (-2) and playfield backboard, below lanes/HUD.
-            ZIndex(-1),
+            // Above the movie (-3) and playfield backboard, below the lane
+            // backdrop (-1) and lanes/HUD.
+            ZIndex(-2),
         ))
         .id();
     parent_overlay(commands, overlay, bga_parent);
@@ -618,8 +619,8 @@ fn spawn_movie_overlay(
                 align_items: AlignItems::Center,
                 ..default()
             },
-            // Behind image layers (-1) and lanes/HUD, above playfield backboard.
-            ZIndex(-2),
+            // Behind image layers (-2) and lanes/HUD, above playfield backboard.
+            ZIndex(-3),
         ))
         .with_children(|parent| {
             parent.spawn((
