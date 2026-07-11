@@ -118,7 +118,7 @@ pub fn plugin(app: &mut App) {
         .add_systems(
             Update,
             (
-                capture_binding,
+                capture_binding.run_if(super::profile_dialog::profile_dialog_closed),
                 select_channel_on_row_click,
                 midi_hit_autoselect,
                 highlight_selected_row,

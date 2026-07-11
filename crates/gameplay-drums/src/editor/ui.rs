@@ -266,6 +266,7 @@ fn close_on_escape(
     calib: Res<super::calibration::CalibrationState>,
     profile_session: Res<super::profile_state::CustomizeSession>,
     mut pending: ResMut<super::profile_state::PendingCloseState>,
+    dialog: Res<super::profile_dialog::ProfileDialogState>,
 ) {
     if !matches!(*calib, super::calibration::CalibrationState::Idle) {
         close_requests.clear();
@@ -274,6 +275,13 @@ fn close_on_escape(
     // While the dirty-close guard is up, Esc/Enter belong to the guard
     // (resolve_pending_close); this system must not double-handle them.
     if !matches!(*pending, super::profile_state::PendingCloseState::None) {
+        close_requests.clear();
+        return;
+    }
+    // While a profile dialog (name entry, delete confirm, dirty guard,
+    // corrupt reset) is open, Esc belongs to it (profile_dialog_ui); this
+    // system must not also close the whole Customize surface.
+    if !matches!(*dialog, super::profile_dialog::ProfileDialogState::Closed) {
         close_requests.clear();
         return;
     }

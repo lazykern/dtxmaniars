@@ -24,7 +24,9 @@ pub mod panel;
 pub mod panel_kit;
 pub mod picking;
 pub mod profile_bar;
+pub mod profile_bar_ui;
 pub mod profile_dialog;
+pub mod profile_dialog_ui;
 pub mod profile_state;
 pub mod save;
 pub mod selection_box;
@@ -135,6 +137,8 @@ pub fn plugin(app: &mut App) {
                 bindings_spatial::plugin,
                 drag::plugin,
                 close_dialog::plugin,
+                profile_bar_ui::plugin,
+                profile_dialog_ui::plugin,
             ),
             hotkeys::plugin,
             keyboard_nav::plugin,
@@ -227,13 +231,172 @@ fn sync_drafts_to_session(
     }
 }
 
+/// Load, apply one or more registry actions in sequence, and write once.
+/// Shared by every profile-bar action (Select/SaveAs/Rename/Delete and the
+/// dirty-guard's combined save+select) that needs a keyboard/MIDI-shaped
+/// registry transaction.
+pub(super) fn commit_registry_actions<T: Clone + PartialEq>(
+    registry_startup: dtx_input::profiles::RegistryStartup<dtx_input::profiles::ProfileRegistry<T>>,
+    builtins: &std::collections::BTreeMap<String, T>,
+    actions: Vec<dtx_input::profiles::RegistryAction<T>>,
+    save: impl FnOnce(&dtx_input::profiles::ProfileRegistry<T>) -> Result<(), dtx_input::profiles::RegistryIoError>,
+) -> Result<dtx_input::profiles::ProfileRegistry<T>, String> {
+    use dtx_input::profiles::RegistryStartup;
+    let mut registry = match registry_startup {
+        RegistryStartup::Ready(r) | RegistryStartup::LegacySession { registry: r, .. } => r,
+        RegistryStartup::ReadOnlyBuiltins(error) => {
+            return Err(format!("registry unusable: {error}"));
+        }
+    };
+    for action in actions {
+        registry = dtx_input::profiles::reduce_registry(&registry, builtins, action)
+            .map_err(|error| error.to_string())?;
+    }
+    save(&registry).map_err(|error| error.to_string())?;
+    Ok(registry)
+}
+
+pub(super) fn load_keyboard_startup(
+) -> dtx_input::profiles::RegistryStartup<dtx_input::profiles::ProfileRegistry<dtx_input::profiles::KeyboardProfile>>
+{
+    dtx_input::profiles::load_keyboard_registry(
+        &crate::bindings::keyboard_registry_path(),
+        &dtx_input::default_bindings_path(),
+    )
+}
+
+pub(super) fn load_midi_startup(
+) -> dtx_input::profiles::RegistryStartup<dtx_input::profiles::ProfileRegistry<dtx_input::profiles::MidiProfile>>
+{
+    dtx_input::profiles::load_midi_registry(
+        &crate::bindings::midi_registry_path(),
+        &dtx_input::default_bindings_path(),
+    )
+}
+
+pub(super) fn load_lane_startup() -> dtx_layout::profiles::LaneRegistryStartup {
+    dtx_layout::profiles::load_lane_registry(&crate::lanes::lane_registry_path(), &dtx_layout::default_path())
+}
+
+/// The lane registry has no generic `RegistryAction`/`reduce_registry` (its
+/// registry type isn't the generic `ProfileRegistry<T>`), so the profile bar
+/// gets its own small mirror of the keyboard/MIDI action set.
+pub(super) enum LaneRegAction {
+    Select(String),
+    Save(dtx_layout::profiles::LaneProfile),
+    SaveAs {
+        name: String,
+        value: dtx_layout::profiles::LaneProfile,
+    },
+    Rename(String),
+    Delete,
+}
+
+fn reduce_lane_registry(
+    registry: &dtx_layout::profiles::LaneProfileRegistry,
+    builtins: &std::collections::BTreeMap<String, dtx_layout::profiles::LaneProfile>,
+    action: LaneRegAction,
+) -> Result<dtx_layout::profiles::LaneProfileRegistry, String> {
+    let mut updated = registry.clone();
+    match action {
+        LaneRegAction::Select(name) => {
+            if !builtins.contains_key(&name) && !updated.profiles.contains_key(&name) {
+                return Err(format!("profile not found: {name}"));
+            }
+            updated.active = name;
+        }
+        LaneRegAction::Save(value) => {
+            if builtins.contains_key(&updated.active) {
+                return Err(format!(
+                    "built-in profile cannot be modified: {}",
+                    updated.active
+                ));
+            }
+            let Some(slot) = updated.profiles.get_mut(&updated.active) else {
+                return Err(format!("profile not found: {}", updated.active));
+            };
+            *slot = value;
+        }
+        LaneRegAction::SaveAs { name, value } => {
+            if builtins.contains_key(&name) {
+                return Err(format!("built-in profile cannot be modified: {name}"));
+            }
+            if updated.profiles.contains_key(&name) {
+                return Err(format!("profile already exists: {name}"));
+            }
+            updated.profiles.insert(name.clone(), value);
+            updated.active = name;
+        }
+        LaneRegAction::Rename(name) => {
+            if builtins.contains_key(&updated.active) {
+                return Err(format!(
+                    "built-in profile cannot be modified: {}",
+                    updated.active
+                ));
+            }
+            let old = updated.active.clone();
+            let Some(value) = updated.profiles.remove(&old) else {
+                return Err(format!("profile not found: {old}"));
+            };
+            if builtins.contains_key(&name) {
+                return Err(format!("built-in profile cannot be modified: {name}"));
+            }
+            if updated.profiles.contains_key(&name) {
+                return Err(format!("profile already exists: {name}"));
+            }
+            updated.profiles.insert(name.clone(), value);
+            updated.active = name;
+        }
+        LaneRegAction::Delete => {
+            if builtins.contains_key(&updated.active) {
+                return Err(format!(
+                    "built-in profile cannot be modified: {}",
+                    updated.active
+                ));
+            }
+            let active = updated.active.clone();
+            if updated.profiles.remove(&active).is_none() {
+                return Err(format!("profile not found: {active}"));
+            }
+            updated.active = builtins
+                .keys()
+                .next()
+                .cloned()
+                .ok_or_else(|| "no built-in lane profile to fall back to".to_owned())?;
+        }
+    }
+    Ok(updated)
+}
+
+pub(super) fn commit_lane_actions(
+    registry_startup: dtx_layout::profiles::LaneRegistryStartup,
+    actions: Vec<LaneRegAction>,
+) -> Result<dtx_layout::profiles::LaneProfileRegistry, String> {
+    use dtx_layout::profiles::LaneRegistryStartup;
+    let mut registry = match registry_startup {
+        LaneRegistryStartup::Ready(r) | LaneRegistryStartup::LegacySession { registry: r, .. } => r,
+        LaneRegistryStartup::ReadOnlyBuiltins(error) => {
+            return Err(format!("registry unusable: {error}"));
+        }
+    };
+    let builtins = dtx_layout::profiles::lane_builtins();
+    for action in actions {
+        registry = reduce_lane_registry(&registry, &builtins, action)?;
+    }
+    dtx_layout::profiles::save_lane_registry(&crate::lanes::lane_registry_path(), &registry)
+        .map_err(|error| error.to_string())?;
+    Ok(registry)
+}
+
 /// Write one dirty profile kind to its registry: load the canonical file,
 /// apply Save (or an auto-named Save As when a built-in is selected), and
-/// persist atomically. Returns success per kind for the close guard.
+/// persist atomically. Shared by the close guard's Save All and the profile
+/// bar's Save button — the only two places a draft's *own* value gets
+/// written back under its own name.
 fn save_dirty_kind(
     kind: profile_state::ProfileKind,
     session: &profile_state::ProfileSession,
-) -> bool {
+) -> Result<(), String> {
     use dtx_input::profiles as cfg;
     use dtx_persistence::suggest_copy_name;
     use profile_state::ProfileKind;
@@ -244,13 +407,12 @@ fn save_dirty_kind(
         selected: &str,
         value: T,
         save: impl FnOnce(&cfg::ProfileRegistry<T>) -> Result<(), cfg::RegistryIoError>,
-    ) -> bool {
+    ) -> Result<(), String> {
         let registry = match registry_startup {
             cfg::RegistryStartup::Ready(r)
             | cfg::RegistryStartup::LegacySession { registry: r, .. } => r,
             cfg::RegistryStartup::ReadOnlyBuiltins(error) => {
-                warn!("profile save skipped, registry unusable: {error}");
-                return false;
+                return Err(format!("registry unusable: {error}"));
             }
         };
         let action = if builtins.contains_key(selected) {
@@ -260,51 +422,32 @@ fn save_dirty_kind(
                 .chain(registry.profiles.keys().map(String::as_str))
                 .collect();
             let name = suggest_copy_name(selected, names.iter().copied());
-            cfg::RegistryAction::SaveAs {
-                name: match dtx_persistence::validate_profile_name(
-                    &name,
-                    builtins.keys().map(String::as_str),
-                    registry.profiles.keys().map(String::as_str),
-                    None,
-                ) {
-                    Ok(name) => name,
-                    Err(error) => {
-                        warn!("profile save-as name invalid: {error}");
-                        return false;
-                    }
-                },
-                value,
-            }
+            let name = dtx_persistence::validate_profile_name(
+                &name,
+                builtins.keys().map(String::as_str),
+                registry.profiles.keys().map(String::as_str),
+                None,
+            )
+            .map_err(|error| format!("save-as name invalid: {error}"))?;
+            cfg::RegistryAction::SaveAs { name, value }
         } else {
             cfg::RegistryAction::Save(value)
         };
-        let next = match cfg::reduce_registry(&registry, builtins, action) {
-            Ok(next) => next,
-            Err(error) => {
-                warn!("profile save rejected: {error}");
-                return false;
-            }
-        };
-        match save(&next) {
-            Ok(()) => true,
-            Err(error) => {
-                warn!("profile save failed: {error}");
-                false
-            }
-        }
+        let next =
+            cfg::reduce_registry(&registry, builtins, action).map_err(|error| error.to_string())?;
+        save(&next).map_err(|error| error.to_string())
     }
 
-    let legacy = dtx_input::default_bindings_path();
     match kind {
         ProfileKind::Keyboard => commit(
-            cfg::load_keyboard_registry(&crate::bindings::keyboard_registry_path(), &legacy),
+            load_keyboard_startup(),
             &cfg::keyboard_builtins(),
             &session.keyboard.selected,
             session.keyboard.value.clone(),
             |next| cfg::save_keyboard_registry(&crate::bindings::keyboard_registry_path(), next),
         ),
         ProfileKind::Midi => commit(
-            cfg::load_midi_registry(&crate::bindings::midi_registry_path(), &legacy),
+            load_midi_startup(),
             &cfg::midi_builtins(),
             &session.midi.selected,
             session.midi.value.clone(),
@@ -312,38 +455,30 @@ fn save_dirty_kind(
         ),
         ProfileKind::Lanes => {
             use dtx_layout::profiles as lp;
-            let path = crate::lanes::lane_registry_path();
-            let layout = dtx_layout::default_path();
-            let mut registry = match lp::load_lane_registry(&path, &layout) {
-                lp::LaneRegistryStartup::Ready(r)
-                | lp::LaneRegistryStartup::LegacySession { registry: r, .. } => r,
-                lp::LaneRegistryStartup::ReadOnlyBuiltins(error) => {
-                    warn!("lane profile save skipped, registry unusable: {error}");
-                    return false;
-                }
-            };
             let builtins = lp::lane_builtins();
-            let name = if builtins.contains_key(&session.lanes.selected) {
+            let startup = load_lane_startup();
+            let action = if builtins.contains_key(&session.lanes.selected) {
+                let registry = match &startup {
+                    lp::LaneRegistryStartup::Ready(r)
+                    | lp::LaneRegistryStartup::LegacySession { registry: r, .. } => r.clone(),
+                    lp::LaneRegistryStartup::ReadOnlyBuiltins(error) => {
+                        return Err(format!("registry unusable: {error}"));
+                    }
+                };
                 let names: Vec<&str> = builtins
                     .keys()
                     .map(String::as_str)
                     .chain(registry.profiles.keys().map(String::as_str))
                     .collect();
-                suggest_copy_name(&session.lanes.selected, names.iter().copied())
-            } else {
-                session.lanes.selected.clone()
-            };
-            registry
-                .profiles
-                .insert(name.clone(), session.lanes.value.clone());
-            registry.active = name;
-            match lp::save_lane_registry(&path, &registry) {
-                Ok(()) => true,
-                Err(error) => {
-                    warn!("lane profile save failed: {error}");
-                    false
+                let name = suggest_copy_name(&session.lanes.selected, names.iter().copied());
+                LaneRegAction::SaveAs {
+                    name,
+                    value: session.lanes.value.clone(),
                 }
-            }
+            } else {
+                LaneRegAction::Save(session.lanes.value.clone())
+            };
+            commit_lane_actions(startup, vec![action]).map(|_| ())
         }
     }
 }
@@ -387,7 +522,7 @@ fn resolve_pending_close(
         close
             .dirty
             .iter()
-            .map(|kind| (*kind, save_dirty_kind(*kind, &session.0)))
+            .map(|kind| (*kind, save_dirty_kind(*kind, &session.0).is_ok()))
             .collect()
     } else {
         Vec::new()

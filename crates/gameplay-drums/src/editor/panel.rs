@@ -2,6 +2,7 @@
 //! whenever the selection changes; control changes write straight into
 //! `WidgetLayouts` (single mutation path — undo/save cover it).
 
+use bevy::ecs::system::SystemParam;
 use bevy::prelude::*;
 use dtx_layout::{Anchor9, WidgetKind, MAX_WIDGET_SCALE, MIN_WIDGET_SCALE};
 use dtx_ui::widget::controls::{self, ControlBool, ControlValue, Slider, Stepper};
@@ -198,9 +199,36 @@ fn despawn_panel(
     }
 }
 
-/// Left content panel: renders the active tab's content. Rebuilds on
-/// tab/content change only (NOT selection). The debounce signature drops
-/// `selection.0` so picking a widget never respawns this list.
+/// Debounce signature for `rebuild_left_content`: everything the profile bar
+/// and tab content visually depend on. `bar` holds the active bar kind's
+/// selected name and dirty flag, `None` on tabs with no profile bar.
+#[derive(PartialEq, Clone)]
+struct LeftPanelSig {
+    open: bool,
+    lanes: String,
+    tab: game_shell::CustomizeTab,
+    bindings_rev: u64,
+    segment: super::controls_panel::ControlsSegment,
+    popup: super::profile_bar_ui::ProfileBarPopup,
+    bar: Option<(String, bool)>,
+    error: Option<super::profile_bar::ProfileUiError>,
+}
+
+/// Profile-bar inputs, bundled to stay under Bevy's system-param ceiling
+/// (`rebuild_left_content` already has a full plate of tab-content params).
+#[derive(SystemParam)]
+struct ProfileBarInputs<'w> {
+    segment: Res<'w, super::controls_panel::ControlsSegment>,
+    session: Res<'w, super::profile_state::CustomizeSession>,
+    popup: Res<'w, super::profile_bar_ui::ProfileBarPopup>,
+    error: Res<'w, super::profile_bar_ui::ProfileUiErrorState>,
+}
+
+/// Left content panel: renders the profile bar (Controls/Lanes only) above
+/// the active tab's content. Rebuilds on tab/content change only (NOT
+/// selection). The debounce signature drops `selection.0` so picking a
+/// widget never respawns this list.
+#[allow(clippy::too_many_arguments)]
 fn rebuild_left_content(
     mut commands: Commands,
     open: Res<EditorOpen>,
@@ -214,19 +242,33 @@ fn rebuild_left_content(
     ports: Res<super::bindings_panel::MidiPortList>,
     theme: Res<dtx_ui::ThemeResource>,
     midi: Option<Res<game_shell::MidiConnected>>,
+    bar: ProfileBarInputs,
     existing: Query<Entity, With<LeftContentRoot>>,
-    mut last_sig: Local<Option<(bool, String, game_shell::CustomizeTab, u64)>>,
+    mut last_sig: Local<Option<LeftPanelSig>>,
 ) {
-    let sig = (
-        open.0,
-        dtx_layout::structure_signature(&lanes.0),
-        active.0,
-        rev.0,
-    );
+    let segment = *bar.segment;
+    let session = &bar.session;
+    let popup = *bar.popup;
+    let bar_error = &bar.error;
+    let bar_kind = super::profile_bar_ui::bar_kind(active.0, segment);
+    let bar_sig = bar_kind.map(|kind| {
+        let info = super::profile_bar_ui::bar_info(kind, session);
+        (info.selected, info.dirty)
+    });
+    let sig = LeftPanelSig {
+        open: open.0,
+        lanes: dtx_layout::structure_signature(&lanes.0),
+        tab: active.0,
+        bindings_rev: rev.0,
+        segment,
+        popup,
+        bar: bar_sig,
+        error: bar_error.0.clone(),
+    };
     if last_sig.as_ref() == Some(&sig) {
         return;
     }
-    *last_sig = Some(sig);
+    last_sig.replace(sig);
     for e in &existing {
         commands.entity(e).despawn();
     }
@@ -253,6 +295,12 @@ fn rebuild_left_content(
             GlobalZIndex(crate::ui_z::EDITOR_CHROME),
         ))
         .id();
+
+    if let Some(kind) = bar_kind {
+        commands.entity(root).with_children(|p| {
+            super::profile_bar_ui::spawn_bar(p, &t, kind, session, popup, bar_error.0.as_ref());
+        });
+    }
 
     // Pads can reach these tabs on the rail but cannot work their content.
     if midi.is_some_and(|m| m.0) && super::keyboard_nav::pad_excluded(active.0) {

@@ -174,7 +174,10 @@ fn startup_registry<T>(
     }
 }
 
-fn active_keyboard_profile(registry: &ProfileRegistry<KeyboardProfile>) -> KeyboardProfile {
+/// Look up a registry's active profile value, falling back to built-ins then
+/// the code default. Shared with the profile bar (Select/SaveAs/Rename/
+/// Delete all need the resulting active value to refresh the session draft).
+pub(crate) fn active_keyboard_profile(registry: &ProfileRegistry<KeyboardProfile>) -> KeyboardProfile {
     registry
         .profiles
         .get(&registry.active)
@@ -183,7 +186,7 @@ fn active_keyboard_profile(registry: &ProfileRegistry<KeyboardProfile>) -> Keybo
         .unwrap_or_default()
 }
 
-fn active_midi_profile(registry: &ProfileRegistry<MidiProfile>) -> MidiProfile {
+pub(crate) fn active_midi_profile(registry: &ProfileRegistry<MidiProfile>) -> MidiProfile {
     registry
         .profiles
         .get(&registry.active)
@@ -192,23 +195,26 @@ fn active_midi_profile(registry: &ProfileRegistry<MidiProfile>) -> MidiProfile {
         .unwrap_or_default()
 }
 
-/// Compose channel-keyed bindings from the active profiles so the legacy
-/// editor panels keep working against `LiveBindings` until the profile
-/// editors replace them.
-fn compose_bindings(profiles: &ActiveInputProfiles) -> InputBindings {
+/// Compose channel-keyed bindings from independent keyboard/MIDI profile
+/// values so the legacy editor panels (chip list, capture, resolver) keep
+/// working against `LiveBindings`. Shared by boot/reload and the profile
+/// bar, which recomposes `LiveBindings` from the session drafts after every
+/// Select/Save/SaveAs/Rename/Delete/Revert so the panel and resolver never
+/// lag behind the committed profile.
+pub(crate) fn compose_bindings(keyboard: &KeyboardProfile, midi: &MidiProfile) -> InputBindings {
     let mut bindings = InputBindings {
         midi: dtx_input::MidiDeviceConfig {
-            port: profiles.midi.port.clone(),
-            velocity_threshold: profiles.midi.velocity_threshold,
+            port: midi.port.clone(),
+            velocity_threshold: midi.velocity_threshold,
         },
         map: HashMap::new(),
     };
     for ch in BINDABLE_CHANNELS {
         let mut sources = Vec::new();
-        for key in profiles.keyboard.map.get(&ch).into_iter().flatten() {
+        for key in keyboard.map.get(&ch).into_iter().flatten() {
             sources.push(BindSource::Key(*key));
         }
-        for note in profiles.midi.map.get(&ch).into_iter().flatten() {
+        for note in midi.map.get(&ch).into_iter().flatten() {
             sources.push(BindSource::Midi { note: *note });
         }
         if !sources.is_empty() {
@@ -242,7 +248,7 @@ fn reload_profiles(
         midi: active_midi_profile(&midi),
     };
     *resolver = BindResolver::from_profiles(&profiles.keyboard, &profiles.midi);
-    live.0 = compose_bindings(&profiles);
+    live.0 = compose_bindings(&profiles.keyboard, &profiles.midi);
 }
 
 /// Rebuild `BindResolver` whenever `LiveBindings` changes (editor preview
