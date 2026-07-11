@@ -39,9 +39,7 @@ pub fn check_halt(
         .entries
         .iter()
         .filter(|e| {
-            e.judge_ms == target_ms
-                && lane_of(e.channel).is_some()
-                && !judged.contains(&e.chip_idx)
+            e.judge_ms == target_ms && lane_of(e.channel).is_some() && !judged.contains(&e.chip_idx)
         })
         .map(|e| e.chip_idx)
         .collect();

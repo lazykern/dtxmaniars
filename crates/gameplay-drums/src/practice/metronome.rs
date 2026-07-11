@@ -235,7 +235,11 @@ pub fn update_countdown(
             }
             text.0 = n.to_string();
             let theme = Theme::default();
-            let base = if accent { theme.accent } else { theme.text_primary };
+            let base = if accent {
+                theme.accent
+            } else {
+                theme.text_primary
+            };
             color.0 = base.with_alpha(1.0 - (age / COUNTDOWN_FADE_S) as f32);
             *vis = Visibility::Visible;
         }
@@ -249,8 +253,7 @@ pub(crate) fn plugin(app: &mut App) {
         .init_resource::<CountdownDisplay>()
         .add_systems(
             OnEnter(AppState::Performance),
-            (build_metronome_sounds, spawn_countdown)
-                .run_if(resource_exists::<PracticeSession>),
+            (build_metronome_sounds, spawn_countdown).run_if(resource_exists::<PracticeSession>),
         )
         .add_systems(OnExit(AppState::Performance), despawn_countdown)
         .add_systems(
@@ -353,8 +356,16 @@ mod tests {
     fn due_clicks_advance_cursor_and_stop_at_clock() {
         let s = ClickSchedule {
             clicks: vec![
-                Click { at_ms: 2_000, accent: true, beats_remaining: 2 },
-                Click { at_ms: 2_500, accent: false, beats_remaining: 1 },
+                Click {
+                    at_ms: 2_000,
+                    accent: true,
+                    beats_remaining: 2,
+                },
+                Click {
+                    at_ms: 2_500,
+                    accent: false,
+                    beats_remaining: 1,
+                },
             ],
         };
         let mut cursor = 0usize;

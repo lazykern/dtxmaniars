@@ -362,7 +362,10 @@ mod tests {
 
         s.lane_diag.apply_judgment(0, JudgmentKind::Perfect, 0);
         s.clear_loop();
-        assert!(s.lane_diag.lanes.is_empty(), "Clear loop must clear diagnosis");
+        assert!(
+            s.lane_diag.lanes.is_empty(),
+            "Clear loop must clear diagnosis"
+        );
     }
 
     #[test]

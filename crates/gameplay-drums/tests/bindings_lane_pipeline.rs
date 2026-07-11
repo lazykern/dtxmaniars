@@ -51,4 +51,3 @@ fn persisted_bindings_keep_logical_channels_across_lane_presets() {
 
     let _ = std::fs::remove_dir_all(dir);
 }
-

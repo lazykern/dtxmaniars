@@ -242,11 +242,7 @@ impl ScoreStore {
             .iter()
             .filter(|e| e.chart.source_path_hint.as_deref() == Some(path))
             .collect();
-        hits.sort_by(|a, b| {
-            b.score
-                .cmp(&a.score)
-                .then(b.played_at.cmp(&a.played_at))
-        });
+        hits.sort_by(|a, b| b.score.cmp(&a.score).then(b.played_at.cmp(&a.played_at)));
         hits.truncate(limit);
         hits
     }

@@ -92,7 +92,9 @@ pub fn track_attempt_stats(
             continue; // cleared while halted: tempo-free, not timing-judged
         }
         apply_judgment(&mut session.current_attempt, ev.kind, ev.delta_ms);
-        session.lane_diag.apply_judgment(ev.lane, ev.kind, ev.delta_ms);
+        session
+            .lane_diag
+            .apply_judgment(ev.lane, ev.kind, ev.delta_ms);
     }
     for m in missed.read() {
         let judge_ms = timeline
@@ -194,7 +196,10 @@ mod tests {
             .find("continue; // pre-roll chip: audible feedback only")
             .unwrap();
         let diag = src.find("session.lane_diag.apply_judgment").unwrap();
-        assert!(gate < diag, "lane_diag feed must come after the pre-roll gate");
+        assert!(
+            gate < diag,
+            "lane_diag feed must come after the pre-roll gate"
+        );
     }
 
     #[test]
