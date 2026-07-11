@@ -142,11 +142,9 @@ impl<'de> Deserialize<'de> for MidiProfile {
             }
             for note in notes {
                 if let Some(owner) = owners.insert(*note, name) {
-                    if owner != name {
-                        return Err(serde::de::Error::custom(format!(
-                            "MIDI note {note} is bound to both {owner} and {name}"
-                        )));
-                    }
+                    return Err(serde::de::Error::custom(format!(
+                        "MIDI note {note} is bound to both {owner} and {name}"
+                    )));
                 }
             }
         }
