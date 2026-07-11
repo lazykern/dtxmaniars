@@ -39,6 +39,9 @@ struct CaptureChoiceBtn(ArrivedChoice);
 #[derive(Component)]
 struct CaptureConfirmBtn;
 
+#[derive(Component)]
+struct CaptureCancelBtn;
+
 pub(super) fn plugin(app: &mut App) {
     app.add_systems(
         Update,
@@ -63,19 +66,19 @@ fn despawn_modal(mut commands: Commands, roots: Query<Entity, With<CaptureModalR
 
 /// Everything the modal needs to render for one `CaptureState`, minus the
 /// live MIDI-listening line (that comes from `LastMidiHit`, refreshed every
-/// frame independent of this — see `update_capture_live_text`).
+/// frame independent of this — see `update_capture_live_text`). Conflict is
+/// not stored separately — it's exactly `owners_caption.is_some()`.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ModalLines {
-    pub title: String,
+struct ModalLines {
+    title: String,
     /// Listening states only ("Esc cancel"); `Arrived` states leave this
     /// `None` since the footer already carries their verbs (Task 2).
-    pub subtitle: Option<String>,
+    subtitle: Option<String>,
     /// `Arrived` states only: the captured key/note preview line.
-    pub arrived: Option<String>,
+    arrived: Option<String>,
     /// `Arrived` states with a conflict: "also bound to {names}".
-    pub owners_caption: Option<String>,
-    pub choice: Option<ArrivedChoice>,
-    pub has_conflict: bool,
+    owners_caption: Option<String>,
+    choice: Option<ArrivedChoice>,
 }
 
 fn channel_name(ch: dtx_core::EChannel) -> &'static str {
@@ -103,7 +106,7 @@ fn owners_caption(owners: &[dtx_core::EChannel]) -> String {
 
 /// Pure `CaptureState` → modal text/mode mapping. `None` means no modal
 /// (`Idle`).
-pub fn modal_lines(state: &CaptureState) -> Option<ModalLines> {
+fn modal_lines(state: &CaptureState) -> Option<ModalLines> {
     match state {
         CaptureState::Idle => None,
         CaptureState::Keyboard(ch) => Some(ModalLines {
@@ -112,7 +115,6 @@ pub fn modal_lines(state: &CaptureState) -> Option<ModalLines> {
             arrived: None,
             owners_caption: None,
             choice: None,
-            has_conflict: false,
         }),
         CaptureState::Midi(ch) => Some(ModalLines {
             title: format!("Hit a pad for {}", channel_name(*ch)),
@@ -120,30 +122,21 @@ pub fn modal_lines(state: &CaptureState) -> Option<ModalLines> {
             arrived: None,
             owners_caption: None,
             choice: None,
-            has_conflict: false,
         }),
-        CaptureState::KeyArrived { key, owners, choice, .. } => {
-            let has_conflict = !owners.is_empty();
-            Some(ModalLines {
-                title: "Confirm binding".to_string(),
-                subtitle: None,
-                arrived: Some(key_label(*key)),
-                owners_caption: has_conflict.then(|| owners_caption(owners)),
-                choice: Some(*choice),
-                has_conflict,
-            })
-        }
-        CaptureState::MidiArrived { note, velocity, owners, choice, .. } => {
-            let has_conflict = !owners.is_empty();
-            Some(ModalLines {
-                title: "Confirm binding".to_string(),
-                subtitle: None,
-                arrived: Some(format!("note {note} · velocity {velocity}")),
-                owners_caption: has_conflict.then(|| owners_caption(owners)),
-                choice: Some(*choice),
-                has_conflict,
-            })
-        }
+        CaptureState::KeyArrived { key, owners, choice, .. } => Some(ModalLines {
+            title: "Confirm binding".to_string(),
+            subtitle: None,
+            arrived: Some(key_label(*key)),
+            owners_caption: (!owners.is_empty()).then(|| owners_caption(owners)),
+            choice: Some(*choice),
+        }),
+        CaptureState::MidiArrived { note, velocity, owners, choice, .. } => Some(ModalLines {
+            title: "Confirm binding".to_string(),
+            subtitle: None,
+            arrived: Some(format!("note {note} · velocity {velocity}")),
+            owners_caption: (!owners.is_empty()).then(|| owners_caption(owners)),
+            choice: Some(*choice),
+        }),
     }
 }
 
@@ -152,7 +145,7 @@ pub fn modal_lines(state: &CaptureState) -> Option<ModalLines> {
 /// muted))` after — `muted` true when the hit was below the velocity
 /// threshold (it never reaches the capture machine, but the user should
 /// still see it landed).
-pub fn live_hit_line(hit: &crate::LastMidiHit) -> Option<(String, bool)> {
+fn live_hit_line(hit: &crate::LastMidiHit) -> Option<(String, bool)> {
     hit.at?;
     if hit.below_threshold {
         Some((format!("note {} · velocity {} — below threshold", hit.note, hit.velocity), true))
@@ -165,7 +158,7 @@ pub fn live_hit_line(hit: &crate::LastMidiHit) -> Option<(String, bool)> {
 /// that's already active COMMITS it (mirrors "press Enter on the default"),
 /// clicking the other one TOGGLES to it — the same reducer the keyboard's
 /// ←/→ (Toggle) and Enter (Confirm) drive.
-pub fn choice_click_input(clicked: ArrivedChoice, current: ArrivedChoice) -> ArrivedInput {
+fn choice_click_input(clicked: ArrivedChoice, current: ArrivedChoice) -> ArrivedInput {
     if clicked == current {
         ArrivedInput::Confirm
     } else {
@@ -267,7 +260,8 @@ fn sync_capture_modal(
                         card.spawn((Text::new(arrived.clone()), dtx_ui::theme::Theme::font(20.0), TextColor(t.text_primary)));
                     }
 
-                    if lines.has_conflict {
+                    if let Some(caption) = &lines.owners_caption {
+                        // Conflict: two-way choice + who else holds the source.
                         let current = lines.choice.unwrap_or_default();
                         card.spawn(Node {
                             flex_direction: FlexDirection::Row,
@@ -278,9 +272,7 @@ fn sync_capture_modal(
                             spawn_choice_btn(row, &t, ArrivedChoice::Shared, "Add shared", current);
                             spawn_choice_btn(row, &t, ArrivedChoice::Move, "Move here", current);
                         });
-                        if let Some(caption) = &lines.owners_caption {
-                            card.spawn((Text::new(caption.clone()), dtx_ui::theme::Theme::font(11.0), TextColor(chrome::TEXT_MUTED)));
-                        }
+                        card.spawn((Text::new(caption.clone()), dtx_ui::theme::Theme::font(11.0), TextColor(chrome::TEXT_MUTED)));
                     } else if lines.arrived.is_some() {
                         card.spawn((
                             CaptureConfirmBtn,
@@ -293,6 +285,24 @@ fn sync_capture_modal(
                             children![(Text::new("Confirm (Enter)"), dtx_ui::theme::Theme::font(13.0), TextColor(t.text_primary))],
                         ));
                     }
+
+                    // Cancel is first-class for mouse in EVERY non-Idle state
+                    // (listening AND arrived), so a mouse-only user who armed
+                    // capture by clicking `+` always has a way out. Its click
+                    // feeds the same Cancel the driver reads from Esc.
+                    card.spawn((
+                        CaptureCancelBtn,
+                        Button,
+                        Node {
+                            padding: UiRect::axes(Val::Px(12.0), Val::Px(6.0)),
+                            border: UiRect::all(Val::Px(1.0)),
+                            border_radius: BorderRadius::all(Val::Px(4.0)),
+                            ..default()
+                        },
+                        BackgroundColor(chrome::CHIP_BG),
+                        BorderColor::all(chrome::CHIP_BORDER),
+                        children![(Text::new("Cancel (Esc)"), dtx_ui::theme::Theme::font(12.0), TextColor(chrome::TEXT_MUTED))],
+                    ));
                 });
         });
 }
@@ -319,13 +329,16 @@ fn update_capture_live_text(
     *color = TextColor(if muted { chrome::TEXT_MUTED } else { theme.0.text_primary });
 }
 
-/// Choice/confirm button clicks → `MouseArrivedInput`, drained by
-/// `capture_binding` through the exact same `arrived_step` reducer the
-/// keyboard drives (ordered `.before` it above).
+/// Choice/confirm/cancel button clicks → `MouseArrivedInput`, drained by
+/// `capture_binding` through the exact same reducer the keyboard drives
+/// (ordered `.before` it above). Cancel works from EVERY non-Idle state: the
+/// driver reads `Cancel` as `escape || mouse_cancel` in the listening arms and
+/// through `arrived_input` in the arrived arms.
 fn handle_capture_mouse_input(
     capture: Res<CaptureState>,
     choice_buttons: Query<(&Interaction, &CaptureChoiceBtn), Changed<Interaction>>,
     confirm_buttons: Query<&Interaction, (With<CaptureConfirmBtn>, Changed<Interaction>)>,
+    cancel_buttons: Query<&Interaction, (With<CaptureCancelBtn>, Changed<Interaction>)>,
     mut mouse_input: ResMut<MouseArrivedInput>,
 ) {
     let current_choice = match &*capture {
@@ -342,6 +355,11 @@ fn handle_capture_mouse_input(
     for interaction in &confirm_buttons {
         if *interaction == Interaction::Pressed {
             mouse_input.0 = Some(ArrivedInput::Confirm);
+        }
+    }
+    for interaction in &cancel_buttons {
+        if *interaction == Interaction::Pressed {
+            mouse_input.0 = Some(ArrivedInput::Cancel);
         }
     }
 }
@@ -377,7 +395,6 @@ mod tests {
         })
         .unwrap();
         assert_eq!(lines.arrived.as_deref(), Some("X"));
-        assert!(!lines.has_conflict);
         assert_eq!(lines.owners_caption, None);
     }
 
@@ -390,7 +407,6 @@ mod tests {
             choice: ArrivedChoice::Move,
         })
         .unwrap();
-        assert!(lines.has_conflict);
         assert_eq!(lines.owners_caption.as_deref(), Some("also bound to HH, LT"));
         assert_eq!(lines.choice, Some(ArrivedChoice::Move));
     }
@@ -462,5 +478,137 @@ mod tests {
             choice_click_input(ArrivedChoice::Move, ArrivedChoice::Move),
             ArrivedInput::Confirm
         );
+    }
+
+    // ===== App-driven (headless) tests =====
+
+    use super::super::bindings_capture::capture_binding;
+
+    fn modal_count(app: &mut App) -> usize {
+        let world = app.world_mut();
+        world
+            .query_filtered::<Entity, With<CaptureModalRoot>>()
+            .iter(world)
+            .count()
+    }
+
+    #[test]
+    fn modal_gate_does_not_respawn_on_unchanged_state() {
+        // The PartialEq Local gate must not despawn+respawn the modal every
+        // frame while the state is unchanged — that would strobe the buttons
+        // and break `Changed<Interaction>` click detection.
+        let mut app = App::new();
+        app.init_resource::<crate::LastMidiHit>()
+            .init_resource::<dtx_ui::ThemeResource>()
+            .insert_resource(CaptureState::Keyboard(dtx_core::EChannel::Snare))
+            .add_systems(Update, sync_capture_modal);
+        app.update();
+        assert_eq!(modal_count(&mut app), 1);
+        app.update();
+        assert_eq!(modal_count(&mut app), 1, "unchanged state must not respawn the modal");
+    }
+
+    #[test]
+    fn exit_reset_lets_modal_respawn_next_session() {
+        // Regression for the OnExit stale-capture bug: OnExit despawns the
+        // modal but the Local gate still holds the old lines, so if
+        // CaptureState survives unchanged the modal never comes back. The
+        // fix (close_editor_on_exit resets CaptureState to Idle) breaks the
+        // gate so the next session respawns.
+        let arrived = || CaptureState::KeyArrived {
+            channel: dtx_core::EChannel::Snare,
+            key: KeyCode::KeyX,
+            owners: vec![],
+            choice: ArrivedChoice::Shared,
+        };
+        let mut app = App::new();
+        app.init_resource::<crate::LastMidiHit>()
+            .init_resource::<dtx_ui::ThemeResource>()
+            .insert_resource(arrived())
+            .add_systems(Update, sync_capture_modal);
+        app.update();
+        assert_eq!(modal_count(&mut app), 1);
+
+        // Simulate OnExit: modal despawned, plus the fix resets to Idle.
+        let roots: Vec<Entity> = {
+            let world = app.world_mut();
+            world
+                .query_filtered::<Entity, With<CaptureModalRoot>>()
+                .iter(world)
+                .collect()
+        };
+        for e in roots {
+            app.world_mut().despawn(e);
+        }
+        *app.world_mut().resource_mut::<CaptureState>() = CaptureState::Idle;
+        app.update();
+        assert_eq!(modal_count(&mut app), 0, "Idle leaves no modal");
+
+        // Next session re-arms the SAME binding; the Idle reset broke the gate.
+        *app.world_mut().resource_mut::<CaptureState>() = arrived();
+        app.update();
+        assert_eq!(modal_count(&mut app), 1, "modal respawns after the exit reset");
+    }
+
+    /// Build an App wired like the real plugin (sync → mouse-input → driver),
+    /// spawn the modal, click its × (Cancel), and step once so the click
+    /// reaches the driver. Returns the App for assertions.
+    fn cancel_via_button(state: CaptureState) -> App {
+        let mut app = App::new();
+        app.init_resource::<ButtonInput<KeyCode>>()
+            .init_resource::<crate::bindings::LiveBindings>()
+            .init_resource::<super::super::bindings_panel::BindingsRev>()
+            .init_resource::<crate::LastMidiHit>()
+            .init_resource::<crate::resources::GameplayClock>()
+            .init_resource::<MouseArrivedInput>()
+            .init_resource::<dtx_ui::ThemeResource>()
+            .add_message::<crate::events::LaneHit>()
+            .insert_resource(state)
+            .add_systems(
+                Update,
+                (sync_capture_modal, handle_capture_mouse_input, capture_binding).chain(),
+            );
+        app.update(); // spawns modal + Cancel button
+        let cancels: Vec<Entity> = {
+            let world = app.world_mut();
+            world
+                .query_filtered::<Entity, With<CaptureCancelBtn>>()
+                .iter(world)
+                .collect()
+        };
+        assert_eq!(cancels.len(), 1, "every non-Idle modal has exactly one Cancel button");
+        for e in cancels {
+            *app.world_mut().get_mut::<Interaction>(e).unwrap() = Interaction::Pressed;
+        }
+        app.update(); // click → MouseArrivedInput::Cancel → driver → Idle
+        app
+    }
+
+    #[test]
+    fn mouse_cancel_from_arrived_returns_to_idle_without_binding() {
+        let app = cancel_via_button(CaptureState::MidiArrived {
+            channel: dtx_core::EChannel::Snare,
+            note: 99,
+            velocity: 90,
+            owners: vec![],
+            choice: ArrivedChoice::Shared,
+        });
+        assert!(matches!(*app.world().resource::<CaptureState>(), CaptureState::Idle));
+        assert!(
+            app.world()
+                .resource::<crate::bindings::LiveBindings>()
+                .0
+                .channels_for_note(99)
+                .is_empty(),
+            "cancel must not bind the previewed note"
+        );
+    }
+
+    #[test]
+    fn mouse_cancel_from_listening_state_returns_to_idle() {
+        // Cancel must also work from the listening states, not just Arrived —
+        // the driver reads it as `escape || mouse_cancel` in those arms.
+        let app = cancel_via_button(CaptureState::Keyboard(dtx_core::EChannel::Snare));
+        assert!(matches!(*app.world().resource::<CaptureState>(), CaptureState::Idle));
     }
 }

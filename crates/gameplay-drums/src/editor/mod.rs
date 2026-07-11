@@ -175,6 +175,8 @@ fn close_editor_on_exit(
     draft: Res<tabs::ConfigDraft>,
     mut perf_draft: ResMut<crate::perf_hotkeys::PerfHotkeyDraft>,
     show_perf_info: Res<crate::resources::ShowPerfInfo>,
+    mut capture: ResMut<bindings_capture::CaptureState>,
+    mut mouse_arrived: ResMut<bindings_capture::MouseArrivedInput>,
 ) {
     if open.0 {
         // Config and widget layout keep their auto-save policy. Profile
@@ -195,6 +197,14 @@ fn close_editor_on_exit(
     gesture.0 = drag::Gesture::None;
     hovered.0 = None;
     selection.0 = None;
+    // A capture armed at exit (song ended mid-KeyArrived/MidiArrived) would
+    // otherwise survive into the next Performance: the modal despawns on
+    // OnExit but `capture_binding` keeps running against the stale Arrived
+    // state, and the modal's PartialEq rebuild gate holds the SAME lines so
+    // it never respawns — a stray Enter/hit would silently commit an unseen
+    // binding. Reset both the state and its mouse inlet here.
+    *capture = bindings_capture::CaptureState::Idle;
+    mouse_arrived.0 = None;
     // Covers non-Esc exits (song ended, forced transition): a stale session
     // flag would make the next Performance force-open the editor.
     session.0 = false;

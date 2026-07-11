@@ -308,11 +308,18 @@ pub(super) fn capture_binding(
             }
         }
     };
+    // Drain the mouse inlet once per frame into a Copy local so it can feed
+    // BOTH the listening arms (as a cancel signal, alongside Esc) and the
+    // `Arrived` arms (as a full choice/confirm/cancel input) without a borrow
+    // clash. Only one capture arm runs per frame, so consuming it in one place
+    // is enough.
+    let mouse_arrived = mouse_input.0.take();
+    let mouse_cancel = mouse_arrived == Some(ArrivedInput::Cancel);
     // Arrow/Enter/Esc are shared across both `Arrived` variants. A pending
-    // mouse click (choice/confirm button) wins over keyboard the same frame —
-    // there's normally at most one input source per frame anyway.
-    let mut arrived_input = || {
-        if let Some(input) = mouse_input.0.take() {
+    // mouse click (choice/confirm/cancel button) wins over keyboard the same
+    // frame — there's normally at most one input source per frame anyway.
+    let arrived_input = || {
+        if let Some(input) = mouse_arrived {
             return input;
         }
         if keys.just_pressed(KeyCode::Escape) {
@@ -340,7 +347,7 @@ pub(super) fn capture_binding(
             // First non-reserved key wins even when a reserved key lands the
             // same frame; the step still refuses reserved keys defensively.
             let step = keyboard_capture_step(
-                keys.just_pressed(KeyCode::Escape),
+                keys.just_pressed(KeyCode::Escape) || mouse_cancel,
                 modifier_held(&keys),
                 keys.get_just_pressed().copied().find(|k| !is_reserved(*k)),
             );
@@ -367,7 +374,7 @@ pub(super) fn capture_binding(
             if new_note.is_some() {
                 *seen_midi_at = last_midi.at;
             }
-            let step = midi_capture_step(keys.just_pressed(KeyCode::Escape), new_note);
+            let step = midi_capture_step(keys.just_pressed(KeyCode::Escape) || mouse_cancel, new_note);
             match step {
                 MidiCaptureStep::Pending => CaptureState::Midi(channel),
                 MidiCaptureStep::Cancelled => CaptureState::Idle,
