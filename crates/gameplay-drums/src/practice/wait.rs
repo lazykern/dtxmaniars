@@ -169,10 +169,15 @@ pub fn wait_watcher(
 /// Any seek resets to Flowing (audio ownership passes back to the seek
 /// engine, which stops/restarts instances itself) and starts a fresh
 /// waited-chip set for the new attempt.
-pub fn reset_wait_on_seek(mut seeks: MessageReader<SeekToChartTime>, mut state: ResMut<WaitState>) {
+pub fn reset_wait_on_seek(
+    mut seeks: MessageReader<SeekToChartTime>,
+    mut state: ResMut<WaitState>,
+    mut chord_hits: ResMut<ChordHitTimes>,
+) {
     if seeks.read().last().is_some() {
         state.phase = WaitPhase::Flowing;
         state.waited_chips.clear();
+        chord_hits.0.clear();
     }
 }
 
@@ -384,6 +389,32 @@ mod tests {
                 .len(),
             1,
             "reject should surface one feedback toast"
+        );
+    }
+
+    #[test]
+    fn seek_clears_chord_hit_times() {
+        let mut app = App::new();
+        app.add_message::<SeekToChartTime>();
+        app.insert_resource(WaitState {
+            phase: WaitPhase::Halted(WaitSet {
+                target_ms: 1_000,
+                chips: vec![2],
+            }),
+            waited_chips: [2].into(),
+        });
+        app.insert_resource(ChordHitTimes([(2, 1_000)].into()));
+        app.add_systems(Update, reset_wait_on_seek);
+        app.world_mut().write_message(SeekToChartTime {
+            target_ms: 0,
+            snap: None,
+            attempt_start_ms: None,
+        });
+        app.update();
+
+        assert!(
+            app.world().resource::<ChordHitTimes>().0.is_empty(),
+            "seek must drop any in-flight chord hit times"
         );
     }
 }
