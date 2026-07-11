@@ -68,10 +68,7 @@ pub(super) fn plugin(app: &mut App) {
                 .run_if(in_state(game_shell::AppState::Performance))
                 .run_if(super::editor_open),
         )
-        .add_systems(
-            OnExit(game_shell::AppState::Performance),
-            despawn_overlay,
-        );
+        .add_systems(OnExit(game_shell::AppState::Performance), despawn_overlay);
 }
 
 /// Called by the panel Calibrate button: enter Collecting, forcing metronome +

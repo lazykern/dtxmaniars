@@ -102,13 +102,38 @@ fn spawn_footer_on_open(
     });
 }
 
-/// Refresh the left-hand description when the hovered row changes.
-fn update_footer_desc(desc: Res<HoveredDesc>, mut q: Query<&mut Text, With<FooterDescText>>) {
-    if !desc.is_changed() {
+/// Footer text while a capture is armed; None outside capture.
+pub fn capture_footer_text(state: &super::bindings_capture::CaptureState) -> Option<String> {
+    use super::bindings_capture::CaptureState;
+    match state {
+        CaptureState::Idle => None,
+        CaptureState::Keyboard(channel) => Some(format!(
+            "Press a key for {} — Esc cancels",
+            channel.short_name().unwrap_or("channel")
+        )),
+        CaptureState::Midi(channel) => Some(format!(
+            "Hit a pad for {} — Esc cancels",
+            channel.short_name().unwrap_or("channel")
+        )),
+        CaptureState::ConfirmMidiSteal { note, from, .. } => Some(format!(
+            "Note {note} is bound to {} — Enter steals, Esc cancels",
+            from.short_name().unwrap_or("channel")
+        )),
+    }
+}
+
+/// Refresh the left-hand description when the hovered row or capture state
+/// changes. An armed capture overrides the hover description.
+fn update_footer_desc(
+    desc: Res<HoveredDesc>,
+    capture: Res<super::bindings_capture::CaptureState>,
+    mut q: Query<&mut Text, With<FooterDescText>>,
+) {
+    if !desc.is_changed() && !capture.is_changed() {
         return;
     }
     for mut text in &mut q {
-        text.0 = desc_text(&desc);
+        text.0 = capture_footer_text(&capture).unwrap_or_else(|| desc_text(&desc));
     }
 }
 

@@ -305,21 +305,26 @@ fn default_profiles() -> (KeyboardProfile, MidiProfile) {
 }
 
 fn split_default_bindings() -> (KeyboardProfile, MidiProfile) {
-    let bindings = InputBindings::default();
+    split_bindings(&InputBindings::default())
+}
+
+/// Partition channel-keyed bindings into independent keyboard and MIDI
+/// profiles (keys shared, notes exclusive via `bind_note`).
+pub fn split_bindings(bindings: &InputBindings) -> (KeyboardProfile, MidiProfile) {
     let mut keyboard = KeyboardProfile {
         map: HashMap::new(),
     };
     let mut midi = MidiProfile {
-        port: bindings.midi.port,
+        port: bindings.midi.port.clone(),
         velocity_threshold: bindings.midi.velocity_threshold,
         map: HashMap::new(),
     };
 
-    for (channel, bindings) in bindings.map {
-        for binding in bindings {
-            match binding {
-                BindSource::Key(key) => keyboard.add_key(channel, key),
-                BindSource::Midi { note } => midi.bind_note(channel, note),
+    for (channel, sources) in &bindings.map {
+        for source in sources {
+            match source {
+                BindSource::Key(key) => keyboard.add_key(*channel, *key),
+                BindSource::Midi { note } => midi.bind_note(*channel, *note),
             }
         }
     }

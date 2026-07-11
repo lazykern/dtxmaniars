@@ -107,14 +107,14 @@ pub struct PracticeIntent(pub bool);
 pub struct EditorSession(pub bool);
 
 /// Which Customize-surface tab is active. SETTINGS group edits `config.toml`;
-/// KIT group edits the layout (lanes/widgets). Bindings tab lands in Phase 3.
+/// KIT group edits input profiles and the layout (lanes/widgets).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum CustomizeTab {
     Gameplay,
     Audio,
     Drums,
     System,
-    Bindings,
+    Controls,
     Lanes,
     Widgets,
 }
@@ -126,7 +126,7 @@ impl CustomizeTab {
         CustomizeTab::Audio,
         CustomizeTab::Drums,
         CustomizeTab::System,
-        CustomizeTab::Bindings,
+        CustomizeTab::Controls,
         CustomizeTab::Lanes,
         CustomizeTab::Widgets,
     ];
@@ -139,7 +139,7 @@ impl CustomizeTab {
     ];
     /// Kit group (edits layout.toml).
     pub const KIT: [CustomizeTab; 3] = [
-        CustomizeTab::Bindings,
+        CustomizeTab::Controls,
         CustomizeTab::Lanes,
         CustomizeTab::Widgets,
     ];
@@ -151,7 +151,7 @@ impl CustomizeTab {
             CustomizeTab::Audio => "Audio",
             CustomizeTab::Drums => "Drums",
             CustomizeTab::System => "System",
-            CustomizeTab::Bindings => "Bindings",
+            CustomizeTab::Controls => "Controls",
             CustomizeTab::Lanes => "Lanes",
             CustomizeTab::Widgets => "Widgets",
         }
@@ -198,9 +198,15 @@ mod tests {
     }
 
     #[test]
-    fn bindings_is_a_kit_tab() {
-        assert!(!CustomizeTab::Bindings.is_settings());
-        assert!(CustomizeTab::KIT.contains(&CustomizeTab::Bindings));
+    fn controls_is_a_kit_tab() {
+        assert!(!CustomizeTab::Controls.is_settings());
+        assert!(CustomizeTab::KIT.contains(&CustomizeTab::Controls));
+    }
+
+    #[test]
+    fn customize_still_has_seven_tabs() {
+        assert_eq!(CustomizeTab::ALL.len(), 7);
+        assert_eq!(CustomizeTab::Controls.label(), "Controls");
     }
 
     #[test]

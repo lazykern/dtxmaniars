@@ -14,12 +14,16 @@ pub mod bindings_panel;
 pub mod bindings_spatial;
 pub mod calibration;
 pub mod chrome;
+pub mod controls_panel;
 pub mod drag;
 pub mod footer;
 pub mod hotkeys;
 pub mod keyboard_nav;
 pub mod panel;
 pub mod picking;
+pub mod profile_bar;
+pub mod profile_dialog;
+pub mod profile_state;
 pub mod save;
 pub mod selection_box;
 pub mod session;
@@ -99,6 +103,18 @@ pub fn plugin(app: &mut App) {
         .init_resource::<PreviewState>()
         .init_resource::<drag::Selection>()
         .init_resource::<undo::UndoStack>()
+        .init_resource::<controls_panel::ControlsSegment>()
+        .init_resource::<controls_panel::ControlsFocus>()
+        .init_resource::<profile_state::LaneProfileDraft>()
+        .init_resource::<profile_state::CustomizeSession>()
+        .init_resource::<profile_state::PendingCloseState>()
+        .init_resource::<profile_dialog::ProfileDialogState>()
+        .add_systems(
+            Update,
+            (sync_drafts_to_session, resolve_pending_close)
+                .chain()
+                .run_if(in_state(AppState::Performance)),
+        )
         .add_systems(
             Update,
             (
@@ -146,24 +162,22 @@ fn close_editor_on_exit(
     mut selection: ResMut<drag::Selection>,
     mut session: ResMut<game_shell::EditorSession>,
     layouts: Res<crate::widget_layout::WidgetLayouts>,
-    lanes: Res<crate::lanes::Lanes>,
+    profile_session: Res<profile_state::CustomizeSession>,
     draft: Res<tabs::ConfigDraft>,
-    live_bindings: Res<crate::bindings::LiveBindings>,
     mut perf_draft: ResMut<crate::perf_hotkeys::PerfHotkeyDraft>,
     show_perf_info: Res<crate::resources::ShowPerfInfo>,
 ) {
     if open.0 {
-        let file = save::layout_file_from(&layouts, &lanes);
+        // Config and widget layout keep their auto-save policy. Profile
+        // drafts are NOT saved here: committed profile state changes only
+        // through explicit registry transactions (dirty close guard). The
+        // lane snapshot is the last committed profile, not the preview.
+        let file = save::layout_file_from(&layouts, &profile_session.0.lanes.saved.arrangement);
         if let Err(e) = dtx_layout::save(&dtx_layout::default_path(), &file) {
             warn!("layout save on exit failed: {e}");
         }
         if let Err(e) = dtx_config::save(&dtx_config::default_path(), &draft.0) {
             warn!("config save on exit failed: {e}");
-        }
-        if let Err(e) =
-            dtx_config::save_bindings(&dtx_config::default_bindings_path(), &live_bindings.0)
-        {
-            warn!("bindings save on exit failed: {e}");
         }
         perf_draft.sync_from_editor(&draft.0, show_perf_info.0);
         autoplay.0 = prev.0;
@@ -175,6 +189,207 @@ fn close_editor_on_exit(
     // Covers non-Esc exits (song ended, forced transition): a stale session
     // flag would make the next Performance force-open the editor.
     session.0 = false;
+}
+
+/// Mirror the transitional edit surfaces into the profile session so dirty
+/// tracking sees every edit: LiveBindings splits into the keyboard/MIDI
+/// draft values; the lane draft copies over wholesale.
+fn sync_drafts_to_session(
+    live: Res<crate::bindings::LiveBindings>,
+    lane_draft: Res<profile_state::LaneProfileDraft>,
+    mut session: ResMut<profile_state::CustomizeSession>,
+) {
+    if live.is_changed() {
+        let (keyboard, midi) = dtx_config::profiles::split_bindings(&live.0);
+        if session.0.keyboard.value != keyboard {
+            session.0.keyboard.value = keyboard;
+        }
+        if session.0.midi.value != midi {
+            session.0.midi.value = midi;
+        }
+    }
+    if lane_draft.is_changed() && session.0.lanes != lane_draft.0 {
+        session.0.lanes = lane_draft.0.clone();
+    }
+}
+
+/// Write one dirty profile kind to its registry: load the canonical file,
+/// apply Save (or an auto-named Save As when a built-in is selected), and
+/// persist atomically. Returns success per kind for the close guard.
+fn save_dirty_kind(
+    kind: profile_state::ProfileKind,
+    session: &profile_state::ProfileSession,
+) -> bool {
+    use dtx_config::profiles as cfg;
+    use dtx_persistence::suggest_copy_name;
+    use profile_state::ProfileKind;
+
+    fn commit<T: Clone + PartialEq>(
+        registry_startup: cfg::RegistryStartup<cfg::ProfileRegistry<T>>,
+        builtins: &std::collections::BTreeMap<String, T>,
+        selected: &str,
+        value: T,
+        save: impl FnOnce(&cfg::ProfileRegistry<T>) -> Result<(), cfg::RegistryIoError>,
+    ) -> bool {
+        let registry = match registry_startup {
+            cfg::RegistryStartup::Ready(r)
+            | cfg::RegistryStartup::LegacySession { registry: r, .. } => r,
+            cfg::RegistryStartup::ReadOnlyBuiltins(error) => {
+                warn!("profile save skipped, registry unusable: {error}");
+                return false;
+            }
+        };
+        let action = if builtins.contains_key(selected) {
+            let names: Vec<&str> = builtins
+                .keys()
+                .map(String::as_str)
+                .chain(registry.profiles.keys().map(String::as_str))
+                .collect();
+            let name = suggest_copy_name(selected, names.iter().copied());
+            cfg::RegistryAction::SaveAs {
+                name: match dtx_persistence::validate_profile_name(
+                    &name,
+                    builtins.keys().map(String::as_str),
+                    registry.profiles.keys().map(String::as_str),
+                    None,
+                ) {
+                    Ok(name) => name,
+                    Err(error) => {
+                        warn!("profile save-as name invalid: {error}");
+                        return false;
+                    }
+                },
+                value,
+            }
+        } else {
+            cfg::RegistryAction::Save(value)
+        };
+        let next = match cfg::reduce_registry(&registry, builtins, action) {
+            Ok(next) => next,
+            Err(error) => {
+                warn!("profile save rejected: {error}");
+                return false;
+            }
+        };
+        match save(&next) {
+            Ok(()) => true,
+            Err(error) => {
+                warn!("profile save failed: {error}");
+                false
+            }
+        }
+    }
+
+    let legacy = dtx_config::default_bindings_path();
+    match kind {
+        ProfileKind::Keyboard => commit(
+            cfg::load_keyboard_registry(&crate::bindings::keyboard_registry_path(), &legacy),
+            &cfg::keyboard_builtins(),
+            &session.keyboard.selected,
+            session.keyboard.value.clone(),
+            |next| cfg::save_keyboard_registry(&crate::bindings::keyboard_registry_path(), next),
+        ),
+        ProfileKind::Midi => commit(
+            cfg::load_midi_registry(&crate::bindings::midi_registry_path(), &legacy),
+            &cfg::midi_builtins(),
+            &session.midi.selected,
+            session.midi.value.clone(),
+            |next| cfg::save_midi_registry(&crate::bindings::midi_registry_path(), next),
+        ),
+        ProfileKind::Lanes => {
+            use dtx_layout::profiles as lp;
+            let path = crate::lanes::lane_registry_path();
+            let layout = dtx_layout::default_path();
+            let mut registry = match lp::load_lane_registry(&path, &layout) {
+                lp::LaneRegistryStartup::Ready(r)
+                | lp::LaneRegistryStartup::LegacySession { registry: r, .. } => r,
+                lp::LaneRegistryStartup::ReadOnlyBuiltins(error) => {
+                    warn!("lane profile save skipped, registry unusable: {error}");
+                    return false;
+                }
+            };
+            let builtins = lp::lane_builtins();
+            let name = if builtins.contains_key(&session.lanes.selected) {
+                let names: Vec<&str> = builtins
+                    .keys()
+                    .map(String::as_str)
+                    .chain(registry.profiles.keys().map(String::as_str))
+                    .collect();
+                suggest_copy_name(&session.lanes.selected, names.iter().copied())
+            } else {
+                session.lanes.selected.clone()
+            };
+            registry
+                .profiles
+                .insert(name.clone(), session.lanes.value.clone());
+            registry.active = name;
+            match lp::save_lane_registry(&path, &registry) {
+                Ok(()) => true,
+                Err(error) => {
+                    warn!("lane profile save failed: {error}");
+                    false
+                }
+            }
+        }
+    }
+}
+
+/// Resolve the dirty-close guard: Enter saves everything, Escape cancels;
+/// Discard requires an explicit dialog action (handled by dialog UI). Close
+/// finalizes only after a discard or once every dirty save succeeded.
+fn resolve_pending_close(
+    keys: Res<ButtonInput<KeyCode>>,
+    mut pending: ResMut<profile_state::PendingCloseState>,
+    mut session: ResMut<profile_state::CustomizeSession>,
+    mut open: ResMut<EditorOpen>,
+    prev: Res<PrevAutoplay>,
+    mut autoplay: ResMut<crate::autoplay::AutoplayEnabled>,
+    mut editor_session: ResMut<game_shell::EditorSession>,
+    mut requests: MessageWriter<game_shell::TransitionRequest>,
+) {
+    // Skip the frame the guard was armed (or updated): the Esc/Enter press
+    // that raised it must not immediately resolve it.
+    if pending.is_changed() {
+        return;
+    }
+    let profile_state::PendingCloseState::Pending(close) = pending.clone() else {
+        return;
+    };
+    let Some(decision) = profile_state::close_decision_for_key(
+        keys.just_pressed(KeyCode::Enter),
+        keys.just_pressed(KeyCode::Escape),
+    ) else {
+        return;
+    };
+    let save_results: Vec<_> = if decision == profile_state::CloseDecision::SaveAll {
+        close
+            .dirty
+            .iter()
+            .map(|kind| (*kind, save_dirty_kind(*kind, &session.0)))
+            .collect()
+    } else {
+        Vec::new()
+    };
+    match profile_state::reduce_close_decision(&close, decision, &mut session.0, &save_results) {
+        profile_state::CloseOutcome::Cancelled => {
+            *pending = profile_state::PendingCloseState::None;
+        }
+        profile_state::CloseOutcome::Close(_) => {
+            *pending = profile_state::PendingCloseState::None;
+            open.0 = false;
+            autoplay.0 = prev.0;
+            if editor_session.0 {
+                editor_session.0 = false;
+                game_shell::request_transition(&mut requests, game_shell::AppState::Title);
+            }
+        }
+        profile_state::CloseOutcome::StayOpen { failed } => {
+            *pending = profile_state::PendingCloseState::Pending(profile_state::PendingClose {
+                intent: close.intent,
+                dirty: failed,
+            });
+        }
+    }
 }
 
 fn clear_canvas_interaction_outside_widgets(

@@ -30,7 +30,7 @@ pub enum NavLevel {
 
 /// Tabs whose CONTENT pads cannot navigate (pointer / capture surfaces).
 pub fn pad_excluded(tab: CustomizeTab) -> bool {
-    matches!(tab, CustomizeTab::Bindings | CustomizeTab::Widgets)
+    matches!(tab, CustomizeTab::Controls | CustomizeTab::Widgets)
 }
 
 /// Can pads descend from the tab bar into this tab's rows?
@@ -222,9 +222,10 @@ fn settings_nav_consumer(
                             }
                         }
                         verb => {
-                            if let (Some(delta), Some(item)) =
-                                (adjust_delta(verb, NavSource::Keyboard), items.get(focused.0))
-                            {
+                            if let (Some(delta), Some(item)) = (
+                                adjust_delta(verb, NavSource::Keyboard),
+                                items.get(focused.0),
+                            ) {
                                 for _ in 0..reps {
                                     (item.adjust)(&mut draft.0, delta);
                                 }
@@ -340,7 +341,7 @@ mod tests {
 
     #[test]
     fn pad_cannot_enter_excluded_or_non_settings_tabs() {
-        assert!(!pad_can_enter(CustomizeTab::Bindings));
+        assert!(!pad_can_enter(CustomizeTab::Controls));
         assert!(!pad_can_enter(CustomizeTab::Widgets));
         assert!(!pad_can_enter(CustomizeTab::Lanes));
         assert!(pad_can_enter(CustomizeTab::Gameplay));
@@ -488,7 +489,14 @@ mod tests {
         let mut at_rail = false;
         let mut f = scroll;
         let mut c = scroll;
-        apply_keyboard(&mut active, &mut f, &mut at_rail, &mut fine, NavVerb::Inc, false);
+        apply_keyboard(
+            &mut active,
+            &mut f,
+            &mut at_rail,
+            &mut fine,
+            NavVerb::Inc,
+            false,
+        );
         apply_keyboard(
             &mut active,
             &mut c,

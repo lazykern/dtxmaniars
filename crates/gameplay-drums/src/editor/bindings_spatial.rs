@@ -161,7 +161,7 @@ fn sync_bind_overlay(
     >,
 ) {
     let peeking = state.peeking;
-    let on_bindings = state.tab == game_shell::CustomizeTab::Bindings;
+    let on_bindings = state.tab == game_shell::CustomizeTab::Controls;
     // Resolve the selected channel's column (None → nothing to draw).
     let col = if on_bindings && !peeking {
         selected.0.and_then(|ch| lanes.col_of(ch).map(|c| (ch, c)))

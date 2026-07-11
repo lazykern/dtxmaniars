@@ -23,6 +23,7 @@ dtx-core = { workspace = true }
 dtx-config = { workspace = true }
 dtx-input = { workspace = true }
 dtx-layout = { path = "../dtx-layout" }
+dtx-persistence = { workspace = true }
 dtx-scoring = { workspace = true }
 dtx-timing = { workspace = true }
 dtx-audio = { workspace = true }

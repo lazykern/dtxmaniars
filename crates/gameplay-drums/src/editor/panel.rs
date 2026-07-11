@@ -65,9 +65,6 @@ pub struct ChipSplitBtn(pub dtx_core::EChannel);
 #[derive(Component, Debug, Clone, Copy)]
 pub struct LaneWidthSlider(pub usize);
 
-#[derive(Component, Debug, Clone, Copy)]
-pub struct PresetCycleBtn(pub i32);
-
 #[derive(Component)]
 pub struct PresetLabel;
 
@@ -165,8 +162,17 @@ pub fn plugin(app: &mut App) {
                 handle_anchor_auto_cell,
                 handle_reset,
                 refresh_panel_values,
-                handle_lane_buttons,
-                apply_lane_width_sliders,
+                // Chained: manual edits land in Lanes first, then mirror into
+                // the draft, and only then may the draft repaint the preview —
+                // unordered execution could overwrite a same-frame edit with a
+                // stale draft arrangement.
+                (
+                    handle_lane_buttons,
+                    apply_lane_width_sliders,
+                    mirror_lane_edits_to_draft,
+                    apply_lane_draft_preview,
+                )
+                    .chain(),
                 refresh_lane_panel_values,
                 handle_settings_adjust,
                 apply_settings_sliders,
@@ -263,9 +269,9 @@ fn rebuild_left_content(
         });
     }
 
-    // The Bindings tab is a settings-group tab (Offset preset) but renders its
-    // own block, so branch on it BEFORE the generic settings-rows path.
-    if active.0 == game_shell::CustomizeTab::Bindings {
+    // The Controls tab renders its own block, so branch on it BEFORE the
+    // generic settings-rows path.
+    if active.0 == game_shell::CustomizeTab::Controls {
         super::bindings_panel::spawn_bindings_block(
             &mut commands,
             root,
@@ -533,7 +539,8 @@ fn spawn_lane_block(p: &mut ChildSpawnerCommands, t: &dtx_ui::theme::Theme, lane
         TextColor(t.text_primary),
     ));
 
-    // Preset row: < name >
+    // Profile row: the lane profile draft's name (built-in cycling is gone —
+    // profile selection owns built-ins now).
     p.spawn(Node {
         flex_direction: FlexDirection::Row,
         align_items: AlignItems::Center,
@@ -541,20 +548,6 @@ fn spawn_lane_block(p: &mut ChildSpawnerCommands, t: &dtx_ui::theme::Theme, lane
         ..default()
     })
     .with_children(|r| {
-        r.spawn((
-            PresetCycleBtn(-1),
-            Button,
-            Node {
-                padding: UiRect::axes(Val::Px(6.0), Val::Px(1.0)),
-                ..default()
-            },
-            BackgroundColor(Color::srgb(0.14, 0.14, 0.18)),
-            children![(
-                Text::new("<"),
-                dtx_ui::theme::Theme::font(12.0),
-                TextColor(t.text_primary)
-            )],
-        ));
         r.spawn((
             PresetLabel,
             Text::new(preset_name(lanes.0.preset).to_string()),
@@ -564,20 +557,6 @@ fn spawn_lane_block(p: &mut ChildSpawnerCommands, t: &dtx_ui::theme::Theme, lane
                 min_width: Val::Px(70.0),
                 ..default()
             },
-        ));
-        r.spawn((
-            PresetCycleBtn(1),
-            Button,
-            Node {
-                padding: UiRect::axes(Val::Px(6.0), Val::Px(1.0)),
-                ..default()
-            },
-            BackgroundColor(Color::srgb(0.14, 0.14, 0.18)),
-            children![(
-                Text::new(">"),
-                dtx_ui::theme::Theme::font(12.0),
-                TextColor(t.text_primary)
-            )],
         ));
     });
 
@@ -1256,19 +1235,10 @@ fn refresh_panel_values(
     }
 }
 
-/// Preset cycle order for the < > buttons (named presets only; any manual
-/// edit lands on Custom via the transforms).
-const PRESET_ORDER: [dtx_layout::LanePreset; 3] = [
-    dtx_layout::LanePreset::Classic,
-    dtx_layout::LanePreset::NxTypeB,
-    dtx_layout::LanePreset::NxTypeD,
-];
-
 fn handle_lane_buttons(
     reorders: Query<(&LaneReorderBtn, &Interaction), Changed<Interaction>>,
     merges: Query<(&LaneMergeBtn, &Interaction), Changed<Interaction>>,
     splits: Query<(&ChipSplitBtn, &Interaction), Changed<Interaction>>,
-    presets: Query<(&PresetCycleBtn, &Interaction), Changed<Interaction>>,
     mut lanes: ResMut<Lanes>,
     layouts: Res<WidgetLayouts>,
     mut undo: ResMut<super::undo::UndoStack>,
@@ -1294,24 +1264,6 @@ fn handle_lane_buttons(
             mutate = Some(Box::new(move |arr| dtx_layout::split_channel(arr, ch)));
         }
     }
-    for (btn, i) in &presets {
-        if *i == Interaction::Pressed {
-            let dir = btn.0;
-            mutate = Some(Box::new(move |arr| {
-                let cur = PRESET_ORDER.iter().position(|p| *p == arr.preset);
-                let next = match cur {
-                    Some(idx) => {
-                        let n = PRESET_ORDER.len() as i32;
-                        PRESET_ORDER[((idx as i32 + dir).rem_euclid(n)) as usize]
-                    }
-                    // From Custom: either direction lands on Classic.
-                    None => dtx_layout::LanePreset::Classic,
-                };
-                *arr = dtx_layout::arrangement_for(next);
-                true
-            }));
-        }
-    }
     if let Some(f) = mutate {
         // Snapshot BEFORE mutating; drop the snapshot if the op was a no-op.
         let before = super::undo::Snapshot {
@@ -1321,6 +1273,37 @@ fn handle_lane_buttons(
         if f(&mut lanes.0) {
             undo.push_snapshot(before);
         }
+    }
+}
+
+/// Manual lane edits (buttons, sliders, undo) flow into the lane profile
+/// draft: the arrangement changes but the selected profile name is kept, so
+/// a user profile stays itself while edited instead of becoming a generic
+/// Custom. Equality-guarded against the preview mirror to terminate.
+pub fn mirror_lane_edits_to_draft(
+    lanes: Res<Lanes>,
+    mut draft: ResMut<super::profile_state::LaneProfileDraft>,
+) {
+    if !lanes.is_changed() {
+        return;
+    }
+    if draft.0.value.arrangement != lanes.0 {
+        draft.0.value.arrangement = lanes.0.clone();
+    }
+}
+
+/// Draft arrangement → live playfield preview (`Lanes`). Selecting or
+/// reverting a profile updates the draft, and the playfield follows without
+/// touching the committed registry. Equality-guarded like the mirror above.
+pub fn apply_lane_draft_preview(
+    draft: Res<super::profile_state::LaneProfileDraft>,
+    mut lanes: ResMut<Lanes>,
+) {
+    if !draft.is_changed() {
+        return;
+    }
+    if lanes.0 != draft.0.value.arrangement {
+        lanes.0 = draft.0.value.arrangement.clone();
     }
 }
 

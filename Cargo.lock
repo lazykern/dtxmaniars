@@ -2737,6 +2737,7 @@ name = "dtx-layout"
 version = "0.0.0"
 dependencies = [
  "dtx-core",
+ "dtx-persistence",
  "serde",
  "thiserror 1.0.69",
  "toml",
@@ -3156,6 +3157,7 @@ dependencies = [
  "dtx-core",
  "dtx-input",
  "dtx-layout",
+ "dtx-persistence",
  "dtx-scoring",
  "dtx-timing",
  "dtx-ui",

@@ -6,6 +6,13 @@
 use bevy::prelude::*;
 use dtx_core::EChannel;
 
+/// `$XDG_CONFIG_HOME/dtxmaniars/lane-profiles.toml` (next to layout.toml).
+pub fn lane_registry_path() -> std::path::PathBuf {
+    let mut p = dtx_layout::default_path();
+    p.set_file_name("lane-profiles.toml");
+    p
+}
+
 /// Display lane arrangement. Default = classic (legacy NX Type-A geometry).
 #[derive(Resource, Debug, Clone, PartialEq)]
 pub struct Lanes(pub dtx_layout::LaneArrangement);

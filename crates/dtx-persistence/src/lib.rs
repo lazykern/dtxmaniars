@@ -15,7 +15,7 @@ impl ProfileName {
     }
 }
 
-#[derive(Debug, Error, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Error, PartialEq, Eq)]
 pub enum ProfileNameError {
     #[error("profile name is blank")]
     Blank,
