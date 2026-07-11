@@ -67,3 +67,107 @@ pub fn import_archive(archive: &Path, song_root: &Path) -> Result<ImportOutcome,
     let _ = song_root;
     todo!("extraction lands in later tasks")
 }
+
+/// Decode an archive entry name: UTF-8 if valid, else Shift-JIS
+/// (Japanese chart packs commonly use it).
+fn decode_name(raw: &[u8]) -> String {
+    match std::str::from_utf8(raw) {
+        Ok(s) => s.to_owned(),
+        Err(_) => {
+            let (s, _, _) = encoding_rs::SHIFT_JIS.decode(raw);
+            s.into_owned()
+        }
+    }
+}
+
+/// Turn an untrusted entry name into a safe path relative to the extract dir.
+/// zip-slip guard: `..` and drive prefixes are hard errors; absolute paths are
+/// made relative. `Ok(None)` = nothing to write (pure directory marker).
+fn sanitize(name: &str) -> Result<Option<PathBuf>, ImportError> {
+    let name = name.replace('\\', "/");
+    let mut out = PathBuf::new();
+    for part in name.split('/') {
+        match part {
+            "" | "." => continue,
+            ".." => return Err(ImportError::UnsafePath),
+            p if p.contains(':') => return Err(ImportError::UnsafePath),
+            p => out.push(p),
+        }
+    }
+    if out.as_os_str().is_empty() {
+        Ok(None)
+    } else {
+        Ok(Some(out))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn sanitize_plain_path() {
+        assert_eq!(
+            sanitize("Song A/bsc.dtx").unwrap(),
+            Some(PathBuf::from("Song A/bsc.dtx"))
+        );
+    }
+
+    #[test]
+    fn sanitize_normalizes_backslashes() {
+        // Some Windows zippers write backslash separators.
+        assert_eq!(
+            sanitize(r"Song A\bsc.dtx").unwrap(),
+            Some(PathBuf::from("Song A/bsc.dtx"))
+        );
+    }
+
+    #[test]
+    fn sanitize_rejects_parent_traversal() {
+        assert!(matches!(
+            sanitize("../evil.dtx"),
+            Err(ImportError::UnsafePath)
+        ));
+        assert!(matches!(
+            sanitize("a/../../evil"),
+            Err(ImportError::UnsafePath)
+        ));
+    }
+
+    #[test]
+    fn sanitize_rejects_drive_prefix() {
+        assert!(matches!(
+            sanitize("C:/evil.dtx"),
+            Err(ImportError::UnsafePath)
+        ));
+    }
+
+    #[test]
+    fn sanitize_defuses_absolute_path() {
+        // Leading slash is stripped; result stays relative to dest.
+        assert_eq!(
+            sanitize("/etc/passwd").unwrap(),
+            Some(PathBuf::from("etc/passwd"))
+        );
+    }
+
+    #[test]
+    fn sanitize_skips_empty_names() {
+        // Pure directory markers like "dir/" leave nothing after the split.
+        assert_eq!(sanitize("").unwrap(), None);
+        assert_eq!(sanitize("/").unwrap(), None);
+    }
+
+    #[test]
+    fn decode_name_utf8_passthrough() {
+        assert_eq!(decode_name("曲/bsc.dtx".as_bytes()), "曲/bsc.dtx");
+    }
+
+    #[test]
+    fn decode_name_shift_jis_fallback() {
+        // "テスト" in Shift-JIS (invalid as UTF-8).
+        let mut raw = b"\x83\x65\x83\x58\x83\x67".to_vec();
+        raw.extend_from_slice(b"/test.dtx");
+        assert_eq!(decode_name(&raw), "テスト/test.dtx");
+    }
+}
