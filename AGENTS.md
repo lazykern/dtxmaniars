@@ -8,9 +8,11 @@
 ```sh
 cargo check -p dtx-core
 cargo test -p dtx-core
-cargo run -p dtx-cli -- validate tests/fixtures/dtx-core/minimal.dtx
+cargo run -p dtx-cli -- validate crates/dtx-core/tests/fixtures/minimal.dtx
 cargo run -p dtxmaniars-desktop --features bevy/dynamic_linking
 ```
+
+The `dtx-cli` package builds a binary named `dtx`.
 
 Bevy 0.19 requires Rust 1.95+. CI on `stable`. `dynamic_linking` is dev-only;
 release builds must omit it.
@@ -46,7 +48,7 @@ debugger information is needed.
 
 ## Before writing any implementation code (mandatory)
 
-**Read the relevant reference files first.** See `docs/decisions/0008-reference-first-workflow.md`.
+**Read the relevant reference files first.** See `docs/decisions/README.md`.
 
 1. Read `crates/<your-crate>/AGENTS.md` — it lists the specific reference files for your crate.
 2. Read those files (`ctx_execute_file` for excerpts, `ctx_index` for whole small files).
@@ -63,7 +65,7 @@ EChannel mapping, chart parsing, scroll logic, default input bindings must match
 pixel layouts, GitaDora transitions, or static HUD when ADR-0014 specifies otherwise.
 
 - Mechanics source of truth: `references/DTXmaniaNX-BocuD/`
-- UX/UI source of truth: `docs/UX_UI_DESIGN.md` + ADR-0014
+- UX/UI source of truth: ADR-0014
 - Screen transitions: 300ms OutQuint fades (not GitaDora, not 1500ms snapshot)
 - Exception: correctness fixes for crashes/data corruption are always OK
 
@@ -77,9 +79,7 @@ Tool order:
 
 | Need | File |
 |---|---|
-| What are we building? Phase status | `docs/ROADMAP.md` |
-| Crate map, layer rules, data flow | `docs/ARCHITECTURE.md` |
-| Project-specific Bevy patterns | `docs/BEVY_PATTERNS.md` |
+| What are we building? Phase status | `docs/superpowers/specs/2026-07-11-game-improvement-roadmap-design.md` |
 | Why we chose X over Y | `docs/decisions/` |
 | Scratch / session logs / research | `docs/notes/` |
 | Per-crate scope, tests, ref files | `crates/<name>/AGENTS.md` |
@@ -88,15 +88,15 @@ Tool order:
 ## Crate layers (no violations)
 
 ```
-Pure    (no bevy)         dtx-core, dtx-scoring, dtx-config
-Engine  (bevy allowed)    dtx-timing, dtx-audio, dtx-input, dtx-assets, dtx-library
+Pure    (no bevy)         dtx-core, dtx-scoring, dtx-config, dtx-layout, xtask
+Engine  (bevy allowed)    dtx-timing, dtx-audio, dtx-input, dtx-assets, dtx-library, dtx-bga, gameplay-guitar
 Game    (bevy + plugins)  dtx-ui, gameplay-drums, game-shell, game-menu, game-results, dev-tools
 Bin     (main only)       app/dtxmaniars-desktop, tools/dtx-cli
 ```
 
 A Pure crate **must not** depend on any Engine or Game crate. Engine crates may depend on Pure. Game crates may depend on Pure + Engine.
 
-## Bevy conventions (see `docs/BEVY_PATTERNS.md` for details)
+## Bevy conventions
 
 - One plugin fn per file: `pub(super) fn plugin(app: &mut App)`
 - Screens as States; use `StateScoped(Screen::X)` for cleanup (bevy 0.14+)
@@ -145,7 +145,7 @@ A Pure crate **must not** depend on any Engine or Game crate. Engine crates may 
 ## Continuing work in a new session
 
 1. Read this `AGENTS.md` first.
-2. Read `docs/ROADMAP.md` for current milestone status.
+2. Read `docs/superpowers/specs/2026-07-11-game-improvement-roadmap-design.md` for current milestone status.
 3. Read `docs/decisions/` for accepted constraints.
 4. Read the `AGENTS.md` of the crate you'll touch.
 5. (Re)index reference files via `ctx_index` (cheap, pays back fast).
