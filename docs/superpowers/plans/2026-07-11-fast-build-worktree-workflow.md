@@ -2,9 +2,9 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Make concurrent Bevy worktree builds independent, cache dependency compilation across worktrees, shrink test artifacts, and document a fast verification workflow.
+**Goal:** Reuse Bevy artifacts across worktrees, shrink test artifacts, and document a fast verification workflow that serializes only heavy Cargo jobs.
 
-**Architecture:** Each worktree uses its default local `target/` for independent Cargo locks and incremental workspace builds. A user-local sccache installation shares cacheable dependency outputs across checkout paths. Repo profiles reduce debug-data generation; `AGENTS.md` defines package-scoped commands and dev-only Bevy dynamic linking.
+**Architecture:** Worktrees retain the existing shared Cargo target because measured isolated targets require 30+ GiB cold builds per Bevy worktree. A user-local sccache installation provides secondary reuse across cleans and compatible variants. Repo profiles reduce debug-data generation; `AGENTS.md` defines package-scoped commands, serialized heavy gates, and dev-only Bevy dynamic linking.
 
 **Tech Stack:** Cargo 1.96, Rust 1.96, Bevy 0.19, mold/BFD, sccache, cargo-nextest, git worktrees.
 
@@ -122,12 +122,12 @@ State that package tests should replace the full workspace test when the known f
 Document:
 
 ```text
-- Each worktree uses its own target/ directory; never point concurrent worktrees at one target directory.
-- sccache shares cacheable compilation across worktrees; local incremental caches remain per worktree.
+- Worktrees share the configured target directory to avoid repeated 30+ GiB Bevy cold builds.
+- Parallelize editing and small package checks; serialize Bevy-heavy and workspace-wide Cargo commands.
+- sccache provides secondary reuse across cleans and compatible variants.
 - SCCACHE_BASEDIRS must include the common absolute worktree parent.
 - Linker, rustflags, toolchain, profile, and feature changes invalidate artifacts.
-- Remove completed worktrees to reclaim their target directories.
-- Never delete active build caches without confirmation.
+- Never clean the shared target while Cargo is active or without confirmation.
 ```
 
 - [ ] **Step 3: Validate documentation commands and formatting**
@@ -155,7 +155,7 @@ git commit -m "docs: define fast worktree workflow"
 
 **Interfaces:**
 - Consumes: installed `sccache` executable and worktrees under `/home/lazykern/lab`.
-- Produces: per-worktree Cargo targets with shared normalized sccache keys.
+- Produces: retained shared Cargo artifacts plus normalized sccache keys.
 
 - [ ] **Step 1: Install sccache without changing repo manifests**
 
@@ -173,38 +173,35 @@ cargo install --locked sccache
 
 Expected: `sccache --version` exits 0.
 
-- [ ] **Step 2: Replace global shared target configuration**
+- [ ] **Step 2: Add sccache without removing shared target**
 
-Change `$HOME/.cargo/config.toml` from:
+Set `$HOME/.cargo/config.toml` to:
 
 ```toml
 [build]
 target-dir = "/home/lazykern/.cache/cargo-target"
+rustc-wrapper = "sccache"
 ```
 
-To:
+Set sccache path normalization in `$HOME/.config/sccache/config`:
 
 ```toml
-[build]
-rustc-wrapper = "sccache"
-
-[env]
-SCCACHE_BASEDIRS = { value = "/home/lazykern/lab", force = false }
+basedirs = ["/home/lazykern/lab"]
 ```
 
 Do not modify repo `.cargo/config.toml`; its current uncommitted mold choice remains user-owned.
 
-- [ ] **Step 3: Verify target isolation and sccache startup**
+- [ ] **Step 3: Verify shared target and sccache startup**
 
 Run from repo root:
 
 ```sh
 cargo metadata --no-deps --format-version 1
-sccache --start-server
+TMPDIR=/tmp sccache --start-server
 sccache --show-stats
 ```
 
-Expected: metadata reports `/home/lazykern/lab/dtxmaniars/target`; sccache reports a local cache without server errors.
+Expected: metadata reports `/home/lazykern/.cache/cargo-target`; sccache reports a local cache without server errors. Start persistent sccache from a host shell, not an ephemeral context-mode sandbox.
 
 - [ ] **Step 4: Warm smallest cache path**
 
@@ -223,7 +220,7 @@ Expected: check exits 0; stats show compile requests. A first run may have zero 
 - No file changes.
 
 **Interfaces:**
-- Consumes: repo profiles, documented commands, per-worktree target, sccache.
+- Consumes: repo profiles, documented commands, shared target, sccache.
 - Produces: build evidence and non-destructive disk report.
 
 - [ ] **Step 1: Check Bevy package with dynamic linking**

@@ -126,11 +126,12 @@ A Pure crate **must not** depend on any Engine or Game crate. Engine crates may 
 
 - **One agent per crate domain.** Two agents on the same crate = serialize.
 - Use `git worktree add ../dtxmaniars-<domain> -b feat/<domain>-<task>` for parallel work.
-- Each worktree uses its own `target/`; never share one target directory across concurrent worktrees.
-- Share cacheable compilation through `sccache`; set `SCCACHE_BASEDIRS` to the absolute common worktree parent.
-- Keep incremental compilation enabled for worktree-local crates.
+- Worktrees share the configured Cargo target directory; isolated Bevy targets cost tens of GiB and require cold rebuilds.
+- Parallelize editing and small package checks, but serialize Bevy-heavy builds/tests and workspace-wide gates.
+- Use `sccache` as secondary reuse across cleans/config variants; set `SCCACHE_BASEDIRS` to the absolute common worktree parent.
+- Keep incremental compilation enabled.
 - Linker, `rustflags`, toolchain, profile, or feature changes invalidate build artifacts.
-- Remove completed worktrees to reclaim their `target/`; never delete active caches without confirmation.
+- Never clean the shared target while another Cargo process is active or without confirmation.
 - Merge order: `dtx-core` → `dtx-timing` → `gameplay-drums` → `game-shell` → `game-menu`.
 
 ## When stuck

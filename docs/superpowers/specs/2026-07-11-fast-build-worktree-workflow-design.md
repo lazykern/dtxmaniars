@@ -2,7 +2,7 @@
 
 ## Goal
 
-Keep Bevy edit/build/test feedback fast while multiple git worktrees build concurrently. Reduce disk growth without weakening release verification.
+Keep Bevy edit/build/test feedback fast across git worktrees without multiplying cold builds or disk use. Reduce artifact growth without weakening release verification.
 
 ## Diagnosis
 
@@ -14,19 +14,19 @@ Keep Bevy edit/build/test feedback fast while multiple git worktrees build concu
 
 ## Design
 
-### Cache isolation
+### Cache strategy
 
-Use Cargo's default per-worktree `target/` directory. Do not set one global `build.target-dir` for concurrent worktrees.
+Keep the existing shared Cargo target directory. A measured isolated-target trial produced a 33 GiB target in one Bevy worktree and forced cold dependency builds; repeating that per active worktree costs more time and disk than shared-target lock contention.
 
-Use local `sccache` as the cross-worktree compilation cache. Configure `SCCACHE_BASEDIRS` with the common worktree parent so absolute checkout paths normalize. Keep Cargo incremental compilation enabled: edited workspace crates retain local incremental builds, while non-incremental dependencies can use sccache.
+Use local `sccache` as secondary reuse across cleans and compatible configuration variants. Configure `SCCACHE_BASEDIRS` with the common worktree parent so absolute checkout paths normalize. Keep Cargo incremental compilation enabled.
 
 ```text
-worktree A/target ─┐
-worktree B/target ─┼── local sccache
-worktree C/target ─┘
+worktree A ─┐
+worktree B ─┼── shared Cargo target ── sccache fallback
+worktree C ─┘
 ```
 
-Removing a completed worktree also removes its isolated build artifacts. Cache cleanup no longer depends on manually pruning one unbounded global target directory.
+Parallelize editing and small package checks. Serialize Bevy-heavy builds/tests and workspace-wide gates so concurrent jobs do not compete for the shared target, RAM, and linker. Shared-target cleanup remains explicit maintenance, never an automatic worktree-removal side effect.
 
 ### Build profiles
 
@@ -90,7 +90,7 @@ Update root `AGENTS.md` with:
 - package-scoped inner-loop commands;
 - dev-only dynamic-linking commands;
 - verification tiers;
-- per-worktree target and sccache policy;
+- shared-target, serialized-heavy-build, and sccache policy;
 - warning that linker/rustflag changes invalidate caches;
 - `CARGO_BUILD_JOBS=1` fallback for full workspace gates.
 
@@ -98,11 +98,10 @@ Update root `AGENTS.md` with:
 
 1. Add reduced-debug profile settings and debugger profile.
 2. Update `AGENTS.md`.
-3. Install/configure sccache locally.
-4. Remove global `build.target-dir` after active Cargo processes stop.
-5. Rebuild once in each active worktree as needed.
-6. After explicit confirmation, delete the old 140 GiB shared target and stale nested target directory.
-7. Benchmark mold versus committed BFD separately; preserve current uncommitted linker change until resolved.
+3. Install/configure sccache locally while retaining the shared `build.target-dir`.
+4. Serialize Bevy-heavy and workspace-wide Cargo commands across worktrees.
+5. After explicit confirmation, selectively remove obsolete large test artifacts and abandoned isolated targets; avoid a full clean unless a cold rebuild is acceptable.
+6. Benchmark mold versus committed BFD separately; preserve current uncommitted linker change until resolved.
 
 ## Non-goals
 
@@ -114,8 +113,9 @@ Update root `AGENTS.md` with:
 
 ## Success Criteria
 
-- Concurrent worktrees no longer contend for one Cargo build directory.
+- New worktrees reuse existing Bevy artifacts instead of performing 30+ GiB cold builds.
 - Bevy integration-test binaries and link time shrink through reduced debug info and optional dynamic linking.
-- New worktrees reuse dependency compilations through sccache.
+- Heavy Cargo commands are serialized; small package feedback remains scoped and fast.
+- sccache provides secondary reuse after compatible cache misses or cleanup.
 - Inner-loop commands target changed packages; full validation remains available before merge.
 - Release artifacts remain statically linked and independently runnable.
