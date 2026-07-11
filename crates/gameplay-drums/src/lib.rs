@@ -312,6 +312,8 @@ mod midi_consumer {
     //! `poll_midi` handles everything uniformly.
 
     use bevy::prelude::*;
+    #[cfg(feature = "midi")]
+    use bevy::time::common_conditions::on_real_timer;
     use dtx_input::midi::{MidiSource, VirtualSource};
 
     use super::events::LaneHit;
@@ -350,7 +352,10 @@ mod midi_consumer {
                 .add_systems(Startup, connect_midi)
                 .add_systems(
                     Update,
-                    connect_midi.run_if(resource_changed::<crate::bindings::LiveBindings>),
+                    connect_midi.run_if(
+                        resource_changed::<crate::bindings::LiveBindings>
+                            .or_else(on_real_timer(std::time::Duration::from_secs(1))),
+                    ),
                 )
                 .add_systems(
                     FixedUpdate,
@@ -362,8 +367,9 @@ mod midi_consumer {
     }
 
     /// Connect (or reconnect) the real MIDI source using the port filter from
-    /// `LiveBindings`. Runs at startup and whenever the bindings (hence the
-    /// selected port) change. Reconnect overwrites, dropping the old
+    /// `LiveBindings`. Runs at startup, whenever the selected port changes,
+    /// and once per second so devices plugged in after boot are discovered.
+    /// Reconnect overwrites, dropping the old
     /// connection. Non-send: runs on the main thread only.
     #[cfg(feature = "midi")]
     fn connect_midi(
