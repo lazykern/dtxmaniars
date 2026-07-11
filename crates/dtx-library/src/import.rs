@@ -61,11 +61,168 @@ fn detect_format(archive: &Path) -> Result<Format, ImportError> {
     }
 }
 
+static TEMP_COUNTER: AtomicUsize = AtomicUsize::new(0);
+
 /// Import a chart archive into `song_root`. See module docs for the flow.
 pub fn import_archive(archive: &Path, song_root: &Path) -> Result<ImportOutcome, ImportError> {
-    let _format = detect_format(archive)?;
-    let _ = song_root;
-    todo!("extraction lands in later tasks")
+    let format = detect_format(archive)?;
+    fs::create_dir_all(song_root)?;
+    clean_stale_temps(song_root);
+
+    let temp = song_root.join(format!(
+        ".import-{}-{}",
+        std::process::id(),
+        TEMP_COUNTER.fetch_add(1, Ordering::Relaxed)
+    ));
+    fs::create_dir_all(&temp)?;
+
+    let result = (|| {
+        match format {
+            Format::Zip => extract_zip(archive, &temp)?,
+            Format::SevenZ => extract_7z(archive, &temp)?,
+        }
+
+        let (content, wrapper_name) = collapse_wrappers(temp.clone())?;
+        let chart_count = count_dtx(&content)?;
+        if chart_count == 0 {
+            return Err(ImportError::NoCharts);
+        }
+
+        let dest_name = wrapper_name.unwrap_or_else(|| {
+            archive
+                .file_stem()
+                .map(|s| s.to_string_lossy().into_owned())
+                .unwrap_or_else(|| "imported".to_owned())
+        });
+        let dest = song_root.join(&dest_name);
+        if dest.exists() {
+            return Err(ImportError::AlreadyImported(dest_name));
+        }
+        fs::rename(&content, &dest)?;
+        Ok(ImportOutcome {
+            dest_name,
+            chart_count,
+        })
+    })();
+
+    // Content was renamed out on success; on failure this removes the
+    // partial extraction. Either way the temp dir must not survive.
+    let _ = fs::remove_dir_all(&temp);
+    result
+}
+
+/// Remove leftover temp dirs from crashed imports by OTHER processes.
+/// Our own live temps are excluded by pid so concurrent imports in this
+/// process don't delete each other's work.
+fn clean_stale_temps(song_root: &Path) {
+    let own_prefix = format!(".import-{}-", std::process::id());
+    let Ok(entries) = fs::read_dir(song_root) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let name = entry.file_name();
+        let name = name.to_string_lossy();
+        if name.starts_with(".import-") && !name.starts_with(&own_prefix) {
+            let _ = fs::remove_dir_all(entry.path());
+        }
+    }
+}
+
+fn extract_zip(archive: &Path, dest: &Path) -> Result<(), ImportError> {
+    let file = fs::File::open(archive)?;
+    let mut zip = zip::ZipArchive::new(file).map_err(io::Error::other)?;
+    for i in 0..zip.len() {
+        let mut entry = zip.by_index(i).map_err(io::Error::other)?;
+        let name = decode_name(entry.name_raw());
+        let Some(rel) = sanitize(&name)? else {
+            continue;
+        };
+        let out = dest.join(rel);
+        if entry.is_dir() {
+            fs::create_dir_all(&out)?;
+        } else {
+            if let Some(parent) = out.parent() {
+                fs::create_dir_all(parent)?;
+            }
+            let mut f = fs::File::create(&out)?;
+            io::copy(&mut entry, &mut f)?;
+        }
+    }
+    Ok(())
+}
+
+fn extract_7z(archive: &Path, dest: &Path) -> Result<(), ImportError> {
+    let mut reader = sevenz_rust2::ArchiveReader::open(archive, sevenz_rust2::Password::empty())
+        .map_err(io::Error::other)?;
+    // The closure can only return the crate's error type, so ImportError
+    // is smuggled out through this slot and iteration stopped early.
+    let mut failed: Option<ImportError> = None;
+    reader
+        .for_each_entries(|entry, r| {
+            let rel = match sanitize(entry.name()) {
+                Ok(Some(rel)) => rel,
+                Ok(None) => return Ok(true),
+                Err(e) => {
+                    failed = Some(e);
+                    return Ok(false);
+                }
+            };
+            let out = dest.join(rel);
+            let io_result = (|| -> io::Result<()> {
+                if entry.is_directory() {
+                    fs::create_dir_all(&out)?;
+                } else {
+                    if let Some(parent) = out.parent() {
+                        fs::create_dir_all(parent)?;
+                    }
+                    let mut f = fs::File::create(&out)?;
+                    io::copy(r, &mut f)?;
+                }
+                Ok(())
+            })();
+            if let Err(e) = io_result {
+                failed = Some(ImportError::Io(e));
+                return Ok(false);
+            }
+            Ok(true)
+        })
+        .map_err(io::Error::other)?;
+    match failed {
+        Some(e) => Err(e),
+        None => Ok(()),
+    }
+}
+
+/// Descend through redundant single-directory wrappers.
+/// Returns the innermost content dir and the name of the last wrapper
+/// entered (None if the archive root already held loose content).
+fn collapse_wrappers(mut dir: PathBuf) -> io::Result<(PathBuf, Option<String>)> {
+    let mut wrapper_name = None;
+    loop {
+        let entries: Vec<_> = fs::read_dir(&dir)?.flatten().collect();
+        if entries.len() == 1 && entries[0].path().is_dir() {
+            wrapper_name = Some(entries[0].file_name().to_string_lossy().into_owned());
+            dir = entries[0].path();
+        } else {
+            return Ok((dir, wrapper_name));
+        }
+    }
+}
+
+/// Count `.dtx` files recursively. Same extension rule as the scanner's
+/// `walk_dtx` (lowercase, case-sensitive) so the count matches what a
+/// rescan will actually pick up.
+fn count_dtx(dir: &Path) -> io::Result<usize> {
+    let mut n = 0;
+    for entry in fs::read_dir(dir)?.flatten() {
+        let path = entry.path();
+        if path.is_dir() {
+            n += count_dtx(&path)?;
+        } else if path.extension().and_then(|e| e.to_str()) == Some("dtx") {
+            n += 1;
+        }
+    }
+    Ok(n)
 }
 
 /// Decode an archive entry name: UTF-8 if valid, else Shift-JIS
