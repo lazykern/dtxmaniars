@@ -21,6 +21,7 @@ pub mod drag;
 pub mod footer;
 pub mod hotkeys;
 pub mod keyboard_nav;
+pub mod lanes_panel;
 pub mod panel;
 pub mod panel_kit;
 pub mod picking;
@@ -141,6 +142,7 @@ pub fn plugin(app: &mut App) {
                 close_dialog::plugin,
                 profile_bar_ui::plugin,
                 profile_dialog_ui::plugin,
+                lanes_panel::plugin,
             ),
             hotkeys::plugin,
             keyboard_nav::plugin,
