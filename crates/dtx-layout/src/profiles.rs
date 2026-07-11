@@ -224,7 +224,12 @@ pub fn load_lane_registry(path: &Path, legacy_layout: &Path) -> LaneRegistryStar
             Ok(registry) => LaneRegistryStartup::Ready(registry),
             Err(error) => LaneRegistryStartup::ReadOnlyBuiltins(error),
         },
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+        Err(error)
+            if matches!(
+                error.kind(),
+                std::io::ErrorKind::NotFound | std::io::ErrorKind::NotADirectory
+            ) =>
+        {
             match std::fs::read_to_string(legacy_layout) {
                 Ok(raw) => match parse_checked(&raw)
                     .map_err(|source| LaneRegistryLoadError::Parse {
@@ -312,7 +317,13 @@ pub fn backup_and_reset_lane_registry(
             .and_then(|name| name.to_str())
             .unwrap_or("lane-profiles.toml");
         let backup = path.with_file_name(format!("{file_name}.backup-{stamp}"));
-        std::fs::rename(path, &backup).map_err(|source| LaneRegistryError::Backup {
+        // hard_link fails atomically with AlreadyExists, so a concurrently
+        // created backup can never be overwritten.
+        std::fs::hard_link(path, &backup).map_err(|source| LaneRegistryError::Backup {
+            path: path.to_path_buf(),
+            source,
+        })?;
+        std::fs::remove_file(path).map_err(|source| LaneRegistryError::Backup {
             path: path.to_path_buf(),
             source,
         })?;
@@ -409,7 +420,7 @@ mod tests {
     }
 
     #[test]
-    fn registry_takes_precedence_over_compatibility_snapshot() {
+    fn lane_registry_takes_precedence_over_compatibility_snapshot() {
         let dir = root("authority");
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).expect("dir");
@@ -431,6 +442,148 @@ mod tests {
         std::fs::write(&layout, toml::to_string_pretty(&file).expect("layout")).expect("write");
         let (_, startup) = load_layout_with_lane_authority(&layout, &registry_path).expect("load");
         assert!(matches!(startup, LaneRegistryStartup::Ready(value) if value.active == "Desk"));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn malformed_legacy_layout_blocks_migration() {
+        let dir = root("malformed-legacy");
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).expect("dir");
+        let layout = dir.join("layout.toml");
+        let registry = dir.join("lane-profiles.toml");
+        std::fs::write(&layout, "not = [valid").expect("write");
+        let startup = load_lane_registry(&registry, &layout);
+        assert!(matches!(
+            startup,
+            LaneRegistryStartup::ReadOnlyBuiltins(LaneRegistryLoadError::Parse { .. })
+        ));
+        assert!(!registry.exists());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn lane_migration_does_not_rewrite_layout_scene() {
+        let dir = root("scene-preserved");
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).expect("dir");
+        let layout = dir.join("layout.toml");
+        let registry = dir.join("lane-profiles.toml");
+        let file = LayoutFile {
+            lanes: LanesSection {
+                preset: LanePreset::NxTypeB,
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        let raw = toml::to_string_pretty(&file).expect("layout");
+        std::fs::write(&layout, &raw).expect("write");
+        let startup = load_lane_registry(&registry, &layout);
+        assert!(matches!(startup, LaneRegistryStartup::Ready(_)));
+        assert!(registry.exists());
+        assert_eq!(
+            std::fs::read_to_string(&layout).expect("layout reads"),
+            raw,
+            "migration must not rewrite the legacy layout file"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn lane_migration_retry_is_idempotent() {
+        let dir = root("retry");
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).expect("dir");
+        let layout = dir.join("layout.toml");
+        let registry = dir.join("blocked").join("lane-profiles.toml");
+        let file = LayoutFile {
+            lanes: LanesSection {
+                preset: LanePreset::NxTypeD,
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        std::fs::write(&layout, toml::to_string_pretty(&file).expect("layout")).expect("write");
+        std::fs::write(dir.join("blocked"), "file blocks directory").expect("blocker writes");
+        let first = load_lane_registry(&registry, &layout);
+        assert!(matches!(
+            first,
+            LaneRegistryStartup::LegacySession { ref registry, .. }
+                if registry.active == "NX Type-D"
+        ));
+        std::fs::remove_file(dir.join("blocked")).expect("blocker removes");
+        std::fs::create_dir(dir.join("blocked")).expect("registry parent creates");
+        let second = load_lane_registry(&registry, &layout);
+        assert!(matches!(
+            second,
+            LaneRegistryStartup::Ready(value) if value.active == "NX Type-D"
+        ));
+        assert!(registry.exists());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn corrupt_lane_registry_requires_confirmed_backup_reset() {
+        let dir = root("corrupt-reset");
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).expect("dir");
+        let layout = dir.join("layout.toml");
+        let registry_path = dir.join("lane-profiles.toml");
+        std::fs::write(&registry_path, "not = [valid").expect("write");
+        assert!(matches!(
+            load_lane_registry(&registry_path, &layout),
+            LaneRegistryStartup::ReadOnlyBuiltins(LaneRegistryLoadError::Parse { .. })
+        ));
+        assert!(matches!(
+            backup_and_reset_lane_registry(&registry_path, false, UNIX_EPOCH),
+            Err(LaneRegistryError::ConfirmationRequired { .. })
+        ));
+        assert_eq!(
+            std::fs::read_to_string(&registry_path).expect("registry reads"),
+            "not = [valid"
+        );
+        let reset = backup_and_reset_lane_registry(&registry_path, true, UNIX_EPOCH)
+            .expect("reset succeeds");
+        assert_eq!(reset.active, LANE_DEFAULT_NAME);
+        let backups: Vec<_> = std::fs::read_dir(&dir)
+            .expect("dir reads")
+            .filter_map(Result::ok)
+            .filter(|entry| entry.file_name().to_string_lossy().contains("backup-"))
+            .collect();
+        assert_eq!(backups.len(), 1);
+        assert_eq!(
+            std::fs::read_to_string(backups[0].path()).expect("backup reads"),
+            "not = [valid"
+        );
+        assert!(matches!(
+            load_lane_registry(&registry_path, &layout),
+            LaneRegistryStartup::Ready(_)
+        ));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn reset_rejects_existing_timestamped_backup_without_overwriting() {
+        let dir = root("reset-collision");
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).expect("dir");
+        let registry_path = dir.join("lane-profiles.toml");
+        let backup = dir.join("lane-profiles.toml.backup-0");
+        std::fs::write(&registry_path, "current registry").expect("write");
+        std::fs::write(&backup, "existing backup").expect("write");
+        assert!(matches!(
+            backup_and_reset_lane_registry(&registry_path, true, UNIX_EPOCH),
+            Err(LaneRegistryError::Backup { source, .. })
+                if source.kind() == std::io::ErrorKind::AlreadyExists
+        ));
+        assert_eq!(
+            std::fs::read_to_string(&registry_path).expect("registry reads"),
+            "current registry"
+        );
+        assert_eq!(
+            std::fs::read_to_string(&backup).expect("backup reads"),
+            "existing backup"
+        );
         let _ = std::fs::remove_dir_all(&dir);
     }
 }
