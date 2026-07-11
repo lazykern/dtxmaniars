@@ -21,6 +21,9 @@ pub fn chip_text(session: &PracticeSession, bar_ms: &[i64]) -> String {
         );
         parts.push(format!("RAMP {cur}/{total}"));
     }
+    if session.trainer.wait_enabled {
+        parts.push("WAIT".into());
+    }
     if let Some(r) = session
         .transport
         .loop_region
@@ -44,7 +47,11 @@ pub fn chip_text(session: &PracticeSession, bar_ms: &[i64]) -> String {
         .filter(|a| a.start_ms == span_start)
         .next_back()
     {
-        parts.push(format!("{:.0}%", last.accuracy_pct));
+        if session.trainer.wait_enabled {
+            parts.push(format!("flow {:.0}%", last.flow_pct));
+        } else {
+            parts.push(format!("{:.0}%", last.accuracy_pct));
+        }
     }
     parts.join(" · ")
 }
@@ -130,6 +137,8 @@ mod tests {
             overhits: 0,
             accuracy_pct: 94.2,
             mean_error_ms: -3.0,
+            waited: 0,
+            flow_pct: 0.0,
         });
         s.attempt_history.push(AttemptRecord {
             start_ms: 999,
@@ -140,8 +149,32 @@ mod tests {
             overhits: 0,
             accuracy_pct: 11.0,
             mean_error_ms: -3.0,
+            waited: 0,
+            flow_pct: 0.0,
         });
         assert_eq!(chip_text(&s, &bar_ms), "0.85× · loop 2–4 · 94%");
+    }
+
+    #[test]
+    fn chip_text_shows_wait_and_flow() {
+        let mut s = PracticeSession::default();
+        s.trainer.wait_enabled = true;
+        s.attempt_history.push(AttemptRecord {
+            start_ms: 0,
+            end_ms: 4_000,
+            tempo: 1.0,
+            counts: Default::default(),
+            max_combo: 0,
+            overhits: 0,
+            accuracy_pct: 0.0,
+            mean_error_ms: 0.0,
+            waited: 2,
+            flow_pct: 60.0,
+        });
+        let bar_ms = vec![0, 2_000];
+        let text = chip_text(&s, &bar_ms);
+        assert!(text.contains("WAIT"), "{text}");
+        assert!(text.contains("flow 60%"), "{text}");
     }
 
     #[test]

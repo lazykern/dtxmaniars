@@ -113,11 +113,24 @@ pub struct AttemptStats {
     pub overhits: u32,
     pub error_sum_ms: i64,
     pub error_count: u32,
+    /// Notes cleared while halted in wait mode (tempo-free, not judged).
+    pub waited: u32,
 }
 
 impl AttemptStats {
     pub fn accuracy_pct(&self) -> f32 {
         self.counts.achievement_pct()
+    }
+
+    /// Notes cleared without halting / all notes seen (%). The wait-mode
+    /// analogue of achievement%.
+    pub fn flow_pct(&self) -> f32 {
+        let total = self.counts.total() + self.waited;
+        if total == 0 {
+            0.0
+        } else {
+            self.counts.total() as f32 / total as f32 * 100.0
+        }
     }
 
     pub fn mean_error_ms(&self) -> f32 {
@@ -129,7 +142,7 @@ impl AttemptStats {
     }
 
     pub fn has_data(&self) -> bool {
-        self.counts.total() > 0
+        self.counts.total() > 0 || self.waited > 0
     }
 }
 
@@ -143,6 +156,8 @@ pub struct AttemptRecord {
     pub overhits: u32,
     pub accuracy_pct: f32,
     pub mean_error_ms: f32,
+    pub waited: u32,
+    pub flow_pct: f32,
 }
 
 /// Transport state: what/where/how-fast the player chose. Only user
@@ -154,6 +169,8 @@ pub struct PracticeTransport {
     pub user_tempo: f32,
     pub snap: SnapDivisor,
     pub preroll: PrerollSetting,
+    /// Count-in click during pre-roll (spec: count-in metronome).
+    pub metronome: bool,
     pub loop_region: Option<LoopRegion>,
     /// Scrub cursor while paused (chart ms). None = cursor at playhead.
     pub scrub_cursor_ms: Option<i64>,
@@ -165,6 +182,7 @@ impl Default for PracticeTransport {
             user_tempo: 1.0,
             snap: SnapDivisor::Bar,
             preroll: PrerollSetting::OneBar,
+            metronome: true,
             loop_region: None,
             scrub_cursor_ms: None,
         }
@@ -176,6 +194,8 @@ impl Default for PracticeTransport {
 pub struct PracticeTrainer {
     pub ramp_config: RampConfig,
     pub ramp: RampState,
+    /// Wait mode: halt at unhit notes (mutually exclusive with the ramp).
+    pub wait_enabled: bool,
 }
 
 /// Present only while the stage runs in practice mode. Absence = normal
@@ -186,6 +206,8 @@ pub struct PracticeSession {
     pub trainer: PracticeTrainer,
     pub current_attempt: AttemptStats,
     pub attempt_history: Vec<AttemptRecord>,
+    /// Per-lane diagnosis for the current loop region (full-HUD panel).
+    pub lane_diag: super::diagnosis::LaneDiagnosis,
 }
 
 impl PracticeSession {
@@ -202,6 +224,7 @@ impl PracticeSession {
     /// Clear the A/B loop (disarms the ramp — the ramp is a claim about
     /// one specific section).
     pub fn clear_loop(&mut self) {
+        self.lane_diag.clear();
         self.transport.loop_region = None;
         self.trainer.ramp.armed = false;
     }
@@ -228,6 +251,8 @@ impl PracticeSession {
                 overhits: a.overhits,
                 accuracy_pct: a.accuracy_pct(),
                 mean_error_ms: a.mean_error_ms(),
+                waited: a.waited,
+                flow_pct: a.flow_pct(),
             };
             self.attempt_history.push(record.clone());
             if self.attempt_history.len() > MAX_ATTEMPT_HISTORY {
@@ -247,6 +272,7 @@ impl PracticeSession {
     /// Set the A marker; keeps the region valid (swap, min length is
     /// enforced by the caller against bar data).
     pub fn set_loop_start(&mut self, ms: i64) {
+        self.lane_diag.clear();
         self.trainer.ramp.armed = false;
         let end = self.transport.loop_region.map(|r| r.end_ms);
         self.transport.loop_region = Some(match end {
@@ -262,6 +288,7 @@ impl PracticeSession {
     }
 
     pub fn set_loop_end(&mut self, ms: i64) {
+        self.lane_diag.clear();
         self.trainer.ramp.armed = false;
         let start = self.transport.loop_region.map(|r| r.start_ms).unwrap_or(0);
         self.transport.loop_region = Some(if ms > start {
@@ -289,6 +316,54 @@ impl PracticeSession {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn metronome_defaults_on() {
+        let s = PracticeSession::default();
+        assert!(s.transport.metronome);
+    }
+
+    #[test]
+    fn wait_defaults_off_and_flow_pct_computes() {
+        let s = PracticeSession::default();
+        assert!(!s.trainer.wait_enabled);
+
+        let mut a = AttemptStats::default();
+        a.counts.perfect = 3;
+        a.waited = 1;
+        assert_eq!(a.flow_pct(), 75.0);
+
+        let empty = AttemptStats::default();
+        assert_eq!(empty.flow_pct(), 0.0);
+    }
+
+    #[test]
+    fn roll_attempt_carries_waited_and_flow() {
+        let mut s = PracticeSession::default();
+        s.current_attempt.counts.perfect = 3;
+        s.current_attempt.waited = 1;
+        let rec = s.roll_attempt(4_000, 0).unwrap();
+        assert_eq!(rec.waited, 1);
+        assert_eq!(rec.flow_pct, 75.0);
+        assert_eq!(s.current_attempt.waited, 0, "fresh attempt starts clean");
+    }
+
+    #[test]
+    fn region_change_clears_lane_diag() {
+        use dtx_scoring::JudgmentKind;
+        let mut s = PracticeSession::default();
+        s.lane_diag.apply_judgment(0, JudgmentKind::Perfect, 0);
+        s.set_loop_start(2_000);
+        assert!(s.lane_diag.lanes.is_empty(), "Set A must clear diagnosis");
+
+        s.lane_diag.apply_judgment(0, JudgmentKind::Perfect, 0);
+        s.set_loop_end(6_000);
+        assert!(s.lane_diag.lanes.is_empty(), "Set B must clear diagnosis");
+
+        s.lane_diag.apply_judgment(0, JudgmentKind::Perfect, 0);
+        s.clear_loop();
+        assert!(s.lane_diag.lanes.is_empty(), "Clear loop must clear diagnosis");
+    }
 
     #[test]
     fn rate_step_quantized_and_clamped() {

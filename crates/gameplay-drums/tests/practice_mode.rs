@@ -647,6 +647,8 @@ fn empty_loop_pass_makes_no_ramp_decision() {
             max_combo: 4,
             accuracy_pct: 100.0,
             mean_error_ms: 0.0,
+            waited: 0,
+            flow_pct: 0.0,
         });
     app.world_mut().insert_resource(s);
     {

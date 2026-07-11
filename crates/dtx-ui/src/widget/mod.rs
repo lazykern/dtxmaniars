@@ -18,6 +18,7 @@ pub mod options_panel;
 pub mod pad_chips;
 pub mod perf_combo;
 pub mod phrase_meter;
+pub mod play_history;
 pub mod playfield_speed;
 pub mod rolling_counter;
 pub mod score_detailed;

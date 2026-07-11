@@ -32,6 +32,8 @@ pub struct HudLoopFill;
 pub struct HudTimeText;
 #[derive(Component)]
 pub struct AttemptHistoryText;
+#[derive(Component)]
+pub struct LaneDiagnosisText;
 
 /// One selectable right-rail row.
 #[derive(Component, Clone, Copy, PartialEq, Eq)]
@@ -45,23 +47,26 @@ pub enum RailItem {
     Rate,
     Snap,
     Preroll,
+    Metronome,
     RampArm,
     RampStart,
     RampTarget,
     RampStep,
     RampThreshold,
     RampStreak,
+    WaitMode,
     ExitPractice,
 }
 
 impl RailItem {
-    pub const ORDER: [RailItem; 16] = [
+    pub const ORDER: [RailItem; 18] = [
         RailItem::Resume,
         RailItem::Scrub,
         RailItem::RestartSection,
         RailItem::Rate,
         RailItem::Snap,
         RailItem::Preroll,
+        RailItem::Metronome,
         RailItem::SetA,
         RailItem::SetB,
         RailItem::ClearLoop,
@@ -71,6 +76,7 @@ impl RailItem {
         RailItem::RampStep,
         RailItem::RampThreshold,
         RailItem::RampStreak,
+        RailItem::WaitMode,
         RailItem::ExitPractice,
     ];
 }
@@ -106,6 +112,10 @@ pub fn rail_label(item: RailItem, session: &PracticeSession, exit_armed: bool) -
         }
         RailItem::Snap => format!("Snap  ◀ {} ▶", session.transport.snap.label()),
         RailItem::Preroll => format!("Pre-roll  ◀ {} ▶", session.transport.preroll.label()),
+        RailItem::Metronome => format!(
+            "Count-in  {}",
+            if session.transport.metronome { "on" } else { "off" }
+        ),
         RailItem::RampArm => {
             if session.trainer.ramp.armed {
                 let (cur, total) = crate::practice::ramp::ramp_step_index(
@@ -136,6 +146,13 @@ pub fn rail_label(item: RailItem, session: &PracticeSession, exit_armed: bool) -
             "Ramp streak  ◀ ×{} ▶",
             session.trainer.ramp_config.required_successes
         ),
+        RailItem::WaitMode => {
+            if session.trainer.wait_enabled {
+                "Wait  ON".into()
+            } else {
+                "Wait  off  (Enter: on)".into()
+            }
+        }
         RailItem::ExitPractice => {
             if exit_armed {
                 "Exit practice — Enter again to confirm".into()
@@ -277,8 +294,8 @@ pub fn spawn_full_hud(
                 for (idx, item) in RailItem::ORDER.iter().enumerate() {
                     let header = match idx {
                         0 => Some("TRANSPORT"),
-                        6 => Some("LOOP"),
-                        9 => Some("TRAINER"),
+                        7 => Some("LOOP"),
+                        10 => Some("TRAINER"),
                         _ => None,
                     };
                     if let Some(h) = header {
@@ -302,6 +319,16 @@ pub fn spawn_full_hud(
                 rail.spawn((
                     AttemptHistoryText,
                     Text::new(attempt_history_text(&session, timeline.end_ms)),
+                    Theme::label_font(),
+                    TextColor(theme.text_secondary),
+                    Node {
+                        margin: UiRect::top(Val::Px(12.0)),
+                        ..default()
+                    },
+                ));
+                rail.spawn((
+                    LaneDiagnosisText,
+                    Text::new(crate::practice::diagnosis::diagnosis_text(&session.lane_diag)),
                     Theme::label_font(),
                     TextColor(theme.text_secondary),
                     Node {
@@ -445,6 +472,14 @@ pub fn full_hud_input(
     mut practice_actions: MessageWriter<crate::practice::actions::PracticeAction>,
     mut rows: Query<(&RailItem, &mut Text, &mut TextColor)>,
     mut history: Query<&mut Text, (With<AttemptHistoryText>, Without<RailItem>)>,
+    mut diag_text: Query<
+        &mut Text,
+        (
+            With<LaneDiagnosisText>,
+            Without<RailItem>,
+            Without<AttemptHistoryText>,
+        ),
+    >,
 ) {
     let count = RailItem::ORDER.len();
     if keys.just_pressed(KeyCode::ArrowDown) {
@@ -558,9 +593,18 @@ pub fn full_hud_input(
                 session.set_loop_end(ms);
             }
             RailItem::ClearLoop => session.clear_loop(),
+            RailItem::Metronome => {
+                session.transport.metronome = !session.transport.metronome;
+            }
             RailItem::Rate | RailItem::Snap | RailItem::Preroll => {}
             RailItem::RampArm => {
                 practice_actions.write(crate::practice::actions::PracticeAction::ToggleRamp);
+            }
+            RailItem::WaitMode => {
+                session.trainer.wait_enabled = !session.trainer.wait_enabled;
+                if session.trainer.wait_enabled && session.trainer.ramp.armed {
+                    session.trainer.ramp.armed = false;
+                }
             }
             RailItem::RampStart
             | RailItem::RampTarget
@@ -589,6 +633,9 @@ pub fn full_hud_input(
     }
     if let Ok(mut t) = history.single_mut() {
         t.0 = attempt_history_text(&session, timeline.end_ms);
+    }
+    if let Ok(mut t) = diag_text.single_mut() {
+        t.0 = crate::practice::diagnosis::diagnosis_text(&session.lane_diag);
     }
 }
 
@@ -659,7 +706,28 @@ mod tests {
             max_combo: 0,
             accuracy_pct: acc,
             mean_error_ms: 0.0,
+            waited: 0,
+            flow_pct: 0.0,
         }
+    }
+
+    #[test]
+    fn wait_rail_label_reflects_toggle() {
+        let mut s = PracticeSession::default();
+        assert_eq!(
+            rail_label(RailItem::WaitMode, &s, false),
+            "Wait  off  (Enter: on)"
+        );
+        s.trainer.wait_enabled = true;
+        assert_eq!(rail_label(RailItem::WaitMode, &s, false), "Wait  ON");
+    }
+
+    #[test]
+    fn metronome_rail_label_reflects_toggle() {
+        let mut s = PracticeSession::default();
+        assert_eq!(rail_label(RailItem::Metronome, &s, false), "Count-in  on");
+        s.transport.metronome = false;
+        assert_eq!(rail_label(RailItem::Metronome, &s, false), "Count-in  off");
     }
 
     #[test]

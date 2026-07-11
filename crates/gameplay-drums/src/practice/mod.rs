@@ -7,12 +7,15 @@
 
 pub mod ab_loop;
 pub mod actions;
+pub mod diagnosis;
 pub mod hud;
+pub mod metronome;
 pub mod ramp;
 pub mod rate;
 pub mod session;
 pub mod stats;
 pub mod toast;
+pub mod wait;
 
 use bevy::prelude::*;
 use game_shell::{AppState, PracticeIntent};
@@ -56,9 +59,11 @@ pub(super) fn plugin(app: &mut App) {
     .add_plugins((
         ab_loop::plugin,
         hud::plugin,
+        metronome::plugin,
         ramp::plugin,
         rate::plugin,
         stats::plugin,
+        wait::plugin,
     ));
 }
 

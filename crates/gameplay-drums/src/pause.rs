@@ -89,17 +89,39 @@ fn toggle_pause(
     }
 }
 
+pub(crate) fn pause_all_chart_audio(
+    bgm: &BgmHandle,
+    polyphony: &DrumPolyphony,
+    active: &ActiveDrumSounds,
+    instances: &mut Assets<AudioInstance>,
+) {
+    if let Some(handle) = &bgm.instance {
+        dtx_audio::pause_audio_instance(instances, handle);
+    }
+    dtx_audio::pause_polyphony(instances, polyphony);
+    active.pause_all(instances);
+}
+
+pub(crate) fn resume_all_chart_audio(
+    bgm: &BgmHandle,
+    polyphony: &DrumPolyphony,
+    active: &ActiveDrumSounds,
+    instances: &mut Assets<AudioInstance>,
+) {
+    if let Some(handle) = &bgm.instance {
+        dtx_audio::resume_audio_instance(instances, handle);
+    }
+    dtx_audio::resume_polyphony(instances, polyphony);
+    active.resume_all(instances);
+}
+
 fn pause_chart_audio(
     bgm: Res<BgmHandle>,
     polyphony: Res<DrumPolyphony>,
     active: Res<ActiveDrumSounds>,
     mut instances: ResMut<Assets<AudioInstance>>,
 ) {
-    if let Some(handle) = &bgm.instance {
-        dtx_audio::pause_audio_instance(&mut instances, handle);
-    }
-    dtx_audio::pause_polyphony(&mut instances, &polyphony);
-    active.pause_all(&mut instances);
+    pause_all_chart_audio(&bgm, &polyphony, &active, &mut instances);
 }
 
 fn resume_chart_audio(
@@ -108,11 +130,7 @@ fn resume_chart_audio(
     active: Res<ActiveDrumSounds>,
     mut instances: ResMut<Assets<AudioInstance>>,
 ) {
-    if let Some(handle) = &bgm.instance {
-        dtx_audio::resume_audio_instance(&mut instances, handle);
-    }
-    dtx_audio::resume_polyphony(&mut instances, &polyphony);
-    active.resume_all(&mut instances);
+    resume_all_chart_audio(&bgm, &polyphony, &active, &mut instances);
 }
 
 pub fn spawn_overlay(
