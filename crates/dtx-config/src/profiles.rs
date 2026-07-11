@@ -155,22 +155,12 @@ impl MidiProfile {
     }
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Default, Serialize, Deserialize)]
 #[serde(default)]
 struct MidiProfileDto {
     port: Option<String>,
     velocity_threshold: u8,
     map: BTreeMap<String, Vec<u8>>,
-}
-
-impl Default for MidiProfileDto {
-    fn default() -> Self {
-        Self {
-            port: None,
-            velocity_threshold: 0,
-            map: BTreeMap::new(),
-        }
-    }
 }
 
 impl Serialize for MidiProfile {
@@ -414,7 +404,7 @@ fn validate_registry<T>(
         });
     }
     let names: Vec<&str> = registry.profiles.keys().map(String::as_str).collect();
-    for (name, _) in &registry.profiles {
+    for name in registry.profiles.keys() {
         let existing = names.iter().copied().filter(|other| *other != name);
         if let Err(error) =
             validate_profile_name(name, builtins.keys().map(String::as_str), existing, None)
@@ -750,8 +740,10 @@ mod tests {
 
     #[test]
     fn keyboard_registry_round_trips_spec_shape() {
-        let mut registry = ProfileRegistry::default();
-        registry.active = "Desk".to_owned();
+        let mut registry = ProfileRegistry {
+            active: "Desk".to_owned(),
+            ..Default::default()
+        };
         registry.profiles.insert(
             "Desk".to_owned(),
             KeyboardProfile {
@@ -774,8 +766,10 @@ mod tests {
 
     #[test]
     fn midi_registry_round_trips_spec_shape() {
-        let mut registry = ProfileRegistry::default();
-        registry.active = "Roland TD-17".to_owned();
+        let mut registry = ProfileRegistry {
+            active: "Roland TD-17".to_owned(),
+            ..Default::default()
+        };
         registry.profiles.insert(
             "Roland TD-17".to_owned(),
             MidiProfile {
