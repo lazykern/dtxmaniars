@@ -493,17 +493,15 @@ mod midi_consumer {
             if velocity == 0 || velocity <= resolver.velocity_threshold {
                 continue;
             }
-            let Some(lane) = resolver.lane_for_note(note) else {
-                continue;
-            };
-            nav_lanes.push(lane);
-            if !gameplay_ready {
-                continue;
+            for lane in resolver.lanes_for_note(note) {
+                nav_lanes.push(lane);
+                if gameplay_ready {
+                    hits.push(LaneHit {
+                        lane,
+                        audio_ms: stamp_audio_ms(Some(clock_ms), audio_ms),
+                    });
+                }
             }
-            hits.push(LaneHit {
-                lane,
-                audio_ms: stamp_audio_ms(Some(clock_ms), audio_ms),
-            });
         }
         ConsumedMidi { hits, nav_lanes }
     }
@@ -533,6 +531,28 @@ mod midi_consumer {
             assert!(last.at.is_some());
             assert!(hits.hits.is_empty());
             assert_eq!(hits.nav_lanes.len(), 1);
+        }
+
+        #[test]
+        fn shared_note_emits_one_hit_per_owning_lane() {
+            use dtx_input::{BindSource, InputBindings};
+            let mut b = InputBindings::default();
+            b.bind_shared(dtx_core::EChannel::LeftBassDrum, BindSource::Midi { note: 36 });
+            let resolver = crate::bindings::BindResolver::from_bindings(&b);
+            let mut last = LastMidiHit::default();
+            let out = consume_midi_events(
+                [dtx_input::midi::MidiEvent::NoteOn {
+                    note: 36,
+                    velocity: 100,
+                    audio_ms: 10,
+                }],
+                &resolver,
+                true,
+                0,
+                &mut last,
+            );
+            assert_eq!(out.hits.len(), 2, "BD and LBD both hit");
+            assert_eq!(out.nav_lanes.len(), 2);
         }
 
         #[test]

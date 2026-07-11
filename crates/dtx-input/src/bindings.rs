@@ -74,8 +74,8 @@ impl Default for BindingsFile {
 pub struct InputBindings {
     /// MIDI device options.
     pub midi: MidiDeviceConfig,
-    /// Channel → sources. Keyboard sources may appear under multiple channels;
-    /// MIDI sources appear under at most one channel.
+    /// Channel → sources. Keyboard and MIDI sources may each appear under
+    /// multiple channels (`bind_shared`); every owning channel's lane fires.
     pub map: HashMap<EChannel, Vec<BindSource>>,
 }
 

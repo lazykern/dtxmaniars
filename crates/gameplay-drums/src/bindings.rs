@@ -48,7 +48,7 @@ pub struct LiveBindings(pub dtx_input::InputBindings);
 #[derive(Resource, Debug, Clone)]
 pub struct BindResolver {
     key_to_lanes: HashMap<KeyCode, Vec<LaneId>>,
-    note_to_lane: HashMap<u8, LaneId>,
+    note_to_lanes: HashMap<u8, Vec<LaneId>>,
     /// NoteOn velocities at or below this are ignored.
     pub velocity_threshold: u8,
 }
@@ -65,19 +65,19 @@ impl BindResolver {
     /// never depend on the display lane arrangement.
     pub fn from_profiles(keyboard: &KeyboardProfile, midi: &MidiProfile) -> Self {
         let mut key_to_lanes = HashMap::new();
-        let mut note_to_lane = HashMap::new();
+        let mut note_to_lanes = HashMap::new();
         for ch in BINDABLE_CHANNELS {
             let Some(lane) = lane_of(ch) else { continue };
             for key in keyboard.map.get(&ch).into_iter().flatten() {
                 key_to_lanes.entry(*key).or_insert_with(Vec::new).push(lane);
             }
             for note in midi.map.get(&ch).into_iter().flatten() {
-                note_to_lane.insert(*note, lane);
+                note_to_lanes.entry(*note).or_insert_with(Vec::new).push(lane);
             }
         }
         Self {
             key_to_lanes,
-            note_to_lane,
+            note_to_lanes,
             velocity_threshold: midi.velocity_threshold,
         }
     }
@@ -85,7 +85,7 @@ impl BindResolver {
     /// Build lookup tables from channel-keyed bindings.
     pub fn from_bindings(b: &InputBindings) -> Self {
         let mut key_to_lanes = HashMap::new();
-        let mut note_to_lane = HashMap::new();
+        let mut note_to_lanes = HashMap::new();
         for ch in BINDABLE_CHANNELS {
             let Some(lane) = lane_of(ch) else { continue };
             let Some(sources) = b.map.get(&ch) else {
@@ -97,14 +97,14 @@ impl BindResolver {
                         key_to_lanes.entry(*k).or_insert_with(Vec::new).push(lane);
                     }
                     BindSource::Midi { note } => {
-                        note_to_lane.insert(*note, lane);
+                        note_to_lanes.entry(*note).or_insert_with(Vec::new).push(lane);
                     }
                 }
             }
         }
         Self {
             key_to_lanes,
-            note_to_lane,
+            note_to_lanes,
             velocity_threshold: b.midi.velocity_threshold,
         }
     }
@@ -124,9 +124,17 @@ impl BindResolver {
             .flat_map(|lanes| lanes.iter().copied())
     }
 
-    /// Lane for a MIDI note, if bound.
+    /// First lane for a MIDI note, if bound.
     pub fn lane_for_note(&self, note: u8) -> Option<LaneId> {
-        self.note_to_lane.get(&note).copied()
+        self.lanes_for_note(note).next()
+    }
+
+    /// Lanes for a MIDI note (a note may be shared by several channels).
+    pub fn lanes_for_note(&self, note: u8) -> impl Iterator<Item = LaneId> + '_ {
+        self.note_to_lanes
+            .get(&note)
+            .into_iter()
+            .flat_map(|lanes| lanes.iter().copied())
     }
 }
 
@@ -358,6 +366,17 @@ mod tests {
         assert_eq!(r.lane_for_note(38), lane_of(EChannel::Snare));
         assert_eq!(r.lane_for_note(36), lane_of(EChannel::BassDrum));
         assert_eq!(r.lane_for_key(KeyCode::KeyX), lane_of(EChannel::HiHatClose));
+    }
+
+    #[test]
+    fn note_shared_by_two_channels_resolves_both_lanes() {
+        let mut b = InputBindings::default();
+        b.bind_shared(EChannel::LeftBassDrum, BindSource::Midi { note: 36 });
+        let r = BindResolver::from_bindings(&b);
+        let lanes: Vec<_> = r.lanes_for_note(36).collect();
+        assert_eq!(lanes.len(), 2, "36 owned by BD and LBD: {lanes:?}");
+        assert_eq!(r.lanes_for_note(42).count(), 1);
+        assert_eq!(r.lanes_for_note(99).count(), 0);
     }
 
     #[test]
