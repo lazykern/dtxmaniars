@@ -20,14 +20,8 @@ use std::path::{Path, PathBuf};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
-pub mod bindings;
 pub mod drums;
-pub mod profiles;
 
-pub use bindings::{
-    default_bindings_path, load_bindings, save_bindings, BindSource, BindingsFile, InputBindings,
-    MidiDeviceConfig, BINDABLE_CHANNELS,
-};
 pub use drums::{BdGroup, CyGroup, DrumsConfig, FtGroup, HhGroup, HitSoundPriority};
 
 /// Top-level persisted configuration. Each BocuD section becomes a sub-struct.

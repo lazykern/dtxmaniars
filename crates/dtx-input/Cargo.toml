@@ -20,6 +20,9 @@ midi = ["dep:midir"]
 [dependencies]
 bevy = { workspace = true, default-features = false, features = ["serialize", "keyboard"] }
 dtx-core = { workspace = true }
+dtx-config = { path = "../dtx-config" }
+dtx-persistence = { path = "../dtx-persistence" }
 serde = { version = "1", features = ["derive"] }
+toml = "0.8"
 thiserror = { workspace = true }
 midir = { version = "0.10", optional = true }

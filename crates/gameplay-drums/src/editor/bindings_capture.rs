@@ -19,7 +19,7 @@
 //! stream — that made the pick chase whatever note was being judged.
 
 use bevy::prelude::*;
-use dtx_config::BindSource;
+use dtx_input::BindSource;
 
 use crate::bindings::LiveBindings;
 use crate::events::LaneHit;
@@ -359,7 +359,7 @@ fn highlight_selected_row(
 
 #[cfg(test)]
 mod tests {
-    use dtx_config::InputBindings;
+    use dtx_input::InputBindings;
 
     use super::*;
 

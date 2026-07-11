@@ -15,7 +15,7 @@
 //! (Tab held to preview the play view).
 
 use bevy::prelude::*;
-use dtx_config::BindSource;
+use dtx_input::BindSource;
 
 use crate::bindings::LiveBindings;
 use crate::lanes::Lanes;

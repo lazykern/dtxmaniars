@@ -7,7 +7,7 @@
 //! bump `BindingsRev`, which re-triggers the left-panel rebuild so chips repaint.
 
 use bevy::prelude::*;
-use dtx_config::{BindSource, BINDABLE_CHANNELS};
+use dtx_input::{BindSource, BINDABLE_CHANNELS};
 
 use super::bindings_capture::CaptureState;
 use crate::bindings::LiveBindings;
@@ -543,12 +543,12 @@ fn handle_velocity_adjust(
     }
 }
 
-fn bindings_modified(bindings: &dtx_config::InputBindings) -> bool {
-    bindings != &dtx_config::InputBindings::default()
+fn bindings_modified(bindings: &dtx_input::InputBindings) -> bool {
+    bindings != &dtx_input::InputBindings::default()
 }
 
 fn reset_bindings(live: &mut LiveBindings, rev: &mut BindingsRev) {
-    live.0 = dtx_config::InputBindings::default();
+    live.0 = dtx_input::InputBindings::default();
     rev.0 = rev.0.wrapping_add(1);
 }
 
@@ -832,7 +832,7 @@ mod tests {
     fn reset_bindings_restores_all_defaults() {
         use dtx_core::EChannel;
 
-        let mut live = LiveBindings(dtx_config::InputBindings::default());
+        let mut live = LiveBindings(dtx_input::InputBindings::default());
         live.0.midi.port = Some("test-port".into());
         live.0.midi.velocity_threshold = 64;
         live.0.bind(EChannel::Snare, BindSource::Key(KeyCode::KeyQ));
@@ -841,7 +841,7 @@ mod tests {
         assert!(bindings_modified(&live.0));
         reset_bindings(&mut live, &mut rev);
 
-        assert_eq!(live.0, dtx_config::InputBindings::default());
+        assert_eq!(live.0, dtx_input::InputBindings::default());
         assert_eq!(rev.0, 8);
         assert!(!bindings_modified(&live.0));
     }

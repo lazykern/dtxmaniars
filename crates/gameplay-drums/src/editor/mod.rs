@@ -200,7 +200,7 @@ fn sync_drafts_to_session(
     mut session: ResMut<profile_state::CustomizeSession>,
 ) {
     if live.is_changed() {
-        let (keyboard, midi) = dtx_config::profiles::split_bindings(&live.0);
+        let (keyboard, midi) = dtx_input::profiles::split_bindings(&live.0);
         if session.0.keyboard.value != keyboard {
             session.0.keyboard.value = keyboard;
         }
@@ -220,7 +220,7 @@ fn save_dirty_kind(
     kind: profile_state::ProfileKind,
     session: &profile_state::ProfileSession,
 ) -> bool {
-    use dtx_config::profiles as cfg;
+    use dtx_input::profiles as cfg;
     use dtx_persistence::suggest_copy_name;
     use profile_state::ProfileKind;
 
@@ -280,7 +280,7 @@ fn save_dirty_kind(
         }
     }
 
-    let legacy = dtx_config::default_bindings_path();
+    let legacy = dtx_input::default_bindings_path();
     match kind {
         ProfileKind::Keyboard => commit(
             cfg::load_keyboard_registry(&crate::bindings::keyboard_registry_path(), &legacy),

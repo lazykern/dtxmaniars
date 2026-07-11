@@ -8,8 +8,9 @@ use std::collections::{BTreeMap, HashMap};
 use std::path::{Path, PathBuf};
 
 use dtx_core::EChannel;
-use dtx_input::KeyCode;
 use serde::{Deserialize, Serialize};
+
+use crate::KeyCode;
 
 /// Current bindings.toml schema version.
 pub const BINDINGS_VERSION: u32 = 1;
@@ -268,7 +269,7 @@ impl BindingsFile {
 
 /// Parse raw TOML, running the version migration chain (same policy as
 /// dtx-layout `parse_with_migrations`).
-pub fn parse_bindings_checked(raw: &str) -> Result<BindingsFile, crate::ConfigError> {
+pub fn parse_bindings_checked(raw: &str) -> Result<BindingsFile, dtx_config::ConfigError> {
     let mut file: BindingsFile = toml::from_str(raw)?;
     if file.version <= BINDINGS_VERSION {
         file.version = BINDINGS_VERSION;
@@ -300,9 +301,9 @@ pub fn parse_with_migrations(raw: &str) -> BindingsFile {
 }
 
 /// `$XDG_CONFIG_HOME/dtxmaniars/bindings.toml` (same directory scheme as
-/// config.toml, see `crate::default_path`).
+/// config.toml, see `dtx_config::default_path`).
 pub fn default_bindings_path() -> PathBuf {
-    let mut p = crate::default_path();
+    let mut p = dtx_config::default_path();
     p.set_file_name("bindings.toml");
     p
 }
@@ -316,7 +317,7 @@ pub fn load_bindings(path: &Path) -> InputBindings {
 }
 
 /// Save bindings. Creates parent dirs.
-pub fn save_bindings(path: &Path, b: &InputBindings) -> Result<(), crate::ConfigError> {
+pub fn save_bindings(path: &Path, b: &InputBindings) -> Result<(), dtx_config::ConfigError> {
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)?;
     }

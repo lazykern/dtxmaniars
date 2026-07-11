@@ -4,15 +4,15 @@ use std::{
     time::{SystemTime, UNIX_EPOCH},
 };
 
+use crate::KeyCode;
 use dtx_core::EChannel;
-use dtx_input::KeyCode;
 use dtx_persistence::{
     replace_bytes, suggest_copy_name, validate_profile_name, PersistenceError, ProfileName,
 };
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use thiserror::Error;
 
-use crate::{BindSource, BindingsFile, InputBindings, BINDABLE_CHANNELS};
+use crate::bindings::{BindSource, BindingsFile, InputBindings, BINDABLE_CHANNELS};
 
 pub const KEYBOARD_DEFAULT_NAME: &str = "DTXMania default";
 pub const MIDI_DEFAULT_NAME: &str = "General MIDI drums";
@@ -493,7 +493,7 @@ fn legacy_bindings(path: &Path) -> Result<BindingsFile, RegistryLoadError> {
         source,
     })?;
     crate::bindings::parse_bindings_checked(&raw).map_err(|source| match source {
-        crate::ConfigError::Parse(source) => RegistryLoadError::Parse {
+        dtx_config::ConfigError::Parse(source) => RegistryLoadError::Parse {
             path: path.to_path_buf(),
             source,
         },
@@ -708,8 +708,8 @@ pub fn backup_and_reset_midi_registry(
 mod tests {
     use std::collections::BTreeMap;
 
+    use crate::KeyCode;
     use dtx_core::EChannel;
-    use dtx_input::KeyCode;
     use dtx_persistence::validate_profile_name;
 
     use super::*;

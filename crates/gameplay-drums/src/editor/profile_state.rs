@@ -6,7 +6,7 @@
 //! access lives here.
 
 use bevy::prelude::Resource;
-use dtx_config::profiles::{KeyboardProfile, MidiProfile};
+use dtx_input::profiles::{KeyboardProfile, MidiProfile};
 use dtx_layout::profiles::{LaneProfile, LANE_DEFAULT_NAME};
 use dtx_persistence::ProfileName;
 
@@ -80,11 +80,11 @@ impl Default for ProfileSession {
     fn default() -> Self {
         Self {
             keyboard: ProfileDraft::clean(
-                dtx_config::profiles::KEYBOARD_DEFAULT_NAME,
+                dtx_input::profiles::KEYBOARD_DEFAULT_NAME,
                 KeyboardProfile::default(),
             ),
             midi: ProfileDraft::clean(
-                dtx_config::profiles::MIDI_DEFAULT_NAME,
+                dtx_input::profiles::MIDI_DEFAULT_NAME,
                 MidiProfile::default(),
             ),
             lanes: ProfileDraft::clean(

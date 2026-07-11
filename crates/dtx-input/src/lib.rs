@@ -13,22 +13,35 @@
 //!
 //! `LaneHit::lane` is just a `u8`. Sources here emit raw events (keys,
 //! `MidiEvent`s); resolving them to lanes is the consuming gameplay crate's
-//! job (drums does it via `dtx-config` `InputBindings` → `BindResolver`).
+//! job (drums does it via this crate's `InputBindings` → `BindResolver`).
 //! dtx-input only knows "key pressed on lane X at audio_ms Y".
 
 #![warn(missing_docs)]
 
 use bevy::prelude::*;
 
+// Ported from dtx-config (which did not require item docs). Keep them exempt
+// from this crate's `#![warn(missing_docs)]` rather than back-fill ~76 docs.
+#[allow(missing_docs)]
+pub mod bindings;
 pub mod events;
 pub mod keyboard;
 pub mod midi;
 pub mod pad;
+#[allow(missing_docs)]
+pub mod profiles;
 
 pub use events::{LaneHit, LaneHitKind, LaneId};
 
-/// Re-export for config crates that serialize key bindings without a direct
-/// bevy dependency.
+/// Key/MIDI binding schema (moved here from dtx-config: it serializes bevy's
+/// `KeyCode`, so it belongs in the Engine layer, not Pure config).
+pub use bindings::{
+    default_bindings_path, load_bindings, save_bindings, BindSource, BindingsFile, InputBindings,
+    MidiDeviceConfig, BINDABLE_CHANNELS,
+};
+
+/// Re-export so binding/profile code (and external callers) name `KeyCode`
+/// without a direct bevy dependency.
 pub use bevy::input::keyboard::KeyCode;
 
 /// Plugin assembly: registers LaneHit message. The keyboard-to-LaneHit

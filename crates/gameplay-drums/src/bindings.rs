@@ -8,11 +8,11 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 
 use bevy::prelude::*;
-use dtx_config::profiles::{
+use dtx_input::profiles::{
     keyboard_builtins, keyboard_registry, load_keyboard_registry, load_midi_registry,
     midi_builtins, midi_registry, KeyboardProfile, MidiProfile, ProfileRegistry, RegistryStartup,
 };
-use dtx_config::{BindSource, InputBindings, BINDABLE_CHANNELS};
+use dtx_input::{BindSource, InputBindings, BINDABLE_CHANNELS};
 
 use crate::lane_map::{lane_of, LaneId};
 
@@ -42,7 +42,7 @@ pub struct ActiveInputProfiles {
 /// Live, editable bindings — the Bindings tab mutates this; the resolver +
 /// disk follow. Seeded from bindings.toml on Performance enter.
 #[derive(Resource, Debug, Clone, Default)]
-pub struct LiveBindings(pub dtx_config::InputBindings);
+pub struct LiveBindings(pub dtx_input::InputBindings);
 
 /// Flattened lookup tables derived from `InputBindings`.
 #[derive(Resource, Debug, Clone)]
@@ -189,7 +189,7 @@ fn active_midi_profile(registry: &ProfileRegistry<MidiProfile>) -> MidiProfile {
 /// editors replace them.
 fn compose_bindings(profiles: &ActiveInputProfiles) -> InputBindings {
     let mut bindings = InputBindings {
-        midi: dtx_config::MidiDeviceConfig {
+        midi: dtx_input::MidiDeviceConfig {
             port: profiles.midi.port.clone(),
             velocity_threshold: profiles.midi.velocity_threshold,
         },
@@ -218,7 +218,7 @@ fn reload_profiles(
     mut resolver: ResMut<BindResolver>,
     mut live: ResMut<LiveBindings>,
 ) {
-    let legacy = dtx_config::default_bindings_path();
+    let legacy = dtx_input::default_bindings_path();
     let keyboard = startup_registry(
         "keyboard",
         load_keyboard_registry(&keyboard_registry_path(), &legacy),
@@ -278,7 +278,7 @@ mod tests {
     #[test]
     fn custom_binding_reroutes_lane() {
         let mut b = InputBindings::default();
-        b.bind(EChannel::Snare, dtx_config::BindSource::Key(KeyCode::KeyX));
+        b.bind(EChannel::Snare, dtx_input::BindSource::Key(KeyCode::KeyX));
         let r = BindResolver::from_bindings(&b);
         assert_eq!(r.lane_for_key(KeyCode::KeyX), Some(1)); // now SD
     }
@@ -286,7 +286,7 @@ mod tests {
     #[test]
     fn shared_key_binding_maps_to_multiple_lanes() {
         let mut b = InputBindings::default();
-        b.bind_shared(EChannel::Snare, dtx_config::BindSource::Key(KeyCode::KeyX));
+        b.bind_shared(EChannel::Snare, dtx_input::BindSource::Key(KeyCode::KeyX));
         let r = BindResolver::from_bindings(&b);
         assert_eq!(
             r.lanes_for_key(KeyCode::KeyX).collect::<Vec<_>>(),
@@ -296,9 +296,9 @@ mod tests {
 
     #[test]
     fn resolver_tracks_live_binding_edit() {
-        let mut ib = dtx_config::InputBindings::default();
+        let mut ib = dtx_input::InputBindings::default();
         let sd = dtx_core::EChannel::Snare;
-        ib.bind(sd, dtx_config::BindSource::Key(KeyCode::KeyP));
+        ib.bind(sd, dtx_input::BindSource::Key(KeyCode::KeyP));
         let resolver = BindResolver::from_bindings(&ib);
         assert_eq!(
             resolver.lane_for_key(KeyCode::KeyP),
@@ -362,8 +362,8 @@ mod tests {
 
     #[test]
     fn failed_registry_selection_keeps_active_resolver() {
-        use dtx_config::profiles::{reduce_registry, RegistryAction};
-        let registry = dtx_config::profiles::keyboard_registry();
+        use dtx_input::profiles::{reduce_registry, RegistryAction};
+        let registry = dtx_input::profiles::keyboard_registry();
         let before = ActiveInputProfiles::default();
         let resolver = BindResolver::from_profiles(&before.keyboard, &before.midi);
         let result = reduce_registry(
