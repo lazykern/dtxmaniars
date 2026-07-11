@@ -27,6 +27,7 @@
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
+use bevy::image::{ImageFormatSetting, ImageLoaderSettings};
 use bevy::prelude::*;
 use bevy_kira_audio::prelude::*;
 use dtx_audio::{
@@ -273,7 +274,10 @@ fn resolve_difficulty_slot(
 }
 
 fn read_set_def_difficulties(folder: &Path) -> HashMap<String, SetDefDifficulty> {
-    let Ok(bytes) = std::fs::read(folder.join("set.def")) else {
+    let Some(set_def_path) = find_set_def_path(folder) else {
+        return HashMap::new();
+    };
+    let Ok(bytes) = std::fs::read(&set_def_path) else {
         return HashMap::new();
     };
     let text = decode_set_def(&bytes);
@@ -311,6 +315,39 @@ fn read_set_def_difficulties(folder: &Path) -> HashMap<String, SetDefDifficulty>
             file.map(|file| (file, SetDefDifficulty { slot, label }))
         })
         .collect()
+}
+
+/// Locate a `set.def` file case-insensitively. Windows chart packs ship it as
+/// `SET.def`, `set.def`, or `Set.def`; case-sensitive filesystems miss a
+/// hard-coded `folder.join("set.def")`, so scan the directory entries instead.
+/// Load a jacket image, sniffing the real format from magic bytes rather than
+/// the file extension. DTX packs routinely ship a JPEG named `pre.png`, which
+/// the extension-driven loader rejects with "Invalid PNG signature".
+fn load_jacket(asset_server: &AssetServer, path: &Path) -> Handle<Image> {
+    asset_server
+        .load_builder()
+        .with_settings(|settings: &mut ImageLoaderSettings| {
+            settings.format = ImageFormatSetting::Guess
+        })
+        .load(path.to_string_lossy().to_string())
+}
+
+fn find_set_def_path(folder: &Path) -> Option<PathBuf> {
+    let direct = folder.join("set.def");
+    if direct.exists() {
+        return Some(direct);
+    }
+    for entry in std::fs::read_dir(folder).ok()?.flatten() {
+        let path = entry.path();
+        if path
+            .file_name()
+            .and_then(|name| name.to_str())
+            .is_some_and(|name| name.eq_ignore_ascii_case("set.def"))
+        {
+            return Some(path);
+        }
+    }
+    None
 }
 
 fn filename_difficulty_label(stem: &str) -> Option<&'static str> {
@@ -1038,7 +1075,7 @@ fn spawn_wheel_rows(
                 let display = folder_display_chart(folder, db).and_then(|i| db.songs.get(i));
                 let jacket_image = display
                     .and_then(|s| s.preimage_path.as_ref())
-                    .map(|p| assets.load(p.to_string_lossy().to_string()))
+                    .map(|p| load_jacket(&assets, p))
                     .unwrap_or_default();
                 row.spawn((
                     WheelRowJacket,
@@ -1766,7 +1803,7 @@ fn update_album_art_image(
     for (_, mut image, mut bg) in &mut query {
         if let Some(path) = &song.preimage_path {
             // Real #PREIMAGE: present: show the image, hide the placeholder.
-            image.image = asset_server.load(path.to_string_lossy().to_string());
+            image.image = load_jacket(&asset_server, path);
             image.color = image.color.with_alpha(1.0);
             bg.0 = bg.0.with_alpha(0.0);
         } else {
