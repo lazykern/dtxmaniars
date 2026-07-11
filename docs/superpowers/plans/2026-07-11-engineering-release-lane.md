@@ -22,6 +22,21 @@
 
 ---
 
+## Execution status (updated 2026-07-11, branch `worktree-eng-release-lane`)
+
+Executed on top of a `main` that had since merged the input/profile registries and the midi-consumer fix. Outcomes diverged from the original task list:
+
+- **Task 1 (toolchain pin):** ✅ done — `rust-toolchain.toml` + CI action `@1.96.0`.
+- **Task 2 (fmt commit):** ✅ done — pinned rustfmt across workspace; `fmt --check` clean.
+- **Task 3 (clippy `-D warnings`):** ✅ done, but far larger than scoped. The 1.96.0 pin + main's merges exposed clippy debt across *every* previously-unreachable bevy crate (whack-a-mole: each fixed dep layer revealed the next). Fixed via crate-level `#![allow(too_many_arguments, type_complexity)]` for bevy false-positives (gameplay-drums, game-menu, game-results) + ~23 genuine fixes. **Full-workspace `clippy --all-targets -- -D warnings` is green.**
+- **Task 4 (CI test package groups):** ⏭️ **skipped** — user deprioritized CI/CD ("don't need ci cd now"). Note: current `ci.yml` deliberately runs *format + clippy only* (tests OOM on 7 GB runners); merged AGENTS.md still claims "CI uses package tests" — a pre-existing main inconsistency left as-is.
+- **Task 5 (AGENTS.md repair):** ✅ done — dead links + `docs/decisions/README.md`; correct fixture path preserved through rebase conflict.
+- **Task 6 (dtx-core→dtx-timing):** ✅ **already achieved upstream** — the pure math now lives in `dtx-core::timing`; `dtx-timing` re-exports it as `math`. dtx-core deps are empty (no cycle). Reduced to one dangling doc-link fix in `beat_lines.rs`.
+- **Task 7 (dtx-config→dtx-input):** ⏸️ **deferred** — still a real violation (`bindings.rs` + main's new `profiles.rs` both serialize `KeyCode`). Investigated: feasible & clean (edge reverses to Engine→Pure, no cycle; round-trip tests guard the on-disk schema). **Blocked on sequencing:** the unmerged `feat/input-lane-profiles` branch massively rewrites the exact call-site files Task 7 touches (`editor/bindings_capture|bindings_panel|mod.rs` + `profiles.rs`). Do Task 7 *after* that branch lands on main. Concrete move plan captured in conversation; see original Task 7 steps below (expand to move `profiles.rs` too).
+- **Task 8 (release.yml):** ⏭️ **skipped** — user deprioritized CI/CD.
+
+---
+
 ### Task 1: Pin the toolchain (rustfmt drift killer)
 
 **Files:**
