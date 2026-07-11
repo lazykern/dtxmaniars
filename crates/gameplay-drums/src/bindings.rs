@@ -14,7 +14,7 @@ use dtx_config::profiles::{
 };
 use dtx_config::{BindSource, InputBindings, BINDABLE_CHANNELS};
 
-use crate::lane_map::{LaneId, lane_of};
+use crate::lane_map::{lane_of, LaneId};
 
 pub(super) fn plugin(app: &mut App) {
     app.init_resource::<BindResolver>()
