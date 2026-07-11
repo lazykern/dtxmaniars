@@ -3158,6 +3158,7 @@ dependencies = [
  "dtx-core",
  "dtx-input",
  "dtx-layout",
+ "dtx-persistence",
  "dtx-scoring",
  "dtx-timing",
  "dtx-ui",
