@@ -6,13 +6,43 @@
 ## Quickstart
 
 ```sh
-cargo check --workspace      # type-check everything
-cargo test -p dtx-core       # parser tests
+cargo check -p dtx-core
+cargo test -p dtx-core
 cargo run -p dtx-cli -- validate tests/fixtures/dtx-core/minimal.dtx
-cargo run -p dtxmaniars-desktop   # launches the bevy window (M2+)
+cargo run -p dtxmaniars-desktop --features bevy/dynamic_linking
 ```
 
-Bevy 0.19 requires Rust 1.95+. CI on `stable`.
+Bevy 0.19 requires Rust 1.95+. CI on `stable`. `dynamic_linking` is dev-only;
+release builds must omit it.
+
+## Fast build/test workflow
+
+Inner loop — run only changed package and smallest relevant target:
+
+```sh
+cargo check -p <changed-package>
+cargo test -p <changed-package> --lib
+cargo test -p <changed-package> --test <integration-test>
+cargo nextest run -p <changed-package> # multiple test binaries
+```
+
+For Bevy-heavy integration tests, reduce linking cost with:
+
+```sh
+cargo test -p gameplay-drums --features bevy/dynamic_linking --test <integration-test>
+```
+
+Before handoff, run all tests for changed packages. Before merge:
+
+```sh
+cargo check --workspace
+cargo clippy --workspace --all-targets -- -D warnings
+```
+
+Run `CARGO_BUILD_JOBS=1 cargo test --workspace --all-targets` only when a full
+workspace gate is required; this suite can exceed available RAM, so CI currently
+uses package tests instead. Use `cargo build --profile debugging` when full
+debugger information is needed.
 
 ## Before writing any implementation code (mandatory)
 
@@ -96,6 +126,11 @@ A Pure crate **must not** depend on any Engine or Game crate. Engine crates may 
 
 - **One agent per crate domain.** Two agents on the same crate = serialize.
 - Use `git worktree add ../dtxmaniars-<domain> -b feat/<domain>-<task>` for parallel work.
+- Each worktree uses its own `target/`; never share one target directory across concurrent worktrees.
+- Share cacheable compilation through `sccache`; set `SCCACHE_BASEDIRS` to the absolute common worktree parent.
+- Keep incremental compilation enabled for worktree-local crates.
+- Linker, `rustflags`, toolchain, profile, or feature changes invalidate build artifacts.
+- Remove completed worktrees to reclaim their `target/`; never delete active caches without confirmation.
 - Merge order: `dtx-core` → `dtx-timing` → `gameplay-drums` → `game-shell` → `game-menu`.
 
 ## When stuck
