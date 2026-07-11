@@ -238,7 +238,7 @@ mod tests {
     #[test]
     fn bindings_and_lanes_preview_like_settings() {
         let win = Vec2::new(1600.0, 900.0);
-        for tab in [CustomizeTab::Bindings, CustomizeTab::Lanes] {
+        for tab in [CustomizeTab::Controls, CustomizeTab::Lanes] {
             let r = preset_rect(tab, win, false);
             assert_eq!(r.origin, Vec2::new(240.0, 0.0));
             assert_eq!(r.size, win);

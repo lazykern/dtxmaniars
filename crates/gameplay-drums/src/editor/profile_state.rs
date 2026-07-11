@@ -140,6 +140,13 @@ impl std::error::Error for ProfileStateError {}
 
 /// Resolve a pending action against a draft. `builtin_selected` marks the
 /// draft's selected profile as an immutable built-in.
+///
+/// Decision semantics are uniform across actions: `Save`/`SaveAs` always
+/// persist the working value, `Discard` always drops it, `Cancel` always
+/// aborts the pending action. In particular, `Save` during a `Revert`
+/// prompt means "keep my changes instead" — the revert is abandoned and the
+/// draft becomes clean at the saved value. Never destroys unsaved work
+/// without an explicit `Discard`.
 pub fn reduce_dirty_action<T: Clone + PartialEq>(
     draft: &ProfileDraft<T>,
     builtin_selected: bool,
@@ -340,6 +347,57 @@ mod tests {
             DraftEffect::Transaction {
                 save: Some(("My kit".into(), draft.value.clone())),
                 select: Some("My kit".into()),
+            }
+        );
+    }
+
+    #[test]
+    fn revert_save_keeps_changes_instead_of_reverting() {
+        let draft = dirty_keyboard_draft("Desk");
+        let effect = reduce_dirty_action(
+            &draft,
+            false,
+            &PendingProfileAction::Revert,
+            DirtyDecision::Save,
+        )
+        .expect("revert save reduces");
+        assert_eq!(
+            effect,
+            DraftEffect::Transaction {
+                save: Some(("Desk".into(), draft.value.clone())),
+                select: None,
+            }
+        );
+    }
+
+    #[test]
+    fn revert_discard_resets_draft_without_write() {
+        let draft = dirty_keyboard_draft("Desk");
+        let effect = reduce_dirty_action(
+            &draft,
+            false,
+            &PendingProfileAction::Revert,
+            DirtyDecision::Discard,
+        )
+        .expect("revert discard reduces");
+        assert_eq!(effect, DraftEffect::ResetDraft);
+    }
+
+    #[test]
+    fn close_save_as_selects_new_profile() {
+        let draft = dirty_keyboard_draft("DTXMania default");
+        let effect = reduce_dirty_action(
+            &draft,
+            true,
+            &PendingProfileAction::ExitApp,
+            DirtyDecision::SaveAs(name("Backup kit")),
+        )
+        .expect("exit save as reduces");
+        assert_eq!(
+            effect,
+            DraftEffect::Transaction {
+                save: Some(("Backup kit".into(), draft.value.clone())),
+                select: Some("Backup kit".into()),
             }
         );
     }

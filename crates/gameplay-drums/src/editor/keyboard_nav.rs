@@ -30,7 +30,7 @@ pub enum NavLevel {
 
 /// Tabs whose CONTENT pads cannot navigate (pointer / capture surfaces).
 pub fn pad_excluded(tab: CustomizeTab) -> bool {
-    matches!(tab, CustomizeTab::Bindings | CustomizeTab::Widgets)
+    matches!(tab, CustomizeTab::Controls | CustomizeTab::Widgets)
 }
 
 /// Can pads descend from the tab bar into this tab's rows?
@@ -340,7 +340,7 @@ mod tests {
 
     #[test]
     fn pad_cannot_enter_excluded_or_non_settings_tabs() {
-        assert!(!pad_can_enter(CustomizeTab::Bindings));
+        assert!(!pad_can_enter(CustomizeTab::Controls));
         assert!(!pad_can_enter(CustomizeTab::Widgets));
         assert!(!pad_can_enter(CustomizeTab::Lanes));
         assert!(pad_can_enter(CustomizeTab::Gameplay));

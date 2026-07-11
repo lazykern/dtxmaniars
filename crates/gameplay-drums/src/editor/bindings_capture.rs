@@ -242,7 +242,7 @@ fn midi_hit_autoselect(
     mut seen_at: Local<Option<std::time::Instant>>,
     mut selected: ResMut<SelectedChannel>,
 ) {
-    if active.0 != game_shell::CustomizeTab::Bindings {
+    if active.0 != game_shell::CustomizeTab::Controls {
         return;
     }
     match last_midi.at {

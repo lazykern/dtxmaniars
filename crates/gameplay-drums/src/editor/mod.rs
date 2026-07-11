@@ -14,6 +14,7 @@ pub mod bindings_panel;
 pub mod bindings_spatial;
 pub mod calibration;
 pub mod chrome;
+pub mod controls_panel;
 pub mod drag;
 pub mod footer;
 pub mod hotkeys;

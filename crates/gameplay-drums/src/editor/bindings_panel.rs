@@ -180,7 +180,7 @@ pub fn spawn_bindings_block(
         })
         .with_children(|header| {
             header.spawn((
-                Text::new("Bindings"),
+                Text::new("Controls"),
                 dtx_ui::theme::Theme::font(13.0),
                 TextColor(t.text_primary),
             ));
