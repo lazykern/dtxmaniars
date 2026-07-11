@@ -30,17 +30,23 @@ pub struct BindChannelRow(pub dtx_core::EChannel);
 #[derive(Component, Clone, Copy)]
 pub struct UnboundRow;
 
-/// A chip: clicking anywhere on it removes `source[index]` from `channel`.
+/// The `×` remove button on a chip: removes `source[index]` from `channel`.
+/// Lives on a dedicated small child node — the chip body itself is inert.
 #[derive(Component, Clone, Copy)]
 pub struct BindChipRemove {
     pub channel: dtx_core::EChannel,
     pub index: usize,
 }
 
-/// The bind source a chip displays, so hovering it can light every OTHER
-/// channel that also owns it (see `bindings_spatial::sync_hover_outlines`).
+/// Carried by the (inert, hoverable) chip body so hovering it can light every
+/// OTHER channel that also owns this source (see
+/// `bindings_spatial::sync_hover_outlines`). Holds the chip's own channel so
+/// that channel is excluded from the highlight.
 #[derive(Component, Clone, Copy)]
-pub struct ChipSource(pub BindSource);
+pub struct ChipSource {
+    pub channel: dtx_core::EChannel,
+    pub source: BindSource,
+}
 
 /// `+` on a channel row: starts capturing a new source for `channel`.
 #[derive(Component, Clone, Copy)]
@@ -600,12 +606,20 @@ fn spawn_pads_card(
                         r,
                         &chip.label,
                         chip.shared,
-                        (ChipSource(chip.source), Button),
+                        (ChipSource { channel: ch, source: chip.source }, Button),
                     );
                     r.commands_mut().entity(chip_id).with_children(|cc| {
                         cc.spawn((
                             BindChipRemove { channel: ch, index: chip.index },
                             Button,
+                            // Clickable but does NOT block the chip body below
+                            // it from hovering — so hovering the × keeps the
+                            // shared-lane preview lit (bevy_ui picking ignores
+                            // FocusPolicy; Pickable is the real knob).
+                            Pickable {
+                                should_block_lower: false,
+                                is_hoverable: true,
+                            },
                             Node {
                                 padding: UiRect::axes(Val::Px(3.0), Val::Px(0.0)),
                                 margin: UiRect::left(Val::Px(2.0)),
@@ -705,7 +719,8 @@ fn handle_bindings_reset(
     }
 }
 
-/// Anywhere on a chip: drop that source from the channel's list (bounds-checked).
+/// The `×` button on a chip: drop that source from the channel's list
+/// (bounds-checked). The chip body itself is inert — only the `×` removes.
 fn handle_bind_chip_remove(
     q: Query<(&Interaction, &BindChipRemove), Changed<Interaction>>,
     mut live: ResMut<LiveBindings>,
@@ -754,25 +769,29 @@ fn handle_segment_btn(
     }
 }
 
-/// Hovering (or pressing) a shared chip lights every OTHER channel that also
-/// owns its source; leaving it clears the highlight. Chips with a single
-/// owner never populate `HighlightedChannels` (nothing shared to show).
+/// Each frame, light every OTHER channel that shares the source of whichever
+/// chip is currently hovered/pressed (first match wins); nothing hovered, or a
+/// source only this channel owns, clears the highlight. A single deterministic
+/// pass — not per-entity `Changed<Interaction>` deltas, which could clobber
+/// the shared resource when the pointer jumps between two chips in one frame.
 fn update_chip_hover_highlight(
-    q: Query<(&Interaction, &ChipSource), Changed<Interaction>>,
+    q: Query<(&Interaction, &ChipSource)>,
     live: Res<LiveBindings>,
     mut highlighted: ResMut<super::bindings_spatial::HighlightedChannels>,
 ) {
-    for (interaction, chip) in &q {
-        match interaction {
-            Interaction::Hovered | Interaction::Pressed => {
-                let owners = match chip.0 {
-                    BindSource::Key(k) => live.0.channels_for_key(k),
-                    BindSource::Midi { note } => live.0.channels_for_note(note),
-                };
-                highlighted.0 = if owners.len() > 1 { owners } else { Vec::new() };
-            }
-            Interaction::None => highlighted.0.clear(),
-        }
+    let owners = q
+        .iter()
+        .find(|(interaction, _)| matches!(interaction, Interaction::Hovered | Interaction::Pressed))
+        .map(|(_, chip)| {
+            let all = match chip.source {
+                BindSource::Key(k) => live.0.channels_for_key(k),
+                BindSource::Midi { note } => live.0.channels_for_note(note),
+            };
+            all.into_iter().filter(|c| *c != chip.channel).collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
+    if highlighted.0 != owners {
+        highlighted.0 = owners;
     }
 }
 
@@ -992,6 +1011,33 @@ mod tests {
 
         let hh = rows.iter().find(|r| r.channel == dtx_core::EChannel::HiHatClose).unwrap();
         assert!(hh.chips.iter().all(|c| !c.shared));
+    }
+
+    #[test]
+    fn segment_rows_preserve_unfiltered_source_index() {
+        // A mixed source vec: the MIDI entry sits at index 0, so the two key
+        // chips MUST report index 1 and 2 (their position in the full list),
+        // not 0 and 1 — otherwise `BindChipRemove` would delete the wrong
+        // entry once MIDI sources are filtered out of the Keyboard segment.
+        use dtx_core::EChannel;
+        use dtx_input::{BindSource, InputBindings};
+
+        let mut b = InputBindings::default();
+        b.map.insert(
+            EChannel::Snare,
+            vec![
+                BindSource::Midi { note: 60 },
+                BindSource::Key(KeyCode::KeyA),
+                BindSource::Key(KeyCode::KeyB),
+            ],
+        );
+        let rows = segment_rows(&b, ControlsSegment::Keyboard, &dtx_layout::classic());
+        let sd = rows.iter().find(|r| r.channel == EChannel::Snare).unwrap();
+        assert_eq!(sd.chips.len(), 2, "only the two key chips show in Keyboard");
+        assert_eq!(sd.chips[0].index, 1);
+        assert!(matches!(sd.chips[0].source, BindSource::Key(KeyCode::KeyA)));
+        assert_eq!(sd.chips[1].index, 2);
+        assert!(matches!(sd.chips[1].source, BindSource::Key(KeyCode::KeyB)));
     }
 
     #[test]
