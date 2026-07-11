@@ -87,6 +87,8 @@ pub(crate) fn judge_lane_hit_system(
     bar_changes: Res<BarLengthChangeList>,
     drum_settings: Res<DrumGameplaySettings>,
     input_offset: Res<crate::resources::InputOffsetMs>,
+    wait_state: Option<Res<crate::practice::wait::WaitState>>,
+    mut chord_hits: Option<ResMut<crate::practice::wait::ChordHitTimes>>,
     mut judged: ResMut<JudgedChips>,
     mut events: MessageWriter<JudgmentEvent>,
     mut empty_hits: MessageWriter<EmptyHit>,
@@ -99,6 +101,13 @@ pub(crate) fn judge_lane_hit_system(
         bpm_changes: &bpm_changes.changes,
         bar_changes: &bar_changes.changes,
     };
+    // While practice wait mode is halted, only the halted chord's chips
+    // are judgeable — otherwise a repeated hit on an already-satisfied
+    // lane "borrows" credit from a future note on that same lane.
+    let halted_chips: Option<&[usize]> = wait_state.as_deref().and_then(|s| match &s.phase {
+        crate::practice::wait::WaitPhase::Halted(set) => Some(set.chips.as_slice()),
+        crate::practice::wait::WaitPhase::Flowing => None,
+    });
 
     for hit in lane_hits.read() {
         let Some(pad) = DrumPad::from_lane(hit.lane) else {
@@ -117,6 +126,10 @@ pub(crate) fn judge_lane_hit_system(
             timing,
             &drum_settings.groups,
         );
+        let results = filter_to_halted_set(results, halted_chips);
+        if let Some(chord_hits) = chord_hits.as_deref_mut() {
+            record_chord_hit_times(chord_hits, &results, halted_chips, adjusted_hit_ms);
+        }
 
         if results.is_empty() {
             empty_hits.write(EmptyHit {
@@ -135,6 +148,40 @@ pub(crate) fn judge_lane_hit_system(
                 chip_idx: idx,
             });
         }
+    }
+}
+
+/// While practice wait mode is halted on a chord, drop any judged chip
+/// that isn't part of that chord — a repeated hit on an already-satisfied
+/// lane must not "borrow" credit from a future note on the same lane.
+fn filter_to_halted_set(
+    results: Vec<(usize, i64)>,
+    halted_chips: Option<&[usize]>,
+) -> Vec<(usize, i64)> {
+    match halted_chips {
+        Some(allowed) => results
+            .into_iter()
+            .filter(|(idx, _)| allowed.contains(idx))
+            .collect(),
+        None => results,
+    }
+}
+
+/// Record `hit_ms` for every `(chip_idx, _delta)` in `results` into
+/// `chord_hits`, but only while wait mode is halted (`halted_chips` is
+/// `Some`) — outside a halt there is no chord being evaluated, so there
+/// is nothing to record against.
+fn record_chord_hit_times(
+    chord_hits: &mut crate::practice::wait::ChordHitTimes,
+    results: &[(usize, i64)],
+    halted_chips: Option<&[usize]>,
+    hit_ms: i64,
+) {
+    if halted_chips.is_none() {
+        return;
+    }
+    for (idx, _delta) in results {
+        chord_hits.0.insert(*idx, hit_ms);
     }
 }
 
@@ -335,5 +382,38 @@ mod tests {
     #[test]
     fn max_judge_window_matches_nx_poor_window() {
         assert_eq!(MAX_JUDGE_WINDOW_MS, 117);
+    }
+
+    #[test]
+    fn halted_filter_passes_through_when_not_halted() {
+        let results = vec![(5, 10)];
+        assert_eq!(filter_to_halted_set(results.clone(), None), results);
+    }
+
+    #[test]
+    fn halted_filter_keeps_only_chord_chips() {
+        let results = vec![(2, 0), (5, 3)];
+        // chip 2 is part of the halted chord, chip 5 (a future note on the
+        // same lane) must not be credited while still halted.
+        assert_eq!(filter_to_halted_set(results, Some(&[2, 3])), vec![(2, 0)]);
+    }
+
+    #[test]
+    fn halted_filter_drops_future_note_entirely() {
+        let results = vec![(5, 3)];
+        assert_eq!(filter_to_halted_set(results, Some(&[2, 3])), Vec::new());
+    }
+
+    #[test]
+    fn records_hit_time_only_for_halted_chips() {
+        use crate::practice::wait::ChordHitTimes;
+        let mut chord_hits = ChordHitTimes::default();
+        record_chord_hit_times(&mut chord_hits, &[(2, 0_i64), (5, 3)], Some(&[2, 3]), 12_345);
+        assert_eq!(chord_hits.0.get(&2), Some(&12_345));
+        assert_eq!(chord_hits.0.get(&5), Some(&12_345));
+
+        let mut chord_hits2 = ChordHitTimes::default();
+        record_chord_hit_times(&mut chord_hits2, &[(2, 0_i64)], None, 12_345);
+        assert!(chord_hits2.0.is_empty());
     }
 }

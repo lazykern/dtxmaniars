@@ -160,7 +160,9 @@ pub fn reset_wait_on_seek(mut seeks: MessageReader<SeekToChartTime>, mut state: 
 }
 
 pub(crate) fn plugin(app: &mut App) {
-    app.init_resource::<WaitState>().add_systems(
+    app.init_resource::<WaitState>()
+        .init_resource::<ChordHitTimes>()
+        .add_systems(
         FixedUpdate,
         (
             reset_wait_on_seek.after(crate::seek::apply_seek_system),
