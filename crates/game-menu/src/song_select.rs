@@ -121,6 +121,30 @@ impl SongFolderView {
             _ => "?",
         }
     }
+
+    pub fn difficulty_label_for(path: &Path, ordinal: u8) -> String {
+        let name = path
+            .file_name()
+            .and_then(|name| name.to_str())
+            .map(str::to_ascii_lowercase);
+        let set_difficulties = path
+            .parent()
+            .map(read_set_def_difficulties)
+            .unwrap_or_default();
+        if let Some(definition) = name.as_deref().and_then(|name| set_difficulties.get(name)) {
+            return definition
+                .label
+                .clone()
+                .unwrap_or_else(|| Self::difficulty_label(definition.slot as u8).to_string());
+        }
+        let filename_label = path
+            .file_stem()
+            .and_then(|stem| stem.to_str())
+            .and_then(filename_difficulty_label);
+        filename_label
+            .unwrap_or_else(|| Self::difficulty_label(ordinal))
+            .to_string()
+    }
 }
 
 /// Currently selected folder + chart, search/sort state, and the
@@ -170,10 +194,12 @@ impl SongSelectSelection {
         let mut v: Vec<SongFolderView> = by_folder
             .into_iter()
             .map(|(folder, mut indices)| {
-                let set_order = read_set_def_order(&folder);
+                let set_difficulties = read_set_def_difficulties(&folder);
                 indices.sort_by(|&a, &b| {
-                    let oa = set_order_for(&set_order, &all[a].path);
-                    let ob = set_order_for(&set_order, &all[b].path);
+                    let oa = set_difficulty_for(&set_difficulties, &all[a].path)
+                        .map(|definition| definition.slot);
+                    let ob = set_difficulty_for(&set_difficulties, &all[b].path)
+                        .map(|definition| definition.slot);
                     match (oa, ob) {
                         (Some(oa), Some(ob)) => oa.cmp(&ob).then_with(|| a.cmp(&b)),
                         (Some(_), None) => std::cmp::Ordering::Less,
@@ -208,35 +234,72 @@ fn display_level_key(song: &SongInfo) -> u32 {
         .unwrap_or(u32::MAX)
 }
 
-fn set_order_for(order: &HashMap<String, usize>, path: &Path) -> Option<usize> {
-    let name = path.file_name()?.to_str()?.to_ascii_lowercase();
-    order.get(&name).copied()
+#[derive(Debug, Clone)]
+struct SetDefDifficulty {
+    slot: usize,
+    label: Option<String>,
 }
 
-fn read_set_def_order(folder: &Path) -> HashMap<String, usize> {
+fn set_difficulty_for<'a>(
+    difficulties: &'a HashMap<String, SetDefDifficulty>,
+    path: &Path,
+) -> Option<&'a SetDefDifficulty> {
+    let name = path.file_name()?.to_str()?.to_ascii_lowercase();
+    difficulties.get(&name)
+}
+
+fn read_set_def_difficulties(folder: &Path) -> HashMap<String, SetDefDifficulty> {
     let Ok(bytes) = std::fs::read(folder.join("set.def")) else {
         return HashMap::new();
     };
     let text = decode_set_def(&bytes);
-    let mut order = HashMap::new();
+    let mut files = std::array::from_fn::<_, 5, _>(|_| None);
+    let mut labels = std::array::from_fn::<_, 5, _>(|_| None);
     for line in text.lines().map(str::trim) {
         let upper = line.to_ascii_uppercase();
-        for i in 1..=5 {
-            let key = format!("#L{i}FILE");
-            if upper.starts_with(&key) {
-                let file = line[key.len()..].trim_matches([':', ' ', '\t']);
-                let file = Path::new(file)
+        for (slot, (file, label)) in files.iter_mut().zip(labels.iter_mut()).enumerate() {
+            let file_key = format!("#L{}FILE", slot + 1);
+            if upper.starts_with(&file_key) {
+                let value = line[file_key.len()..].trim_matches([':', ' ', '\t']);
+                let file_name = Path::new(value)
                     .file_name()
-                    .and_then(|s| s.to_str())
-                    .unwrap_or(file)
+                    .and_then(|name| name.to_str())
+                    .unwrap_or(value)
                     .to_ascii_lowercase();
-                if !file.is_empty() {
-                    order.insert(file, i - 1);
+                if !file_name.is_empty() {
+                    *file = Some(file_name);
+                }
+            }
+            let label_key = format!("#L{}LABEL", slot + 1);
+            if upper.starts_with(&label_key) {
+                let value = line[label_key.len()..].trim_matches([':', ' ', '\t']);
+                if !value.is_empty() {
+                    *label = Some(value.to_string());
                 }
             }
         }
     }
-    order
+    files
+        .into_iter()
+        .zip(labels)
+        .enumerate()
+        .filter_map(|(slot, (file, label))| {
+            file.map(|file| (file, SetDefDifficulty { slot, label }))
+        })
+        .collect()
+}
+
+fn filename_difficulty_label(stem: &str) -> Option<&'static str> {
+    stem.split(|c: char| !c.is_ascii_alphanumeric())
+        .next_back()
+        .and_then(|part| match part.to_ascii_lowercase().as_str() {
+            "bsc" | "bas" | "basic" => Some("BASIC"),
+            "adv" | "advanced" => Some("ADV"),
+            "ext" | "extreme" => Some("EXT"),
+            "mas" | "mst" | "mstr" | "master" => Some("MAS"),
+            "edit" => Some("EDIT"),
+            _ => None,
+        })
 }
 
 fn decode_set_def(bytes: &[u8]) -> String {
@@ -1133,7 +1196,10 @@ fn update_left_cluster(
             let best = dtx_scoring::score_ini::read_best(&ini);
             data.slots[slot_i] = DifficultySlot {
                 present: true,
-                label: format!("DRUM · {}", SongFolderView::difficulty_label(slot_i as u8)),
+                label: format!(
+                    "DRUM · {}",
+                    SongFolderView::difficulty_label_for(&song.path, slot_i as u8)
+                ),
                 level: song.dlevel.map(dtx_core::display_dlevel),
                 achievement: best.as_ref().map(|b| b.accuracy()),
                 rank: best.as_ref().map(|b| b.rank.clone()),
@@ -1579,7 +1645,7 @@ fn song_select_nav_consumer(
             info!(
                 "SongSelect: selected {} ({}){}",
                 song.title,
-                SongFolderView::difficulty_label(selection.difficulty),
+                SongFolderView::difficulty_label_for(&song.path, selection.difficulty),
                 if practice { " [practice]" } else { "" }
             );
             selected_song.0 = Some(song.path.clone());
@@ -2072,6 +2138,44 @@ mod tests {
             search_query: "bra".into(),
             ..Default::default()
         };
+    #[test]
+    fn difficulty_labels_use_chart_source() {
+        for (file, label) in [
+            ("bsc.dtx", "BASIC"),
+            ("adv.dtx", "ADV"),
+            ("ext.dtx", "EXT"),
+            ("mstr.dtx", "MAS"),
+            ("edit.dtx", "EDIT"),
+        ] {
+            assert_eq!(
+                SongFolderView::difficulty_label_for(std::path::Path::new(file), 0),
+                label
+            );
+        }
+        assert_eq!(
+            SongFolderView::difficulty_label_for(std::path::Path::new("chart.dtx"), 1),
+            "ADV"
+        );
+
+        let root = std::env::temp_dir().join(format!(
+            "dtxmaniars-setdef-label-{}-{}",
+            std::process::id(),
+            "song-select"
+        ));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::write(
+            root.join("set.def"),
+            "#L4FILE mstr.dtx\n#L4LABEL CHALLENGE\n",
+        )
+        .unwrap();
+        assert_eq!(
+            SongFolderView::difficulty_label_for(&root.join("mstr.dtx"), 0),
+            "CHALLENGE"
+        );
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
         let all = vec![
             make_song("Charlie", "X"),
             make_song("Alpha", "Y"),

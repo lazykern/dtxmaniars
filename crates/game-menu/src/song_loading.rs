@@ -337,7 +337,7 @@ fn spawn_loading(
             s.artist.clone(),
             s.bpm,
             s.dlevel,
-            crate::song_select::SongFolderView::difficulty_label(selection.difficulty).to_string(),
+            crate::song_select::SongFolderView::difficulty_label_for(&s.path, selection.difficulty),
             s.preimage_path.clone(),
         ),
         None => (
