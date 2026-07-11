@@ -103,6 +103,8 @@ pub fn plugin(app: &mut App) {
         .init_resource::<PreviewState>()
         .init_resource::<drag::Selection>()
         .init_resource::<undo::UndoStack>()
+        .init_resource::<controls_panel::ControlsSegment>()
+        .init_resource::<controls_panel::ControlsFocus>()
         .add_systems(
             Update,
             (

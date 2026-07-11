@@ -1,14 +1,16 @@
-//! Binding-capture state machine for the Bindings tab.
+//! Binding-capture state machine for the Controls tab.
 //!
-//! `+` on a channel row (bindings_panel) arms `CaptureState::Capturing(ch)`.
-//! From there `capture_binding` listens for the first input (keyboard key or
-//! MIDI NoteOn), refuses reserved keys, and either binds immediately or
-//! — when a MIDI note already belongs to another channel — routes through a
-//! `ConfirmSteal` step so no bind is stolen silently (Enter steals, Esc cancels).
+//! `+` on a channel row (bindings_panel) arms `CaptureState::Keyboard(ch)` or
+//! `CaptureState::Midi(ch)` depending on the active Controls segment. The
+//! keyboard machine listens only for key presses (refusing reserved keys and
+//! modifier combos) and binds shared; the MIDI machine listens only for
+//! strictly-new NoteOns and — when a note already belongs to another channel —
+//! routes through `ConfirmMidiSteal` so no bind is stolen silently (Enter
+//! steals, Esc cancels).
 //!
-//! Esc while `Capturing`/`ConfirmSteal` cancels capture WITHOUT closing the
-//! surface: `close_on_escape` (ui.rs) is gated `not(capture_active)` so the same
-//! Esc press can't also close the Customize overlay mid-capture.
+//! Esc while capturing/confirming cancels WITHOUT closing the surface:
+//! `close_on_escape` (ui.rs) is gated `not(capture_active)` so the same Esc
+//! press can't also close the Customize overlay mid-capture.
 //!
 //! Channel selection (drives `SelectedChannel` → the spatial lane display):
 //! clicking a channel row (`select_channel_on_row_click`) is the primary path;
@@ -26,21 +28,25 @@ use crate::resources::GameplayClock;
 
 use super::bindings_panel::{BindChannelRow, BindingsRev};
 
-/// Keyboard/MIDI capture state machine.
+/// Source-split capture state machine. Keyboard capture listens only to the
+/// keyboard; MIDI learning listens only to strictly-new NoteOns. A stray hit
+/// on the other device can never bind.
 #[derive(Resource, Default, Debug, Clone)]
 pub enum CaptureState {
     /// Not capturing.
     #[default]
     Idle,
-    /// Listening for the first input to bind to this channel.
-    Capturing(dtx_core::EChannel),
-    /// The captured source already belongs to `from`; await Enter (steal) / Esc.
-    ConfirmSteal {
+    /// `Add key`: listening for the first bindable key for this channel.
+    Keyboard(dtx_core::EChannel),
+    /// `Learn pad`: listening for the next new NoteOn for this channel.
+    Midi(dtx_core::EChannel),
+    /// The learned note already belongs to `from`; await Enter (steal) / Esc.
+    ConfirmMidiSteal {
         /// Channel the user is binding.
         channel: dtx_core::EChannel,
-        /// Source that was captured.
-        source: dtx_config::BindSource,
-        /// Channel that currently owns `source`.
+        /// Note that was captured.
+        note: u8,
+        /// Channel that currently owns `note`.
         from: dtx_core::EChannel,
     },
 }
@@ -105,28 +111,70 @@ fn modifier_held(keys: &ButtonInput<KeyCode>) -> bool {
         || keys.pressed(KeyCode::SuperRight)
 }
 
-/// Channel that currently owns exclusive `src`, if any. Keyboard binds are
-/// intentionally non-exclusive, so only MIDI can conflict.
-fn owner_of(bindings: &InputBindings, src: BindSource) -> Option<dtx_core::EChannel> {
-    match src {
-        BindSource::Key(_) => None,
-        BindSource::Midi { note } => bindings.channel_for_note(note),
-    }
-}
-
-fn bind_captured(bindings: &mut InputBindings, channel: dtx_core::EChannel, src: BindSource) {
-    match src {
-        BindSource::Key(_) => bindings.bind_shared(channel, src),
-        BindSource::Midi { .. } => bindings.bind(channel, src),
-    }
-}
-
 fn captured_lane_hit(channel: dtx_core::EChannel, audio_ms: i64) -> Option<LaneHit> {
     lane_of(channel).map(|lane| LaneHit { lane, audio_ms })
 }
 
-/// Drive the capture state machine: first non-reserved input wins; conflicts go
-/// through `ConfirmSteal`; Esc cancels at any stage.
+/// Outcome of one keyboard-capture step.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum KeyboardCaptureStep {
+    Pending,
+    Cancelled,
+    Bind(KeyCode),
+}
+
+/// Pure keyboard-capture decision: Esc cancels, modifiers and reserved keys
+/// are refused, MIDI input is invisible to this machine. A captured key is
+/// bound shared — it never steals from another channel.
+pub fn keyboard_capture_step(
+    escape: bool,
+    modifier_held: bool,
+    new_key: Option<KeyCode>,
+) -> KeyboardCaptureStep {
+    if escape {
+        return KeyboardCaptureStep::Cancelled;
+    }
+    if modifier_held {
+        return KeyboardCaptureStep::Pending;
+    }
+    match new_key {
+        Some(key) if !is_reserved(key) => KeyboardCaptureStep::Bind(key),
+        _ => KeyboardCaptureStep::Pending,
+    }
+}
+
+/// Outcome of one MIDI-learn step.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MidiCaptureStep {
+    Pending,
+    Cancelled,
+    Bind(u8),
+    ConfirmSteal { note: u8, from: dtx_core::EChannel },
+}
+
+/// Pure MIDI-learn decision: Esc cancels, keyboard keys are invisible, only a
+/// strictly-new positive-velocity NoteOn counts. A note owned by another
+/// channel routes through explicit steal confirmation.
+pub fn midi_capture_step(
+    channel: dtx_core::EChannel,
+    escape: bool,
+    new_note: Option<u8>,
+    owner: impl Fn(u8) -> Option<dtx_core::EChannel>,
+) -> MidiCaptureStep {
+    if escape {
+        return MidiCaptureStep::Cancelled;
+    }
+    let Some(note) = new_note else {
+        return MidiCaptureStep::Pending;
+    };
+    match owner(note) {
+        Some(from) if from != channel => MidiCaptureStep::ConfirmSteal { note, from },
+        _ => MidiCaptureStep::Bind(note),
+    }
+}
+
+/// Drive the source-split capture machine: keyboard capture sees only keys,
+/// MIDI learning sees only new NoteOns; Esc cancels at any stage.
 fn capture_binding(
     keys: Res<ButtonInput<KeyCode>>,
     last_midi: Res<crate::LastMidiHit>,
@@ -137,6 +185,22 @@ fn capture_binding(
     clock: Res<GameplayClock>,
     mut hits: MessageWriter<LaneHit>,
 ) {
+    let mut bind = |live: &mut LiveBindings,
+                    rev: &mut BindingsRev,
+                    hits: &mut MessageWriter<LaneHit>,
+                    channel: dtx_core::EChannel,
+                    src: BindSource| {
+        match src {
+            BindSource::Key(_) => live.0.bind_shared(channel, src),
+            BindSource::Midi { .. } => live.0.bind(channel, src),
+        }
+        rev.0 = rev.0.wrapping_add(1);
+        if clock.is_ready() {
+            if let Some(hit) = captured_lane_hit(channel, clock.current_ms) {
+                hits.write(hit);
+            }
+        }
+    };
     match *capture {
         CaptureState::Idle => {
             // While idle, track the latest MIDI hit so a pre-existing (stale)
@@ -144,71 +208,75 @@ fn capture_binding(
             // capture — only a strictly-newer NoteOn counts once armed.
             *seen_midi_at = last_midi.at;
         }
-        CaptureState::Capturing(channel) => {
-            // Esc cancels FIRST (before reserved-key logic), and never binds.
-            if keys.just_pressed(KeyCode::Escape) {
-                *capture = CaptureState::Idle;
-                return;
-            }
-            // Refuse bindings while a modifier is held (Ctrl/Alt/Super combos).
-            if modifier_held(&keys) {
-                return;
-            }
-            // First candidate wins: keyboard is checked first, then MIDI. A
-            // key just pressed this frame beats a NoteOn arriving the same
-            // frame (deterministic tie-break).
-            let key_candidate = keys
-                .get_just_pressed()
-                .copied()
-                .find(|&k| !is_reserved(k))
-                .map(BindSource::Key);
-            // A NEW NoteOn (velocity > 0, `at` strictly newer than the one this
-            // capture already consumed) offers a MIDI candidate. Advancing
-            // `seen_midi_at` here dedupes a held/sustained note so it can't
-            // re-bind every frame while the source keeps reporting it.
-            let midi_candidate = match last_midi.at {
-                Some(t) if last_midi.velocity > 0 && *seen_midi_at != Some(t) => {
-                    *seen_midi_at = Some(t);
-                    Some(BindSource::Midi {
-                        note: last_midi.note,
-                    })
-                }
-                _ => None,
-            };
-            let candidate = key_candidate.or(midi_candidate);
-            if let Some(src) = candidate {
-                match owner_of(&live.0, src) {
-                    Some(other) if other != channel => {
-                        *capture = CaptureState::ConfirmSteal {
-                            channel,
-                            source: src,
-                            from: other,
-                        };
-                    }
-                    _ => {
-                        bind_captured(&mut live.0, channel, src);
-                        rev.0 = rev.0.wrapping_add(1);
-                        if clock.is_ready() {
-                            if let Some(hit) = captured_lane_hit(channel, clock.current_ms) {
-                                hits.write(hit);
-                            }
-                        }
-                        *capture = CaptureState::Idle;
-                    }
+        CaptureState::Keyboard(channel) => {
+            let step = keyboard_capture_step(
+                keys.just_pressed(KeyCode::Escape),
+                modifier_held(&keys),
+                keys.get_just_pressed().copied().next(),
+            );
+            match step {
+                KeyboardCaptureStep::Pending => {}
+                KeyboardCaptureStep::Cancelled => *capture = CaptureState::Idle,
+                KeyboardCaptureStep::Bind(key) => {
+                    bind(
+                        &mut live,
+                        &mut rev,
+                        &mut hits,
+                        channel,
+                        BindSource::Key(key),
+                    );
+                    *capture = CaptureState::Idle;
                 }
             }
         }
-        CaptureState::ConfirmSteal {
-            channel, source, ..
-        } => {
-            if keys.just_pressed(KeyCode::Enter) {
-                bind_captured(&mut live.0, channel, source);
-                rev.0 = rev.0.wrapping_add(1);
-                if clock.is_ready() {
-                    if let Some(hit) = captured_lane_hit(channel, clock.current_ms) {
-                        hits.write(hit);
-                    }
+        CaptureState::Midi(channel) => {
+            // A NEW NoteOn (velocity > 0, `at` strictly newer than the one
+            // this capture already consumed). Advancing `seen_midi_at` dedupes
+            // a held/sustained note so it can't re-bind every frame.
+            let new_note = match last_midi.at {
+                Some(t) if last_midi.velocity > 0 && *seen_midi_at != Some(t) => {
+                    *seen_midi_at = Some(t);
+                    Some(last_midi.note)
                 }
+                _ => None,
+            };
+            let step = midi_capture_step(
+                channel,
+                keys.just_pressed(KeyCode::Escape),
+                new_note,
+                |note| live.0.channel_for_note(note),
+            );
+            match step {
+                MidiCaptureStep::Pending => {}
+                MidiCaptureStep::Cancelled => *capture = CaptureState::Idle,
+                MidiCaptureStep::Bind(note) => {
+                    bind(
+                        &mut live,
+                        &mut rev,
+                        &mut hits,
+                        channel,
+                        BindSource::Midi { note },
+                    );
+                    *capture = CaptureState::Idle;
+                }
+                MidiCaptureStep::ConfirmSteal { note, from } => {
+                    *capture = CaptureState::ConfirmMidiSteal {
+                        channel,
+                        note,
+                        from,
+                    };
+                }
+            }
+        }
+        CaptureState::ConfirmMidiSteal { channel, note, .. } => {
+            if keys.just_pressed(KeyCode::Enter) {
+                bind(
+                    &mut live,
+                    &mut rev,
+                    &mut hits,
+                    channel,
+                    BindSource::Midi { note },
+                );
                 *capture = CaptureState::Idle;
             } else if keys.just_pressed(KeyCode::Escape) {
                 *capture = CaptureState::Idle;
@@ -284,22 +352,91 @@ mod tests {
     }
 
     #[test]
-    fn steal_detection_only_applies_to_midi() {
-        let mut ib = InputBindings::default();
-        ib.bind(
-            dtx_core::EChannel::HiHatClose,
-            BindSource::Midi { note: 99 },
-        );
-        assert_eq!(owner_of(&ib, BindSource::Key(KeyCode::KeyX)), None);
+    fn keyboard_capture_ignores_new_midi_hit() {
+        // The keyboard machine has no MIDI input at all: a fresh NoteOn while
+        // armed leaves the capture pending.
+        let step = keyboard_capture_step(false, false, None);
+        assert_eq!(step, KeyboardCaptureStep::Pending);
+    }
+
+    #[test]
+    fn keyboard_capture_rejects_reserved_and_modified_keys() {
         assert_eq!(
-            owner_of(&ib, BindSource::Midi { note: 99 }),
-            Some(dtx_core::EChannel::HiHatClose)
+            keyboard_capture_step(false, false, Some(KeyCode::Tab)),
+            KeyboardCaptureStep::Pending
         );
+        assert_eq!(
+            keyboard_capture_step(false, false, Some(KeyCode::F3)),
+            KeyboardCaptureStep::Pending
+        );
+        assert_eq!(
+            keyboard_capture_step(false, true, Some(KeyCode::KeyX)),
+            KeyboardCaptureStep::Pending
+        );
+    }
+
+    #[test]
+    fn keyboard_capture_adds_shared_key_without_steal() {
+        use dtx_core::EChannel;
+        // The step machine binds a key already owned elsewhere without any
+        // confirm state (shared semantics)...
+        assert_eq!(
+            keyboard_capture_step(false, false, Some(KeyCode::KeyX)),
+            KeyboardCaptureStep::Bind(KeyCode::KeyX)
+        );
+        // ...and the bind itself is shared: the key stays on its old channel.
+        let mut live = LiveBindings(InputBindings::default());
+        live.0
+            .bind_shared(EChannel::Snare, BindSource::Key(KeyCode::KeyX));
+        assert_eq!(
+            live.0.channels_for_key(KeyCode::KeyX),
+            vec![EChannel::HiHatClose, EChannel::Snare]
+        );
+    }
+
+    #[test]
+    fn escape_cancels_keyboard_capture() {
+        assert_eq!(
+            keyboard_capture_step(true, false, Some(KeyCode::KeyX)),
+            KeyboardCaptureStep::Cancelled
+        );
+    }
+
+    #[test]
+    fn midi_capture_ignores_keyboard() {
+        use dtx_core::EChannel;
+        // No new NoteOn means pending — the MIDI machine has no keyboard
+        // input besides Esc.
+        let step = midi_capture_step(EChannel::Snare, false, None, |_| None);
+        assert_eq!(step, MidiCaptureStep::Pending);
+    }
+
+    #[test]
+    fn midi_conflict_requires_confirmed_steal() {
+        use dtx_core::EChannel;
+        let step = midi_capture_step(EChannel::Snare, false, Some(42), |note| {
+            (note == 42).then_some(EChannel::HiHatClose)
+        });
+        assert_eq!(
+            step,
+            MidiCaptureStep::ConfirmSteal {
+                note: 42,
+                from: EChannel::HiHatClose
+            }
+        );
+        // Re-learning a note the channel already owns binds without confirm.
+        let step = midi_capture_step(EChannel::Snare, false, Some(38), |note| {
+            (note == 38).then_some(EChannel::Snare)
+        });
+        assert_eq!(step, MidiCaptureStep::Bind(38));
     }
 
     #[test]
     fn capture_feedback_targets_newly_bound_channel() {
         let hit = captured_lane_hit(dtx_core::EChannel::Snare, 1234);
-        assert_eq!(hit.map(|value| (value.lane, value.audio_ms)), Some((1, 1234)));
+        assert_eq!(
+            hit.map(|value| (value.lane, value.audio_ms)),
+            Some((1, 1234))
+        );
     }
 }

@@ -184,69 +184,70 @@ pub fn spawn_bindings_block(
                 dtx_ui::theme::Theme::font(13.0),
                 TextColor(t.text_primary),
             ));
-            header.spawn(Node {
-                flex_direction: FlexDirection::Row,
-                column_gap: Val::Px(4.0),
-                align_items: AlignItems::Center,
-                ..default()
-            })
-            .with_children(|actions| {
-                if bindings_modified(&live.0) {
-                    actions.spawn((
-                        Text::new("MODIFIED"),
-                        dtx_ui::theme::Theme::font(9.0),
-                        TextColor(Color::srgb(0.85, 0.6, 0.1)),
-                    ));
-                }
-                match reset {
-                    BindingsResetState::Idle => {
+            header
+                .spawn(Node {
+                    flex_direction: FlexDirection::Row,
+                    column_gap: Val::Px(4.0),
+                    align_items: AlignItems::Center,
+                    ..default()
+                })
+                .with_children(|actions| {
+                    if bindings_modified(&live.0) {
                         actions.spawn((
-                            ResetBindingsButton,
-                            Button,
-                            Node {
-                                padding: UiRect::axes(Val::Px(6.0), Val::Px(2.0)),
-                                ..default()
-                            },
-                            BackgroundColor(Color::srgb(0.3, 0.14, 0.14)),
-                            children![(
-                                Text::new("RESET TAB"),
-                                dtx_ui::theme::Theme::font(9.0),
-                                TextColor(t.text_primary),
-                            )],
+                            Text::new("MODIFIED"),
+                            dtx_ui::theme::Theme::font(9.0),
+                            TextColor(Color::srgb(0.85, 0.6, 0.1)),
                         ));
                     }
-                    BindingsResetState::Confirming => {
-                        actions.spawn((
-                            ConfirmResetBindingsButton,
-                            Button,
-                            Node {
-                                padding: UiRect::axes(Val::Px(6.0), Val::Px(2.0)),
-                                ..default()
-                            },
-                            BackgroundColor(Color::srgb(0.45, 0.22, 0.12)),
-                            children![(
-                                Text::new("CONFIRM RESET"),
-                                dtx_ui::theme::Theme::font(9.0),
-                                TextColor(t.text_primary),
-                            )],
-                        ));
-                        actions.spawn((
-                            CancelResetBindingsButton,
-                            Button,
-                            Node {
-                                padding: UiRect::axes(Val::Px(6.0), Val::Px(2.0)),
-                                ..default()
-                            },
-                            BackgroundColor(Color::srgb(0.14, 0.14, 0.18)),
-                            children![(
-                                Text::new("CANCEL"),
-                                dtx_ui::theme::Theme::font(9.0),
-                                TextColor(t.text_primary),
-                            )],
-                        ));
+                    match reset {
+                        BindingsResetState::Idle => {
+                            actions.spawn((
+                                ResetBindingsButton,
+                                Button,
+                                Node {
+                                    padding: UiRect::axes(Val::Px(6.0), Val::Px(2.0)),
+                                    ..default()
+                                },
+                                BackgroundColor(Color::srgb(0.3, 0.14, 0.14)),
+                                children![(
+                                    Text::new("RESET TAB"),
+                                    dtx_ui::theme::Theme::font(9.0),
+                                    TextColor(t.text_primary),
+                                )],
+                            ));
+                        }
+                        BindingsResetState::Confirming => {
+                            actions.spawn((
+                                ConfirmResetBindingsButton,
+                                Button,
+                                Node {
+                                    padding: UiRect::axes(Val::Px(6.0), Val::Px(2.0)),
+                                    ..default()
+                                },
+                                BackgroundColor(Color::srgb(0.45, 0.22, 0.12)),
+                                children![(
+                                    Text::new("CONFIRM RESET"),
+                                    dtx_ui::theme::Theme::font(9.0),
+                                    TextColor(t.text_primary),
+                                )],
+                            ));
+                            actions.spawn((
+                                CancelResetBindingsButton,
+                                Button,
+                                Node {
+                                    padding: UiRect::axes(Val::Px(6.0), Val::Px(2.0)),
+                                    ..default()
+                                },
+                                BackgroundColor(Color::srgb(0.14, 0.14, 0.18)),
+                                children![(
+                                    Text::new("CANCEL"),
+                                    dtx_ui::theme::Theme::font(9.0),
+                                    TextColor(t.text_primary),
+                                )],
+                            ));
+                        }
                     }
-                }
-            });
+                });
         });
 
         // DEVICE sub-section: port selector, velocity threshold, velocity meter.
@@ -579,7 +580,10 @@ fn handle_bindings_reset(
     mut live: ResMut<LiveBindings>,
     mut rev: ResMut<BindingsRev>,
 ) {
-    if reset.iter().any(|interaction| *interaction == Interaction::Pressed) {
+    if reset
+        .iter()
+        .any(|interaction| *interaction == Interaction::Pressed)
+    {
         *state = BindingsResetState::Confirming;
         rev.0 = rev.0.wrapping_add(1);
         return;
@@ -619,14 +623,19 @@ fn handle_bind_chip_remove(
     }
 }
 
-/// `+` on a channel row: arm keyboard/MIDI capture for that channel.
+/// `+` on a channel row: arm source-specific capture for that channel. The
+/// active Controls segment decides which device the capture listens to.
 fn handle_capture_start(
     q: Query<(&Interaction, &BindCaptureStart), Changed<Interaction>>,
+    segment: Res<super::controls_panel::ControlsSegment>,
     mut capture: ResMut<CaptureState>,
 ) {
     for (interaction, start) in &q {
         if *interaction == Interaction::Pressed {
-            *capture = CaptureState::Capturing(start.0);
+            *capture = match *segment {
+                super::controls_panel::ControlsSegment::Keyboard => CaptureState::Keyboard(start.0),
+                super::controls_panel::ControlsSegment::Midi => CaptureState::Midi(start.0),
+            };
         }
     }
 }
