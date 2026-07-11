@@ -57,9 +57,12 @@ fn play_hit_voice_on_lane_hit(
         };
         let vol = chart.chart.assets.wav.volume(wav_slot);
         let pan = chart.chart.assets.wav.pan(wav_slot);
-        // Editor feedback is for short kit voices only. Some charts put long
-        // stems/full-song audio on playable lanes; replaying those on each pad
-        // press sounds like the song multiplying.
+        // Guard against replaying full-song stems: some charts put the whole
+        // BGM (minutes long) on a playable lane, and re-triggering it per pad
+        // press sounds like the song multiplying. Real drum one-shots ring far
+        // longer than a couple seconds though — un-gated stereo-mix cymbals,
+        // toms and even kicks routinely decay 4-11s — so the cutoff must sit
+        // above any plausible kit voice, not clip them.
         if let Some(sound) = sound_bank.get(wav_slot) {
             if let Some(src) = sources.get(&sound.handle) {
                 let duration = src.sound.duration().as_secs_f64();
@@ -114,7 +117,7 @@ fn play_hit_voice_on_lane_hit(
 }
 
 fn feedback_wav_is_too_long(duration_secs: f64) -> bool {
-    duration_secs > 2.0
+    duration_secs > 30.0
 }
 
 /// First chart chip on the lane's channel that carries a WAV slot, else any
@@ -150,7 +153,9 @@ fn wav_path(
     }
     let filename = chart.assets.wav.get(wav_slot)?;
     Some(match source_dir {
-        Some(dir) => dir.join(filename).to_string_lossy().to_string(),
+        Some(dir) => dtx_audio::resolve_chart_audio_path(dir, filename)
+            .to_string_lossy()
+            .to_string(),
         None => filename.to_string(),
     })
 }
@@ -161,7 +166,10 @@ mod tests {
 
     #[test]
     fn editor_feedback_skips_long_audio() {
-        assert!(!feedback_wav_is_too_long(1.99));
-        assert!(feedback_wav_is_too_long(2.01));
+        // Long stereo-mix kit voices (cymbals ~11s, kicks ~4s) must pass.
+        assert!(!feedback_wav_is_too_long(11.0));
+        assert!(!feedback_wav_is_too_long(29.99));
+        // Full-song stems (minutes) are still blocked.
+        assert!(feedback_wav_is_too_long(30.01));
     }
 }
