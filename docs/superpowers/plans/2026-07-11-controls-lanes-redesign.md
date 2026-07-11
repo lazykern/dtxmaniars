@@ -157,6 +157,85 @@ git commit -m "feat(input): fan out one MIDI note to every owning lane"
 
 ---
 
+### Task 1.5: Let MIDI notes persist under multiple channels (dtx-input)
+
+Discovered during Task 1: shared MIDI (spec decision "B") cannot survive today. Four collapse points in `dtx-input`, all must lift for a shared note to round-trip: `split_bindings` mirrors via steal-semantics `bind_note`; `MidiProfile::bind_note` retain-removes the note from other channels; `MidiProfile::deserialize` hard-errors on a duplicate note; legacy `BindingsFile::resolve` dedups. Keyboard already supports sharing end-to-end (`KeyboardProfile.add_key` appends, no uniqueness check) — mirror that.
+
+**Files:**
+- Modify: `crates/dtx-input/src/profiles.rs` (`MidiProfile`, `split_bindings`, deserialize)
+- Modify: `crates/dtx-input/src/bindings.rs` (`BindingsFile::resolve` dedup)
+
+- [ ] **Step 1: Failing tests**
+
+In `profiles.rs` tests:
+
+```rust
+#[test]
+fn midi_profile_allows_shared_note_and_round_trips() {
+    let mut p = MidiProfile::default();
+    p.bind_note_shared(EChannel::BassDrum, 36);
+    p.bind_note_shared(EChannel::LeftBassDrum, 36);
+    assert!(p.map[&EChannel::BassDrum].contains(&36));
+    assert!(p.map[&EChannel::LeftBassDrum].contains(&36));
+    let toml = toml::to_string(&p).unwrap();
+    let back: MidiProfile = toml::from_str(&toml).unwrap();
+    assert_eq!(back.map[&EChannel::BassDrum], p.map[&EChannel::BassDrum]);
+    assert_eq!(back.map[&EChannel::LeftBassDrum], p.map[&EChannel::LeftBassDrum]);
+}
+
+#[test]
+fn bind_note_still_steals_for_move_semantics() {
+    let mut p = MidiProfile::default();
+    p.bind_note_shared(EChannel::BassDrum, 36);
+    p.bind_note(EChannel::LeftBassDrum, 36); // steal
+    assert!(!p.map[&EChannel::BassDrum].contains(&36));
+    assert!(p.map[&EChannel::LeftBassDrum].contains(&36));
+}
+
+#[test]
+fn split_bindings_preserves_shared_midi_note() {
+    use crate::{BindSource, InputBindings};
+    let mut b = InputBindings::default();
+    b.bind_shared(EChannel::LeftBassDrum, BindSource::Midi { note: 36 });
+    let (_kb, midi) = split_bindings(&b);
+    assert!(midi.map[&EChannel::BassDrum].contains(&36));
+    assert!(midi.map[&EChannel::LeftBassDrum].contains(&36));
+}
+```
+
+Run: `cargo test -p dtx-input shared_note midi_profile_allows split_bindings_preserves` → FAIL.
+
+- [ ] **Step 2: Implement**
+
+```rust
+// MidiProfile impl: keep bind_note (steal) as-is; add the shared variant.
+/// Append `note` to `channel` without removing it from other channels.
+pub fn bind_note_shared(&mut self, channel: EChannel, note: u8) {
+    let notes = self.map.entry(channel).or_default();
+    if !notes.contains(&note) {
+        notes.push(note);
+    }
+}
+```
+
+- In `split_bindings`, change the MIDI arm from `midi.bind_note(*channel, *note)` to `midi.bind_note_shared(*channel, *note)` (InputBindings is the source of truth for sharing; mirroring must not steal).
+- In `MidiProfile::deserialize`, DELETE the duplicate-owner rejection block (the `owners.insert(*note, name)` loop that returns `serde::de::Error::custom("MIDI note ... bound to both ...")`). The runtime resolver now fans out, so shared notes are valid on disk. Keep the `EChannel::from_short_name` filtering.
+- In `crates/dtx-input/src/bindings.rs`, `BindingsFile::resolve`: the MIDI dedup ("duplicate MIDI source; kept first") drops shared notes on legacy load — change it to keep every (channel, note) pair (append instead of skip). Preserve the resolve function's other behavior; only stop discarding duplicate MIDI sources.
+
+- [ ] **Step 3: Run full dtx-input suite**
+
+Run: `cargo test -p dtx-input`
+Expected: PASS. Some existing tests may assert the old rejection/dedup — update them to the new shared-allowed contract (a test named around "duplicate note rejected" becomes "duplicate note allowed"). If a test encodes a real invariant unrelated to sharing, keep it.
+
+- [ ] **Step 4: Commit**
+
+```bash
+git add crates/dtx-input/src/profiles.rs crates/dtx-input/src/bindings.rs
+git commit -m "feat(input): allow a MIDI note to bind multiple channels"
+```
+
+---
+
 ### Task 2: Capture machine — `Arrived` stage with shared/move choice
 
 Extend the pure state machine so BOTH sources stop at an "arrived" preview before commit, and a conflicting source offers Add-shared / Move-here. Replaces `ConfirmMidiSteal`.
