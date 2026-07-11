@@ -213,10 +213,21 @@ fn channel_map<T: Clone>(map: &HashMap<EChannel, Vec<T>>) -> BTreeMap<String, Ve
         .collect()
 }
 
-fn parse_channel_map<T>(map: BTreeMap<String, Vec<T>>) -> HashMap<EChannel, Vec<T>> {
+/// Deserialize a channel map, dropping unknown channel names and deduping
+/// values within each channel (a key/note bound twice to one channel must
+/// fire that lane once). Cross-channel sharing is preserved.
+fn parse_channel_map<T: PartialEq>(map: BTreeMap<String, Vec<T>>) -> HashMap<EChannel, Vec<T>> {
     map.into_iter()
         .filter_map(|(name, values)| {
-            EChannel::from_short_name(&name).map(|channel| (channel, values))
+            EChannel::from_short_name(&name).map(|channel| {
+                let mut unique = Vec::with_capacity(values.len());
+                for value in values {
+                    if !unique.contains(&value) {
+                        unique.push(value);
+                    }
+                }
+                (channel, unique)
+            })
         })
         .collect()
 }
@@ -294,7 +305,8 @@ fn split_default_bindings() -> (KeyboardProfile, MidiProfile) {
 }
 
 /// Partition channel-keyed bindings into independent keyboard and MIDI
-/// profiles (keys shared, notes exclusive via `bind_note`).
+/// profiles. Keys and notes may each be shared across channels
+/// (`add_key` / `bind_note_shared`), deduped within each channel.
 pub fn split_bindings(bindings: &InputBindings) -> (KeyboardProfile, MidiProfile) {
     let mut keyboard = KeyboardProfile {
         map: HashMap::new(),
@@ -531,34 +543,11 @@ fn migrated_midi_registry(file: &BindingsFile) -> Result<ProfileRegistry<MidiPro
 fn split_default_bindings_from(
     file: &BindingsFile,
 ) -> Result<(KeyboardProfile, MidiProfile), String> {
-    let mut keyboard = KeyboardProfile {
-        map: HashMap::new(),
-    };
-    let mut midi = MidiProfile {
-        port: file.midi.port.clone(),
-        velocity_threshold: file.midi.velocity_threshold,
-        map: HashMap::new(),
-    };
-    let mut midi_owners = HashMap::new();
-    for (name, sources) in &file.map {
-        let Some(channel) = EChannel::from_short_name(name) else {
-            continue;
-        };
-        for source in sources {
-            match source {
-                BindSource::Key(key) => keyboard.add_key(channel, *key),
-                BindSource::Midi { note } => {
-                    if let Some(owner) = midi_owners.insert(*note, name) {
-                        return Err(format!(
-                            "MIDI note {note} is bound to both {owner} and {name}"
-                        ));
-                    }
-                    midi.map.entry(channel).or_default().push(*note);
-                }
-            }
-        }
-    }
-    Ok((keyboard, midi))
+    // `resolve` fans a shared key/note out to every owning channel and dedups
+    // within each; `split_bindings` partitions that into the two profiles.
+    // Kept fallible so the migrate closures in `load_registry_or_migrate` still
+    // type-check, but shared bindings are now valid and never rejected.
+    Ok(split_bindings(&file.resolve()))
 }
 
 fn load_registry_or_migrate<T>(
@@ -941,11 +930,11 @@ mod tests {
     }
 
     #[test]
-    fn midi_profile_allows_note_repeated_within_channel_from_toml() {
+    fn midi_profile_dedupes_note_repeated_within_channel_from_toml() {
         let profile = toml::from_str::<MidiProfile>("velocity_threshold = 0\n[map]\nHH = [42, 42]")
             .expect("repeated MIDI note parses");
 
-        assert!(profile.map[&EChannel::HiHatClose].contains(&42));
+        assert_eq!(profile.map[&EChannel::HiHatClose], vec![42]);
     }
 
     #[test]
@@ -1195,34 +1184,32 @@ mod tests {
     }
 
     #[test]
-    fn duplicate_legacy_midi_rejects_migration_without_writing_registries() {
-        let root = migration_dir("duplicate-midi");
+    fn shared_legacy_midi_migrates_note_under_every_channel() {
+        let root = migration_dir("shared-midi");
         let _ = std::fs::remove_dir_all(&root);
         std::fs::create_dir_all(&root).expect("test directory creates");
         let legacy = root.join("bindings.toml");
+        // note 36 is BassDrum by default; also share it onto LeftBassDrum.
         let mut file = InputBindings::default().to_file();
         file.map
-            .entry("SD".to_owned())
+            .entry("LBD".to_owned())
             .or_default()
-            .push(BindSource::Midi { note: 42 });
+            .push(BindSource::Midi { note: 36 });
         std::fs::write(
             &legacy,
             toml::to_string_pretty(&file).expect("legacy serializes"),
         )
         .expect("legacy writes");
-        let keyboard_path = root.join("keyboard-profiles.toml");
         let midi_path = root.join("midi-profiles.toml");
 
-        assert!(matches!(
-            load_keyboard_registry(&keyboard_path, &legacy),
-            RegistryStartup::ReadOnlyBuiltins(RegistryLoadError::Invalid { .. })
-        ));
-        assert!(matches!(
-            load_midi_registry(&midi_path, &legacy),
-            RegistryStartup::ReadOnlyBuiltins(RegistryLoadError::Invalid { .. })
-        ));
-        assert!(!keyboard_path.exists());
-        assert!(!midi_path.exists());
+        let midi = match load_midi_registry(&midi_path, &legacy) {
+            RegistryStartup::Ready(registry) => registry,
+            other => panic!("expected successful migration, got {other:?}"),
+        };
+        let profile = &midi.profiles[&midi.active];
+        assert!(profile.map[&EChannel::BassDrum].contains(&36));
+        assert!(profile.map[&EChannel::LeftBassDrum].contains(&36));
+        assert!(midi_path.exists());
         let _ = std::fs::remove_dir_all(&root);
     }
 

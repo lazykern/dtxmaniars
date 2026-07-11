@@ -380,6 +380,25 @@ mod tests {
     }
 
     #[test]
+    fn note_shared_by_three_channels_resolves_three_lanes() {
+        let mut midi = MidiProfile::default();
+        midi.bind_note_shared(EChannel::LeftBassDrum, 36); // 36 already on BD
+        midi.bind_note_shared(EChannel::Snare, 36);
+        let r = BindResolver::from_profiles(&KeyboardProfile::default(), &midi);
+        assert_eq!(r.lanes_for_note(36).count(), 3);
+    }
+
+    #[test]
+    fn note_repeated_within_channel_resolves_one_lane() {
+        // Within-channel duplicates are deduped when the profile deserializes,
+        // so a saved [38, 38] fires the lane once (no double scoring).
+        let midi: MidiProfile =
+            toml::from_str("velocity_threshold = 0\n[map]\nSD = [38, 38]").expect("profile parses");
+        let r = BindResolver::from_profiles(&KeyboardProfile::default(), &midi);
+        assert_eq!(r.lanes_for_note(38).count(), 1);
+    }
+
+    #[test]
     fn failed_registry_selection_keeps_active_resolver() {
         use dtx_input::profiles::{reduce_registry, RegistryAction};
         let registry = dtx_input::profiles::keyboard_registry();
