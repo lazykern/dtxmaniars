@@ -115,10 +115,14 @@ pub fn capture_footer_text(state: &super::bindings_capture::CaptureState) -> Opt
             "Hit a pad for {} — Esc cancels",
             channel.short_name().unwrap_or("channel")
         )),
-        CaptureState::ConfirmMidiSteal { note, from, .. } => Some(format!(
-            "Note {note} is bound to {} — Enter steals, Esc cancels",
-            from.short_name().unwrap_or("channel")
-        )),
+        CaptureState::KeyArrived { owners, .. } | CaptureState::MidiArrived { owners, .. }
+            if owners.is_empty() =>
+        {
+            Some("Enter confirm · Esc cancel".to_string())
+        }
+        CaptureState::KeyArrived { .. } | CaptureState::MidiArrived { .. } => Some(
+            "Enter confirm · ←→ shared/move · Esc cancel".to_string(),
+        ),
     }
 }
 

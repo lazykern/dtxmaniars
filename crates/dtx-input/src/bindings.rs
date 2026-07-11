@@ -190,6 +190,11 @@ impl InputBindings {
             .next()
     }
 
+    /// All channels for a MIDI note, in bindable lane order.
+    pub fn channels_for_note(&self, note: u8) -> Vec<EChannel> {
+        self.channels_for(BindSource::Midi { note })
+    }
+
     fn channels_for(&self, src: BindSource) -> Vec<EChannel> {
         BINDABLE_CHANNELS
             .into_iter()
@@ -426,6 +431,16 @@ SD = [{ key = "Space" }]
         assert_eq!(
             b.channels_for_key(KeyCode::Space),
             vec![EChannel::Snare, EChannel::BassDrum]
+        );
+    }
+
+    #[test]
+    fn channels_for_note_lists_every_owner() {
+        let mut b = InputBindings::default();
+        b.bind_shared(EChannel::Snare, BindSource::Midi { note: 42 });
+        assert_eq!(
+            b.channels_for_note(42),
+            vec![EChannel::HiHatClose, EChannel::Snare]
         );
     }
 
