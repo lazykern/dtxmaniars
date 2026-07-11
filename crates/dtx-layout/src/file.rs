@@ -170,8 +170,16 @@ impl Default for LayoutFile {
 
 /// Parse raw TOML, running the version migration chain. Best-effort on
 /// newer-than-known versions (parse what matches, warn).
+pub fn parse_checked(raw: &str) -> Result<LayoutFile, toml::de::Error> {
+    let mut file: LayoutFile = toml::from_str(raw)?;
+    if file.version <= LATEST_VERSION {
+        file.version = LATEST_VERSION;
+    }
+    Ok(file)
+}
+
 pub fn parse_with_migrations(raw: &str) -> LayoutFile {
-    let mut file: LayoutFile = match toml::from_str(raw) {
+    let mut file: LayoutFile = match parse_checked(raw) {
         Ok(f) => f,
         Err(e) => {
             eprintln!("dtx-layout: parse failed: {e}; using defaults");

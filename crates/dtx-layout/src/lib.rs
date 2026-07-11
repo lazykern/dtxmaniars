@@ -11,10 +11,11 @@ pub mod file;
 pub mod lane_edit;
 pub mod lanes;
 pub mod presets;
+pub mod profiles;
 pub mod scene;
 pub mod widgets;
 
-pub use file::{parse_with_migrations, LanesSection, LayoutFile, LATEST_VERSION};
+pub use file::{parse_checked, parse_with_migrations, LanesSection, LayoutFile, LATEST_VERSION};
 pub use lane_edit::{
     lane_chips, merge_lane, reorder_lane, set_lane_width, split_channel, structure_signature,
 };
@@ -23,6 +24,12 @@ pub use lanes::{
     DRUM_CHANNELS, MAX_LANE_WIDTH, MIN_LANE_WIDTH,
 };
 pub use presets::{arrangement_for, classic, nx_type_b, nx_type_d, LanePreset};
+pub use profiles::{
+    active_lane_arrangement, backup_and_reset_lane_registry, lane_builtins, lane_registry,
+    load_lane_registry, load_layout_with_lane_authority, save_lane_registry, LaneProfile,
+    LaneProfileRegistry, LaneRegistryError, LaneRegistryLoadError, LaneRegistryStartup,
+    LANE_DEFAULT_NAME,
+};
 pub use scene::{default_instance, SceneSection, WidgetEntry, WidgetKindField};
 pub use widgets::{
     nearest_anchor, offset_for_top_left, resolve_top_left, Anchor9, AnchorSpace, Placement,
@@ -35,6 +42,10 @@ pub enum LayoutError {
     Io(#[from] std::io::Error),
     #[error("serialize: {0}")]
     Serialize(#[from] toml::ser::Error),
+    #[error("parse: {0}")]
+    Parse(#[from] toml::de::Error),
+    #[error("persist: {0}")]
+    Persistence(#[from] dtx_persistence::PersistenceError),
 }
 
 /// `$XDG_CONFIG_HOME/dtxmaniars/layout.toml` → `$HOME/.config/dtxmaniars/layout.toml`
