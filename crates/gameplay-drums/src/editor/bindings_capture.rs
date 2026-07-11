@@ -250,6 +250,15 @@ pub fn rearm_confirms(arrived_note: u8, new_note: Option<u8>) -> bool {
     new_note == Some(arrived_note)
 }
 
+/// The conflict set for a capture: every channel already holding the source
+/// except the one being bound.
+fn other_owners(
+    owners: Vec<dtx_core::EChannel>,
+    channel: dtx_core::EChannel,
+) -> Vec<dtx_core::EChannel> {
+    owners.into_iter().filter(|c| *c != channel).collect()
+}
+
 /// Drive the source-split capture machine: keyboard capture sees only keys,
 /// MIDI learning sees only new NoteOns; Esc cancels at any stage.
 fn capture_binding(
@@ -282,8 +291,7 @@ fn capture_binding(
             }
         }
     };
-    // Arrow/Enter/Esc are shared across both `Arrived` variants; cloning the
-    // small enum sidesteps borrowing `owners: Vec<_>` out of `*capture`.
+    // Arrow/Enter/Esc are shared across both `Arrived` variants.
     let arrived_input = || {
         if keys.just_pressed(KeyCode::Escape) {
             ArrivedInput::Cancel
@@ -295,12 +303,16 @@ fn capture_binding(
             ArrivedInput::None
         }
     };
-    match capture.clone() {
+    // Take by value (leaving Idle) so the `owners: Vec<_>` can be destructured
+    // and moved without a per-frame heap clone; every branch returns the next
+    // state, assigned once below (Pending returns the current state unchanged).
+    let next = match std::mem::take(&mut *capture) {
         CaptureState::Idle => {
             // While idle, track the latest MIDI hit so a pre-existing (stale)
             // hit isn't instantly consumed on the first frame of the next
             // capture — only a strictly-newer NoteOn counts once armed.
             *seen_midi_at = last_midi.at;
+            CaptureState::Idle
         }
         CaptureState::Keyboard(channel) => {
             // First non-reserved key wins even when a reserved key lands the
@@ -311,22 +323,14 @@ fn capture_binding(
                 keys.get_just_pressed().copied().find(|k| !is_reserved(*k)),
             );
             match step {
-                KeyboardCaptureStep::Pending => {}
-                KeyboardCaptureStep::Cancelled => *capture = CaptureState::Idle,
-                KeyboardCaptureStep::Bind(key) => {
-                    let owners: Vec<_> = live
-                        .0
-                        .channels_for_key(key)
-                        .into_iter()
-                        .filter(|c| *c != channel)
-                        .collect();
-                    *capture = CaptureState::KeyArrived {
-                        channel,
-                        key,
-                        owners,
-                        choice: ArrivedChoice::default(),
-                    };
-                }
+                KeyboardCaptureStep::Pending => CaptureState::Keyboard(channel),
+                KeyboardCaptureStep::Cancelled => CaptureState::Idle,
+                KeyboardCaptureStep::Bind(key) => CaptureState::KeyArrived {
+                    channel,
+                    key,
+                    owners: other_owners(live.0.channels_for_key(key), channel),
+                    choice: ArrivedChoice::default(),
+                },
             }
         }
         CaptureState::Midi(channel) => {
@@ -343,23 +347,15 @@ fn capture_binding(
             }
             let step = midi_capture_step(keys.just_pressed(KeyCode::Escape), new_note);
             match step {
-                MidiCaptureStep::Pending => {}
-                MidiCaptureStep::Cancelled => *capture = CaptureState::Idle,
-                MidiCaptureStep::Bind(note) => {
-                    let owners: Vec<_> = live
-                        .0
-                        .channels_for_note(note)
-                        .into_iter()
-                        .filter(|c| *c != channel)
-                        .collect();
-                    *capture = CaptureState::MidiArrived {
-                        channel,
-                        note,
-                        velocity: last_midi.velocity,
-                        owners,
-                        choice: ArrivedChoice::default(),
-                    };
-                }
+                MidiCaptureStep::Pending => CaptureState::Midi(channel),
+                MidiCaptureStep::Cancelled => CaptureState::Idle,
+                MidiCaptureStep::Bind(note) => CaptureState::MidiArrived {
+                    channel,
+                    note,
+                    velocity: last_midi.velocity,
+                    owners: other_owners(live.0.channels_for_note(note), channel),
+                    choice: ArrivedChoice::default(),
+                },
             }
         }
         CaptureState::KeyArrived {
@@ -370,37 +366,26 @@ fn capture_binding(
         } => {
             let has_conflict = !owners.is_empty();
             match arrived_step(arrived_input(), choice, has_conflict) {
-                ArrivedStep::Pending => {}
-                ArrivedStep::Cancelled => *capture = CaptureState::Idle,
-                ArrivedStep::Choice(choice) => {
-                    *capture = CaptureState::KeyArrived {
-                        channel,
-                        key,
-                        owners,
-                        choice,
-                    };
-                }
+                ArrivedStep::Pending => CaptureState::KeyArrived {
+                    channel,
+                    key,
+                    owners,
+                    choice,
+                },
+                ArrivedStep::Cancelled => CaptureState::Idle,
+                ArrivedStep::Choice(choice) => CaptureState::KeyArrived {
+                    channel,
+                    key,
+                    owners,
+                    choice,
+                },
                 ArrivedStep::CommitShared => {
-                    commit(
-                        &mut live,
-                        &mut rev,
-                        &mut hits,
-                        channel,
-                        BindSource::Key(key),
-                        false,
-                    );
-                    *capture = CaptureState::Idle;
+                    commit(&mut live, &mut rev, &mut hits, channel, BindSource::Key(key), false);
+                    CaptureState::Idle
                 }
                 ArrivedStep::CommitMove => {
-                    commit(
-                        &mut live,
-                        &mut rev,
-                        &mut hits,
-                        channel,
-                        BindSource::Key(key),
-                        true,
-                    );
-                    *capture = CaptureState::Idle;
+                    commit(&mut live, &mut rev, &mut hits, channel, BindSource::Key(key), true);
+                    CaptureState::Idle
                 }
             }
         }
@@ -425,64 +410,49 @@ fn capture_binding(
             if let Some(fresh) = new_note.filter(|n| *n != note) {
                 // Fast retry: a different pad hit re-arms in place instead of
                 // requiring Esc then a fresh capture.
-                let owners: Vec<_> = live
-                    .0
-                    .channels_for_note(fresh)
-                    .into_iter()
-                    .filter(|c| *c != channel)
-                    .collect();
-                *capture = CaptureState::MidiArrived {
+                CaptureState::MidiArrived {
                     channel,
                     note: fresh,
                     velocity: last_midi.velocity,
-                    owners,
+                    owners: other_owners(live.0.channels_for_note(fresh), channel),
                     choice: ArrivedChoice::default(),
-                };
-                return;
-            }
-            let has_conflict = !owners.is_empty();
-            let input = if rearm_confirms(note, new_note) {
-                ArrivedInput::Confirm
+                }
             } else {
-                arrived_input()
-            };
-            match arrived_step(input, choice, has_conflict) {
-                ArrivedStep::Pending => {}
-                ArrivedStep::Cancelled => *capture = CaptureState::Idle,
-                ArrivedStep::Choice(choice) => {
-                    *capture = CaptureState::MidiArrived {
+                let has_conflict = !owners.is_empty();
+                let input = if rearm_confirms(note, new_note) {
+                    ArrivedInput::Confirm
+                } else {
+                    arrived_input()
+                };
+                match arrived_step(input, choice, has_conflict) {
+                    ArrivedStep::Pending => CaptureState::MidiArrived {
                         channel,
                         note,
                         velocity,
                         owners,
                         choice,
-                    };
-                }
-                ArrivedStep::CommitShared => {
-                    commit(
-                        &mut live,
-                        &mut rev,
-                        &mut hits,
+                    },
+                    ArrivedStep::Cancelled => CaptureState::Idle,
+                    ArrivedStep::Choice(choice) => CaptureState::MidiArrived {
                         channel,
-                        BindSource::Midi { note },
-                        false,
-                    );
-                    *capture = CaptureState::Idle;
-                }
-                ArrivedStep::CommitMove => {
-                    commit(
-                        &mut live,
-                        &mut rev,
-                        &mut hits,
-                        channel,
-                        BindSource::Midi { note },
-                        true,
-                    );
-                    *capture = CaptureState::Idle;
+                        note,
+                        velocity,
+                        owners,
+                        choice,
+                    },
+                    ArrivedStep::CommitShared => {
+                        commit(&mut live, &mut rev, &mut hits, channel, BindSource::Midi { note }, false);
+                        CaptureState::Idle
+                    }
+                    ArrivedStep::CommitMove => {
+                        commit(&mut live, &mut rev, &mut hits, channel, BindSource::Midi { note }, true);
+                        CaptureState::Idle
+                    }
                 }
             }
         }
-    }
+    };
+    *capture = next;
 }
 
 /// Clicking a channel row selects it (drives the spatial lane display + the
@@ -678,5 +648,54 @@ mod tests {
             hit.map(|value| (value.lane, value.audio_ms)),
             Some((1, 1234))
         );
+    }
+
+    /// Drive `capture_binding` once with Enter pressed against a seeded
+    /// `MidiArrived` and return the resulting live bindings. Note 42 is a
+    /// HiHatClose default; the target is a conflicting channel already owning
+    /// it via `owners`, so the choice actually decides steal vs. share.
+    fn run_commit(choice: ArrivedChoice) -> InputBindings {
+        use dtx_core::EChannel;
+        let mut app = App::new();
+        app.init_resource::<ButtonInput<KeyCode>>()
+            .init_resource::<CaptureState>()
+            .init_resource::<LiveBindings>()
+            .init_resource::<BindingsRev>()
+            .init_resource::<crate::LastMidiHit>()
+            .init_resource::<GameplayClock>()
+            .add_message::<LaneHit>()
+            .insert_resource(CaptureState::MidiArrived {
+                channel: EChannel::Snare,
+                note: 42,
+                velocity: 90,
+                owners: vec![EChannel::HiHatClose],
+                choice,
+            })
+            .add_systems(Update, capture_binding);
+        app.world_mut()
+            .resource_mut::<ButtonInput<KeyCode>>()
+            .press(KeyCode::Enter);
+        app.update();
+        app.world().resource::<LiveBindings>().0.clone()
+    }
+
+    #[test]
+    fn commit_move_steals_source_from_other_channel() {
+        use dtx_core::EChannel;
+        let b = run_commit(ArrivedChoice::Move);
+        let src = BindSource::Midi { note: 42 };
+        // Steal: gone from HiHatClose, present on Snare.
+        assert!(!b.map[&EChannel::HiHatClose].contains(&src));
+        assert!(b.map[&EChannel::Snare].contains(&src));
+    }
+
+    #[test]
+    fn commit_shared_keeps_source_on_both_channels() {
+        use dtx_core::EChannel;
+        let b = run_commit(ArrivedChoice::Shared);
+        let src = BindSource::Midi { note: 42 };
+        // Share: still on HiHatClose AND now also on Snare.
+        assert!(b.map[&EChannel::HiHatClose].contains(&src));
+        assert!(b.map[&EChannel::Snare].contains(&src));
     }
 }
