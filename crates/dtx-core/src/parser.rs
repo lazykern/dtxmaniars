@@ -305,25 +305,11 @@ fn parse_chip_line(
         return Ok(());
     }
 
-    // For BGA / Movie channels: value is a decimal BMP/AVI index. Store as f32.
-    if matches!(
-        channel,
-        EChannel::BGALayer1
-            | EChannel::BGALayer2
-            | EChannel::BGALayer3
-            | EChannel::BGALayer4
-            | EChannel::BGALayer5
-            | EChannel::BGALayer6
-            | EChannel::BGALayer7
-            | EChannel::BGALayer8
-            | EChannel::Movie
-            | EChannel::MovieFull
-    ) {
-        if let Ok(v) = value.parse::<f32>() {
-            chips.push(Chip::new(measure, channel, v));
-        }
-        return Ok(());
-    }
+    // BGA / Movie channels use the same two-character slot sequence as note
+    // channels: each non-"00" slot references a `#BMPxx` / `#AVIxx` asset id
+    // and carries a fractional measure position. Handled by the generic
+    // chip-data parser below so visual timing is preserved
+    // (`references/DTXmaniaNX-BocuD/DTXMania/Score,Song/CDTX.cs:1296-1476`).
 
     // Chip data: pairs of hex digits (standard) or one char per slot (legacy).
     let data = strip_dtx_param(value).replace(' ', "");

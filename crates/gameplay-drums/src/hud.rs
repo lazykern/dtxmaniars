@@ -498,8 +498,21 @@ fn sync_perf_combo(
     }
 }
 
+/// Resolve the performance cover image (`#PREIMAGE`) for a chart against its
+/// source directory, matching case-insensitively. Returns `None` when metadata
+/// or the file is absent (fallback tile stays visible).
+///
+/// Reference: `references/DTXmaniaNX-BocuD/DTXMania/Stage/06.Performance/InfoBox.cs:20-34`
+pub fn performance_preimage_path(chart: &ActiveChart) -> Option<std::path::PathBuf> {
+    let filename = chart.chart.metadata.preimage_filename.as_deref()?;
+    let dir = chart.source_path.as_ref()?.parent()?;
+    dtx_core::resolve_chart_asset_path(dir, filename)
+}
+
+#[allow(clippy::type_complexity)]
 fn sync_now_playing(
     chart: Res<ActiveChart>,
+    asset_server: Res<AssetServer>,
     mut q_title: Query<&mut Text, With<now_playing::NowPlayingTitle>>,
     mut q_artist: Query<
         &mut Text,
@@ -516,6 +529,7 @@ fn sync_now_playing(
             Without<now_playing::NowPlayingArtist>,
         ),
     >,
+    mut q_art: Query<(&mut ImageNode, &mut BackgroundColor), With<now_playing::NowPlayingArt>>,
 ) {
     if !chart.is_changed() {
         return;
@@ -536,6 +550,22 @@ fn sync_now_playing(
     }
     for mut t in &mut q_maker {
         *t = Text::new(maker);
+    }
+
+    let cover = performance_preimage_path(&chart);
+    for (mut image, mut bg) in &mut q_art {
+        match &cover {
+            Some(path) => {
+                image.image = asset_server.load(path.to_string_lossy().to_string());
+                image.color = Color::WHITE;
+                bg.0 = bg.0.with_alpha(0.0);
+            }
+            None => {
+                image.image = Handle::default();
+                image.color = image.color.with_alpha(0.0);
+                bg.0 = Color::srgb(0.15, 0.15, 0.2);
+            }
+        }
     }
 }
 
@@ -696,5 +726,58 @@ mod tests {
     #[test]
     fn kind_label_perfect() {
         assert_eq!(kind_label(JudgmentKind::Perfect), "PERFECT");
+    }
+
+    fn unique_temp_dir(tag: &str) -> std::path::PathBuf {
+        std::env::temp_dir().join(format!(
+            "gameplay-drums-{}-{}-{}",
+            tag,
+            std::process::id(),
+            std::thread::current().name().unwrap_or("t")
+        ))
+    }
+
+    fn chart_with_preimage(
+        preimage: Option<&str>,
+        source: Option<std::path::PathBuf>,
+    ) -> ActiveChart {
+        ActiveChart::new(
+            dtx_core::chart::Chart {
+                metadata: dtx_core::chart::Metadata {
+                    preimage_filename: preimage.map(str::to_string),
+                    ..Default::default()
+                },
+                ..Default::default()
+            },
+            source,
+        )
+    }
+
+    #[test]
+    fn performance_preimage_resolves_case_insensitively() {
+        let dir = unique_temp_dir("cover-ok");
+        std::fs::create_dir_all(&dir).expect("create cover dir");
+        std::fs::write(dir.join("Cover.PNG"), b"image").expect("write cover");
+        let chart = chart_with_preimage(Some("cover.png"), Some(dir.join("song.dtx")));
+        assert_eq!(
+            performance_preimage_path(&chart),
+            Some(dir.join("Cover.PNG"))
+        );
+        std::fs::remove_dir_all(dir).expect("remove cover dir");
+    }
+
+    #[test]
+    fn performance_preimage_none_without_metadata() {
+        let chart = chart_with_preimage(None, Some(std::path::PathBuf::from("/x/song.dtx")));
+        assert_eq!(performance_preimage_path(&chart), None);
+    }
+
+    #[test]
+    fn performance_preimage_none_when_file_missing() {
+        let dir = unique_temp_dir("cover-missing");
+        std::fs::create_dir_all(&dir).expect("create dir");
+        let chart = chart_with_preimage(Some("nope.png"), Some(dir.join("song.dtx")));
+        assert_eq!(performance_preimage_path(&chart), None);
+        std::fs::remove_dir_all(dir).expect("remove dir");
     }
 }

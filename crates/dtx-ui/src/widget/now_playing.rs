@@ -58,6 +58,12 @@ pub fn spawn_now_playing(
                 height: Val::Px(60.0 * scale),
                 ..default()
             },
+            // Image starts empty (neutral tile below shows through); the HUD
+            // fills it from #PREIMAGE when a chart loads.
+            ImageNode {
+                color: Color::WHITE.with_alpha(0.0),
+                ..default()
+            },
             BackgroundColor(Color::srgb(0.15, 0.15, 0.2)),
         ));
         p.spawn((

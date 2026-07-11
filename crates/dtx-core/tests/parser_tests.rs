@@ -45,3 +45,31 @@ fn parse_drums_basic_fixture() {
     let bd = drums.iter().find(|c| c.channel == EChannel::BassDrum);
     assert!(bd.is_some());
 }
+
+#[test]
+fn visual_sequences_preserve_asset_id_and_fraction() {
+    let src = b"#TITLE: Visual\n#BMP01: first.png\n#BMP02: second.png\n#AVI03: movie.avi\n#00004: 0102\n#00154: 0003\n";
+    let chart = parse(&src[..]).expect("visual chart parses");
+
+    let images: Vec<_> = chart
+        .chips
+        .iter()
+        .filter(|chip| chip.channel == EChannel::BGALayer1)
+        .collect();
+    assert_eq!(images.len(), 2);
+    assert_eq!((images[0].wav_slot, images[0].value), (1, 0.0));
+    assert_eq!((images[1].wav_slot, images[1].value), (2, 0.5));
+
+    let movie = chart
+        .chips
+        .iter()
+        .find(|chip| chip.channel == EChannel::Movie)
+        .expect("movie chip");
+    assert_eq!(movie.wav_slot, 3);
+    assert_eq!(movie.value, 0.5);
+
+    let events = dtx_core::bga::bga_events(&chart);
+    assert_eq!(events[0].bmp_index, 1);
+    assert_eq!(events[1].bmp_index, 2);
+    assert_eq!(events[1].fraction, 0.5);
+}

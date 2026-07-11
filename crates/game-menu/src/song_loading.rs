@@ -24,7 +24,7 @@ use bevy::prelude::*;
 use bevy::tasks::{AsyncComputeTaskPool, Task, block_on, futures_lite::future};
 use bevy_kira_audio::prelude::{Audio, AudioInstance, AudioSource as KiraAudioSource};
 use dtx_audio::BgmHandle;
-use dtx_bga::{ActiveChartRes, BgaLayerOverlay, BgaPlayer};
+use dtx_bga::{ActiveChartRes, BgaPlayer};
 use dtx_core::{Chart, resolve_bgm_path};
 use dtx_ui::motion::EnterChoreo;
 use dtx_ui::widget::stage_background::spawn_stage_background;
@@ -113,7 +113,7 @@ pub fn plugin(app: &mut App) {
             OnExit(AppState::SongLoading),
             (stop_nowloading, despawn_stage::<LoadingEntity>).chain(),
         )
-        .add_systems(OnExit(AppState::Performance), cleanup_bga_overlays)
+        .add_systems(OnExit(AppState::Performance), dtx_bga::clear_visuals)
         .add_systems(
             Update,
             (
@@ -125,20 +125,6 @@ pub fn plugin(app: &mut App) {
             )
                 .run_if(in_state(AppState::SongLoading)),
         );
-}
-
-/// On leaving Performance: despawn any BGA image-layer placeholder overlays and
-/// reset the player so state does not bleed into Result/SongSelect. Movie decode
-/// remains deferred to M7.1.
-fn cleanup_bga_overlays(
-    mut commands: Commands,
-    overlays: Query<Entity, With<BgaLayerOverlay>>,
-    mut bga_player: ResMut<BgaPlayer>,
-) {
-    for entity in &overlays {
-        commands.entity(entity).despawn();
-    }
-    bga_player.reset();
 }
 
 /// Kick off the background parse. Clears the chart sound bank for the new song
@@ -223,14 +209,11 @@ fn poll_chart_parse(
             // M6b: also load into the guitar crate so Guitar mode is playable.
             guitar_chart.chart = chart.clone();
             guitar_chart.source_path = path.clone();
-            // M7: populate BGA events for the player.
-            let events = dtx_core::bga::bga_events(&chart);
+            // M7.1: publish prepared visual events + resolved asset paths.
+            let active_visuals = ActiveChartRes::from_chart(&chart, path.as_deref());
             bga_player.reset();
-            bga_player.event_count = events.len();
-            commands.insert_resource(ActiveChartRes {
-                bpm: chart.metadata.bpm.unwrap_or(120.0),
-                events,
-            });
+            bga_player.event_count = active_visuals.events.len();
+            commands.insert_resource(active_visuals);
             // BocuD loads every used WAV before entering Performance
             // (CStageSongLoading.cs:700-708). Waiting prevents unloaded BGM/SE
             // play commands from releasing together as an audible burst.

@@ -18,10 +18,10 @@ fn parse_bga_fixture_extracts_image_and_movie_chips() {
         .iter()
         .any(|e| e.measure == 1 && e.layer == BgaLayer::Layer1 && e.bmp_index == 1));
 
-    // Movie at source measure 0 → chart measure 1
+    // Movie at source measure 0 → chart measure 1, referencing #AVI03
     assert!(events
         .iter()
-        .any(|e| e.measure == 1 && e.layer == BgaLayer::Movie && e.bmp_index == 1));
+        .any(|e| e.measure == 1 && e.layer == BgaLayer::Movie && e.bmp_index == 3));
 
     // BGALayer3 (fullscreen) at source measure 0 → chart measure 1
     assert!(events

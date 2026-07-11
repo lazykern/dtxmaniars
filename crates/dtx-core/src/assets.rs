@@ -430,6 +430,34 @@ pub fn resolve_bgm_path(
     None
 }
 
+/// Resolve a chart-relative asset filename against `chart_dir`.
+///
+/// Tries a direct join first, then a case-insensitive match on the file name
+/// within the chart directory (DTX charts authored on Windows frequently
+/// disagree with the on-disk case). Returns `None` when no match exists.
+/// Shared by audio and visual asset loaders so both use one filesystem
+/// algorithm.
+pub fn resolve_chart_asset_path(
+    chart_dir: &std::path::Path,
+    filename: &str,
+) -> Option<std::path::PathBuf> {
+    let direct = chart_dir.join(filename);
+    if direct.is_file() {
+        return Some(direct);
+    }
+    let wanted = std::path::Path::new(filename).file_name()?.to_str()?;
+    std::fs::read_dir(chart_dir)
+        .ok()?
+        .filter_map(Result::ok)
+        .find(|entry| {
+            entry
+                .file_name()
+                .to_str()
+                .is_some_and(|name| name.eq_ignore_ascii_case(wanted))
+        })
+        .map(|entry| entry.path())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -589,5 +617,23 @@ mod tests {
         let mut r = BgaRegistry::new();
         r.insert(1, "x.bmp".into());
         assert_eq!(r.get(1), Some("x.bmp"));
+    }
+
+    #[test]
+    fn resolve_chart_asset_path_matches_case_insensitively() {
+        let dir = std::env::temp_dir().join(format!(
+            "dtx-core-visual-{}-{}",
+            std::process::id(),
+            std::thread::current().name().unwrap_or("test")
+        ));
+        std::fs::create_dir_all(&dir).expect("create temp chart dir");
+        std::fs::write(dir.join("Jacket.PNG"), b"x").expect("write fixture");
+
+        assert_eq!(
+            resolve_chart_asset_path(&dir, "jacket.png"),
+            Some(dir.join("Jacket.PNG"))
+        );
+
+        std::fs::remove_dir_all(dir).expect("remove temp chart dir");
     }
 }

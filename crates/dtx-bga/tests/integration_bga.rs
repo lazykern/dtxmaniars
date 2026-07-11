@@ -1,8 +1,90 @@
 //! End-to-end BGA integration tests — load real DTX fixture, verify BGA events.
 
+use bevy::asset::AssetPlugin;
+use bevy::prelude::*;
+use dtx_bga::{ActiveChartRes, BgaClock, BgaLayerOverlay, MovieWorker};
 use dtx_core::bga::{bga_events, BgaLayer};
 use dtx_core::parser::parse;
 use std::fs::File;
+use std::path::PathBuf;
+
+fn bga_fixture_dir() -> PathBuf {
+    let mut p = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    p.push("tests");
+    p.push("fixtures");
+    p
+}
+
+fn headless_app() -> App {
+    let mut app = App::new();
+    app.add_plugins((MinimalPlugins, AssetPlugin::default()));
+    app.init_asset::<Image>();
+    app.add_plugins(dtx_bga::plugin);
+    app
+}
+
+#[test]
+fn static_image_event_replaces_only_target_layer() {
+    let dir = bga_fixture_dir();
+    let chart = parse(File::open(dir.join("visual.dtx")).expect("visual fixture")).expect("parse");
+    let res = ActiveChartRes::from_chart(&chart, Some(&dir.join("visual.dtx")));
+
+    let mut app = headless_app();
+    app.insert_resource(res);
+    app.insert_resource(BgaClock { current_ms: 2000 });
+    app.update();
+
+    let overlays: Vec<(BgaLayer, u32)> = app
+        .world_mut()
+        .query::<(&BgaLayerOverlay, &ImageNode)>()
+        .iter(app.world())
+        .map(|(o, _)| (o.layer, o.asset_id))
+        .collect();
+    assert_eq!(overlays.len(), 2, "layer1 + layer3 at 2000ms");
+    assert!(overlays.contains(&(BgaLayer::Layer1, 1)));
+    assert!(overlays.contains(&(BgaLayer::Layer3, 1)));
+
+    // Advance past the second Layer1 event: only Layer1 is replaced.
+    app.insert_resource(BgaClock { current_ms: 4000 });
+    app.update();
+
+    let overlays: Vec<(BgaLayer, u32)> = app
+        .world_mut()
+        .query::<(&BgaLayerOverlay, &ImageNode)>()
+        .iter(app.world())
+        .map(|(o, _)| (o.layer, o.asset_id))
+        .collect();
+    assert_eq!(overlays.len(), 2, "still one entity per layer");
+    assert!(
+        overlays.contains(&(BgaLayer::Layer1, 2)),
+        "layer1 replaced with asset 2"
+    );
+    assert!(
+        overlays.contains(&(BgaLayer::Layer3, 1)),
+        "layer3 unchanged"
+    );
+}
+
+#[test]
+fn movie_worker_decodes_tiny_avi() {
+    let path = bga_fixture_dir().join("tiny.avi");
+    let mut worker = MovieWorker::spawn(path);
+    worker.set_target_ms(900);
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+    let frame = loop {
+        if let Some(frame) = worker.newest_due_frame(900) {
+            break frame;
+        }
+        if let Some(err) = worker.take_error() {
+            panic!("decoder error: {err}");
+        }
+        assert!(std::time::Instant::now() < deadline, "decoder timed out");
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    };
+    assert_eq!((frame.width, frame.height), (16, 16));
+    assert_eq!(frame.rgba.len(), 16 * 16 * 4);
+    worker.stop();
+}
 
 #[test]
 fn bga_fixture_full_event_count() {

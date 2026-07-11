@@ -53,9 +53,9 @@ pub struct SystemConfig {
     pub bg_alpha: u8,
     /// `nMovieAlpha` (0..255) — CConfigIni.cs:56
     pub movie_alpha: u8,
-    /// `bAVIEnabled` — CConfigIni.cs:57
+    /// `bBGAEnabled` — CConfigIni.cs:58. Gates static `#BMP`/`#BGA` image layers.
     pub bga_enabled: bool,
-    /// `bBGAEnabled` — CConfigIni.cs:58
+    /// `bAVIEnabled` — CConfigIni.cs:57. Gates `#AVI` movie playback.
     pub movie_enabled: bool,
     /// `bOutputLogs` — CConfigIni.cs:99
     pub log_enabled: bool,
