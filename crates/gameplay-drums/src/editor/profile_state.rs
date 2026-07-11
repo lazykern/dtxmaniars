@@ -76,6 +76,29 @@ pub struct ProfileSession {
     pub lanes: ProfileDraft<LaneProfile>,
 }
 
+impl Default for ProfileSession {
+    fn default() -> Self {
+        Self {
+            keyboard: ProfileDraft::clean(
+                dtx_config::profiles::KEYBOARD_DEFAULT_NAME,
+                KeyboardProfile::default(),
+            ),
+            midi: ProfileDraft::clean(
+                dtx_config::profiles::MIDI_DEFAULT_NAME,
+                MidiProfile::default(),
+            ),
+            lanes: ProfileDraft::clean(
+                LANE_DEFAULT_NAME,
+                LaneProfile::from_arrangement(dtx_layout::classic()),
+            ),
+        }
+    }
+}
+
+/// Runtime home of the Customize profile session.
+#[derive(Resource, Debug, Clone, PartialEq, Default)]
+pub struct CustomizeSession(pub ProfileSession);
+
 pub fn dirty_profile_kinds(session: &ProfileSession) -> Vec<ProfileKind> {
     let mut kinds = Vec::new();
     if session.keyboard.is_dirty() {
@@ -239,6 +262,143 @@ pub fn reduce_dirty_action<T: Clone + PartialEq>(
             }
         }
     })
+}
+
+/// What a close request wants to close.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CloseIntent {
+    Customize,
+    GracefulAppExit,
+}
+
+/// A close intercepted because drafts were dirty; the surface stays open
+/// until the user decides.
+#[derive(Debug, Clone, PartialEq)]
+pub struct PendingClose {
+    pub intent: CloseIntent,
+    pub dirty: Vec<ProfileKind>,
+}
+
+/// Runtime holder for an intercepted close.
+#[derive(Resource, Debug, Clone, PartialEq, Default)]
+pub enum PendingCloseState {
+    #[default]
+    None,
+    Pending(PendingClose),
+}
+
+/// The user's answer to the close guard.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CloseDecision {
+    Cancel,
+    DiscardAll,
+    SaveAll,
+}
+
+/// Whether a close may proceed immediately or must wait on a decision.
+#[derive(Debug, Clone, PartialEq)]
+pub enum CloseRequestOutcome {
+    /// No dirty drafts: close now.
+    Proceed,
+    /// Dirty drafts: keep the surface open and raise the guard dialog.
+    Guard(PendingClose),
+}
+
+/// Intercept a close/exit request BEFORE `EditorOpen` flips: any dirty draft
+/// raises the guard instead of closing.
+pub fn request_close(intent: CloseIntent, session: &ProfileSession) -> CloseRequestOutcome {
+    let dirty = dirty_profile_kinds(session);
+    if dirty.is_empty() {
+        CloseRequestOutcome::Proceed
+    } else {
+        CloseRequestOutcome::Guard(PendingClose { intent, dirty })
+    }
+}
+
+/// Result of applying a close decision.
+#[derive(Debug, Clone, PartialEq)]
+pub enum CloseOutcome {
+    /// Guard dismissed; the surface stays open, drafts untouched.
+    Cancelled,
+    /// Close may finalize (drafts discarded or all saves succeeded).
+    Close(CloseIntent),
+    /// Some saves failed: dialog stays open listing the failed kinds,
+    /// successful drafts are already clean.
+    StayOpen { failed: Vec<ProfileKind> },
+}
+
+/// Resolve the close guard. `save_results` reports each dirty kind's write
+/// outcome and is only consulted for `SaveAll`; saves run sequentially and
+/// independently, so one failure never rolls back another kind's success.
+pub fn reduce_close_decision(
+    pending: &PendingClose,
+    decision: CloseDecision,
+    session: &mut ProfileSession,
+    save_results: &[(ProfileKind, bool)],
+) -> CloseOutcome {
+    match decision {
+        CloseDecision::Cancel => CloseOutcome::Cancelled,
+        CloseDecision::DiscardAll => {
+            session.keyboard = ProfileDraft::clean(
+                session.keyboard.selected.clone(),
+                session.keyboard.saved.clone(),
+            );
+            session.midi =
+                ProfileDraft::clean(session.midi.selected.clone(), session.midi.saved.clone());
+            session.lanes =
+                ProfileDraft::clean(session.lanes.selected.clone(), session.lanes.saved.clone());
+            CloseOutcome::Close(pending.intent)
+        }
+        CloseDecision::SaveAll => {
+            let failed = apply_save_all_results(session, save_results);
+            if failed.is_empty() {
+                CloseOutcome::Close(pending.intent)
+            } else {
+                CloseOutcome::StayOpen { failed }
+            }
+        }
+    }
+}
+
+/// Dirty-guard dialog layout: button labels in left-to-right order plus
+/// which button holds default focus and which is destructive.
+#[derive(Debug, Clone, PartialEq)]
+pub struct DirtyDialogLayout {
+    pub buttons: Vec<&'static str>,
+    pub default_focus: usize,
+    pub destructive: usize,
+}
+
+/// Build the guard dialog for the given dirty kinds. One dirty user profile:
+/// `Cancel | Discard changes | Save changes` (built-in primary reads
+/// `Save as new profile`); several dirty kinds: `Cancel | Discard all |
+/// Save all`. Save holds default focus; the destructive button never does.
+pub fn dirty_dialog_layout(dirty: &[ProfileKind], builtin_selected: bool) -> DirtyDialogLayout {
+    let buttons = if dirty.len() > 1 {
+        vec!["Cancel", "Discard all", "Save all"]
+    } else if builtin_selected {
+        vec!["Cancel", "Discard changes", "Save as new profile"]
+    } else {
+        vec!["Cancel", "Discard changes", "Save changes"]
+    };
+    DirtyDialogLayout {
+        default_focus: buttons.len() - 1,
+        destructive: 1,
+        buttons,
+    }
+}
+
+/// Keyboard shortcuts on the guard: Enter saves (default focus), Escape
+/// cancels. Discard has no shortcut — it requires an explicit click or
+/// focus movement.
+pub fn close_decision_for_key(enter: bool, escape: bool) -> Option<CloseDecision> {
+    if escape {
+        Some(CloseDecision::Cancel)
+    } else if enter {
+        Some(CloseDecision::SaveAll)
+    } else {
+        None
+    }
 }
 
 /// Apply per-kind Save All write results: successful drafts become clean,
@@ -458,6 +618,133 @@ mod tests {
         );
         assert_eq!(failed, vec![ProfileKind::Midi]);
         assert_eq!(dirty_profile_kinds(&s), vec![ProfileKind::Midi]);
+    }
+
+    #[test]
+    fn dirty_close_does_not_flip_editor_open() {
+        let mut s = session();
+        s.keyboard.value.add_key(EChannel::Snare, KeyCode::KeyQ);
+        let outcome = request_close(CloseIntent::Customize, &s);
+        assert_eq!(
+            outcome,
+            CloseRequestOutcome::Guard(PendingClose {
+                intent: CloseIntent::Customize,
+                dirty: vec![ProfileKind::Keyboard],
+            }),
+            "dirty drafts must guard the close instead of proceeding"
+        );
+        assert_eq!(
+            request_close(CloseIntent::Customize, &session()),
+            CloseRequestOutcome::Proceed,
+            "clean session closes immediately"
+        );
+    }
+
+    #[test]
+    fn single_user_dialog_orders_cancel_discard_save() {
+        let layout = dirty_dialog_layout(&[ProfileKind::Keyboard], false);
+        assert_eq!(
+            layout.buttons,
+            vec!["Cancel", "Discard changes", "Save changes"]
+        );
+        assert_eq!(layout.default_focus, 2);
+    }
+
+    #[test]
+    fn builtin_dialog_uses_save_as_primary() {
+        let layout = dirty_dialog_layout(&[ProfileKind::Midi], true);
+        assert_eq!(layout.buttons[2], "Save as new profile");
+        assert_eq!(layout.default_focus, 2);
+    }
+
+    #[test]
+    fn multiple_dirty_dialog_lists_kinds() {
+        let dirty = vec![ProfileKind::Keyboard, ProfileKind::Lanes];
+        let layout = dirty_dialog_layout(&dirty, false);
+        assert_eq!(layout.buttons, vec!["Cancel", "Discard all", "Save all"]);
+        let pending = PendingClose {
+            intent: CloseIntent::Customize,
+            dirty,
+        };
+        assert_eq!(
+            pending.dirty,
+            vec![ProfileKind::Keyboard, ProfileKind::Lanes]
+        );
+    }
+
+    #[test]
+    fn enter_saves_and_escape_cancels() {
+        assert_eq!(
+            close_decision_for_key(true, false),
+            Some(CloseDecision::SaveAll)
+        );
+        assert_eq!(
+            close_decision_for_key(false, true),
+            Some(CloseDecision::Cancel)
+        );
+        assert_eq!(close_decision_for_key(false, false), None);
+    }
+
+    #[test]
+    fn discard_never_has_default_focus() {
+        for (dirty, builtin) in [
+            (vec![ProfileKind::Keyboard], false),
+            (vec![ProfileKind::Keyboard], true),
+            (vec![ProfileKind::Keyboard, ProfileKind::Midi], false),
+        ] {
+            let layout = dirty_dialog_layout(&dirty, builtin);
+            assert_ne!(
+                layout.default_focus, layout.destructive,
+                "destructive button must never hold default focus"
+            );
+        }
+    }
+
+    #[test]
+    fn partial_save_all_closes_only_successful_drafts() {
+        let mut s = session();
+        s.keyboard.value.add_key(EChannel::Snare, KeyCode::KeyQ);
+        s.midi.value.velocity_threshold = 42;
+        let pending = PendingClose {
+            intent: CloseIntent::Customize,
+            dirty: vec![ProfileKind::Keyboard, ProfileKind::Midi],
+        };
+        let outcome = reduce_close_decision(
+            &pending,
+            CloseDecision::SaveAll,
+            &mut s,
+            &[(ProfileKind::Keyboard, true), (ProfileKind::Midi, false)],
+        );
+        assert_eq!(
+            outcome,
+            CloseOutcome::StayOpen {
+                failed: vec![ProfileKind::Midi]
+            }
+        );
+        assert!(!s.keyboard.is_dirty(), "successful save cleaned the draft");
+        assert!(s.midi.is_dirty(), "failed save keeps the draft dirty");
+    }
+
+    #[test]
+    fn graceful_exit_waits_for_dirty_decision() {
+        let mut s = session();
+        s.lanes.value = LaneProfile::from_arrangement(dtx_layout::nx_type_b());
+        let outcome = request_close(CloseIntent::GracefulAppExit, &s);
+        assert!(
+            matches!(outcome, CloseRequestOutcome::Guard(_)),
+            "graceful exit must wait for the dirty decision"
+        );
+        // Cancel keeps everything as it was.
+        let pending = PendingClose {
+            intent: CloseIntent::GracefulAppExit,
+            dirty: dirty_profile_kinds(&s),
+        };
+        let before = s.clone();
+        assert_eq!(
+            reduce_close_decision(&pending, CloseDecision::Cancel, &mut s, &[]),
+            CloseOutcome::Cancelled
+        );
+        assert_eq!(s, before);
     }
 
     #[test]

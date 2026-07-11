@@ -222,9 +222,10 @@ fn settings_nav_consumer(
                             }
                         }
                         verb => {
-                            if let (Some(delta), Some(item)) =
-                                (adjust_delta(verb, NavSource::Keyboard), items.get(focused.0))
-                            {
+                            if let (Some(delta), Some(item)) = (
+                                adjust_delta(verb, NavSource::Keyboard),
+                                items.get(focused.0),
+                            ) {
                                 for _ in 0..reps {
                                     (item.adjust)(&mut draft.0, delta);
                                 }
@@ -488,7 +489,14 @@ mod tests {
         let mut at_rail = false;
         let mut f = scroll;
         let mut c = scroll;
-        apply_keyboard(&mut active, &mut f, &mut at_rail, &mut fine, NavVerb::Inc, false);
+        apply_keyboard(
+            &mut active,
+            &mut f,
+            &mut at_rail,
+            &mut fine,
+            NavVerb::Inc,
+            false,
+        );
         apply_keyboard(
             &mut active,
             &mut c,

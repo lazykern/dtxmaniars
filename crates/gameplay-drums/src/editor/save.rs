@@ -30,7 +30,11 @@ pub fn plugin(app: &mut App) {
 /// Layout auto-saves when the surface closes (EditorOpen true→false while still
 /// in Performance — the Esc route), matching the config/bindings auto-save
 /// contract. The song-ended route is covered by `close_editor_on_exit`.
-fn save_layout_on_close(open: Res<super::EditorOpen>, layouts: Res<WidgetLayouts>, lanes: Res<Lanes>) {
+fn save_layout_on_close(
+    open: Res<super::EditorOpen>,
+    layouts: Res<WidgetLayouts>,
+    lanes: Res<Lanes>,
+) {
     if !open.is_changed() || open.0 {
         return;
     }

@@ -89,7 +89,13 @@ fn spawn_ui_on_open(
 
     let active_tab = active.0;
     commands.entity(root).with_children(|p| {
-        spawn_tab_row(p, &t, "SETTINGS", &game_shell::CustomizeTab::SETTINGS, active_tab);
+        spawn_tab_row(
+            p,
+            &t,
+            "SETTINGS",
+            &game_shell::CustomizeTab::SETTINGS,
+            active_tab,
+        );
         spawn_tab_row(p, &t, "KIT", &game_shell::CustomizeTab::KIT, active_tab);
     });
 }
@@ -250,8 +256,16 @@ fn close_on_escape(
     mut session: ResMut<game_shell::EditorSession>,
     mut requests: MessageWriter<game_shell::TransitionRequest>,
     calib: Res<super::calibration::CalibrationState>,
+    profile_session: Res<super::profile_state::CustomizeSession>,
+    mut pending: ResMut<super::profile_state::PendingCloseState>,
 ) {
     if !matches!(*calib, super::calibration::CalibrationState::Idle) {
+        close_requests.clear();
+        return;
+    }
+    // While the dirty-close guard is up, Esc/Enter belong to the guard
+    // (resolve_pending_close); this system must not double-handle them.
+    if !matches!(*pending, super::profile_state::PendingCloseState::None) {
         close_requests.clear();
         return;
     }
@@ -260,11 +274,23 @@ fn close_on_escape(
         if selection.0.is_some() {
             selection.0 = None;
         } else {
-            open.0 = false;
-            autoplay.0 = prev.0;
-            if session.0 {
-                session.0 = false;
-                game_shell::request_transition(&mut requests, game_shell::AppState::Title);
+            // Dirty profile drafts intercept the close BEFORE EditorOpen
+            // flips; the surface closes only after the user decides.
+            match super::profile_state::request_close(
+                super::profile_state::CloseIntent::Customize,
+                &profile_session.0,
+            ) {
+                super::profile_state::CloseRequestOutcome::Guard(close) => {
+                    *pending = super::profile_state::PendingCloseState::Pending(close);
+                }
+                super::profile_state::CloseRequestOutcome::Proceed => {
+                    open.0 = false;
+                    autoplay.0 = prev.0;
+                    if session.0 {
+                        session.0 = false;
+                        game_shell::request_transition(&mut requests, game_shell::AppState::Title);
+                    }
+                }
             }
         }
     }
