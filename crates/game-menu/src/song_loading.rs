@@ -223,14 +223,11 @@ fn poll_chart_parse(
             // M6b: also load into the guitar crate so Guitar mode is playable.
             guitar_chart.chart = chart.clone();
             guitar_chart.source_path = path.clone();
-            // M7: populate BGA events for the player.
-            let events = dtx_core::bga::bga_events(&chart);
+            // M7.1: publish prepared visual events + resolved asset paths.
+            let active_visuals = ActiveChartRes::from_chart(&chart, path.as_deref());
             bga_player.reset();
-            bga_player.event_count = events.len();
-            commands.insert_resource(ActiveChartRes {
-                bpm: chart.metadata.bpm.unwrap_or(120.0),
-                events,
-            });
+            bga_player.event_count = active_visuals.events.len();
+            commands.insert_resource(active_visuals);
             // BocuD loads every used WAV before entering Performance
             // (CStageSongLoading.cs:700-708). Waiting prevents unloaded BGM/SE
             // play commands from releasing together as an audible burst.
