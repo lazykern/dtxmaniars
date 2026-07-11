@@ -317,8 +317,10 @@ mod tests {
     #[test]
     fn active_profiles_compose_keyboard_and_midi() {
         let keyboard = KeyboardProfile::default();
-        let mut midi = MidiProfile::default();
-        midi.velocity_threshold = 25;
+        let midi = MidiProfile {
+            velocity_threshold: 25,
+            ..Default::default()
+        };
         let r = BindResolver::from_profiles(&keyboard, &midi);
         assert_eq!(r.lane_for_key(KeyCode::KeyX), Some(0)); // HH
         assert_eq!(r.lane_for_key(KeyCode::Space), Some(2)); // BD

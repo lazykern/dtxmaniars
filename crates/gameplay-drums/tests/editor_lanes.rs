@@ -110,8 +110,7 @@ mod lane_profile_draft {
             LaneProfile::from_arrangement(dtx_layout::nx_type_b()),
         ));
         // The preview mirror copies the draft arrangement into Lanes.
-        let mut lanes = Lanes::default();
-        lanes.0 = draft.0.value.arrangement.clone();
+        let lanes = Lanes(draft.0.value.arrangement.clone());
         let layout = PlayfieldLayout::from_size(1280.0, 720.0, &lanes);
         assert_eq!(layout.col_count(), dtx_layout::nx_type_b().lanes.len());
     }
@@ -145,8 +144,7 @@ mod lane_profile_draft {
             "NX Type-D",
             LaneProfile::from_arrangement(dtx_layout::nx_type_d()),
         ));
-        let mut lanes = Lanes::default();
-        lanes.0 = draft.0.value.arrangement.clone();
+        let lanes = Lanes(draft.0.value.arrangement.clone());
         assert_eq!(lanes.0, dtx_layout::nx_type_d());
         // ...while judgment routing is untouched: the resolver has no lane
         // arrangement input at all.
