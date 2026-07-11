@@ -24,7 +24,7 @@ use bevy::prelude::*;
 use bevy::tasks::{AsyncComputeTaskPool, Task, block_on, futures_lite::future};
 use bevy_kira_audio::prelude::{Audio, AudioInstance, AudioSource as KiraAudioSource};
 use dtx_audio::BgmHandle;
-use dtx_bga::{ActiveChartRes, BgaLayerOverlay, BgaPlayer};
+use dtx_bga::{ActiveChartRes, BgaPlayer};
 use dtx_core::{Chart, resolve_bgm_path};
 use dtx_ui::motion::EnterChoreo;
 use dtx_ui::widget::stage_background::spawn_stage_background;
@@ -113,7 +113,7 @@ pub fn plugin(app: &mut App) {
             OnExit(AppState::SongLoading),
             (stop_nowloading, despawn_stage::<LoadingEntity>).chain(),
         )
-        .add_systems(OnExit(AppState::Performance), cleanup_bga_overlays)
+        .add_systems(OnExit(AppState::Performance), dtx_bga::clear_visuals)
         .add_systems(
             Update,
             (
@@ -127,19 +127,6 @@ pub fn plugin(app: &mut App) {
         );
 }
 
-/// On leaving Performance: despawn any BGA image-layer placeholder overlays and
-/// reset the player so state does not bleed into Result/SongSelect. Movie decode
-/// remains deferred to M7.1.
-fn cleanup_bga_overlays(
-    mut commands: Commands,
-    overlays: Query<Entity, With<BgaLayerOverlay>>,
-    mut bga_player: ResMut<BgaPlayer>,
-) {
-    for entity in &overlays {
-        commands.entity(entity).despawn();
-    }
-    bga_player.reset();
-}
 
 /// Kick off the background parse. Clears the chart sound bank for the new song
 /// so `wait_for_audio` only waits on the handles this chart preloads.
