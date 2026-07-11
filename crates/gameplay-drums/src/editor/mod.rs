@@ -149,6 +149,8 @@ fn close_editor_on_exit(
     lanes: Res<crate::lanes::Lanes>,
     draft: Res<tabs::ConfigDraft>,
     live_bindings: Res<crate::bindings::LiveBindings>,
+    mut perf_draft: ResMut<crate::perf_hotkeys::PerfHotkeyDraft>,
+    show_perf_info: Res<crate::resources::ShowPerfInfo>,
 ) {
     if open.0 {
         let file = save::layout_file_from(&layouts, &lanes);
@@ -163,6 +165,7 @@ fn close_editor_on_exit(
         {
             warn!("bindings save on exit failed: {e}");
         }
+        perf_draft.sync_from_editor(&draft.0, show_perf_info.0);
         autoplay.0 = prev.0;
         open.0 = false;
     }
@@ -186,6 +189,16 @@ fn clear_canvas_interaction_outside_widgets(
     hovered.0 = None;
 }
 
+pub(super) fn just_closed(open: bool, was_open: &mut bool) -> bool {
+    let closed = *was_open && !open;
+    *was_open = open;
+    closed
+}
+
+pub(super) fn should_persist_close(open: bool, in_performance: bool, was_open: &mut bool) -> bool {
+    just_closed(open, was_open) && in_performance
+}
+
 /// Run condition: editor is open.
 pub fn editor_open(open: Res<EditorOpen>) -> bool {
     open.0
@@ -207,5 +220,27 @@ mod tests {
     #[test]
     fn editor_open_default_false() {
         assert!(!EditorOpen::default().0);
+    }
+
+    #[test]
+    fn initial_closed_state_is_not_a_close_transition() {
+        let mut was_open = false;
+        assert!(!just_closed(false, &mut was_open));
+    }
+
+    #[test]
+    fn open_to_closed_is_a_close_transition() {
+        let mut was_open = false;
+        assert!(!just_closed(true, &mut was_open));
+        assert!(just_closed(false, &mut was_open));
+        assert!(!just_closed(false, &mut was_open));
+    }
+
+    #[test]
+    fn forced_exit_consumes_close_outside_performance() {
+        let mut was_open = false;
+        assert!(!should_persist_close(true, true, &mut was_open));
+        assert!(!should_persist_close(false, false, &mut was_open));
+        assert!(!should_persist_close(false, true, &mut was_open));
     }
 }

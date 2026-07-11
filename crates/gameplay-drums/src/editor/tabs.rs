@@ -7,11 +7,11 @@ use game_shell::{CustomizeTab, PendingCustomizeTab};
 pub(super) fn plugin(app: &mut App) {
     app.init_resource::<ActiveTab>()
         .init_resource::<ConfigDraft>()
+        .add_systems(Update, save_draft_on_close)
         .add_systems(
             Update,
             (
                 sync_active_tab_on_open,
-                save_draft_on_close,
                 apply_draft_live
                     .run_if(super::editor_open)
                     .run_if(resource_changed::<ConfigDraft>),
@@ -55,8 +55,17 @@ fn sync_active_tab_on_open(
 }
 
 /// When the surface closes, persist the draft (settings tabs auto-save on exit).
-fn save_draft_on_close(open: Res<super::EditorOpen>, draft: Res<ConfigDraft>) {
-    if !open.is_changed() || open.0 {
+fn save_draft_on_close(
+    open: Res<super::EditorOpen>,
+    draft: Res<ConfigDraft>,
+    state: Res<State<game_shell::AppState>>,
+    mut was_open: Local<bool>,
+) {
+    if !super::should_persist_close(
+        open.0,
+        *state.get() == game_shell::AppState::Performance,
+        &mut was_open,
+    ) {
         return;
     }
     let path = dtx_config::default_path();

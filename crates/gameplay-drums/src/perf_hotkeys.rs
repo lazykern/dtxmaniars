@@ -11,7 +11,7 @@
 use std::time::{Duration, Instant};
 
 use bevy::prelude::*;
-use dtx_config::{default_path, load, save, Config};
+use dtx_config::{Config, default_path, load, save};
 use game_shell::{AppState, EGameMode, PauseState};
 
 use crate::resources::{BgmAdjustState, InputOffsetMs, ScrollSettings, ShowPerfInfo};
@@ -55,10 +55,19 @@ impl Default for PerfHotkeyDraft {
 
 impl PerfHotkeyDraft {
     pub fn reload(&mut self) {
-        self.cfg = load(&default_path());
+        self.replace_config(load(&default_path()));
+    }
+
+    fn replace_config(&mut self, cfg: Config) {
+        self.cfg = cfg;
         self.dirty = false;
         self.last_change = None;
         self.song_bgm_dirty = false;
+    }
+
+    pub(crate) fn sync_from_editor(&mut self, cfg: &Config, show_perf_info: bool) {
+        self.replace_config(cfg.clone());
+        self.cfg.system.show_perf_info = show_perf_info;
     }
 
     fn mark_dirty(&mut self) {
@@ -105,10 +114,7 @@ pub(super) fn plugin(app: &mut App) {
                 .run_if(in_state(AppState::Performance))
                 .run_if(drums_mode_active),
         )
-        .add_systems(
-            Update,
-            reload_draft_on_editor_close.run_if(in_state(AppState::Performance)),
-        )
+        .add_systems(Update, reload_draft_on_editor_close)
         .add_systems(
             Update,
             (handle_perf_hotkeys, debounced_persist_perf_hotkeys)
@@ -137,12 +143,18 @@ fn init_perf_hotkey_draft(mut draft: ResMut<PerfHotkeyDraft>, show: Res<ShowPerf
 /// closes.
 fn reload_draft_on_editor_close(
     open: Res<crate::editor::EditorOpen>,
+    config_draft: Res<crate::editor::tabs::ConfigDraft>,
     mut draft: ResMut<PerfHotkeyDraft>,
     show: Res<ShowPerfInfo>,
+    state: Res<State<AppState>>,
+    mut was_open: Local<bool>,
 ) {
-    if open.is_changed() && !open.0 {
-        draft.reload();
-        draft.cfg.system.show_perf_info = show.0;
+    if crate::editor::should_persist_close(
+        open.0,
+        *state.get() == AppState::Performance,
+        &mut was_open,
+    ) {
+        draft.sync_from_editor(&config_draft.0, show.0);
     }
 }
 
@@ -263,6 +275,64 @@ fn flush_config_draft(draft: &mut PerfHotkeyDraft) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn forced_editor_close_sync_preserves_live_perf_info() {
+        let mut editor_cfg = Config::default();
+        editor_cfg.gameplay.scroll_speed = 7.5;
+
+        let mut draft = PerfHotkeyDraft {
+            cfg: Config::default(),
+            dirty: true,
+            last_change: Some(Instant::now()),
+            song_bgm_dirty: true,
+        };
+        draft.sync_from_editor(&editor_cfg, true);
+
+        assert_eq!(draft.cfg.gameplay.scroll_speed, 7.5);
+        assert!(draft.cfg.system.show_perf_info);
+        assert!(!draft.dirty);
+        assert!(draft.last_change.is_none());
+        assert!(!draft.song_bgm_dirty);
+    }
+
+    #[test]
+    fn editor_close_syncs_perf_draft_from_memory() {
+        let mut editor_cfg = Config::default();
+        editor_cfg.gameplay.scroll_speed = 7.5;
+
+        let mut app = App::new();
+        app.insert_resource(State::new(AppState::Performance))
+            .insert_resource(crate::editor::EditorOpen(false))
+            .insert_resource(crate::editor::tabs::ConfigDraft(editor_cfg))
+            .insert_resource(PerfHotkeyDraft {
+                cfg: Config::default(),
+                dirty: false,
+                last_change: None,
+                song_bgm_dirty: false,
+            })
+            .insert_resource(ShowPerfInfo(false))
+            .add_systems(Update, reload_draft_on_editor_close);
+
+        app.update();
+        app.world_mut()
+            .resource_mut::<crate::editor::EditorOpen>()
+            .0 = true;
+        app.update();
+        app.world_mut()
+            .resource_mut::<crate::editor::EditorOpen>()
+            .0 = false;
+        app.update();
+
+        assert_eq!(
+            app.world()
+                .resource::<PerfHotkeyDraft>()
+                .cfg
+                .gameplay
+                .scroll_speed,
+            7.5
+        );
+    }
 
     #[test]
     fn scroll_speed_steps_and_clamps() {

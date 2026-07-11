@@ -7,9 +7,9 @@
 use std::collections::HashMap;
 
 use bevy::prelude::*;
-use dtx_config::{BindSource, InputBindings, BINDABLE_CHANNELS};
+use dtx_config::{BINDABLE_CHANNELS, BindSource, InputBindings};
 
-use crate::lane_map::{lane_of, LaneId};
+use crate::lane_map::{LaneId, lane_of};
 
 pub(super) fn plugin(app: &mut App) {
     app.init_resource::<BindResolver>()
@@ -17,12 +17,11 @@ pub(super) fn plugin(app: &mut App) {
         // Seeded at boot too: pads navigate menus before any Performance enter.
         .add_systems(Startup, reload_bindings)
         .add_systems(OnEnter(game_shell::AppState::Performance), reload_bindings)
+        .add_systems(Update, save_bindings_on_close)
         .add_systems(
             Update,
-            (
-                apply_live_bindings.run_if(resource_changed::<LiveBindings>),
-                save_bindings_on_close,
-            )
+            apply_live_bindings
+                .run_if(resource_changed::<LiveBindings>)
                 .run_if(in_state(game_shell::AppState::Performance)),
         );
 }
@@ -119,8 +118,17 @@ fn apply_live_bindings(live: Res<LiveBindings>, mut resolver: ResMut<BindResolve
 
 /// When the Customize surface closes, persist the live bindings to disk
 /// (mirrors `tabs::save_draft_on_close`).
-fn save_bindings_on_close(open: Res<crate::editor::EditorOpen>, live: Res<LiveBindings>) {
-    if !open.is_changed() || open.0 {
+fn save_bindings_on_close(
+    open: Res<crate::editor::EditorOpen>,
+    live: Res<LiveBindings>,
+    state: Res<State<game_shell::AppState>>,
+    mut was_open: Local<bool>,
+) {
+    if !crate::editor::should_persist_close(
+        open.0,
+        *state.get() == game_shell::AppState::Performance,
+        &mut was_open,
+    ) {
         return;
     }
     let path = dtx_config::default_bindings_path();

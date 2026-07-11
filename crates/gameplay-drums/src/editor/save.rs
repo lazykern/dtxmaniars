@@ -1,7 +1,7 @@
 //! Persist / reset editor edits, and cycle lane presets.
 
 use bevy::prelude::*;
-use dtx_layout::{LayoutFile, LATEST_VERSION};
+use dtx_layout::{LATEST_VERSION, LayoutFile};
 
 use crate::lanes::Lanes;
 use crate::widget_layout::WidgetLayouts;
@@ -22,7 +22,7 @@ pub fn plugin(app: &mut App) {
             save_hotkey
                 .run_if(super::editor_open)
                 .run_if(in_state(game_shell::AppState::Performance)),
-            save_layout_on_close.run_if(in_state(game_shell::AppState::Performance)),
+            save_layout_on_close,
         ),
     );
 }
@@ -30,8 +30,18 @@ pub fn plugin(app: &mut App) {
 /// Layout auto-saves when the surface closes (EditorOpen true→false while still
 /// in Performance — the Esc route), matching the config/bindings auto-save
 /// contract. The song-ended route is covered by `close_editor_on_exit`.
-fn save_layout_on_close(open: Res<super::EditorOpen>, layouts: Res<WidgetLayouts>, lanes: Res<Lanes>) {
-    if !open.is_changed() || open.0 {
+fn save_layout_on_close(
+    open: Res<super::EditorOpen>,
+    layouts: Res<WidgetLayouts>,
+    lanes: Res<Lanes>,
+    state: Res<State<game_shell::AppState>>,
+    mut was_open: Local<bool>,
+) {
+    if !super::should_persist_close(
+        open.0,
+        *state.get() == game_shell::AppState::Performance,
+        &mut was_open,
+    ) {
         return;
     }
     let file = layout_file_from(&layouts, &lanes);
