@@ -165,10 +165,17 @@ pub fn plugin(app: &mut App) {
                 handle_anchor_auto_cell,
                 handle_reset,
                 refresh_panel_values,
-                handle_lane_buttons,
-                apply_lane_width_sliders,
-                mirror_lane_edits_to_draft,
-                apply_lane_draft_preview,
+                // Chained: manual edits land in Lanes first, then mirror into
+                // the draft, and only then may the draft repaint the preview —
+                // unordered execution could overwrite a same-frame edit with a
+                // stale draft arrangement.
+                (
+                    handle_lane_buttons,
+                    apply_lane_width_sliders,
+                    mirror_lane_edits_to_draft,
+                    apply_lane_draft_preview,
+                )
+                    .chain(),
                 refresh_lane_panel_values,
                 handle_settings_adjust,
                 apply_settings_sliders,
