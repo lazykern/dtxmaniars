@@ -277,8 +277,16 @@ impl BindingsFile {
 
 /// Parse raw TOML, running the version migration chain (same policy as
 /// dtx-layout `parse_with_migrations`).
+pub fn parse_bindings_checked(raw: &str) -> Result<BindingsFile, toml::de::Error> {
+    let mut file: BindingsFile = toml::from_str(raw)?;
+    if file.version <= BINDINGS_VERSION {
+        file.version = BINDINGS_VERSION;
+    }
+    Ok(file)
+}
+
 pub fn parse_with_migrations(raw: &str) -> BindingsFile {
-    let mut file: BindingsFile = match toml::from_str(raw) {
+    let mut file: BindingsFile = match parse_bindings_checked(raw) {
         Ok(f) => f,
         Err(e) => {
             eprintln!("dtx-config: bindings parse failed: {e}; using defaults");

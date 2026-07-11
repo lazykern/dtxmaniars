@@ -1,16 +1,53 @@
-use std::collections::{BTreeMap, HashMap};
+use std::{
+    collections::{BTreeMap, HashMap},
+    path::{Path, PathBuf},
+    time::{SystemTime, UNIX_EPOCH},
+};
 
 use dtx_core::EChannel;
 use dtx_input::KeyCode;
-use dtx_persistence::ProfileName;
+use dtx_persistence::{
+    replace_bytes, suggest_copy_name, validate_profile_name, PersistenceError, ProfileName,
+};
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use thiserror::Error;
 
-use crate::{BindSource, InputBindings, BINDABLE_CHANNELS};
+use crate::{BindSource, BindingsFile, InputBindings, BINDABLE_CHANNELS};
 
 pub const KEYBOARD_DEFAULT_NAME: &str = "DTXMania default";
 pub const MIDI_DEFAULT_NAME: &str = "General MIDI drums";
 pub const PROFILE_REGISTRY_VERSION: u32 = 1;
+
+#[derive(Debug, Error)]
+pub enum RegistryLoadError {
+    #[error("cannot read {path}: {source}")]
+    Read { path: PathBuf, source: std::io::Error },
+    #[error("cannot parse {path}: {source}")]
+    Parse { path: PathBuf, source: toml::de::Error },
+    #[error("unsupported profile registry version {version} in {path}")]
+    UnsupportedVersion { path: PathBuf, version: u32 },
+    #[error("invalid profile registry in {path}: {reason}")]
+    Invalid { path: PathBuf, reason: String },
+}
+
+#[derive(Debug, Error)]
+pub enum RegistryIoError {
+    #[error("cannot serialize profile registry: {0}")]
+    Serialize(#[from] toml::ser::Error),
+    #[error("cannot persist profile registry: {0}")]
+    Persistence(#[from] PersistenceError),
+    #[error("confirmation is required before resetting {path}")]
+    ConfirmationRequired { path: PathBuf },
+    #[error("cannot back up {path}: {source}")]
+    Backup { path: PathBuf, source: std::io::Error },
+}
+
+#[derive(Debug)]
+pub enum RegistryStartup<T> {
+    Ready(T),
+    LegacySession { registry: T, write_error: RegistryIoError },
+    ReadOnlyBuiltins(RegistryLoadError),
+}
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct KeyboardProfile {
@@ -179,6 +216,7 @@ fn parse_channel_map<T>(map: BTreeMap<String, Vec<T>>) -> HashMap<EChannel, Vec<
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(bound(serialize = "T: Serialize", deserialize = "T: Deserialize<'de>"))]
 pub struct ProfileRegistry<T> {
     #[serde(default)]
     pub version: u32,
@@ -338,6 +376,236 @@ pub fn reduce_registry<T: Clone + PartialEq>(
     Ok(updated)
 }
 
+fn validate_registry<T>(
+    path: &Path,
+    registry: &ProfileRegistry<T>,
+    builtins: &BTreeMap<String, T>,
+) -> Result<(), RegistryLoadError> {
+    if registry.version != PROFILE_REGISTRY_VERSION {
+        return Err(RegistryLoadError::UnsupportedVersion {
+            path: path.to_path_buf(),
+            version: registry.version,
+        });
+    }
+    let names: Vec<&str> = registry.profiles.keys().map(String::as_str).collect();
+    for (name, _) in &registry.profiles {
+        let existing = names.iter().copied().filter(|other| *other != name);
+        if let Err(error) = validate_profile_name(name, builtins.keys().map(String::as_str), existing, None) {
+            return Err(RegistryLoadError::Invalid {
+                path: path.to_path_buf(),
+                reason: format!("profile {name:?}: {error}"),
+            });
+        }
+    }
+    if !builtins.contains_key(&registry.active) && !registry.profiles.contains_key(&registry.active) {
+        return Err(RegistryLoadError::Invalid {
+            path: path.to_path_buf(),
+            reason: format!("active profile {:?} does not exist", registry.active),
+        });
+    }
+    Ok(())
+}
+
+fn read_registry<T>(path: &Path, builtins: &BTreeMap<String, T>) -> Result<ProfileRegistry<T>, RegistryLoadError>
+where
+    T: for<'de> Deserialize<'de> + Default,
+{
+    let raw = std::fs::read_to_string(path).map_err(|source| RegistryLoadError::Read {
+        path: path.to_path_buf(),
+        source,
+    })?;
+    let registry = toml::from_str::<ProfileRegistry<T>>(&raw).map_err(|source| {
+        RegistryLoadError::Parse {
+            path: path.to_path_buf(),
+            source,
+        }
+    })?;
+    validate_registry(path, &registry, builtins)?;
+    Ok(registry)
+}
+
+fn write_registry<T: Serialize>(path: &Path, registry: &ProfileRegistry<T>) -> Result<(), RegistryIoError> {
+    let bytes = toml::to_string_pretty(registry)?;
+    replace_bytes(path, bytes.as_bytes())?;
+    Ok(())
+}
+
+fn migrate_name(base: &str, builtins: &BTreeMap<String, impl Sized>) -> String {
+    suggest_copy_name(base, builtins.keys().map(String::as_str))
+}
+
+fn legacy_bindings(path: &Path) -> Result<BindingsFile, RegistryLoadError> {
+    let raw = std::fs::read_to_string(path).map_err(|source| RegistryLoadError::Read {
+        path: path.to_path_buf(),
+        source,
+    })?;
+    crate::bindings::parse_bindings_checked(&raw).map_err(|source| RegistryLoadError::Parse {
+        path: path.to_path_buf(),
+        source,
+    })
+}
+
+fn migrated_keyboard_registry(file: &BindingsFile) -> ProfileRegistry<KeyboardProfile> {
+    let keyboard = split_default_bindings_from(file).0;
+    let builtins = keyboard_builtins();
+    if keyboard == builtins[KEYBOARD_DEFAULT_NAME] {
+        keyboard_registry()
+    } else {
+        let name = migrate_name("Migrated keyboard", &builtins);
+        ProfileRegistry {
+            active: name.clone(),
+            profiles: [(name, keyboard)].into_iter().collect(),
+            ..ProfileRegistry::default()
+        }
+    }
+}
+
+fn migrated_midi_registry(file: &BindingsFile) -> ProfileRegistry<MidiProfile> {
+    let midi = split_default_bindings_from(file).1;
+    let builtins = midi_builtins();
+    if midi == builtins[MIDI_DEFAULT_NAME] {
+        midi_registry()
+    } else {
+        let name = migrate_name("Migrated MIDI", &builtins);
+        ProfileRegistry {
+            active: name.clone(),
+            profiles: [(name, midi)].into_iter().collect(),
+            ..ProfileRegistry::default()
+        }
+    }
+}
+
+fn split_default_bindings_from(file: &BindingsFile) -> (KeyboardProfile, MidiProfile) {
+    let resolved = file.resolve();
+    let mut keyboard = KeyboardProfile { map: HashMap::new() };
+    let mut midi = MidiProfile {
+        port: resolved.midi.port,
+        velocity_threshold: resolved.midi.velocity_threshold,
+        map: HashMap::new(),
+    };
+    for (channel, sources) in resolved.map {
+        for source in sources {
+            match source {
+                BindSource::Key(key) => keyboard.add_key(channel, key),
+                BindSource::Midi { note } => midi.bind_note(channel, note),
+            }
+        }
+    }
+    (keyboard, midi)
+}
+
+fn load_registry_or_migrate<T>(
+    path: &Path,
+    legacy: &Path,
+    builtins: &BTreeMap<String, T>,
+    default: impl FnOnce() -> ProfileRegistry<T>,
+    migrate: impl FnOnce(&BindingsFile) -> ProfileRegistry<T>,
+) -> RegistryStartup<ProfileRegistry<T>>
+where
+    T: for<'de> Deserialize<'de> + Serialize + Clone + Default,
+{
+    match std::fs::read_to_string(path) {
+        Ok(raw) => {
+            let parsed = toml::from_str::<ProfileRegistry<T>>(&raw)
+                .map_err(|source| RegistryLoadError::Parse { path: path.to_path_buf(), source })
+                .and_then(|registry| {
+                    validate_registry(path, &registry, builtins).map(|()| registry)
+                });
+            match parsed {
+                Ok(registry) => RegistryStartup::Ready(registry),
+                Err(error) => RegistryStartup::ReadOnlyBuiltins(error),
+            }
+        }
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            match std::fs::read_to_string(legacy) {
+                Ok(raw) => match toml::from_str::<BindingsFile>(&raw)
+                    .map_err(|source| RegistryLoadError::Parse { path: legacy.to_path_buf(), source })
+                    .and_then(|file| crate::bindings::parse_bindings_checked(&raw)
+                        .map_err(|source| RegistryLoadError::Parse { path: legacy.to_path_buf(), source })
+                        .map(|_| file))
+                {
+                    Ok(file) => {
+                        let registry = migrate(&file);
+                        match write_registry(path, &registry) {
+                            Ok(()) => RegistryStartup::Ready(registry),
+                            Err(write_error) => RegistryStartup::LegacySession { registry, write_error },
+                        }
+                    }
+                    Err(error) => RegistryStartup::ReadOnlyBuiltins(error),
+                },
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                    RegistryStartup::Ready(default())
+                }
+                Err(source) => RegistryStartup::ReadOnlyBuiltins(RegistryLoadError::Read {
+                    path: legacy.to_path_buf(),
+                    source,
+                }),
+            }
+        }
+        Err(source) => RegistryStartup::ReadOnlyBuiltins(RegistryLoadError::Read {
+            path: path.to_path_buf(),
+            source,
+        }),
+    }
+}
+
+pub fn load_keyboard_registry(path: &Path, legacy: &Path) -> RegistryStartup<ProfileRegistry<KeyboardProfile>> {
+    load_registry_or_migrate(path, legacy, &keyboard_builtins(), keyboard_registry, migrated_keyboard_registry)
+}
+
+pub fn load_midi_registry(path: &Path, legacy: &Path) -> RegistryStartup<ProfileRegistry<MidiProfile>> {
+    load_registry_or_migrate(path, legacy, &midi_builtins(), midi_registry, migrated_midi_registry)
+}
+
+pub fn save_keyboard_registry(path: &Path, registry: &ProfileRegistry<KeyboardProfile>) -> Result<(), RegistryIoError> {
+    write_registry(path, registry)
+}
+
+pub fn save_midi_registry(path: &Path, registry: &ProfileRegistry<MidiProfile>) -> Result<(), RegistryIoError> {
+    write_registry(path, registry)
+}
+
+fn backup_and_reset<T: Serialize>(
+    path: &Path,
+    confirmed: bool,
+    now: SystemTime,
+    registry: &ProfileRegistry<T>,
+) -> Result<(), RegistryIoError> {
+    if !confirmed {
+        return Err(RegistryIoError::ConfirmationRequired { path: path.to_path_buf() });
+    }
+    if path.exists() {
+        let stamp = now.duration_since(UNIX_EPOCH).map(|duration| duration.as_millis()).unwrap_or(0);
+        let file_name = path.file_name().and_then(|name| name.to_str()).unwrap_or("profiles.toml");
+        let backup = path.with_file_name(format!("{file_name}.backup-{stamp}"));
+        std::fs::rename(path, &backup).map_err(|source| RegistryIoError::Backup {
+            path: path.to_path_buf(),
+            source,
+        })?;
+    }
+    write_registry(path, registry)
+}
+
+pub fn backup_and_reset_keyboard_registry(
+    path: &Path,
+    confirmed: bool,
+    now: SystemTime,
+) -> Result<ProfileRegistry<KeyboardProfile>, RegistryIoError> {
+    let registry = keyboard_registry();
+    backup_and_reset(path, confirmed, now, &registry)?;
+    Ok(registry)
+}
+
+pub fn backup_and_reset_midi_registry(
+    path: &Path,
+    confirmed: bool,
+    now: SystemTime,
+) -> Result<ProfileRegistry<MidiProfile>, RegistryIoError> {
+    let registry = midi_registry();
+    backup_and_reset(path, confirmed, now, &registry)?;
+    Ok(registry)
+}
+
 #[cfg(test)]
 mod tests {
     use std::collections::BTreeMap;
@@ -351,6 +619,25 @@ mod tests {
     fn user_name(raw: &str) -> dtx_persistence::ProfileName {
         validate_profile_name(raw, [KEYBOARD_DEFAULT_NAME, MIDI_DEFAULT_NAME], [], None)
             .expect("test profile name is valid")
+    }
+
+    #[derive(Debug, PartialEq, Serialize, Deserialize)]
+    struct NonDefaultPayload(String);
+
+    #[test]
+    fn registry_round_trips_non_default_payload() {
+        let registry = ProfileRegistry {
+            version: PROFILE_REGISTRY_VERSION,
+            active: "Desk".to_owned(),
+            profiles: [("Desk".to_owned(), NonDefaultPayload("value".to_owned()))]
+                .into_iter()
+                .collect(),
+        };
+
+        let raw = toml::to_string(&registry).expect("registry serializes");
+        let parsed: ProfileRegistry<NonDefaultPayload> =
+            toml::from_str(&raw).expect("registry parses");
+        assert_eq!(parsed, registry);
     }
 
     #[test]
@@ -575,5 +862,105 @@ mod tests {
 
         assert!(registry.profiles.is_empty());
         assert!(builtins.contains_key(KEYBOARD_DEFAULT_NAME));
+    }
+
+    fn migration_dir(name: &str) -> std::path::PathBuf {
+        std::env::temp_dir()
+            .join("dtx-config-profile-tests")
+            .join(std::process::id().to_string())
+            .join(name)
+    }
+
+    #[test]
+    fn checked_legacy_load_distinguishes_missing_and_malformed() {
+        let root = migration_dir("missing");
+        let _ = std::fs::remove_dir_all(&root);
+        let startup = load_keyboard_registry(&root.join("keyboard-profiles.toml"), &root.join("bindings.toml"));
+        assert!(matches!(startup, RegistryStartup::Ready(registry) if registry.active == KEYBOARD_DEFAULT_NAME));
+
+        std::fs::create_dir_all(&root).expect("test directory creates");
+        std::fs::write(root.join("bindings.toml"), "this is not valid = [[toml").expect("legacy writes");
+        let startup = load_keyboard_registry(&root.join("keyboard-profiles.toml"), &root.join("bindings.toml"));
+        assert!(matches!(startup, RegistryStartup::ReadOnlyBuiltins(RegistryLoadError::Parse { .. })));
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn mixed_v1_bindings_partition_migration_preserves_device_fields() {
+        let root = migration_dir("mixed");
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).expect("test directory creates");
+        let mut bindings = InputBindings::default();
+        bindings.midi.port = Some("TD-17".to_owned());
+        bindings.midi.velocity_threshold = 12;
+        bindings.bind_shared(EChannel::Snare, BindSource::Key(KeyCode::KeyX));
+        std::fs::write(
+            root.join("bindings.toml"),
+            toml::to_string_pretty(&bindings.to_file()).expect("legacy serializes"),
+        )
+        .expect("legacy writes");
+
+        let keyboard = load_keyboard_registry(&root.join("keyboard-profiles.toml"), &root.join("bindings.toml"));
+        let midi = load_midi_registry(&root.join("midi-profiles.toml"), &root.join("bindings.toml"));
+        let keyboard = match keyboard { RegistryStartup::Ready(registry) => registry, other => panic!("unexpected keyboard startup: {other:?}") };
+        let midi = match midi { RegistryStartup::Ready(registry) => registry, other => panic!("unexpected MIDI startup: {other:?}") };
+        assert!(keyboard.active.starts_with("Migrated keyboard"));
+        assert!(midi.active.starts_with("Migrated MIDI"));
+        assert_eq!(midi.profiles[&midi.active].port.as_deref(), Some("TD-17"));
+        assert_eq!(midi.profiles[&midi.active].velocity_threshold, 12);
+        assert!(keyboard.profiles[&keyboard.active].key_owners(KeyCode::KeyX).contains(&EChannel::Snare));
+        assert!(root.join("bindings.toml").exists());
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn matching_legacy_halves_activate_builtins() {
+        let root = migration_dir("matching");
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).expect("test directory creates");
+        let legacy = toml::to_string_pretty(&InputBindings::default().to_file()).expect("legacy serializes");
+        std::fs::write(root.join("bindings.toml"), legacy).expect("legacy writes");
+
+        let keyboard = load_keyboard_registry(&root.join("keyboard-profiles.toml"), &root.join("bindings.toml"));
+        let midi = load_midi_registry(&root.join("midi-profiles.toml"), &root.join("bindings.toml"));
+        assert!(matches!(keyboard, RegistryStartup::Ready(registry) if registry.active == KEYBOARD_DEFAULT_NAME && registry.profiles.is_empty()));
+        assert!(matches!(midi, RegistryStartup::Ready(registry) if registry.active == MIDI_DEFAULT_NAME && registry.profiles.is_empty()));
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn existing_registry_skips_legacy() {
+        let root = migration_dir("existing");
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).expect("test directory creates");
+        let registry = ProfileRegistry {
+            active: "Desk".to_owned(),
+            profiles: [("Desk".to_owned(), KeyboardProfile::default())].into_iter().collect(),
+            ..ProfileRegistry::default()
+        };
+        save_keyboard_registry(&root.join("keyboard-profiles.toml"), &registry).expect("registry writes");
+        std::fs::write(root.join("bindings.toml"), "not migrated").expect("legacy writes");
+        let startup = load_keyboard_registry(&root.join("keyboard-profiles.toml"), &root.join("bindings.toml"));
+        assert!(matches!(startup, RegistryStartup::Ready(registry) if registry.active == "Desk"));
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn reset_requires_confirmation_and_preserves_timestamped_backup() {
+        let root = migration_dir("reset");
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).expect("test directory creates");
+        let path = root.join("keyboard-profiles.toml");
+        save_keyboard_registry(&path, &keyboard_registry()).expect("registry writes");
+        assert!(matches!(backup_and_reset_keyboard_registry(&path, false, UNIX_EPOCH), Err(RegistryIoError::ConfirmationRequired { .. })));
+        let reset = backup_and_reset_keyboard_registry(&path, true, UNIX_EPOCH).expect("reset succeeds");
+        assert_eq!(reset.active, KEYBOARD_DEFAULT_NAME);
+        let backups = std::fs::read_dir(&root)
+            .expect("directory reads")
+            .filter_map(Result::ok)
+            .filter(|entry| entry.file_name().to_string_lossy().contains("backup-"))
+            .count();
+        assert_eq!(backups, 1);
+        let _ = std::fs::remove_dir_all(&root);
     }
 }
