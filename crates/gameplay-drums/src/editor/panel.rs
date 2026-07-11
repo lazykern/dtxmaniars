@@ -209,9 +209,20 @@ struct LeftPanelSig {
     tab: game_shell::CustomizeTab,
     bindings_rev: u64,
     segment: super::controls_panel::ControlsSegment,
+    controls_focus: super::controls_panel::ControlsFocus,
     popup: super::profile_bar_ui::ProfileBarPopup,
     bar: Option<(String, bool)>,
     error: Option<super::profile_bar::ProfileUiError>,
+}
+
+/// Controls-tab inputs bundled to stay under the system-param ceiling
+/// alongside `ProfileBarInputs`: the segment-selector focus ring and the
+/// currently selected channel (initial paint only — `highlight_selected_row`
+/// keeps it live between rebuilds).
+#[derive(SystemParam)]
+struct ControlsInputs<'w> {
+    focus: Res<'w, super::controls_panel::ControlsFocus>,
+    selected: Res<'w, super::bindings_capture::SelectedChannel>,
 }
 
 /// Profile-bar inputs, bundled to stay under Bevy's system-param ceiling
@@ -243,6 +254,7 @@ fn rebuild_left_content(
     theme: Res<dtx_ui::ThemeResource>,
     midi: Option<Res<game_shell::MidiConnected>>,
     bar: ProfileBarInputs,
+    controls: ControlsInputs,
     existing: Query<Entity, With<LeftContentRoot>>,
     mut last_sig: Local<Option<LeftPanelSig>>,
 ) {
@@ -261,6 +273,7 @@ fn rebuild_left_content(
         tab: active.0,
         bindings_rev: rev.0,
         segment,
+        controls_focus: *controls.focus,
         popup,
         bar: bar_sig,
         error: bar_error.0.clone(),
@@ -333,6 +346,9 @@ fn rebuild_left_content(
             &lanes,
             &ports,
             *bindings_reset,
+            segment,
+            *controls.focus,
+            controls.selected.0,
         );
         return;
     }

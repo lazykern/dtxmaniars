@@ -2,8 +2,7 @@
 //! micro-labels, source chips, channel color dots. Visual tokens live in
 //! `chrome.rs`; this module owns only structure.
 //!
-//! Unused today — Tasks 5/8 wire these into the bindings/lanes panels.
-#![allow(dead_code)]
+//! Wired into the Controls tab (Task 5); Task 8 wires the Lanes panel.
 
 use bevy::prelude::*;
 

@@ -494,18 +494,28 @@ fn midi_hit_autoselect(
     }
 }
 
-/// Tint the selected channel row so the pick is visible in the list.
+/// Tint the selected channel row (ROW_SELECTED_BG + accent left border) so
+/// the pick is visible in the list; an unselected, unbound row keeps its
+/// WARN_TINT baseline instead of going transparent.
 fn highlight_selected_row(
     selected: Res<SelectedChannel>,
-    mut rows: Query<(&BindChannelRow, &mut BackgroundColor)>,
+    mut rows: Query<(
+        &BindChannelRow,
+        Has<super::bindings_panel::UnboundRow>,
+        &mut BackgroundColor,
+        &mut BorderColor,
+    )>,
 ) {
-    for (row, mut bg) in &mut rows {
+    for (row, unbound, mut bg, mut border) in &mut rows {
         let on = selected.0 == Some(row.0);
         *bg = BackgroundColor(if on {
-            Color::srgba(0.30, 0.34, 0.42, 1.0)
+            super::chrome::ROW_SELECTED_BG
+        } else if unbound {
+            super::chrome::WARN_TINT
         } else {
             Color::NONE
         });
+        *border = BorderColor::all(if on { super::chrome::ACCENT } else { Color::NONE });
     }
 }
 
