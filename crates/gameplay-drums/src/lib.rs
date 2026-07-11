@@ -426,6 +426,7 @@ mod midi_consumer {
     fn poll_midi(
         mut source: ResMut<VirtualSource>,
         resolver: Res<crate::bindings::BindResolver>,
+        chart: Res<crate::resources::ActiveChart>,
         clock: Res<GameplayClock>,
         mut hits: MessageWriter<LaneHit>,
         mut nav_hits: MessageWriter<PadNavHit>,
@@ -437,15 +438,26 @@ mod midi_consumer {
         let mut buf: Vec<dtx_input::midi::MidiEvent> = Vec::new();
         (*source).poll(&mut buf);
         let gameplay_ready = !chart.chart.chips.is_empty() && clock.is_ready();
-        for hit in consume_midi_events(
+        let consumed = consume_midi_events(
             buf,
             &resolver,
             gameplay_ready,
             clock.current_ms,
             &mut last,
-        ) {
+        );
+        for hit in consumed.hits {
             hits.write(hit);
         }
+        for lane in consumed.nav_lanes {
+            nav_hits.write(PadNavHit { lane });
+        }
+    }
+
+    struct ConsumedMidi {
+        hits: Vec<LaneHit>,
+        /// Lanes for `PadNavHit`; emitted even when gameplay is not ready so
+        /// pads can steer menus outside a run.
+        nav_lanes: Vec<u8>,
     }
 
     fn consume_midi_events(
@@ -454,8 +466,9 @@ mod midi_consumer {
         gameplay_ready: bool,
         clock_ms: i64,
         last: &mut LastMidiHit,
-    ) -> Vec<LaneHit> {
+    ) -> ConsumedMidi {
         let mut hits = Vec::new();
+        let mut nav_lanes = Vec::new();
         for ev in events {
             let dtx_input::midi::MidiEvent::NoteOn {
                 note,
@@ -471,19 +484,22 @@ mod midi_consumer {
                 below_threshold: velocity <= resolver.velocity_threshold,
                 at: Some(std::time::Instant::now()),
             };
-            if !gameplay_ready || velocity == 0 || velocity <= resolver.velocity_threshold {
+            if velocity == 0 || velocity <= resolver.velocity_threshold {
                 continue;
             }
             let Some(lane) = resolver.lane_for_note(note) else {
                 continue;
             };
+            nav_lanes.push(lane);
+            if !gameplay_ready {
+                continue;
+            }
             hits.push(LaneHit {
                 lane,
                 audio_ms: stamp_audio_ms(Some(clock_ms), audio_ms),
             });
-            nav_hits.write(PadNavHit { lane });
         }
-        hits
+        ConsumedMidi { hits, nav_lanes }
     }
 
     #[cfg(test)]
@@ -509,7 +525,8 @@ mod midi_consumer {
 
             assert_eq!((last.note, last.velocity), (38, 90));
             assert!(last.at.is_some());
-            assert!(hits.is_empty());
+            assert!(hits.hits.is_empty());
+            assert_eq!(hits.nav_lanes.len(), 1);
         }
 
         #[test]
@@ -530,8 +547,8 @@ mod midi_consumer {
             );
             let next = consume_midi_events([], &resolver, true, 1234, &mut last);
 
-            assert!(gated.is_empty());
-            assert!(next.is_empty());
+            assert!(gated.hits.is_empty());
+            assert!(next.hits.is_empty());
         }
     }
 }
