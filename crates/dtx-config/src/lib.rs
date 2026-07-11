@@ -1,9 +1,10 @@
 //! dtx-config — persisted user configuration (TOML).
 //!
 //! Port of `references/DTXmaniaNX-BocuD/DTXMania/Core/CConfigIni.cs` (baseline sections).
-//! Baseline CConfigIni (Drums tables) is ported. KeyAssign now lives in
-//! `bindings`; Skin / ChangeSkin / Guitar/Bass tables dropped — no skin
-//! browser per roadmap refresh.
+//! Baseline CConfigIni (Drums tables) is ported. KeyAssign lives in
+//! `dtx_input::bindings` (moved out so this crate stays bevy-free / Pure);
+//! Skin / ChangeSkin / Guitar/Bass tables dropped — no skin browser per
+//! roadmap refresh.
 //!
 //! ## Sections ported
 //! - `System` — nBGAlpha, nMovieAlpha, bAVIEnabled, bBGAEnabled, bVerticalSyncWait (subset)
