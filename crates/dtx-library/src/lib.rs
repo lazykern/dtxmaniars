@@ -6,7 +6,7 @@
 //!
 //! - Sync directory scan (DTXManiaNX uses async Task — deferred to M6+)
 //! - No SQLite cache (`SongCacheSqlite.cs` — M6+)
-//! - No zip unpacking
+//! - Archive import (`import` module): zip/7z unpacking into the song root
 //! - No folder/box tree (`SongNode.cs` — M6+)
 //! - 3 sort modes: Default, ByTitle, ByArtist
 //! - BGM detection: try `<dtx>.ogg` and `1.ogg` in same dir
@@ -20,6 +20,8 @@
 //!
 //! ponytail: stdlib `walkdir` (or manual recursion) + dtx_core::parse. No async
 //! machinery until we have 1000s of charts.
+
+pub mod import;
 
 use std::fs;
 use std::path::{Path, PathBuf};

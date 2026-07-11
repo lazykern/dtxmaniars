@@ -12,3 +12,10 @@ workspace = true
 bevy = { workspace = true, features = ["default"] }
 dtx-core = { path = "../dtx-core" }
 thiserror = { workspace = true }
+zip = "5"
+sevenz-rust2 = "0.21"
+encoding_rs = "0.8"
+
+[dev-dependencies]
+crc32fast = "1"
+sevenz-rust2 = { version = "0.21", features = ["compress"] }
