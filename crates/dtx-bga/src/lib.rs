@@ -441,9 +441,10 @@ fn drive_movie(
     };
     let now = clock.current_ms;
 
-    // (Re)start the worker when the chart selects a different movie.
-    if let Some(id) = player.active_movie {
-        if runtime.current_id != Some(id) {
+    // (Re)start the worker when the chart selects a different movie; stop and
+    // tear down the overlay when a seek lands before any movie event.
+    match player.active_movie {
+        Some(id) if runtime.current_id != Some(id) => {
             runtime.stop_movie();
             runtime.current_id = Some(id);
             runtime.start_ms = player.movie_start_ms;
@@ -455,6 +456,16 @@ fn drive_movie(
                     }
                 }
             }
+        }
+        Some(_) => {}
+        None => {
+            if runtime.worker.is_some() || runtime.texture.is_some() {
+                runtime.stop_movie();
+            }
+            for entity in &root_q {
+                commands.entity(entity).despawn();
+            }
+            return;
         }
     }
 
@@ -585,6 +596,7 @@ fn spawn_movie_overlay(
 
 /// Despawn all BGA image and movie overlays and reset player + movie runtime.
 /// Idempotent: safe to call from any Performance-exit route.
+#[allow(clippy::type_complexity)]
 pub fn clear_visuals(
     mut commands: Commands,
     mut player: ResMut<BgaPlayer>,
