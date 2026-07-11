@@ -506,10 +506,12 @@ fn legacy_bindings(path: &Path) -> Result<BindingsFile, RegistryLoadError> {
     })
 }
 
-fn migrated_keyboard_registry(file: &BindingsFile) -> ProfileRegistry<KeyboardProfile> {
-    let keyboard = split_default_bindings_from(file).0;
+fn migrated_keyboard_registry(
+    file: &BindingsFile,
+) -> Result<ProfileRegistry<KeyboardProfile>, String> {
+    let keyboard = split_default_bindings_from(file)?.0;
     let builtins = keyboard_builtins();
-    if keyboard == builtins[KEYBOARD_DEFAULT_NAME] {
+    Ok(if keyboard == builtins[KEYBOARD_DEFAULT_NAME] {
         keyboard_registry()
     } else {
         let name = migrate_name("Migrated keyboard", &builtins);
@@ -518,13 +520,13 @@ fn migrated_keyboard_registry(file: &BindingsFile) -> ProfileRegistry<KeyboardPr
             profiles: [(name, keyboard)].into_iter().collect(),
             ..ProfileRegistry::default()
         }
-    }
+    })
 }
 
-fn migrated_midi_registry(file: &BindingsFile) -> ProfileRegistry<MidiProfile> {
-    let midi = split_default_bindings_from(file).1;
+fn migrated_midi_registry(file: &BindingsFile) -> Result<ProfileRegistry<MidiProfile>, String> {
+    let midi = split_default_bindings_from(file)?.1;
     let builtins = midi_builtins();
-    if midi == builtins[MIDI_DEFAULT_NAME] {
+    Ok(if midi == builtins[MIDI_DEFAULT_NAME] {
         midi_registry()
     } else {
         let name = migrate_name("Migrated MIDI", &builtins);
@@ -533,28 +535,40 @@ fn migrated_midi_registry(file: &BindingsFile) -> ProfileRegistry<MidiProfile> {
             profiles: [(name, midi)].into_iter().collect(),
             ..ProfileRegistry::default()
         }
-    }
+    })
 }
 
-fn split_default_bindings_from(file: &BindingsFile) -> (KeyboardProfile, MidiProfile) {
-    let resolved = file.resolve();
+fn split_default_bindings_from(
+    file: &BindingsFile,
+) -> Result<(KeyboardProfile, MidiProfile), String> {
     let mut keyboard = KeyboardProfile {
         map: HashMap::new(),
     };
     let mut midi = MidiProfile {
-        port: resolved.midi.port,
-        velocity_threshold: resolved.midi.velocity_threshold,
+        port: file.midi.port.clone(),
+        velocity_threshold: file.midi.velocity_threshold,
         map: HashMap::new(),
     };
-    for (channel, sources) in resolved.map {
+    let mut midi_owners = HashMap::new();
+    for (name, sources) in &file.map {
+        let Some(channel) = EChannel::from_short_name(name) else {
+            continue;
+        };
         for source in sources {
             match source {
-                BindSource::Key(key) => keyboard.add_key(channel, key),
-                BindSource::Midi { note } => midi.bind_note(channel, note),
+                BindSource::Key(key) => keyboard.add_key(channel, *key),
+                BindSource::Midi { note } => {
+                    if let Some(owner) = midi_owners.insert(*note, name) {
+                        return Err(format!(
+                            "MIDI note {note} is bound to both {owner} and {name}"
+                        ));
+                    }
+                    midi.map.entry(channel).or_default().push(*note);
+                }
             }
         }
     }
-    (keyboard, midi)
+    Ok((keyboard, midi))
 }
 
 fn load_registry_or_migrate<T>(
@@ -562,7 +576,7 @@ fn load_registry_or_migrate<T>(
     legacy: &Path,
     builtins: &BTreeMap<String, T>,
     default: impl FnOnce() -> ProfileRegistry<T>,
-    migrate: impl FnOnce(&BindingsFile) -> ProfileRegistry<T>,
+    migrate: impl FnOnce(&BindingsFile) -> Result<ProfileRegistry<T>, String>,
 ) -> RegistryStartup<ProfileRegistry<T>>
 where
     T: for<'de> Deserialize<'de> + Serialize + Clone + Default,
@@ -572,7 +586,15 @@ where
         CheckedLoad::Malformed(error) => RegistryStartup::ReadOnlyBuiltins(error),
         CheckedLoad::Missing => match legacy_bindings(legacy) {
             Ok(file) => {
-                let registry = migrate(&file);
+                let registry = match migrate(&file) {
+                    Ok(registry) => registry,
+                    Err(reason) => {
+                        return RegistryStartup::ReadOnlyBuiltins(RegistryLoadError::Invalid {
+                            path: legacy.to_path_buf(),
+                            reason,
+                        });
+                    }
+                };
                 match write_registry(path, &registry, builtins) {
                     Ok(()) => RegistryStartup::Ready(registry),
                     Err(write_error) => RegistryStartup::LegacySession {
@@ -653,6 +675,21 @@ fn backup_and_reset<T: Serialize + Clone>(
             .and_then(|name| name.to_str())
             .unwrap_or("profiles.toml");
         let backup = path.with_file_name(format!("{file_name}.backup-{stamp}"));
+        if backup
+            .try_exists()
+            .map_err(|source| RegistryIoError::Backup {
+                path: path.to_path_buf(),
+                source,
+            })?
+        {
+            return Err(RegistryIoError::Backup {
+                path: path.to_path_buf(),
+                source: std::io::Error::new(
+                    std::io::ErrorKind::AlreadyExists,
+                    "timestamped backup already exists",
+                ),
+            });
+        }
         std::fs::rename(path, &backup).map_err(|source| RegistryIoError::Backup {
             path: path.to_path_buf(),
             source,
@@ -1141,6 +1178,38 @@ mod tests {
     }
 
     #[test]
+    fn duplicate_legacy_midi_rejects_migration_without_writing_registries() {
+        let root = migration_dir("duplicate-midi");
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).expect("test directory creates");
+        let legacy = root.join("bindings.toml");
+        let mut file = InputBindings::default().to_file();
+        file.map
+            .entry("SD".to_owned())
+            .or_default()
+            .push(BindSource::Midi { note: 42 });
+        std::fs::write(
+            &legacy,
+            toml::to_string_pretty(&file).expect("legacy serializes"),
+        )
+        .expect("legacy writes");
+        let keyboard_path = root.join("keyboard-profiles.toml");
+        let midi_path = root.join("midi-profiles.toml");
+
+        assert!(matches!(
+            load_keyboard_registry(&keyboard_path, &legacy),
+            RegistryStartup::ReadOnlyBuiltins(RegistryLoadError::Invalid { .. })
+        ));
+        assert!(matches!(
+            load_midi_registry(&midi_path, &legacy),
+            RegistryStartup::ReadOnlyBuiltins(RegistryLoadError::Invalid { .. })
+        ));
+        assert!(!keyboard_path.exists());
+        assert!(!midi_path.exists());
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
     fn reset_requires_confirmation_and_preserves_timestamped_backup() {
         let root = migration_dir("reset");
         let _ = std::fs::remove_dir_all(&root);
@@ -1160,6 +1229,32 @@ mod tests {
             .filter(|entry| entry.file_name().to_string_lossy().contains("backup-"))
             .count();
         assert_eq!(backups, 1);
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn reset_rejects_existing_timestamped_backup_without_overwriting() {
+        let root = migration_dir("reset-backup-collision");
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).expect("test directory creates");
+        let path = root.join("keyboard-profiles.toml");
+        let backup = root.join("keyboard-profiles.toml.backup-0");
+        std::fs::write(&path, "current registry").expect("current registry writes");
+        std::fs::write(&backup, "existing backup").expect("backup writes");
+
+        assert!(matches!(
+            backup_and_reset_keyboard_registry(&path, true, UNIX_EPOCH),
+            Err(RegistryIoError::Backup { source, .. })
+                if source.kind() == std::io::ErrorKind::AlreadyExists
+        ));
+        assert_eq!(
+            std::fs::read_to_string(&path).expect("current registry reads"),
+            "current registry"
+        );
+        assert_eq!(
+            std::fs::read_to_string(&backup).expect("backup reads"),
+            "existing backup"
+        );
         let _ = std::fs::remove_dir_all(&root);
     }
 }
