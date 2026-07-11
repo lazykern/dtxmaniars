@@ -22,6 +22,7 @@ use thiserror::Error;
 
 pub mod bindings;
 pub mod drums;
+pub mod profiles;
 
 pub use bindings::{
     default_bindings_path, load_bindings, save_bindings, BindSource, BindingsFile, InputBindings,
