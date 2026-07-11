@@ -438,13 +438,8 @@ mod midi_consumer {
         let mut buf: Vec<dtx_input::midi::MidiEvent> = Vec::new();
         (*source).poll(&mut buf);
         let gameplay_ready = !chart.chart.chips.is_empty() && clock.is_ready();
-        let consumed = consume_midi_events(
-            buf,
-            &resolver,
-            gameplay_ready,
-            clock.current_ms,
-            &mut last,
-        );
+        let consumed =
+            consume_midi_events(buf, &resolver, gameplay_ready, clock.current_ms, &mut last);
         for hit in consumed.hits {
             hits.write(hit);
         }
