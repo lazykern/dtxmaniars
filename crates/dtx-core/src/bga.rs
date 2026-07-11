@@ -114,7 +114,8 @@ impl BgaEvent {
     }
 }
 
-/// Extract all BGA events from a parsed chart, sorted by `(measure, layer)`.
+/// Extract all BGA events from a parsed chart, sorted by `(measure, fraction)`
+/// with stable source order preserved for equal timestamps.
 pub fn bga_events(chart: &Chart) -> Vec<BgaEvent> {
     let mut events: Vec<BgaEvent> = chart
         .chips
@@ -124,12 +125,16 @@ pub fn bga_events(chart: &Chart) -> Vec<BgaEvent> {
             Some(BgaEvent {
                 measure: c.measure,
                 layer,
-                bmp_index: c.value as u32,
-                fraction: 0.0, // DTX chip line format doesn't carry fraction in M2; M7.1 reads BGAPAN
+                bmp_index: c.wav_slot,
+                fraction: c.value,
             })
         })
         .collect();
-    events.sort_by_key(|e| (e.measure, e.layer.label()));
+    events.sort_by(|a, b| {
+        a.measure
+            .cmp(&b.measure)
+            .then_with(|| a.fraction.total_cmp(&b.fraction))
+    });
     events
 }
 
@@ -208,10 +213,10 @@ mod tests {
         let chart = Chart {
             metadata: crate::chart::Metadata::default(),
             chips: vec![
-                Chip::new(0, EChannel::BGALayer1, 1.0),
+                Chip::with_wav(0, EChannel::BGALayer1, 0.0, 1),
                 Chip::new(0, EChannel::BassDrum, 1.0),
-                Chip::new(0, EChannel::Movie, 2.0),
-                Chip::new(1, EChannel::BGALayer3, 1.0),
+                Chip::with_wav(0, EChannel::Movie, 0.0, 2),
+                Chip::with_wav(1, EChannel::BGALayer3, 0.0, 1),
                 Chip::new(2, EChannel::BGM, 1.0),
             ],
             ..Default::default()

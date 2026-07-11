@@ -30,7 +30,7 @@ pub mod score_song;
 pub mod timing;
 pub mod trigger_pipeline;
 
-pub use assets::resolve_bgm_path;
+pub use assets::{resolve_bgm_path, resolve_chart_asset_path};
 pub use beat_lines::{expand_timing_lines, TimingLine, TimingLineKind};
 pub use channel::EChannel;
 pub use chart::{display_dlevel, Chart, Chip, EmptyHitEvent, Metadata};
