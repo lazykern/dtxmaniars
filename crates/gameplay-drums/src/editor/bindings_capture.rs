@@ -20,6 +20,9 @@ use bevy::prelude::*;
 use dtx_config::{BindSource, InputBindings};
 
 use crate::bindings::LiveBindings;
+use crate::events::LaneHit;
+use crate::lane_map::lane_of;
+use crate::resources::GameplayClock;
 
 use super::bindings_panel::{BindChannelRow, BindingsRev};
 
@@ -118,6 +121,10 @@ fn bind_captured(bindings: &mut InputBindings, channel: dtx_core::EChannel, src:
     }
 }
 
+fn captured_lane_hit(channel: dtx_core::EChannel, audio_ms: i64) -> Option<LaneHit> {
+    lane_of(channel).map(|lane| LaneHit { lane, audio_ms })
+}
+
 /// Drive the capture state machine: first non-reserved input wins; conflicts go
 /// through `ConfirmSteal`; Esc cancels at any stage.
 fn capture_binding(
@@ -127,6 +134,8 @@ fn capture_binding(
     mut capture: ResMut<CaptureState>,
     mut live: ResMut<LiveBindings>,
     mut rev: ResMut<BindingsRev>,
+    clock: Res<GameplayClock>,
+    mut hits: MessageWriter<LaneHit>,
 ) {
     match *capture {
         CaptureState::Idle => {
@@ -179,6 +188,11 @@ fn capture_binding(
                     _ => {
                         bind_captured(&mut live.0, channel, src);
                         rev.0 = rev.0.wrapping_add(1);
+                        if clock.is_ready() {
+                            if let Some(hit) = captured_lane_hit(channel, clock.current_ms) {
+                                hits.write(hit);
+                            }
+                        }
                         *capture = CaptureState::Idle;
                     }
                 }
@@ -190,6 +204,11 @@ fn capture_binding(
             if keys.just_pressed(KeyCode::Enter) {
                 bind_captured(&mut live.0, channel, source);
                 rev.0 = rev.0.wrapping_add(1);
+                if clock.is_ready() {
+                    if let Some(hit) = captured_lane_hit(channel, clock.current_ms) {
+                        hits.write(hit);
+                    }
+                }
                 *capture = CaptureState::Idle;
             } else if keys.just_pressed(KeyCode::Escape) {
                 *capture = CaptureState::Idle;
@@ -276,5 +295,11 @@ mod tests {
             owner_of(&ib, BindSource::Midi { note: 99 }),
             Some(dtx_core::EChannel::HiHatClose)
         );
+    }
+
+    #[test]
+    fn capture_feedback_targets_newly_bound_channel() {
+        let hit = captured_lane_hit(dtx_core::EChannel::Snare, 1234);
+        assert_eq!(hit.map(|value| (value.lane, value.audio_ms)), Some((1, 1234)));
     }
 }

@@ -55,9 +55,10 @@ fn capture_key_to_lane_input(
     keys: Res<ButtonInput<KeyCode>>,
     resolver: Res<BindResolver>,
     mode: Res<EGameMode>,
+    capture: Res<crate::editor::bindings_capture::CaptureState>,
     mut pending: ResMut<PendingLaneInputs>,
 ) {
-    if *mode != EGameMode::Drums {
+    if *mode != EGameMode::Drums || !matches!(*capture, crate::editor::bindings_capture::CaptureState::Idle) {
         return;
     }
     for key in keys.get_just_pressed() {

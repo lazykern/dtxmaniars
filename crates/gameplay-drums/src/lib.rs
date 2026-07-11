@@ -436,8 +436,27 @@ mod midi_consumer {
         }
         let mut buf: Vec<dtx_input::midi::MidiEvent> = Vec::new();
         (*source).poll(&mut buf);
-        for ev in buf {
-            // NoteOff / CC ignored (HH pedal CC handling is v2).
+        let gameplay_ready = !chart.chart.chips.is_empty() && clock.is_ready();
+        for hit in consume_midi_events(
+            buf,
+            &resolver,
+            gameplay_ready,
+            clock.current_ms,
+            &mut last,
+        ) {
+            hits.write(hit);
+        }
+    }
+
+    fn consume_midi_events(
+        events: impl IntoIterator<Item = dtx_input::midi::MidiEvent>,
+        resolver: &crate::bindings::BindResolver,
+        gameplay_ready: bool,
+        clock_ms: i64,
+        last: &mut LastMidiHit,
+    ) -> Vec<LaneHit> {
+        let mut hits = Vec::new();
+        for ev in events {
             let dtx_input::midi::MidiEvent::NoteOn {
                 note,
                 velocity,
@@ -446,25 +465,73 @@ mod midi_consumer {
             else {
                 continue;
             };
-            // Capture the last hit before the threshold gate so the meter +
-            // capture see soft (ignored) hits too.
             *last = LastMidiHit {
                 note,
                 velocity,
                 below_threshold: velocity <= resolver.velocity_threshold,
                 at: Some(std::time::Instant::now()),
             };
-            if velocity == 0 || velocity <= resolver.velocity_threshold {
+            if !gameplay_ready || velocity == 0 || velocity <= resolver.velocity_threshold {
                 continue;
             }
             let Some(lane) = resolver.lane_for_note(note) else {
                 continue;
             };
-            hits.write(LaneHit {
+            hits.push(LaneHit {
                 lane,
-                audio_ms: stamp_audio_ms(clock.is_ready().then(|| clock.current_ms), audio_ms),
+                audio_ms: stamp_audio_ms(Some(clock_ms), audio_ms),
             });
             nav_hits.write(PadNavHit { lane });
+        }
+        hits
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use super::*;
+
+        #[test]
+        fn midi_updates_last_hit_without_gameplay_readiness() {
+            let resolver = crate::bindings::BindResolver::default();
+            let mut last = LastMidiHit::default();
+
+            let hits = consume_midi_events(
+                [dtx_input::midi::MidiEvent::NoteOn {
+                    note: 38,
+                    velocity: 90,
+                    audio_ms: 0,
+                }],
+                &resolver,
+                false,
+                0,
+                &mut last,
+            );
+
+            assert_eq!((last.note, last.velocity), (38, 90));
+            assert!(last.at.is_some());
+            assert!(hits.is_empty());
+        }
+
+        #[test]
+        fn gated_midi_event_is_not_replayed_when_gameplay_becomes_ready() {
+            let resolver = crate::bindings::BindResolver::default();
+            let mut last = LastMidiHit::default();
+
+            let gated = consume_midi_events(
+                [dtx_input::midi::MidiEvent::NoteOn {
+                    note: 38,
+                    velocity: 90,
+                    audio_ms: 0,
+                }],
+                &resolver,
+                false,
+                0,
+                &mut last,
+            );
+            let next = consume_midi_events([], &resolver, true, 1234, &mut last);
+
+            assert!(gated.is_empty());
+            assert!(next.is_empty());
         }
     }
 }
