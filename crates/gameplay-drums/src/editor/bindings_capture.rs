@@ -84,6 +84,16 @@ pub enum ArrivedChoice {
 #[derive(Resource, Default, Debug, Clone, Copy)]
 pub struct SelectedChannel(pub Option<dtx_core::EChannel>);
 
+/// One-shot mouse-sourced `Arrived`-stage input: `capture_modal.rs`'s choice
+/// ("Add shared" / "Move here") and confirm buttons write here on click, and
+/// `capture_binding` drains it the same frame through the exact same
+/// `arrived_step` reducer the keyboard's ←/→/Enter drive. Kept as a plain
+/// inlet (not a full event queue) — at most one click matters per frame, and
+/// the buttons that ever write it only exist while an `Arrived` state is on
+/// screen, so nothing else can leave it stale.
+#[derive(Resource, Default, Debug, Clone, Copy)]
+pub struct MouseArrivedInput(pub Option<ArrivedInput>);
+
 /// Reserved keys that cannot be bound (caller also rejects when Ctrl/Alt/Super
 /// held). Escape cancels capture, Tab / function keys drive the surface itself.
 pub fn is_reserved(key: KeyCode) -> bool {
@@ -115,12 +125,14 @@ pub fn capture_active(state: Res<CaptureState>) -> bool {
 pub fn plugin(app: &mut App) {
     app.init_resource::<CaptureState>()
         .init_resource::<SelectedChannel>()
+        .init_resource::<MouseArrivedInput>()
         .add_systems(
             Update,
             (
                 capture_binding.run_if(super::profile_dialog::profile_dialog_closed),
                 select_channel_on_row_click,
                 midi_hit_autoselect,
+                sync_selected_channel_on_capture,
                 highlight_selected_row,
             )
                 .run_if(in_state(game_shell::AppState::Performance))
@@ -261,7 +273,11 @@ fn other_owners(
 
 /// Drive the source-split capture machine: keyboard capture sees only keys,
 /// MIDI learning sees only new NoteOns; Esc cancels at any stage.
-fn capture_binding(
+///
+/// `pub(super)` (not `pub`) so `capture_modal.rs`'s mouse-input system can
+/// order itself `.before(capture_binding)` — sibling modules under `editor`
+/// can see `pub(super)` items, no need for full crate visibility.
+pub(super) fn capture_binding(
     keys: Res<ButtonInput<KeyCode>>,
     last_midi: Res<crate::LastMidiHit>,
     mut seen_midi_at: Local<Option<std::time::Instant>>,
@@ -270,6 +286,7 @@ fn capture_binding(
     mut rev: ResMut<BindingsRev>,
     clock: Res<GameplayClock>,
     mut hits: MessageWriter<LaneHit>,
+    mut mouse_input: ResMut<MouseArrivedInput>,
 ) {
     // `steal`=false → bind_shared (add without disturbing other owners);
     // `steal`=true → bind (removes `src` from every other channel first).
@@ -291,8 +308,13 @@ fn capture_binding(
             }
         }
     };
-    // Arrow/Enter/Esc are shared across both `Arrived` variants.
-    let arrived_input = || {
+    // Arrow/Enter/Esc are shared across both `Arrived` variants. A pending
+    // mouse click (choice/confirm button) wins over keyboard the same frame —
+    // there's normally at most one input source per frame anyway.
+    let mut arrived_input = || {
+        if let Some(input) = mouse_input.0.take() {
+            return input;
+        }
         if keys.just_pressed(KeyCode::Escape) {
             ArrivedInput::Cancel
         } else if keys.just_pressed(KeyCode::Enter) {
@@ -494,6 +516,23 @@ fn midi_hit_autoselect(
     }
 }
 
+/// Keep `SelectedChannel` in lockstep with an active capture, so the spatial
+/// overlay (`bindings_spatial`) lights the target lane behind the capture
+/// modal even when capture was armed by clicking `+` directly (no prior row
+/// click or pad hit to have set the selection).
+fn sync_selected_channel_on_capture(capture: Res<CaptureState>, mut selected: ResMut<SelectedChannel>) {
+    let channel = match &*capture {
+        CaptureState::Idle => return,
+        CaptureState::Keyboard(ch)
+        | CaptureState::Midi(ch)
+        | CaptureState::KeyArrived { channel: ch, .. }
+        | CaptureState::MidiArrived { channel: ch, .. } => *ch,
+    };
+    if selected.0 != Some(channel) {
+        selected.0 = Some(channel);
+    }
+}
+
 /// Tint the selected channel row (ROW_SELECTED_BG + accent left border) so
 /// the pick is visible in the list; an unselected, unbound row keeps its
 /// WARN_TINT baseline instead of going transparent.
@@ -673,6 +712,7 @@ mod tests {
             .init_resource::<BindingsRev>()
             .init_resource::<crate::LastMidiHit>()
             .init_resource::<GameplayClock>()
+            .init_resource::<MouseArrivedInput>()
             .add_message::<LaneHit>()
             .insert_resource(CaptureState::MidiArrived {
                 channel: EChannel::Snare,
@@ -707,5 +747,22 @@ mod tests {
         // Share: still on HiHatClose AND now also on Snare.
         assert!(b.map[&EChannel::HiHatClose].contains(&src));
         assert!(b.map[&EChannel::Snare].contains(&src));
+    }
+
+    /// A capture armed by clicking `+` directly (no prior row click/pad hit)
+    /// must still light the target lane — `SelectedChannel` follows the
+    /// capture, not the other way around.
+    #[test]
+    fn selected_channel_follows_capture_target_without_prior_selection() {
+        use dtx_core::EChannel;
+        let mut app = App::new();
+        app.insert_resource(CaptureState::Keyboard(EChannel::LowTom))
+            .init_resource::<SelectedChannel>()
+            .add_systems(Update, sync_selected_channel_on_capture);
+        app.update();
+        assert_eq!(
+            app.world().resource::<SelectedChannel>().0,
+            Some(EChannel::LowTom)
+        );
     }
 }

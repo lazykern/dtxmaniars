@@ -13,6 +13,7 @@ pub mod bindings_capture;
 pub mod bindings_panel;
 pub mod bindings_spatial;
 pub mod calibration;
+pub mod capture_modal;
 pub mod chrome;
 pub mod close_dialog;
 pub mod controls_panel;
@@ -135,6 +136,7 @@ pub fn plugin(app: &mut App) {
                 bindings_panel::plugin,
                 bindings_capture::plugin,
                 bindings_spatial::plugin,
+                capture_modal::plugin,
                 drag::plugin,
                 close_dialog::plugin,
                 profile_bar_ui::plugin,
