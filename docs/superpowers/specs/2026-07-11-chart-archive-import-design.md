@@ -92,8 +92,12 @@ Before the move: at least one `.dtx` must exist anywhere under `content`. If non
 
 ### Collision handling
 
-If the destination folder name already exists in `song_root`, append ` (2)`,
-` (3)`, … Never overwrite existing charts.
+If the destination folder name already exists in `song_root`, the import is
+skipped: return `ImportError::AlreadyImported(name)` and clean up temp. Never
+overwrite existing charts. Rationale: a name collision almost always means the
+user re-dropped the same archive; a suffix like ` (2)` would silently duplicate
+the song in the list. The rare different-archive-same-name case is resolved by
+the user renaming the existing folder.
 
 ### ImportOutcome
 
@@ -108,16 +112,13 @@ struct ImportOutcome {
 
 ```rust
 enum ImportError {
-    UnsupportedFormat(String), // "rar", or other magic
-    UnsafePath,                // zip-slip attempt
-    NoCharts,                  // no .dtx inside
-    Io(std::io::Error),        // extraction / move failure
+    UnsupportedFormat(String),  // "rar", or other magic
+    UnsafePath,                 // zip-slip attempt
+    NoCharts,                   // no .dtx inside
+    AlreadyImported(String),    // dest folder name already in song_root
+    Io(std::io::Error),         // extraction / move failure
 }
 ```
-
-Note: "already imported" is not a distinct error — collision handling makes import
-idempotent-ish by suffixing, so re-dropping the same archive produces
-`Name (2)`. (Open question below.)
 
 ## Bevy glue (`game-menu`, song-select screen)
 
@@ -134,6 +135,7 @@ idempotent-ish by suffixing, so re-dropping the same archive produces
   - `UnsupportedFormat("rar")` → `unsupported: rar — extract manually`
   - `NoCharts` → `no charts found in archive`
   - `UnsafePath` → `archive rejected (unsafe paths)`
+  - `AlreadyImported` → `already imported: "<name>"`
   - `Io` → `import failed: <message>`
 
 The glue stays thin; all logic and edge handling lives in the pure function.
@@ -149,13 +151,12 @@ Unit tests on `import_archive`, Bevy-free, building tiny in-memory zips per case
 5. zip-slip entry (`../evil`) → `UnsafePath`, nothing written to song_root.
 6. Shift-JIS entry name → decoded, no panic, folder created.
 7. No `.dtx` inside → `NoCharts`, nothing written.
-8. Collision → second import of same name yields ` (2)` suffix.
+8. Collision → second import of same name returns `AlreadyImported`, song_root
+   unchanged.
 
 Bevy glue (drag-drop wiring, picker, toast) is thin and left untested.
 
 ## Open questions
 
-- **Re-import behavior**: suffix ` (2)` on every re-drop is safe but can accumulate
-  duplicates if a user drops the same file twice. Acceptable for v1; a
-  content-hash "already have this" check can come later if it becomes a problem.
-  Marked as a `ponytail:` deferral in code.
+None. Re-import behavior resolved: name collision → skip with
+`AlreadyImported` toast (see Collision handling).
