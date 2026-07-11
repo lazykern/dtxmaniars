@@ -135,6 +135,21 @@ impl<'de> Deserialize<'de> for MidiProfile {
         D: Deserializer<'de>,
     {
         let dto = MidiProfileDto::deserialize(deserializer)?;
+        let mut owners = HashMap::new();
+        for (name, notes) in &dto.map {
+            if EChannel::from_short_name(name).is_none() {
+                continue;
+            }
+            for note in notes {
+                if let Some(owner) = owners.insert(*note, name) {
+                    if owner != name {
+                        return Err(serde::de::Error::custom(format!(
+                            "MIDI note {note} is bound to both {owner} and {name}"
+                        )));
+                    }
+                }
+            }
+        }
         Ok(Self {
             port: dto.port.filter(|port| !port.is_empty()),
             velocity_threshold: dto.velocity_threshold,
@@ -281,6 +296,9 @@ pub fn reduce_registry<T: Clone + PartialEq>(
             let name = name.as_str();
             if builtins.contains_key(name) {
                 return Err(RegistryError::BuiltInProfile(name.to_owned()));
+            }
+            if updated.profiles.contains_key(name) {
+                return Err(RegistryError::DuplicateProfile(name.to_owned()));
             }
             updated.profiles.insert(name.to_owned(), value);
             updated.active = name.to_owned();
@@ -471,7 +489,7 @@ mod tests {
     }
 
     #[test]
-    fn revert_restores_active_value() {
+    fn revert_is_registry_noop() {
         let mut registry = keyboard_registry();
         registry.active = "Desk".to_owned();
         let saved = KeyboardProfile {
@@ -496,6 +514,17 @@ mod tests {
     }
 
     #[test]
+    fn midi_profile_rejects_note_bound_to_multiple_channels() {
+        let error =
+            toml::from_str::<MidiProfile>("velocity_threshold = 0\n[map]\nHH = [42]\nSD = [42]")
+                .expect_err("duplicate MIDI note must fail");
+
+        assert!(error
+            .to_string()
+            .contains("MIDI note 42 is bound to both HH and SD"));
+    }
+
+    #[test]
     fn save_as_uses_owned_profile_name_key() {
         let updated = reduce_registry(
             &keyboard_registry(),
@@ -509,6 +538,26 @@ mod tests {
 
         assert_eq!(updated.active, "Desk");
         assert!(updated.profiles.contains_key("Desk"));
+    }
+
+    #[test]
+    fn save_as_rejects_existing_user_profile() {
+        let mut registry = keyboard_registry();
+        registry
+            .profiles
+            .insert("Desk".to_owned(), KeyboardProfile::default());
+
+        let error = reduce_registry(
+            &registry,
+            &keyboard_builtins(),
+            RegistryAction::SaveAs {
+                name: user_name("Desk"),
+                value: KeyboardProfile::default(),
+            },
+        )
+        .expect_err("existing profile cannot be overwritten");
+
+        assert_eq!(error, RegistryError::DuplicateProfile("Desk".to_owned()));
     }
 
     #[test]
