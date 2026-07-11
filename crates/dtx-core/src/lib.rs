@@ -27,6 +27,7 @@ pub mod fdk_sub_acts;
 pub mod parser;
 pub mod random_mode;
 pub mod score_song;
+pub mod timing;
 pub mod trigger_pipeline;
 
 pub use assets::resolve_bgm_path;

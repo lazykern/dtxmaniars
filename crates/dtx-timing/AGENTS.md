@@ -35,7 +35,7 @@ fn judge_lane(clock: Res<AudioClock>, lane_hit: EventReader<LaneHit>) {
 - `gameplay-drums::GameplayClock` only falls back to wall-clock for explicit
   no-BGM charts; BGM-backed charts wait for audio position.
 - Update system runs every Update; cost = 2 Res reads + match. No allocations.
-- Time-math helpers (`chip_time_ms`, `delta_ms`) are pure, no bevy dep.
+- Time-math helpers are defined in `dtx_core::timing` and re-exported as `dtx_timing::math`.
 
 ## v1 scope (M1)
 
@@ -53,7 +53,7 @@ fn judge_lane(clock: Res<AudioClock>, lane_hit: EventReader<LaneHit>) {
 ## Rules
 
 - `dtx-timing` depends on `dtx-audio` (Engine → Engine, allowed).
-- Pure math lives in `math` submodule — test without spinning up bevy.
+- Pure math lives in `dtx-core`; keep the `dtx_timing::math` re-export for API compatibility.
 - **Port-first (ADR-0010):** AudioClock approach must match DTXManiaNX's
   `CSoundTimer` semantics (BocuD simplified via kira position, that's fine).
   But do not introduce your own frame-based fallback.

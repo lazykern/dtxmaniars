@@ -9,7 +9,7 @@
 
 use crate::chart::Chip;
 use crate::constants::RandomMode;
-use dtx_timing::math::{chip_time_ms_with_bpm_changes, BpmChange};
+use crate::timing::{chip_time_ms_with_bpm_changes, BpmChange};
 
 /// DTXMania score mode (BocuD `nScoreMode`).
 ///

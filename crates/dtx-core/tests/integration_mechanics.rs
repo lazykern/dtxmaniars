@@ -87,7 +87,7 @@ fn integration_judge_one_miss_one_perfect() {
 
 #[test]
 fn integration_chip_target_ms_bpm_change() {
-    use dtx_timing::math::{chip_time_ms_with_bpm_changes, BpmChange};
+    use dtx_core::timing::{chip_time_ms_with_bpm_changes, BpmChange};
     let chart = load_minimal();
     // Source measure 1 shifts to chart measure 2 (NX empty first measure).
     let chip = &chart.chips[0];
