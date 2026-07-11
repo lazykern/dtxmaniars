@@ -14,6 +14,7 @@ pub mod bindings_panel;
 pub mod bindings_spatial;
 pub mod calibration;
 pub mod chrome;
+pub mod close_dialog;
 pub mod controls_panel;
 pub mod drag;
 pub mod footer;
@@ -132,6 +133,7 @@ pub fn plugin(app: &mut App) {
                 bindings_capture::plugin,
                 bindings_spatial::plugin,
                 drag::plugin,
+                close_dialog::plugin,
             ),
             hotkeys::plugin,
             keyboard_nav::plugin,
@@ -195,12 +197,23 @@ fn close_editor_on_exit(
 /// tracking sees every edit: LiveBindings splits into the keyboard/MIDI
 /// draft values; the lane draft copies over wholesale.
 fn sync_drafts_to_session(
+    open: Res<EditorOpen>,
     live: Res<crate::bindings::LiveBindings>,
     lane_draft: Res<profile_state::LaneProfileDraft>,
     mut session: ResMut<profile_state::CustomizeSession>,
+    mut was_open: Local<bool>,
 ) {
-    if live.is_changed() {
-        let (keyboard, midi) = dtx_config::profiles::split_bindings(&live.0);
+    // Seed loaded profiles as the clean baseline once per Customize session.
+    // Later LiveBindings changes remain dirty edits.
+    let just_opened = open.0 && !*was_open;
+    *was_open = open.0;
+    if just_opened {
+        let (keyboard, midi) = dtx_input::profiles::split_bindings(&live.0);
+        session.0.keyboard =
+            profile_state::ProfileDraft::clean(&session.0.keyboard.selected, keyboard);
+        session.0.midi = profile_state::ProfileDraft::clean(&session.0.midi.selected, midi);
+    } else if live.is_changed() {
+        let (keyboard, midi) = dtx_input::profiles::split_bindings(&live.0);
         if session.0.keyboard.value != keyboard {
             session.0.keyboard.value = keyboard;
         }
@@ -220,7 +233,7 @@ fn save_dirty_kind(
     kind: profile_state::ProfileKind,
     session: &profile_state::ProfileSession,
 ) -> bool {
-    use dtx_config::profiles as cfg;
+    use dtx_input::profiles as cfg;
     use dtx_persistence::suggest_copy_name;
     use profile_state::ProfileKind;
 
@@ -280,7 +293,7 @@ fn save_dirty_kind(
         }
     }
 
-    let legacy = dtx_config::default_bindings_path();
+    let legacy = dtx_input::default_bindings_path();
     match kind {
         ProfileKind::Keyboard => commit(
             cfg::load_keyboard_registry(&crate::bindings::keyboard_registry_path(), &legacy),
@@ -339,6 +352,7 @@ fn save_dirty_kind(
 /// finalizes only after a discard or once every dirty save succeeded.
 fn resolve_pending_close(
     keys: Res<ButtonInput<KeyCode>>,
+    mut requested: MessageReader<close_dialog::CloseDecisionRequest>,
     mut pending: ResMut<profile_state::PendingCloseState>,
     mut session: ResMut<profile_state::CustomizeSession>,
     mut open: ResMut<EditorOpen>,
@@ -355,10 +369,17 @@ fn resolve_pending_close(
     let profile_state::PendingCloseState::Pending(close) = pending.clone() else {
         return;
     };
-    let Some(decision) = profile_state::close_decision_for_key(
-        keys.just_pressed(KeyCode::Enter),
-        keys.just_pressed(KeyCode::Escape),
-    ) else {
+    let decision = requested
+        .read()
+        .map(|request| request.0)
+        .last()
+        .or_else(|| {
+            profile_state::close_decision_for_key(
+                keys.just_pressed(KeyCode::Enter),
+                keys.just_pressed(KeyCode::Escape),
+            )
+        });
+    let Some(decision) = decision else {
         return;
     };
     let save_results: Vec<_> = if decision == profile_state::CloseDecision::SaveAll {
@@ -435,6 +456,26 @@ mod tests {
     #[test]
     fn editor_open_default_false() {
         assert!(!EditorOpen::default().0);
+    }
+
+    #[test]
+    fn opening_customize_seeds_clean_binding_drafts() {
+        let mut bindings = dtx_input::InputBindings::default();
+        bindings.bind(
+            dtx_core::EChannel::Snare,
+            dtx_input::BindSource::Key(KeyCode::KeyQ),
+        );
+        let mut app = App::new();
+        app.insert_resource(EditorOpen(true))
+            .insert_resource(crate::bindings::LiveBindings(bindings))
+            .init_resource::<profile_state::LaneProfileDraft>()
+            .init_resource::<profile_state::CustomizeSession>()
+            .add_systems(Update, sync_drafts_to_session);
+
+        app.update();
+
+        let session = &app.world().resource::<profile_state::CustomizeSession>().0;
+        assert!(profile_state::dirty_profile_kinds(session).is_empty());
     }
 
     #[test]

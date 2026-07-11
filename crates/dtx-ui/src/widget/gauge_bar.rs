@@ -69,8 +69,10 @@ mod tests {
 
     #[test]
     fn fill_width_scales() {
-        let mut g = GaugeBarWidget::default();
-        g.pct = 50.0;
+        let g = GaugeBarWidget {
+            pct: 50.0,
+            ..Default::default()
+        };
         assert!((g.fill_width() - 140.0).abs() < 0.1);
     }
 }

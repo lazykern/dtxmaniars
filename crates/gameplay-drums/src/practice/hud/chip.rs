@@ -44,8 +44,7 @@ pub fn chip_text(session: &PracticeSession, bar_ms: &[i64]) -> String {
     if let Some(last) = session
         .attempt_history
         .iter()
-        .filter(|a| a.start_ms == span_start)
-        .next_back()
+        .rfind(|a| a.start_ms == span_start)
     {
         if session.trainer.wait_enabled {
             parts.push(format!("flow {:.0}%", last.flow_pct));

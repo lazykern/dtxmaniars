@@ -162,14 +162,14 @@ mod tests {
     use std::cell::Cell;
     use std::path::PathBuf;
 
-    use dtx_config::profiles::{
+    use dtx_input::profiles::{
         keyboard_builtins, reduce_registry, KeyboardProfile, ProfileRegistry, RegistryAction,
     };
 
     use super::*;
 
     fn user_registry(names: &[&str]) -> ProfileRegistry<KeyboardProfile> {
-        let mut registry = dtx_config::profiles::keyboard_registry();
+        let mut registry = dtx_input::profiles::keyboard_registry();
         for name in names {
             registry
                 .profiles

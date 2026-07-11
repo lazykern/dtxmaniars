@@ -4,7 +4,7 @@
 
 use std::fs::File;
 use std::io::BufReader;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
 use anyhow::{Context, Result};
@@ -125,7 +125,7 @@ fn print_metadata(chart: &dtx_core::Chart) {
     }
 }
 
-fn import_nx_scores_cli(songs_dir: &PathBuf) -> Result<()> {
+fn import_nx_scores_cli(songs_dir: &Path) -> Result<()> {
     use dtx_scoring::nx_import::{import_nx_scores, ImportOptions};
     use dtx_scoring::ScoreStore;
 
@@ -134,7 +134,7 @@ fn import_nx_scores_cli(songs_dir: &PathBuf) -> Result<()> {
     let report = import_nx_scores(
         &mut store,
         ImportOptions {
-            root: songs_dir.clone(),
+            root: songs_dir.to_path_buf(),
         },
     )
     .context("importing DTXManiaNX scores")?;

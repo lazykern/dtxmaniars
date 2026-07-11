@@ -48,7 +48,7 @@ fn undo_restores_reset_all() {
 
 mod compatibility_snapshot {
     use gameplay_drums::editor::profile_state::{
-        dirty_profile_kinds, LaneProfileDraft, ProfileDraft, ProfileKind, ProfileSession,
+        dirty_profile_kinds, LaneProfileDraft, ProfileKind, ProfileSession,
     };
 
     use super::*;

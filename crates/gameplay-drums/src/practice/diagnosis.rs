@@ -89,8 +89,7 @@ impl LaneDiagnosis {
 
     /// Rows sorted worst-first: lowest hit%, ties by larger |mean delta|.
     pub fn sorted_rows(&self) -> Vec<(LaneId, LaneAgg)> {
-        let mut rows: Vec<(LaneId, LaneAgg)> =
-            self.lanes.iter().map(|(&l, &a)| (l, a)).collect();
+        let mut rows: Vec<(LaneId, LaneAgg)> = self.lanes.iter().map(|(&l, &a)| (l, a)).collect();
         rows.sort_by(|a, b| {
             a.1.hit_pct()
                 .partial_cmp(&b.1.hit_pct())

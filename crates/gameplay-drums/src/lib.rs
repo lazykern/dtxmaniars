@@ -12,6 +12,11 @@
 //! Reference: `references/DTXmaniaNX-BocuD/DTXMania/Stage/06.Performance/DrumsScreen/*`
 //! Lane order: LC, HH, SD, BD, HT, LT, FT, CY, LP, RD, HHO (BocuD CActPerfDrumsLaneFlushD.cs).
 
+// Bevy systems take many params (queries/res/commands/events) and Bevy queries
+// use deeply nested generic tuples; both trip these lints across nearly every
+// system in this crate. Allowed crate-wide as bevy-idiomatic false-positives.
+#![allow(clippy::too_many_arguments, clippy::type_complexity)]
+
 pub mod autoplay;
 pub mod beat_lines;
 pub mod bgm_scheduler;
@@ -307,6 +312,8 @@ mod midi_consumer {
     //! `poll_midi` handles everything uniformly.
 
     use bevy::prelude::*;
+    #[cfg(feature = "midi")]
+    use bevy::time::common_conditions::on_real_timer;
     use dtx_input::midi::{MidiSource, VirtualSource};
 
     use super::events::LaneHit;
@@ -345,7 +352,10 @@ mod midi_consumer {
                 .add_systems(Startup, connect_midi)
                 .add_systems(
                     Update,
-                    connect_midi.run_if(resource_changed::<crate::bindings::LiveBindings>),
+                    connect_midi.run_if(
+                        resource_changed::<crate::bindings::LiveBindings>
+                            .or_else(on_real_timer(std::time::Duration::from_secs(1))),
+                    ),
                 )
                 .add_systems(
                     FixedUpdate,
@@ -357,8 +367,9 @@ mod midi_consumer {
     }
 
     /// Connect (or reconnect) the real MIDI source using the port filter from
-    /// `LiveBindings`. Runs at startup and whenever the bindings (hence the
-    /// selected port) change. Reconnect overwrites, dropping the old
+    /// `LiveBindings`. Runs at startup, whenever the selected port changes,
+    /// and once per second so devices plugged in after boot are discovered.
+    /// Reconnect overwrites, dropping the old
     /// connection. Non-send: runs on the main thread only.
     #[cfg(feature = "midi")]
     fn connect_midi(
@@ -438,13 +449,8 @@ mod midi_consumer {
         let mut buf: Vec<dtx_input::midi::MidiEvent> = Vec::new();
         (*source).poll(&mut buf);
         let gameplay_ready = !chart.chart.chips.is_empty() && clock.is_ready();
-        let consumed = consume_midi_events(
-            buf,
-            &resolver,
-            gameplay_ready,
-            clock.current_ms,
-            &mut last,
-        );
+        let consumed =
+            consume_midi_events(buf, &resolver, gameplay_ready, clock.current_ms, &mut last);
         for hit in consumed.hits {
             hits.write(hit);
         }

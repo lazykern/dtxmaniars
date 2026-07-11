@@ -1,9 +1,10 @@
 //! dtx-config — persisted user configuration (TOML).
 //!
 //! Port of `references/DTXmaniaNX-BocuD/DTXMania/Core/CConfigIni.cs` (baseline sections).
-//! Baseline CConfigIni (Drums tables) is ported. KeyAssign now lives in
-//! `bindings`; Skin / ChangeSkin / Guitar/Bass tables dropped — no skin
-//! browser per roadmap refresh.
+//! Baseline CConfigIni (Drums tables) is ported. KeyAssign lives in
+//! `dtx_input::bindings` (moved out so this crate stays bevy-free / Pure);
+//! Skin / ChangeSkin / Guitar/Bass tables dropped — no skin browser per
+//! roadmap refresh.
 //!
 //! ## Sections ported
 //! - `System` — nBGAlpha, nMovieAlpha, bAVIEnabled, bBGAEnabled, bVerticalSyncWait (subset)
@@ -20,18 +21,12 @@ use std::path::{Path, PathBuf};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
-pub mod bindings;
 pub mod drums;
-pub mod profiles;
 
-pub use bindings::{
-    default_bindings_path, load_bindings, save_bindings, BindSource, BindingsFile, InputBindings,
-    MidiDeviceConfig, BINDABLE_CHANNELS,
-};
 pub use drums::{BdGroup, CyGroup, DrumsConfig, FtGroup, HhGroup, HitSoundPriority};
 
 /// Top-level persisted configuration. Each BocuD section becomes a sub-struct.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct Config {
     /// System: windowing, BGA, BGM, logging.
     #[serde(default)]
@@ -45,17 +40,6 @@ pub struct Config {
     /// Drums grouping / cymbal-free / hit-sound priority.
     #[serde(default)]
     pub drums: DrumsConfig,
-}
-
-impl Default for Config {
-    fn default() -> Self {
-        Self {
-            system: SystemConfig::default(),
-            gameplay: GameplayConfig::default(),
-            audio: AudioConfig::default(),
-            drums: DrumsConfig::default(),
-        }
-    }
 }
 
 /// System section — CConfigIni.cs:1-100 (subset).

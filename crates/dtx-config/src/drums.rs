@@ -6,10 +6,11 @@
 use serde::{Deserialize, Serialize};
 
 /// CY/RD grouping (`ECYGroup`).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum CyGroup {
     /// 打ち分ける — CY pad hits CY chips only; RD pad hits RD only.
+    #[default]
     Separate,
     /// 共通 — CY and RD pads share CY/RD chips.
     Common,
@@ -21,17 +22,12 @@ impl CyGroup {
     }
 }
 
-impl Default for CyGroup {
-    fn default() -> Self {
-        Self::Separate
-    }
-}
-
 /// HH/HC/HHO/LC grouping (`EHHGroup`).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum HhGroup {
     /// 全部打ち分ける
+    #[default]
     SeparateAll,
     /// ハイハットのみ打ち分ける (HC+LC vs HO)
     HhAndLc,
@@ -52,16 +48,11 @@ impl HhGroup {
     }
 }
 
-impl Default for HhGroup {
-    fn default() -> Self {
-        Self::SeparateAll
-    }
-}
-
 /// LT/FT grouping (`EFTGroup`).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum FtGroup {
+    #[default]
     Separate,
     Common,
 }
@@ -72,17 +63,12 @@ impl FtGroup {
     }
 }
 
-impl Default for FtGroup {
-    fn default() -> Self {
-        Self::Separate
-    }
-}
-
 /// BD/LP/LBD grouping (`EBDGroup`).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum BdGroup {
     /// LP | LBD | BD all separate.
+    #[default]
     Separate,
     /// LP | (LBD & BD).
     BdAndLbd,
@@ -103,16 +89,11 @@ impl BdGroup {
     }
 }
 
-impl Default for BdGroup {
-    fn default() -> Self {
-        Self::Separate
-    }
-}
-
 /// Chip-over-pad vs pad-over-chip (`EPlaybackPriority`).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum HitSoundPriority {
+    #[default]
     ChipOverPad,
     PadOverChip,
 }
@@ -120,12 +101,6 @@ pub enum HitSoundPriority {
 impl HitSoundPriority {
     pub fn all() -> [Self; 2] {
         [Self::ChipOverPad, Self::PadOverChip]
-    }
-}
-
-impl Default for HitSoundPriority {
-    fn default() -> Self {
-        Self::ChipOverPad
     }
 }
 

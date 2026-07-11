@@ -51,19 +51,14 @@ impl Anchor9 {
 }
 
 /// Which anchor space the widget lives in.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum AnchorSpace {
     /// Anchored to the full screen ref rect (1280×720).
+    #[default]
     Screen,
     /// Anchored to the playfield strip rect (dynamic; resolved by the consumer).
     Playfield,
-}
-
-impl Default for AnchorSpace {
-    fn default() -> Self {
-        Self::Screen
-    }
 }
 
 /// How the widget's position is computed.

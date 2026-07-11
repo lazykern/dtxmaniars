@@ -8,8 +8,8 @@
 use std::path::PathBuf;
 
 use bevy::prelude::KeyCode;
-use dtx_config::profiles as cfg;
 use dtx_core::EChannel;
+use dtx_input::profiles as cfg;
 use dtx_layout::profiles as lp;
 use gameplay_drums::bindings::BindResolver;
 use gameplay_drums::editor::profile_bar::{run_transaction, TransactionGate};
@@ -30,7 +30,7 @@ fn temp_dir(name: &str) -> PathBuf {
 
 fn write_legacy_bindings(dir: &std::path::Path) -> PathBuf {
     let path = dir.join("bindings.toml");
-    let file = dtx_config::InputBindings::default().to_file();
+    let file = dtx_input::InputBindings::default().to_file();
     std::fs::write(&path, toml::to_string_pretty(&file).expect("legacy toml")).expect("write");
     path
 }

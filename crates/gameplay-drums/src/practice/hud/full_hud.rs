@@ -114,7 +114,11 @@ pub fn rail_label(item: RailItem, session: &PracticeSession, exit_armed: bool) -
         RailItem::Preroll => format!("Pre-roll  ◀ {} ▶", session.transport.preroll.label()),
         RailItem::Metronome => format!(
             "Count-in  {}",
-            if session.transport.metronome { "on" } else { "off" }
+            if session.transport.metronome {
+                "on"
+            } else {
+                "off"
+            }
         ),
         RailItem::RampArm => {
             if session.trainer.ramp.armed {
@@ -328,7 +332,9 @@ pub fn spawn_full_hud(
                 ));
                 rail.spawn((
                     LaneDiagnosisText,
-                    Text::new(crate::practice::diagnosis::diagnosis_text(&session.lane_diag)),
+                    Text::new(crate::practice::diagnosis::diagnosis_text(
+                        &session.lane_diag,
+                    )),
                     Theme::label_font(),
                     TextColor(theme.text_secondary),
                     Node {

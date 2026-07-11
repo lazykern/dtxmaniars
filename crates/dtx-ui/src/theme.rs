@@ -61,14 +61,8 @@ impl Default for Theme {
 }
 
 /// Bevy resource wrapping the active theme.
-#[derive(Resource, Debug, Clone, Copy)]
+#[derive(Resource, Debug, Clone, Copy, Default)]
 pub struct ThemeResource(pub Theme);
-
-impl Default for ThemeResource {
-    fn default() -> Self {
-        Self(Theme::default())
-    }
-}
 
 impl Theme {
     pub fn judgment_color(&self, label: &str) -> Color {

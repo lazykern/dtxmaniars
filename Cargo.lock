@@ -2869,8 +2869,6 @@ name = "dtx-config"
 version = "0.0.0"
 dependencies = [
  "dtx-core",
- "dtx-input",
- "dtx-persistence",
  "serde",
  "thiserror 1.0.69",
  "toml",
@@ -2890,10 +2888,13 @@ name = "dtx-input"
 version = "0.0.0"
 dependencies = [
  "bevy",
+ "dtx-config",
  "dtx-core",
+ "dtx-persistence",
  "midir",
  "serde",
  "thiserror 1.0.69",
+ "toml",
 ]
 
 [[package]]

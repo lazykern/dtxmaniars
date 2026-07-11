@@ -426,8 +426,10 @@ mod tests {
         std::fs::create_dir_all(&dir).expect("dir");
         let layout = dir.join("layout.toml");
         let registry_path = dir.join("lane-profiles.toml");
-        let mut registry = LaneProfileRegistry::default();
-        registry.active = "Desk".into();
+        let mut registry = LaneProfileRegistry {
+            active: "Desk".into(),
+            ..Default::default()
+        };
         registry
             .profiles
             .insert("Desk".into(), LaneProfile::from_arrangement(nx_type_d()));

@@ -277,7 +277,7 @@ fn parse_chip_line(
     //   channel 0x03 → direct BPM, channel 0x08 → listBPM lookup.
     if matches!(channel, EChannel::BPM | EChannel::BPMEx) {
         let data = strip_dtx_param(value).replace(' ', "");
-        if data.len() % 2 != 0 || data.is_empty() {
+        if !data.len().is_multiple_of(2) || data.is_empty() {
             return Ok(());
         }
         let num_slots = data.len() / 2;
@@ -336,7 +336,7 @@ fn parse_chip_line(
         return Ok(());
     }
 
-    if data.len() % 2 == 0 {
+    if data.len().is_multiple_of(2) {
         let mut hex_chips = Vec::new();
         let num_slots = data.len() / 2;
         for i in 0..num_slots {
@@ -368,7 +368,7 @@ fn push_empty_hit_events(measure: u32, lane: u8, value: &str, empty_hits: &mut V
         return;
     }
 
-    if data.len() % 2 == 0 && !is_binary_only(&data) {
+    if data.len().is_multiple_of(2) && !is_binary_only(&data) {
         let num_slots = data.len() / 2;
         for i in 0..num_slots {
             let pair = &data[i * 2..i * 2 + 2];

@@ -90,10 +90,10 @@ pub fn seed_skip_sets(
             | dtx_core::EChannel::SE02
             | dtx_core::EChannel::SE03
             | dtx_core::EChannel::SE04
-            | dtx_core::EChannel::SE05 => {
-                if e.auto_ms < target_ms {
-                    played_se.insert(e.chip_idx);
-                }
+            | dtx_core::EChannel::SE05
+                if e.auto_ms < target_ms =>
+            {
+                played_se.insert(e.chip_idx);
             }
             _ => {}
         }

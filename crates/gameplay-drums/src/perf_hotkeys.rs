@@ -11,7 +11,7 @@
 use std::time::{Duration, Instant};
 
 use bevy::prelude::*;
-use dtx_config::{Config, default_path, load, save};
+use dtx_config::{default_path, load, save, Config};
 use game_shell::{AppState, EGameMode, PauseState};
 
 use crate::resources::{BgmAdjustState, InputOffsetMs, ScrollSettings, ShowPerfInfo};

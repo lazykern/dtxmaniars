@@ -145,6 +145,45 @@ pub fn available_ports() -> Vec<String> {
     vec![]
 }
 
+#[cfg(all(any(feature = "midi", test), target_os = "linux"))]
+fn stable_port_name(name: &str) -> &str {
+    let Some((stable, address)) = name.rsplit_once(' ') else {
+        return name;
+    };
+    let Some((client, port)) = address.split_once(':') else {
+        return name;
+    };
+    if client.chars().all(|c| c.is_ascii_digit()) && port.chars().all(|c| c.is_ascii_digit()) {
+        stable
+    } else {
+        name
+    }
+}
+
+#[cfg(any(feature = "midi", test))]
+fn matching_port_index(port_filter: Option<&str>, ports: &[String]) -> Option<usize> {
+    let Some(filter) = port_filter else {
+        return (!ports.is_empty()).then_some(0);
+    };
+    let matched = ports
+        .iter()
+        .position(|name| name == filter)
+        .or_else(|| ports.iter().position(|name| name.contains(filter)));
+    #[cfg(target_os = "linux")]
+    {
+        matched.or_else(|| {
+            let stable_filter = stable_port_name(filter);
+            ports
+                .iter()
+                .position(|name| stable_port_name(name) == stable_filter)
+        })
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        matched
+    }
+}
+
 /// Real MIDI input source backed by `midir`. The connection callback runs on
 /// midir's own OS thread and pushes parsed events into a shared inbox; `poll`
 /// drains that inbox on the consumer's thread.
@@ -163,14 +202,12 @@ impl RealMidiSource {
         let mut mi = midir::MidiInput::new("dtxmaniars").map_err(|e| e.to_string())?;
         mi.ignore(midir::Ignore::None);
         let ports = mi.ports();
-        let port = ports
+        let names = ports
             .iter()
-            .find(|p| match (port_filter, mi.port_name(p)) {
-                (Some(f), Ok(n)) => n.contains(f),
-                (None, _) => true,
-                _ => false,
-            })
-            .cloned()
+            .map(|port| mi.port_name(port).unwrap_or_default())
+            .collect::<Vec<_>>();
+        let port = matching_port_index(port_filter, &names)
+            .and_then(|index| ports.get(index).cloned())
             .ok_or_else(|| "no matching MIDI port".to_string())?;
         let name = mi.port_name(&port).map_err(|e| e.to_string())?;
         let inbox = std::sync::Arc::new(std::sync::Mutex::new(std::collections::VecDeque::new()));
@@ -301,5 +338,26 @@ mod tests {
         assert!(!s.has_events());
         s.note_on(38, 90, 0);
         assert!(s.has_events());
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn stale_alsa_client_id_still_matches_same_port() {
+        let ports = [
+            "Midi Through:Midi Through Port-0 14:0".to_owned(),
+            "MEDELI DD510:MEDELI DD510 MIDI 1 32:0".to_owned(),
+        ];
+
+        assert_eq!(
+            matching_port_index(Some("MEDELI DD510:MEDELI DD510 MIDI 1 24:0"), &ports,),
+            Some(1)
+        );
+    }
+
+    #[test]
+    fn non_alsa_suffix_remains_part_of_port_name() {
+        let ports = ["Controller Alpha:x".to_owned()];
+
+        assert_eq!(matching_port_index(Some("Controller Beta:x"), &ports), None);
     }
 }

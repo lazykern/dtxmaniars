@@ -14,9 +14,9 @@ use std::time::{Duration, Instant};
 use bevy::prelude::*;
 use game_shell::{AppState, NavAction, NavSource, NavVerb, PauseState};
 
-use crate::PadNavHit;
 use crate::editor::bindings_capture::CaptureState;
 use crate::editor::calibration::CalibrationState;
+use crate::PadNavHit;
 
 /// Minimum gap between accepted pad nav actions (double-trigger/flam guard).
 const DEBOUNCE: Duration = Duration::from_millis(80);
@@ -204,7 +204,10 @@ mod tests {
         assert!(g.accept(t1));
         g.enter_context(NavContext::SongSelect, t1);
         assert!(g.accept(t1 + std::time::Duration::from_millis(100)));
-        g.enter_context(NavContext::Result, t1 + std::time::Duration::from_millis(200));
+        g.enter_context(
+            NavContext::Result,
+            t1 + std::time::Duration::from_millis(200),
+        );
         assert!(!g.accept(t1 + std::time::Duration::from_millis(300)));
     }
 
@@ -232,27 +235,63 @@ mod tests {
     #[test]
     fn no_context_during_live_play_or_capture() {
         assert_eq!(
-            active_context(&AppState::Performance, &PauseState::Running, false, false, false),
+            active_context(
+                &AppState::Performance,
+                &PauseState::Running,
+                false,
+                false,
+                false
+            ),
             None
         );
         assert_eq!(
-            active_context(&AppState::Performance, &PauseState::Running, true, true, false),
+            active_context(
+                &AppState::Performance,
+                &PauseState::Running,
+                true,
+                true,
+                false
+            ),
             None
         );
         assert_eq!(
-            active_context(&AppState::SongSelect, &PauseState::Running, false, false, true),
+            active_context(
+                &AppState::SongSelect,
+                &PauseState::Running,
+                false,
+                false,
+                true
+            ),
             None
         );
         assert_eq!(
-            active_context(&AppState::Performance, &PauseState::Paused, false, false, false),
+            active_context(
+                &AppState::Performance,
+                &PauseState::Paused,
+                false,
+                false,
+                false
+            ),
             Some(NavContext::Paused)
         );
         assert_eq!(
-            active_context(&AppState::Performance, &PauseState::Running, true, false, false),
+            active_context(
+                &AppState::Performance,
+                &PauseState::Running,
+                true,
+                false,
+                false
+            ),
             Some(NavContext::Editor)
         );
         assert_eq!(
-            active_context(&AppState::SongLoading, &PauseState::Running, false, false, false),
+            active_context(
+                &AppState::SongLoading,
+                &PauseState::Running,
+                false,
+                false,
+                false
+            ),
             None
         );
     }

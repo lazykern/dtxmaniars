@@ -5,7 +5,6 @@ use bevy::prelude::*;
 use bevy::window::PresentMode;
 use bevy::window::{MonitorSelection, Window, WindowMode, WindowPlugin};
 use dtx_assets::DtxAssetsPlugin;
-use dtx_audio;
 use dtx_input::InputPlugin as DtxInputPlugin;
 use dtx_library::SongDbPlugin;
 use dtx_scoring::ScoreStore;

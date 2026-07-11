@@ -8,11 +8,7 @@ use dtx_scoring::{JudgmentTotals, Rank, ScoreEntry, ScoreSource, ScoreStore};
 fn entry(path: &str, score: u32, played_at: u64) -> ScoreEntry {
     ScoreEntry {
         id: format!("test:{path}:{score}:{played_at}"),
-        chart: ChartIdentity::new(
-            format!("dtx1:{path}"),
-            None,
-            Some(PathBuf::from(path)),
-        ),
+        chart: ChartIdentity::new(format!("dtx1:{path}"), None, Some(PathBuf::from(path))),
         title: "Title".into(),
         artist: "Artist".into(),
         score,

@@ -26,5 +26,7 @@ pub const SNAP_GUIDES: i32 = 2050;
 pub const HOVER_OUTLINE: i32 = 2100;
 /// Customize: anchor line/dots.
 pub const ANCHOR_VIZ: i32 = 2150;
-/// Customize: selection box (topmost editor visual).
+/// Customize: selection box.
 pub const SELECTION_BOX: i32 = 2200;
+/// Customize: modal dialogs above all editor visuals.
+pub const EDITOR_MODAL: i32 = 2300;

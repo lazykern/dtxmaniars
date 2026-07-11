@@ -35,6 +35,8 @@ impl LaneFlushWidget {
     }
 }
 
+// Orthogonal display knobs; a params struct would only relocate the list (clippy::too_many_arguments).
+#[allow(clippy::too_many_arguments)]
 pub fn spawn_lane_flush_strip(
     commands: &mut Commands,
     parent: Entity,
