@@ -199,11 +199,11 @@ fn settings_nav_consumer(
                 NavLevel::Rail => match action.verb {
                     NavVerb::Dec => active.0 = active.0.prev(),
                     NavVerb::Inc => active.0 = active.0.next(),
-                    NavVerb::Down | NavVerb::Confirm => {
-                        if keyboard_can_enter(active.0) && !items.is_empty() {
-                            focused.0 = 0;
-                            *level = NavLevel::Rows;
-                        }
+                    NavVerb::Down | NavVerb::Confirm
+                        if keyboard_can_enter(active.0) && !items.is_empty() =>
+                    {
+                        focused.0 = 0;
+                        *level = NavLevel::Rows;
                     }
                     _ => {}
                 },
@@ -304,11 +304,11 @@ mod tests {
             match verb {
                 NavVerb::Dec => *active = active.prev(),
                 NavVerb::Inc => *active = active.next(),
-                NavVerb::Down | NavVerb::Confirm => {
-                    if keyboard_can_enter(*active) && !items.is_empty() {
-                        *focused = 0;
-                        *at_rail = false;
-                    }
+                NavVerb::Down | NavVerb::Confirm
+                    if keyboard_can_enter(*active) && !items.is_empty() =>
+                {
+                    *focused = 0;
+                    *at_rail = false;
                 }
                 _ => {}
             }

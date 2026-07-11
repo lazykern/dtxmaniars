@@ -41,14 +41,8 @@ pub struct ActiveInputProfiles {
 
 /// Live, editable bindings — the Bindings tab mutates this; the resolver +
 /// disk follow. Seeded from bindings.toml on Performance enter.
-#[derive(Resource, Debug, Clone)]
+#[derive(Resource, Debug, Clone, Default)]
 pub struct LiveBindings(pub dtx_config::InputBindings);
-
-impl Default for LiveBindings {
-    fn default() -> Self {
-        Self(dtx_config::InputBindings::default())
-    }
-}
 
 /// Flattened lookup tables derived from `InputBindings`.
 #[derive(Resource, Debug, Clone)]

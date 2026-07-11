@@ -18,7 +18,7 @@ pub struct StageRect {
 }
 
 /// Desired stage rect; `StageRect` animates toward this.
-#[derive(Resource, Debug, Clone, Copy, PartialEq)]
+#[derive(Resource, Debug, Clone, Copy, PartialEq, Default)]
 pub struct StageTarget(pub StageRect);
 
 impl StageRect {
@@ -45,12 +45,6 @@ impl Default for StageRect {
     }
 }
 
-impl Default for StageTarget {
-    fn default() -> Self {
-        StageTarget(StageRect::default())
-    }
-}
-
 pub(crate) fn plugin(app: &mut App) {
     app.init_resource::<StageRect>()
         .init_resource::<StageTarget>()
@@ -74,8 +68,7 @@ pub(crate) fn plugin(app: &mut App) {
 pub fn stage_xform(rect: StageRect, window: Vec2) -> (f32, Vec2) {
     let s = (rect.size.x / window.x)
         .min(rect.size.y / window.y)
-        .min(1.0)
-        .max(0.01);
+        .clamp(0.01, 1.0);
     let d = rect.origin + (rect.size - window * s) * 0.5;
     let c = window * 0.5;
     (s, d - c * (1.0 - s))

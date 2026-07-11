@@ -181,10 +181,14 @@ mod tests {
 
     #[test]
     fn miss_scaled_by_damage_level() {
-        let mut normal = StageGauge::default();
-        normal.damage_level = DamageLevel::Normal;
-        let mut high = StageGauge::default();
-        high.damage_level = DamageLevel::High;
+        let mut normal = StageGauge {
+            damage_level: DamageLevel::Normal,
+            ..Default::default()
+        };
+        let mut high = StageGauge {
+            damage_level: DamageLevel::High,
+            ..Default::default()
+        };
         normal.apply_judgment(JudgmentKind::Miss);
         high.apply_judgment(JudgmentKind::Miss);
         // High damage drains more than Normal.
@@ -193,8 +197,10 @@ mod tests {
 
     #[test]
     fn fails_at_minus_point_one() {
-        let mut g = StageGauge::default();
-        g.value = GAUGE_MIN + 0.005;
+        let mut g = StageGauge {
+            value: GAUGE_MIN + 0.005,
+            ..Default::default()
+        };
         g.apply_judgment(JudgmentKind::Miss);
         assert!(g.failed);
         assert!(g.value <= GAUGE_MIN);
@@ -202,8 +208,10 @@ mod tests {
 
     #[test]
     fn none_damage_level_never_drains_on_miss() {
-        let mut g = StageGauge::default();
-        g.damage_level = DamageLevel::None;
+        let mut g = StageGauge {
+            damage_level: DamageLevel::None,
+            ..Default::default()
+        };
         let before = g.value;
         g.apply_judgment(JudgmentKind::Miss);
         assert!((g.value - before).abs() < 1e-6);

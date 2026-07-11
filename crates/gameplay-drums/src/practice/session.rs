@@ -436,9 +436,11 @@ mod tests {
 
     #[test]
     fn mean_error_signed() {
-        let mut a = AttemptStats::default();
-        a.error_sum_ms = -30;
-        a.error_count = 10;
+        let a = AttemptStats {
+            error_sum_ms: -30,
+            error_count: 10,
+            ..Default::default()
+        };
         assert!((a.mean_error_ms() + 3.0).abs() < 1e-6);
     }
 
