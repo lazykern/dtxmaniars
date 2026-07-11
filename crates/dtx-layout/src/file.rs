@@ -26,6 +26,11 @@ pub struct LanesSection {
     /// Channel→lane overrides, keyed by channel short name.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub map: Option<HashMap<String, String>>,
+    /// Channels intentionally hidden (`lane_edit::hide_lane`) — no lane, but
+    /// still judged. Distinguishes "deliberately unassigned" from "corrupt
+    /// map entry", which still gets auto-repaired onto `lanes[0]`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub hidden: Option<Vec<String>>,
 }
 
 impl LanesSection {
@@ -105,7 +110,17 @@ impl LanesSection {
                 }
             }
         }
+        let hidden: HashSet<dtx_core::EChannel> = self
+            .hidden
+            .iter()
+            .flatten()
+            .filter_map(|name| channel_from_short(name))
+            .collect();
         for ch in DRUM_CHANNELS {
+            if hidden.contains(&ch) {
+                map.remove(&ch);
+                continue;
+            }
             let id = map.get(&ch).cloned().unwrap_or_default();
             if !lanes.iter().any(|l| l.id == id) {
                 map.insert(ch, lanes[0].id.clone());
@@ -128,6 +143,12 @@ impl LanesSection {
                 ..Default::default()
             };
         }
+        let hidden: Vec<String> = DRUM_CHANNELS
+            .into_iter()
+            .filter(|ch| !arr.map.contains_key(ch))
+            .filter_map(channel_short_name)
+            .map(str::to_string)
+            .collect();
         Self {
             preset: LanePreset::Custom,
             order: Some(arr.lanes.iter().map(|l| l.id.clone()).collect()),
@@ -140,6 +161,7 @@ impl LanesSection {
                     })
                     .collect(),
             ),
+            hidden: if hidden.is_empty() { None } else { Some(hidden) },
         }
     }
 }
@@ -295,6 +317,25 @@ mod tests {
 
         assert_eq!(ids, ["HH", "SD", "BD"]);
         assert_eq!(arr.lane_index_of(EChannel::HiHatClose), Some(0));
+    }
+
+    #[test]
+    fn hidden_lane_survives_section_round_trip() {
+        // Registry completeness: an arrangement with an intentionally hidden
+        // channel (`lane_edit::hide_lane`) must NOT be "repaired" back onto
+        // some lane on save/load — that would silently undo the hide.
+        let mut arr = crate::presets::classic();
+        crate::lane_edit::hide_lane(&mut arr, 0);
+        assert!(!crate::lane_edit::unassigned_channels(&arr).is_empty());
+
+        let section = LanesSection::from_arrangement(&arr);
+        assert!(section.hidden.is_some(), "hidden channels are recorded");
+        let resolved = section.resolve();
+        assert_eq!(resolved, arr, "hide survives a full serde round trip");
+
+        let raw = toml::to_string_pretty(&section).expect("section serializes");
+        let parsed: LanesSection = toml::from_str(&raw).expect("section parses");
+        assert_eq!(parsed.resolve(), arr, "hide survives TOML text round trip");
     }
 
     #[test]
