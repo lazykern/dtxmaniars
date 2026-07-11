@@ -525,6 +525,16 @@ mod tests {
     }
 
     #[test]
+    fn midi_profile_rejects_note_repeated_within_channel() {
+        let error = toml::from_str::<MidiProfile>("velocity_threshold = 0\n[map]\nHH = [42, 42]")
+            .expect_err("duplicate MIDI note must fail");
+
+        assert!(error
+            .to_string()
+            .contains("MIDI note 42 is bound to both HH and HH"));
+    }
+
+    #[test]
     fn save_as_uses_owned_profile_name_key() {
         let updated = reduce_registry(
             &keyboard_registry(),
