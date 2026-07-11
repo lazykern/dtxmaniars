@@ -12,8 +12,8 @@
 
 use std::collections::HashSet;
 
-use bevy::prelude::*;
 use bevy::asset::RenderAssetUsages;
+use bevy::prelude::*;
 use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat};
 use dtx_core::bga::BgaLayer;
 use thiserror::Error;
@@ -186,10 +186,7 @@ fn validate_frame_len(width: u32, height: u32, len: usize) -> Result<(), BgaErro
 fn rebuild_state(
     events: &[TimedVisualEvent],
     now_ms: i64,
-) -> (
-    std::collections::HashMap<BgaLayer, u32>,
-    Option<(u32, i64)>,
-) {
+) -> (std::collections::HashMap<BgaLayer, u32>, Option<(u32, i64)>) {
     let mut images: std::collections::HashMap<BgaLayer, u32> = std::collections::HashMap::new();
     let mut movie: Option<(u32, i64)> = None;
     for event in events.iter().filter(|e| e.target_ms <= now_ms) {
@@ -492,7 +489,13 @@ fn drive_movie(
     };
 
     if root_q.is_empty() {
-        spawn_movie_overlay(&mut commands, texture, aspect, visibility, settings.movie_alpha);
+        spawn_movie_overlay(
+            &mut commands,
+            texture,
+            aspect,
+            visibility,
+            settings.movie_alpha,
+        );
     } else {
         for (mut image, mut vis, mut node) in image_q.iter_mut() {
             image.image = texture.clone();
@@ -505,7 +508,11 @@ fn drive_movie(
 
 /// Upload a decoded frame into the reusable texture, recreating it when the
 /// dimensions change. Invalid frame lengths are dropped, keeping the old frame.
-fn upload_movie_frame(runtime: &mut MovieRuntime, images: &mut Assets<Image>, frame: &DecodedFrame) {
+fn upload_movie_frame(
+    runtime: &mut MovieRuntime,
+    images: &mut Assets<Image>,
+    frame: &DecodedFrame,
+) {
     if validate_frame_len(frame.width, frame.height, frame.rgba.len()).is_err() {
         return;
     }
@@ -648,7 +655,10 @@ mod tests {
 
     #[test]
     fn image_layer_geometry_layer3_is_fullscreen() {
-        assert_eq!(image_layer_geometry(BgaLayer::Layer3), (0.0, 0.0, 1280.0, 720.0));
+        assert_eq!(
+            image_layer_geometry(BgaLayer::Layer3),
+            (0.0, 0.0, 1280.0, 720.0)
+        );
     }
 
     #[test]
@@ -675,11 +685,31 @@ mod tests {
     #[test]
     fn rebuild_state_picks_last_image_per_layer_and_last_movie() {
         let events = vec![
-            TimedVisualEvent { target_ms: 0, layer: BgaLayer::Layer3, asset_id: 1 },
-            TimedVisualEvent { target_ms: 100, layer: BgaLayer::Movie, asset_id: 7 },
-            TimedVisualEvent { target_ms: 200, layer: BgaLayer::Layer3, asset_id: 2 },
-            TimedVisualEvent { target_ms: 300, layer: BgaLayer::Movie, asset_id: 8 },
-            TimedVisualEvent { target_ms: 500, layer: BgaLayer::Layer3, asset_id: 9 },
+            TimedVisualEvent {
+                target_ms: 0,
+                layer: BgaLayer::Layer3,
+                asset_id: 1,
+            },
+            TimedVisualEvent {
+                target_ms: 100,
+                layer: BgaLayer::Movie,
+                asset_id: 7,
+            },
+            TimedVisualEvent {
+                target_ms: 200,
+                layer: BgaLayer::Layer3,
+                asset_id: 2,
+            },
+            TimedVisualEvent {
+                target_ms: 300,
+                layer: BgaLayer::Movie,
+                asset_id: 8,
+            },
+            TimedVisualEvent {
+                target_ms: 500,
+                layer: BgaLayer::Layer3,
+                asset_id: 9,
+            },
         ];
         let (images, movie) = rebuild_state(&events, 350);
         assert_eq!(images.get(&BgaLayer::Layer3), Some(&2));

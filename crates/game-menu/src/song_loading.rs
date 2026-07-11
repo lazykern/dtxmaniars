@@ -127,7 +127,6 @@ pub fn plugin(app: &mut App) {
         );
 }
 
-
 /// Kick off the background parse. Clears the chart sound bank for the new song
 /// so `wait_for_audio` only waits on the handles this chart preloads.
 fn start_load(

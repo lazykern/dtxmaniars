@@ -529,10 +529,7 @@ fn sync_now_playing(
             Without<now_playing::NowPlayingArtist>,
         ),
     >,
-    mut q_art: Query<
-        (&mut ImageNode, &mut BackgroundColor),
-        With<now_playing::NowPlayingArt>,
-    >,
+    mut q_art: Query<(&mut ImageNode, &mut BackgroundColor), With<now_playing::NowPlayingArt>>,
 ) {
     if !chart.is_changed() {
         return;

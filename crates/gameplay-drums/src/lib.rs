@@ -300,10 +300,7 @@ fn load_drum_audio_settings(
 
 /// Mirror the authoritative gameplay chart time into `dtx_bga::BgaClock` so
 /// visual playback follows pause and practice seeks without a second clock.
-fn sync_bga_clock(
-    gameplay: Res<resources::GameplayClock>,
-    mut visuals: ResMut<dtx_bga::BgaClock>,
-) {
+fn sync_bga_clock(gameplay: Res<resources::GameplayClock>, mut visuals: ResMut<dtx_bga::BgaClock>) {
     visuals.current_ms = gameplay.current_ms;
 }
 

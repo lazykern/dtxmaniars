@@ -55,8 +55,14 @@ fn static_image_event_replaces_only_target_layer() {
         .map(|(o, _)| (o.layer, o.asset_id))
         .collect();
     assert_eq!(overlays.len(), 2, "still one entity per layer");
-    assert!(overlays.contains(&(BgaLayer::Layer1, 2)), "layer1 replaced with asset 2");
-    assert!(overlays.contains(&(BgaLayer::Layer3, 1)), "layer3 unchanged");
+    assert!(
+        overlays.contains(&(BgaLayer::Layer1, 2)),
+        "layer1 replaced with asset 2"
+    );
+    assert!(
+        overlays.contains(&(BgaLayer::Layer3, 1)),
+        "layer3 unchanged"
+    );
 }
 
 #[test]
@@ -72,10 +78,7 @@ fn movie_worker_decodes_tiny_avi() {
         if let Some(err) = worker.take_error() {
             panic!("decoder error: {err}");
         }
-        assert!(
-            std::time::Instant::now() < deadline,
-            "decoder timed out"
-        );
+        assert!(std::time::Instant::now() < deadline, "decoder timed out");
         std::thread::sleep(std::time::Duration::from_millis(10));
     };
     assert_eq!((frame.width, frame.height), (16, 16));

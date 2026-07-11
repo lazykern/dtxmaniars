@@ -113,7 +113,12 @@ fn frame_to_rgba(frame: &Frame) -> (u32, u32, Vec<u8>) {
     } else {
         for y in 0..h {
             for x in 0..w {
-                rgba.extend_from_slice(&[frame[[y, x, 0]], frame[[y, x, 1]], frame[[y, x, 2]], 255]);
+                rgba.extend_from_slice(&[
+                    frame[[y, x, 0]],
+                    frame[[y, x, 1]],
+                    frame[[y, x, 2]],
+                    255,
+                ]);
             }
         }
     }

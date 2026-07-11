@@ -86,12 +86,15 @@ pub fn timed_visual_events(chart: &Chart) -> Vec<TimedVisualEvent> {
 
 /// Resolve the chart's `#BMP`/`#BGA` and `#AVI` registries to absolute file
 /// paths under `chart_dir`. Missing files are simply absent from the maps.
-fn resolve_maps(
-    chart: &Chart,
-    chart_dir: &Path,
-) -> (HashMap<u32, PathBuf>, HashMap<u32, PathBuf>) {
+fn resolve_maps(chart: &Chart, chart_dir: &Path) -> (HashMap<u32, PathBuf>, HashMap<u32, PathBuf>) {
     let mut bmp_paths = HashMap::new();
-    for (&id, filename) in chart.assets.bmp.by_id.iter().chain(chart.assets.bga.by_id.iter()) {
+    for (&id, filename) in chart
+        .assets
+        .bmp
+        .by_id
+        .iter()
+        .chain(chart.assets.bga.by_id.iter())
+    {
         if let Some(path) = resolve_chart_asset_path(chart_dir, filename) {
             bmp_paths.insert(id, path);
         }
