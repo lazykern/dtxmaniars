@@ -20,8 +20,8 @@ pub struct HistoryRow {
     pub score: u32,
     /// Perfect percentage (0..100).
     pub perfect_pct: f32,
-    /// Pre-formatted UTC date, `YYYY-MM-DD`.
-    pub date: String,
+    /// Pre-formatted UTC play time, `YYYY-MM-DD HH:MM`.
+    pub played_at: String,
 }
 
 /// Rows for the selected chart, best score first. Filled by the
@@ -74,19 +74,19 @@ pub fn spawn_play_history(parent: &mut ChildSpawnerCommands, theme: &Theme) {
         });
 }
 
-/// Render one row as a single line: `S   982340   95.2%  2026-07-10`.
+/// Render one row as a single line: `S   982340   95.2%  2026-07-10 14:35`.
 pub fn history_row_line(row: &HistoryRow) -> String {
     format!(
         "{:<2} {:>7}  {:>5.1}%  {}",
-        row.rank, row.score, row.perfect_pct, row.date
+        row.rank, row.score, row.perfect_pct, row.played_at
     )
 }
 
-/// Format unix seconds as a UTC `YYYY-MM-DD` date string.
+/// Format unix seconds as a UTC `YYYY-MM-DD HH:MM` play time string.
 ///
 /// Uses the days-to-civil algorithm (Howard Hinnant) — the workspace
-/// has no date dependency and this panel only needs a day stamp.
-pub fn format_unix_date(secs: u64) -> String {
+/// has no date dependency and this panel only needs minute precision.
+pub fn format_unix_played_at(secs: u64) -> String {
     let days = (secs / 86_400) as i64;
     let z = days + 719_468;
     let era = z / 146_097;
@@ -97,7 +97,10 @@ pub fn format_unix_date(secs: u64) -> String {
     let d = doy - (153 * mp + 2) / 5 + 1;
     let m = if mp < 10 { mp + 3 } else { mp - 9 };
     let y = yoe + era * 400 + i64::from(m <= 2);
-    format!("{y:04}-{m:02}-{d:02}")
+    let seconds_today = secs % 86_400;
+    let hour = seconds_today / 3_600;
+    let minute = (seconds_today % 3_600) / 60;
+    format!("{y:04}-{m:02}-{d:02} {hour:02}:{minute:02}")
 }
 
 #[cfg(test)]
@@ -106,25 +109,25 @@ mod tests {
 
     #[test]
     fn date_epoch_start() {
-        assert_eq!(format_unix_date(0), "1970-01-01");
+        assert_eq!(format_unix_played_at(0), "1970-01-01 00:00");
     }
 
     #[test]
     fn date_day_boundary() {
-        assert_eq!(format_unix_date(86_399), "1970-01-01");
-        assert_eq!(format_unix_date(86_400), "1970-01-02");
+        assert_eq!(format_unix_played_at(86_399), "1970-01-01 23:59");
+        assert_eq!(format_unix_played_at(86_400), "1970-01-02 00:00");
     }
 
     #[test]
     fn date_modern() {
         // 2026-07-11 00:00:00 UTC
-        assert_eq!(format_unix_date(1_783_728_000), "2026-07-11");
+        assert_eq!(format_unix_played_at(1_783_728_000), "2026-07-11 00:00");
     }
 
     #[test]
     fn date_leap_day() {
         // 2024-02-29 00:00:00 UTC
-        assert_eq!(format_unix_date(1_709_164_800), "2024-02-29");
+        assert_eq!(format_unix_played_at(1_709_164_800), "2024-02-29 00:00");
     }
 
     #[test]
@@ -133,9 +136,12 @@ mod tests {
             rank: "S".into(),
             score: 982_340,
             perfect_pct: 95.234,
-            date: "2026-07-10".into(),
+            played_at: "2026-07-10 14:35".into(),
         };
-        assert_eq!(history_row_line(&row), "S   982340   95.2%  2026-07-10");
+        assert_eq!(
+            history_row_line(&row),
+            "S   982340   95.2%  2026-07-10 14:35"
+        );
     }
 
     #[test]

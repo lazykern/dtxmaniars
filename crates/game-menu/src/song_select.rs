@@ -46,7 +46,7 @@ use dtx_ui::widget::difficulty_grid::{
 };
 use dtx_ui::widget::play_history::{
     HISTORY_MAX_ROWS, HistoryEmptyText, HistoryRow, HistoryRowText, PlayHistoryData,
-    format_unix_date, history_row_line, spawn_play_history,
+    format_unix_played_at, history_row_line, spawn_play_history,
 };
 use dtx_ui::widget::song_wheel::{SongWheel, VISIBLE_HALF, WheelRow, WheelSpring, row_geometry};
 use dtx_ui::widget::stage_background::spawn_stage_background;
@@ -248,6 +248,30 @@ fn set_difficulty_for<'a>(
     difficulties.get(&name)
 }
 
+/// Resolve a chart's true difficulty tier (0=BASIC..4=EDIT) for grid
+/// placement, independent of its packed position in `chart_indices`.
+fn resolve_difficulty_slot(
+    set_difficulties: &HashMap<String, SetDefDifficulty>,
+    path: &Path,
+    ordinal: u8,
+) -> usize {
+    if let Some(definition) = set_difficulty_for(set_difficulties, path) {
+        return definition.slot;
+    }
+    let filename_label = path
+        .file_stem()
+        .and_then(|stem| stem.to_str())
+        .and_then(filename_difficulty_label);
+    match filename_label {
+        Some("BASIC") => 0,
+        Some("ADV") => 1,
+        Some("EXT") => 2,
+        Some("MAS") => 3,
+        Some("EDIT") => 4,
+        _ => ordinal as usize,
+    }
+}
+
 fn read_set_def_difficulties(folder: &Path) -> HashMap<String, SetDefDifficulty> {
     let Ok(bytes) = std::fs::read(folder.join("set.def")) else {
         return HashMap::new();
@@ -379,6 +403,10 @@ impl CommandHistory {
 
 #[derive(Component)]
 pub struct SongSelectEntity;
+
+/// Content rebuilt whenever the visible song list changes.
+#[derive(Component)]
+struct SongWheelContent;
 
 /// The 1280×720 reference-space stage; scaled to fill the window by
 /// `scale_song_select_stage`.
@@ -958,6 +986,7 @@ fn spawn_wheel_rows(
 ) {
     if selection_state.visible.is_empty() {
         wheel.spawn((
+            SongWheelContent,
             Node {
                 position_type: PositionType::Absolute,
                 left: Val::Px(60.0),
@@ -978,6 +1007,7 @@ fn spawn_wheel_rows(
     for (i, folder) in selection_state.visible.iter().enumerate() {
         wheel
             .spawn((
+                SongWheelContent,
                 WheelRow { index: i },
                 Node {
                     position_type: PositionType::Absolute,
@@ -1183,18 +1213,22 @@ fn update_left_cluster(
         return;
     }
     // difficulty grid
-    let mut data = DifficultyGridData {
-        selected: selection.difficulty as usize,
-        ..Default::default()
-    };
+    let mut data = DifficultyGridData::default();
+    let mut selected_tier = selection.difficulty as usize;
     if let Some(folder) = selection_state.visible.get(selection.folder) {
+        let set_difficulties = read_set_def_difficulties(&folder.folder);
         for (slot_i, chart_idx) in folder.chart_indices.iter().enumerate().take(GRID_MAX_SLOTS) {
             let Some(song) = db.songs.get(*chart_idx) else {
                 continue;
             };
+            let tier = resolve_difficulty_slot(&set_difficulties, &song.path, slot_i as u8)
+                .min(GRID_MAX_SLOTS - 1);
+            if slot_i == selection.difficulty as usize {
+                selected_tier = tier;
+            }
             let ini = dtx_scoring::score_ini::score_ini_path(&song.path);
             let best = dtx_scoring::score_ini::read_best(&ini);
-            data.slots[slot_i] = DifficultySlot {
+            data.slots[tier] = DifficultySlot {
                 present: true,
                 label: format!(
                     "DRUM · {}",
@@ -1206,6 +1240,7 @@ fn update_left_cluster(
             };
         }
     }
+    data.selected = selected_tier;
     *grid = data;
 
     // skill + bpm badges
@@ -1267,7 +1302,7 @@ fn update_left_cluster(
                     },
                     score: e.score,
                     perfect_pct: e.perfect_pct(),
-                    date: format_unix_date(e.played_at),
+                    played_at: format_unix_played_at(e.played_at),
                 })
                 .collect()
         })
@@ -1379,7 +1414,7 @@ fn render_play_history(
 }
 
 /// When `SongSelectSelection.visible` changes (sort/search/rescan),
-/// despawn the wheel row entities and respawn from the new list.
+/// despawn the wheel content and respawn from the new list.
 fn respawn_wheel_on_change(
     mut commands: Commands,
     selection_state: Res<SongSelectSelection>,
@@ -1387,7 +1422,7 @@ fn respawn_wheel_on_change(
     assets: Res<AssetServer>,
     theme: Res<ThemeResource>,
     wheel: Query<Entity, With<SongWheel>>,
-    rows: Query<Entity, With<WheelRow>>,
+    content: Query<Entity, With<SongWheelContent>>,
 ) {
     if !selection_state.is_changed() {
         return;
@@ -1395,8 +1430,8 @@ fn respawn_wheel_on_change(
     let Ok(wheel_entity) = wheel.single() else {
         return;
     };
-    for row in &rows {
-        commands.entity(row).despawn();
+    for entity in &content {
+        commands.entity(entity).despawn();
     }
     let t = theme.0;
     commands.entity(wheel_entity).with_children(|w| {
@@ -2133,12 +2168,6 @@ mod tests {
     }
 
     #[test]
-    fn recompute_filters_via_search() {
-        let mut sel = SongSelectSelection {
-            search_query: "bra".into(),
-            ..Default::default()
-        };
-    #[test]
     fn difficulty_labels_use_chart_source() {
         for (file, label) in [
             ("bsc.dtx", "BASIC"),
@@ -2176,6 +2205,12 @@ mod tests {
         let _ = std::fs::remove_dir_all(&root);
     }
 
+    #[test]
+    fn recompute_filters_via_search() {
+        let mut sel = SongSelectSelection {
+            search_query: "bra".into(),
+            ..Default::default()
+        };
         let all = vec![
             make_song("Charlie", "X"),
             make_song("Alpha", "Y"),
