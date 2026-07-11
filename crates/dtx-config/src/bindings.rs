@@ -277,7 +277,7 @@ impl BindingsFile {
 
 /// Parse raw TOML, running the version migration chain (same policy as
 /// dtx-layout `parse_with_migrations`).
-pub fn parse_bindings_checked(raw: &str) -> Result<BindingsFile, toml::de::Error> {
+pub fn parse_bindings_checked(raw: &str) -> Result<BindingsFile, crate::ConfigError> {
     let mut file: BindingsFile = toml::from_str(raw)?;
     if file.version <= BINDINGS_VERSION {
         file.version = BINDINGS_VERSION;
