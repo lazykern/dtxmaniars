@@ -5,6 +5,11 @@
 //! ADR-0010: Mechanics-only port — UI/skin files stripped. Song selection
 //! logic kept; visual layer (Title, Config tabs, etc.) is osu-style placeholder.
 
+// Bevy systems take many params and queries use deeply nested generic tuples;
+// both trip these lints across this crate's systems. Bevy-idiomatic
+// false-positives, allowed crate-wide.
+#![allow(clippy::too_many_arguments, clippy::type_complexity)]
+
 use bevy::prelude::*;
 
 pub mod chart_stats;

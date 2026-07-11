@@ -155,10 +155,8 @@ fn title_input(
 /// select does).
 fn pick_editor_song(db: &mut dtx_library::SongDb) -> Option<std::path::PathBuf> {
     let cfg = dtx_config::load(&dtx_config::default_path());
-    if let Some(last) = cfg.gameplay.last_played {
-        if last.exists() {
-            return Some(last);
-        }
+    if let Some(last) = cfg.gameplay.last_played.filter(|p| p.exists()) {
+        return Some(last);
     }
     if db.is_empty() {
         let dir = dtx_library::default_song_dir();

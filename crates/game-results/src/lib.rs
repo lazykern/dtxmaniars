@@ -1,5 +1,10 @@
 //! CStageResult — animated stat reveals (ADR-0014).
 
+// Bevy systems take many params and queries use deeply nested generic tuples;
+// both trip these lints across this crate's systems. Bevy-idiomatic
+// false-positives, allowed crate-wide.
+#![allow(clippy::too_many_arguments, clippy::type_complexity)]
+
 use bevy::prelude::*;
 use dtx_scoring::identity::{canonical_chart_hash, raw_file_sha256, ChartIdentity};
 use dtx_scoring::{JudgmentTotals, Rank, ScoreEntry, ScoreSource};
@@ -143,7 +148,7 @@ fn spawn_result(
     let t = theme.0;
 
     let stat_rows: Vec<(String, f32)> = vec![
-        (format!("{title}"), 0.0),
+        (title.to_string(), 0.0),
         (format!("{artist}  Lv.{difficulty}"), STAGGER_MS),
         (String::new(), STAGGER_MS * 2.0),
         (format!("Score     {}", score.0), STAGGER_MS * 3.0),
