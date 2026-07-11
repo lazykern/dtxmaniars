@@ -12,6 +12,11 @@
 //! Reference: `references/DTXmaniaNX-BocuD/DTXMania/Stage/06.Performance/DrumsScreen/*`
 //! Lane order: LC, HH, SD, BD, HT, LT, FT, CY, LP, RD, HHO (BocuD CActPerfDrumsLaneFlushD.cs).
 
+// Bevy systems take many params (queries/res/commands/events) and Bevy queries
+// use deeply nested generic tuples; both trip these lints across nearly every
+// system in this crate. Allowed crate-wide as bevy-idiomatic false-positives.
+#![allow(clippy::too_many_arguments, clippy::type_complexity)]
+
 pub mod autoplay;
 pub mod beat_lines;
 pub mod bgm_scheduler;
