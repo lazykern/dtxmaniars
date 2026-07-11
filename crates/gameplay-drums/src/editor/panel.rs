@@ -298,7 +298,12 @@ fn rebuild_left_content(
 
     if let Some(kind) = bar_kind {
         commands.entity(root).with_children(|p| {
-            super::profile_bar_ui::spawn_bar(p, &t, kind, session, popup, bar_error.0.as_ref());
+            // Scope the error to this bar's kind: the error state is global
+            // and only clears on the next successful action, so an unfiltered
+            // pass would bleed a failed Keyboard rename under the MIDI/Lanes
+            // bar after a tab/segment switch.
+            let scoped_error = bar_error.0.as_ref().filter(|e| e.kind == kind);
+            super::profile_bar_ui::spawn_bar(p, &t, kind, session, popup, scoped_error);
         });
     }
 

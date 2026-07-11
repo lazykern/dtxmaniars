@@ -358,11 +358,9 @@ fn reduce_lane_registry(
             if updated.profiles.remove(&active).is_none() {
                 return Err(format!("profile not found: {active}"));
             }
-            updated.active = builtins
-                .keys()
-                .next()
-                .cloned()
-                .ok_or_else(|| "no built-in lane profile to fall back to".to_owned())?;
+            // Fall back to the named default, not whatever BTreeMap ordering
+            // happens to surface first.
+            updated.active = dtx_layout::profiles::LANE_DEFAULT_NAME.to_owned();
         }
     }
     Ok(updated)
@@ -641,13 +639,87 @@ mod tests {
     }
 
     #[test]
-    fn reduce_lane_delete_falls_back_to_builtin() {
-        // Deleting the active user profile drops it and selects a built-in.
+    fn reduce_lane_delete_falls_back_to_named_default() {
+        // Deleting the active user profile drops it and selects the named
+        // default, not whatever BTreeMap ordering happens to surface first.
         let builtins = dtx_layout::profiles::lane_builtins();
         let registry = lane_user_registry("Desk", &[("Desk", dtx_layout::nx_type_b())]);
         let next = reduce_lane_registry(&registry, &builtins, LaneRegAction::Delete).expect("delete succeeds");
         assert!(!next.profiles.contains_key("Desk"), "deleted profile is gone");
-        assert!(builtins.contains_key(&next.active), "active fell back to a built-in: {}", next.active);
+        assert_eq!(next.active, dtx_layout::profiles::LANE_DEFAULT_NAME);
+    }
+
+    #[test]
+    fn commit_registry_actions_never_writes_on_reducer_failure() {
+        // A Rename onto an existing name fails mid-sequence: the save closure
+        // must never fire and the whole commit errors (no partial write).
+        use dtx_input::profiles as cfg;
+        let mut registry = cfg::keyboard_registry();
+        registry.active = "Desk".to_owned();
+        registry.profiles.insert("Desk".to_owned(), cfg::KeyboardProfile::default());
+        registry.profiles.insert("Studio".to_owned(), cfg::KeyboardProfile::default());
+        let name = dtx_persistence::validate_profile_name("Studio", [cfg::KEYBOARD_DEFAULT_NAME], [], None)
+            .expect("valid name");
+        let mut saved = false;
+        let result = commit_registry_actions(
+            cfg::RegistryStartup::Ready(registry),
+            &cfg::keyboard_builtins(),
+            vec![cfg::RegistryAction::Rename(name)],
+            |_| {
+                saved = true;
+                Ok(())
+            },
+        );
+        assert!(result.is_err(), "rename-to-existing must fail the commit");
+        assert!(!saved, "save closure must never run when the reducer fails");
+    }
+
+    #[test]
+    fn commit_registry_actions_propagates_save_failure() {
+        use dtx_input::profiles as cfg;
+        let name = dtx_persistence::validate_profile_name("Desk", [cfg::KEYBOARD_DEFAULT_NAME], [], None)
+            .expect("valid name");
+        let err = commit_registry_actions(
+            cfg::RegistryStartup::Ready(cfg::keyboard_registry()),
+            &cfg::keyboard_builtins(),
+            vec![cfg::RegistryAction::SaveAs {
+                name,
+                value: cfg::KeyboardProfile::default(),
+            }],
+            |_| Err(cfg::RegistryIoError::ConfirmationRequired { path: "disk".into() }),
+        )
+        .expect_err("save failure propagates");
+        assert!(err.contains("disk") || err.contains("confirmation"), "{err}");
+    }
+
+    #[test]
+    fn commit_lane_actions_never_writes_on_reducer_failure() {
+        // Delete on a built-in (Classic) fails: save closure never fires.
+        let mut saved = false;
+        let result = commit_lane_actions(
+            dtx_layout::profiles::LaneRegistryStartup::Ready(dtx_layout::profiles::lane_registry()),
+            vec![LaneRegAction::Delete],
+            |_| {
+                saved = true;
+                Ok(())
+            },
+        );
+        assert!(result.is_err(), "deleting a built-in must fail the commit");
+        assert!(!saved, "save closure must never run when the reducer fails");
+    }
+
+    #[test]
+    fn commit_lane_actions_propagates_save_failure() {
+        let err = commit_lane_actions(
+            dtx_layout::profiles::LaneRegistryStartup::Ready(dtx_layout::profiles::lane_registry()),
+            vec![LaneRegAction::SaveAs {
+                name: "Desk".to_owned(),
+                value: dtx_layout::profiles::LaneProfile::from_arrangement(dtx_layout::nx_type_b()),
+            }],
+            |_| Err(dtx_layout::profiles::LaneRegistryError::ConfirmationRequired { path: "disk".into() }),
+        )
+        .expect_err("save failure propagates");
+        assert!(err.contains("disk") || err.contains("confirmation"), "{err}");
     }
 
     #[test]
