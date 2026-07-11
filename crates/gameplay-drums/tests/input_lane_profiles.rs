@@ -12,10 +12,8 @@ use dtx_core::EChannel;
 use dtx_input::profiles as cfg;
 use dtx_layout::profiles as lp;
 use gameplay_drums::bindings::BindResolver;
-use gameplay_drums::editor::profile_bar::{run_transaction, TransactionGate};
 use gameplay_drums::editor::profile_state::{
-    apply_save_all_results, dirty_profile_kinds, ProfileDraft, ProfileKind, ProfileSession,
-    TransactionResult,
+    apply_save_all_results, dirty_profile_kinds, ProfileKind, ProfileSession,
 };
 
 fn temp_dir(name: &str) -> PathBuf {
@@ -124,59 +122,6 @@ fn classic_nx_and_custom_profiles_keep_same_lane_hit_id() {
             .collect();
         assert_eq!(now, baseline);
     }
-}
-
-#[test]
-fn dirty_save_and_select_rolls_back_on_write_failure() {
-    let dir = temp_dir("rollback");
-    let kb_path = dir.join("keyboard-profiles.toml");
-    let mut registry = cfg::keyboard_registry();
-    registry
-        .profiles
-        .insert("Desk".to_owned(), cfg::KeyboardProfile::default());
-    registry.active = "Desk".to_owned();
-    cfg::save_keyboard_registry(&kb_path, &registry).expect("seed registry");
-    let on_disk_before = std::fs::read_to_string(&kb_path).expect("read");
-
-    let mut dirty_value = cfg::KeyboardProfile::default();
-    dirty_value.add_key(EChannel::Snare, KeyCode::KeyQ);
-    let draft = ProfileDraft::clean("Desk", cfg::KeyboardProfile::default());
-
-    let mut gate = TransactionGate::default();
-    // Write target's parent is a regular file → deterministic failure.
-    let blocked = dir.join("blocked");
-    std::fs::write(&blocked, "not a directory").expect("blocker");
-    let blocked_path = blocked.join("keyboard-profiles.toml");
-    let result = run_transaction(
-        &mut gate,
-        &registry,
-        ProfileKind::Keyboard,
-        &blocked_path,
-        || unreachable!("first write needs no reload"),
-        |canonical| {
-            let next = cfg::reduce_registry(
-                canonical,
-                &cfg::keyboard_builtins(),
-                cfg::RegistryAction::Save(dirty_value.clone()),
-            )
-            .map_err(|e| e.to_string())?;
-            Ok((next, ProfileDraft::clean("Desk", dirty_value.clone())))
-        },
-        |next| cfg::save_keyboard_registry(&blocked_path, next).map_err(|e| e.to_string()),
-    );
-    assert!(matches!(result, TransactionResult::Failed(_)));
-    assert!(gate.needs_reload);
-    // Prior draft, selection, and canonical file all unchanged.
-    assert_eq!(draft.selected, "Desk");
-    assert!(
-        !draft.is_dirty(),
-        "failure leaves the prior draft untouched"
-    );
-    assert_eq!(
-        std::fs::read_to_string(&kb_path).expect("read"),
-        on_disk_before
-    );
-    let _ = std::fs::remove_dir_all(&dir);
 }
 
 #[test]

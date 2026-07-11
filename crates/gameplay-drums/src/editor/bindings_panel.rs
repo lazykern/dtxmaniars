@@ -1,32 +1,60 @@
-//! Bindings tab content block: a DEVICE sub-section (velocity threshold) and a
-//! CHANNELS list — one row per bindable drum channel with a color swatch, its
-//! bind chips (each removable via `×`) and a `+` to start capture.
+//! Controls tab content: a `Keyboard | MIDI` segment selector, a Device card
+//! (MIDI segment only: port cycler, live status dot, velocity threshold +
+//! meter) and a Pads card (both segments: one row per bindable drum channel
+//! with its segment-filtered bind chips and a `+` to start capture).
 //!
-//! The block is spawned by `panel::rebuild_left_content` for the Bindings tab.
-//! Edits mutate `crate::bindings::LiveBindings` (the resolver + disk follow) and
-//! bump `BindingsRev`, which re-triggers the left-panel rebuild so chips repaint.
+//! The block is spawned by `panel::rebuild_left_content` for the Controls
+//! tab, below the Task 4 profile bar (spawned separately — this module never
+//! re-renders it). Edits mutate `crate::bindings::LiveBindings` (the resolver
+//! and disk follow) and bump `BindingsRev`, which re-triggers the left-panel
+//! rebuild so chips repaint.
 
 use bevy::prelude::*;
-use dtx_input::{BindSource, BINDABLE_CHANNELS};
+use dtx_input::{BindSource, InputBindings, BINDABLE_CHANNELS};
+use dtx_layout::LaneArrangement;
 
 use super::bindings_capture::CaptureState;
+use super::chrome;
+use super::controls_panel::{ControlsFocus, ControlsSegment};
+use super::panel_kit;
 use crate::bindings::LiveBindings;
 use crate::lanes::Lanes;
 
-/// One channel row in the CHANNELS list.
+/// One channel row in the Pads card.
 #[derive(Component, Clone, Copy)]
 pub struct BindChannelRow(pub dtx_core::EChannel);
 
-/// `×` on a bind chip: removes `source[index]` from `channel`.
+/// Marks a channel row with no source bound in the active segment (drives
+/// the WARN_TINT baseline `highlight_selected_row` restores outside
+/// selection).
+#[derive(Component, Clone, Copy)]
+pub struct UnboundRow;
+
+/// The `×` remove button on a chip: removes `source[index]` from `channel`.
+/// Lives on a dedicated small child node — the chip body itself is inert.
 #[derive(Component, Clone, Copy)]
 pub struct BindChipRemove {
     pub channel: dtx_core::EChannel,
     pub index: usize,
 }
 
+/// Carried by the (inert, hoverable) chip body so hovering it can light every
+/// OTHER channel that also owns this source (see
+/// `bindings_spatial::sync_hover_outlines`). Holds the chip's own channel so
+/// that channel is excluded from the highlight.
+#[derive(Component, Clone, Copy)]
+pub struct ChipSource {
+    pub channel: dtx_core::EChannel,
+    pub source: BindSource,
+}
+
 /// `+` on a channel row: starts capturing a new source for `channel`.
 #[derive(Component, Clone, Copy)]
 pub struct BindCaptureStart(pub dtx_core::EChannel);
+
+/// `Keyboard` / `MIDI` segment-selector button.
+#[derive(Component, Clone, Copy)]
+pub struct SegmentBtn(pub ControlsSegment);
 
 /// ◂ / ▸ on the velocity-threshold row (dir = -1 / +1).
 #[derive(Component, Clone, Copy)]
@@ -36,7 +64,7 @@ pub struct VelocityThresholdAdjust(pub i32);
 #[derive(Component, Clone, Copy)]
 pub struct PortCycle(pub i32);
 
-/// "Rescan" button in the DEVICE box: re-enumerates MIDI input ports.
+/// "Rescan" button in the Device card: re-enumerates MIDI input ports.
 #[derive(Component, Clone, Copy)]
 pub struct RescanPorts;
 
@@ -60,7 +88,7 @@ pub struct MidiPortList(pub Vec<String>);
 #[derive(Resource, Debug, Default, Clone, Copy)]
 pub struct BindingsRev(pub u64);
 
-/// Reset confirmation for the Bindings tab. Kept separate from capture so Esc
+/// Reset confirmation for the Controls tab. Kept separate from capture so Esc
 /// continues to cancel capture without also altering a pending reset.
 #[derive(Resource, Debug, Default, Clone, Copy, PartialEq, Eq)]
 pub enum BindingsResetState {
@@ -98,9 +126,17 @@ pub fn plugin(app: &mut App) {
                 handle_rescan,
                 handle_bindings_reset,
                 update_velocity_meter,
+                update_chip_hover_highlight,
             )
                 .run_if(in_state(game_shell::AppState::Performance))
                 .run_if(super::editor_open),
+        )
+        .add_systems(
+            Update,
+            handle_segment_btn
+                .run_if(in_state(game_shell::AppState::Performance))
+                .run_if(super::editor_open)
+                .run_if(super::profile_dialog::profile_dialog_closed),
         );
 }
 
@@ -129,8 +165,8 @@ fn source_label(src: &BindSource) -> String {
 /// Bindings are shown in the active display arrangement, delegating to the
 /// shared display-order contract; bindable channels missing from the
 /// arrangement still get a row at the end.
-fn channels_in_display_order(lanes: &Lanes) -> Vec<dtx_core::EChannel> {
-    let mut channels: Vec<_> = super::controls_panel::channels_in_display_order(&lanes.0)
+fn bindable_channels_in_order(arrangement: &LaneArrangement) -> Vec<dtx_core::EChannel> {
+    let mut channels: Vec<_> = super::controls_panel::channels_in_display_order(arrangement)
         .into_iter()
         .filter(|channel| BINDABLE_CHANNELS.contains(channel))
         .collect();
@@ -142,6 +178,60 @@ fn channels_in_display_order(lanes: &Lanes) -> Vec<dtx_core::EChannel> {
     channels
 }
 
+/// One bind-source chip in a Controls-tab row. `index` is the position in the
+/// channel's full (unfiltered, both segments mixed) source list, so
+/// `BindChipRemove` keeps removing the right entry regardless of segment
+/// filtering. `shared` marks a source another channel also holds.
+pub struct SegmentChip {
+    pub source: BindSource,
+    pub label: String,
+    pub index: usize,
+    pub shared: bool,
+}
+
+/// One channel row for the active segment.
+pub struct SegmentRow {
+    pub channel: dtx_core::EChannel,
+    pub chips: Vec<SegmentChip>,
+    pub unbound: bool,
+}
+
+fn segment_matches(segment: ControlsSegment, source: &BindSource) -> bool {
+    matches!(
+        (segment, source),
+        (ControlsSegment::Keyboard, BindSource::Key(_)) | (ControlsSegment::Midi, BindSource::Midi { .. })
+    )
+}
+
+/// Rows for the active segment: only that segment's sources; `shared` = the
+/// source is also held by another channel; `unbound` = the channel has no
+/// source in this segment.
+pub fn segment_rows(b: &InputBindings, segment: ControlsSegment, lanes: &LaneArrangement) -> Vec<SegmentRow> {
+    bindable_channels_in_order(lanes)
+        .into_iter()
+        .map(|channel| {
+            let sources = b.map.get(&channel).cloned().unwrap_or_default();
+            let chips: Vec<SegmentChip> = sources
+                .iter()
+                .enumerate()
+                .filter(|(_, source)| segment_matches(segment, source))
+                .map(|(index, source)| SegmentChip {
+                    source: *source,
+                    label: source_label(source),
+                    index,
+                    shared: b
+                        .map
+                        .iter()
+                        .any(|(other, v)| *other != channel && v.contains(source)),
+                })
+                .collect();
+            let unbound = chips.is_empty();
+            SegmentRow { channel, chips, unbound }
+        })
+        .collect()
+}
+
+#[allow(clippy::too_many_arguments)]
 pub fn spawn_bindings_block(
     commands: &mut Commands,
     root: Entity,
@@ -150,136 +240,200 @@ pub fn spawn_bindings_block(
     lanes: &Lanes,
     ports: &MidiPortList,
     reset: BindingsResetState,
+    segment: ControlsSegment,
+    focus: ControlsFocus,
+    selected: Option<dtx_core::EChannel>,
 ) {
     let t = theme;
+    commands.entity(root).with_children(|p| {
+        spawn_segment_selector(p, t, segment, focus, reset);
+        if segment == ControlsSegment::Midi {
+            spawn_device_card(p, t, live, ports);
+        }
+        spawn_pads_card(p, t, live, lanes, segment, selected);
+    });
+}
+
+/// `Keyboard | MIDI` segment selector + the (small) reset-tab control, docked
+/// above the segment's card(s).
+fn spawn_segment_selector(
+    p: &mut ChildSpawnerCommands,
+    t: &dtx_ui::theme::Theme,
+    segment: ControlsSegment,
+    focus: ControlsFocus,
+    reset: BindingsResetState,
+) {
+    let focused = focus == ControlsFocus::SegmentSelector;
+    p.spawn(Node {
+        flex_direction: FlexDirection::Row,
+        justify_content: JustifyContent::SpaceBetween,
+        align_items: AlignItems::Center,
+        margin: UiRect::bottom(Val::Px(2.0)),
+        ..default()
+    })
+    .with_children(|row| {
+        row.spawn((
+            Node {
+                flex_direction: FlexDirection::Row,
+                padding: UiRect::all(Val::Px(2.0)),
+                border: UiRect::all(Val::Px(1.0)),
+                border_radius: BorderRadius::all(Val::Px(5.0)),
+                column_gap: Val::Px(2.0),
+                ..default()
+            },
+            BorderColor::all(if focused { chrome::ACCENT } else { Color::NONE }),
+        ))
+        .with_children(|group| {
+            for seg in [ControlsSegment::Keyboard, ControlsSegment::Midi] {
+                let active = seg == segment;
+                group.spawn((
+                    SegmentBtn(seg),
+                    Button,
+                    Node {
+                        padding: UiRect::axes(Val::Px(12.0), Val::Px(4.0)),
+                        border_radius: BorderRadius::all(Val::Px(4.0)),
+                        ..default()
+                    },
+                    BackgroundColor(if active { chrome::ACCENT } else { chrome::CHIP_BG }),
+                    children![(
+                        Text::new(seg.label()),
+                        dtx_ui::theme::Theme::font(11.0),
+                        TextColor(if active { Color::WHITE } else { chrome::TEXT_MUTED }),
+                    )],
+                ));
+            }
+        });
+
+        spawn_reset_controls(row, t, reset);
+    });
+}
+
+/// Small reset-tab button (Idle) / confirm-cancel pair (Confirming), docked
+/// at the right edge of the segment-selector row.
+fn spawn_reset_controls(p: &mut ChildSpawnerCommands, t: &dtx_ui::theme::Theme, reset: BindingsResetState) {
+    p.spawn(Node {
+        flex_direction: FlexDirection::Row,
+        column_gap: Val::Px(4.0),
+        align_items: AlignItems::Center,
+        ..default()
+    })
+    .with_children(|actions| match reset {
+        BindingsResetState::Idle => {
+            actions.spawn((
+                ResetBindingsButton,
+                Button,
+                Node {
+                    padding: UiRect::axes(Val::Px(6.0), Val::Px(2.0)),
+                    border_radius: BorderRadius::all(Val::Px(3.0)),
+                    ..default()
+                },
+                BackgroundColor(Color::srgb(0.3, 0.14, 0.14)),
+                children![(
+                    Text::new("Reset tab"),
+                    dtx_ui::theme::Theme::font(9.0),
+                    TextColor(t.text_primary),
+                )],
+            ));
+        }
+        BindingsResetState::Confirming => {
+            actions.spawn((
+                ConfirmResetBindingsButton,
+                Button,
+                Node {
+                    padding: UiRect::axes(Val::Px(6.0), Val::Px(2.0)),
+                    border_radius: BorderRadius::all(Val::Px(3.0)),
+                    ..default()
+                },
+                BackgroundColor(Color::srgb(0.45, 0.22, 0.12)),
+                children![(
+                    Text::new("Confirm reset"),
+                    dtx_ui::theme::Theme::font(9.0),
+                    TextColor(t.text_primary),
+                )],
+            ));
+            actions.spawn((
+                CancelResetBindingsButton,
+                Button,
+                Node {
+                    padding: UiRect::axes(Val::Px(6.0), Val::Px(2.0)),
+                    border_radius: BorderRadius::all(Val::Px(3.0)),
+                    ..default()
+                },
+                BackgroundColor(chrome::CHIP_BG),
+                children![(
+                    Text::new("Cancel"),
+                    dtx_ui::theme::Theme::font(9.0),
+                    TextColor(t.text_primary),
+                )],
+            ));
+        }
+    });
+}
+
+/// Small ◂/▸ stepper button sharing one style across the port cycler and the
+/// velocity-threshold stepper.
+fn spawn_stepper_button(parent: &mut ChildSpawnerCommands, t: &dtx_ui::theme::Theme, bundle: impl Bundle, label: &str) {
+    parent.spawn((
+        bundle,
+        Button,
+        Node {
+            padding: UiRect::axes(Val::Px(6.0), Val::Px(1.0)),
+            border_radius: BorderRadius::all(Val::Px(3.0)),
+            ..default()
+        },
+        BackgroundColor(chrome::CHIP_BG),
+        children![(
+            Text::new(label.to_string()),
+            dtx_ui::theme::Theme::font(12.0),
+            TextColor(t.text_primary),
+        )],
+    ));
+}
+
+/// MIDI-segment-only Device card: live status dot, port cycler + Rescan,
+/// velocity threshold stepper + meter.
+fn spawn_device_card(p: &mut ChildSpawnerCommands, t: &dtx_ui::theme::Theme, live: &LiveBindings, ports: &MidiPortList) {
     let threshold = live.0.midi.velocity_threshold;
     let port_label = port_display_label(&live.0.midi.port, &ports.0);
     let mark_pct = threshold as f32 / 127.0 * 100.0;
-    commands.entity(root).with_children(|p| {
-        p.spawn(Node {
-            flex_direction: FlexDirection::Row,
-            justify_content: JustifyContent::SpaceBetween,
-            align_items: AlignItems::Center,
-            ..default()
-        })
-        .with_children(|header| {
-            header.spawn((
-                Text::new("Controls"),
-                dtx_ui::theme::Theme::font(13.0),
-                TextColor(t.text_primary),
-            ));
-            header
-                .spawn(Node {
-                    flex_direction: FlexDirection::Row,
-                    column_gap: Val::Px(4.0),
-                    align_items: AlignItems::Center,
-                    ..default()
-                })
-                .with_children(|actions| {
-                    if bindings_modified(&live.0) {
-                        actions.spawn((
-                            Text::new("MODIFIED"),
-                            dtx_ui::theme::Theme::font(9.0),
-                            TextColor(Color::srgb(0.85, 0.6, 0.1)),
-                        ));
-                    }
-                    match reset {
-                        BindingsResetState::Idle => {
-                            actions.spawn((
-                                ResetBindingsButton,
-                                Button,
-                                Node {
-                                    padding: UiRect::axes(Val::Px(6.0), Val::Px(2.0)),
-                                    ..default()
-                                },
-                                BackgroundColor(Color::srgb(0.3, 0.14, 0.14)),
-                                children![(
-                                    Text::new("RESET TAB"),
-                                    dtx_ui::theme::Theme::font(9.0),
-                                    TextColor(t.text_primary),
-                                )],
-                            ));
-                        }
-                        BindingsResetState::Confirming => {
-                            actions.spawn((
-                                ConfirmResetBindingsButton,
-                                Button,
-                                Node {
-                                    padding: UiRect::axes(Val::Px(6.0), Val::Px(2.0)),
-                                    ..default()
-                                },
-                                BackgroundColor(Color::srgb(0.45, 0.22, 0.12)),
-                                children![(
-                                    Text::new("CONFIRM RESET"),
-                                    dtx_ui::theme::Theme::font(9.0),
-                                    TextColor(t.text_primary),
-                                )],
-                            ));
-                            actions.spawn((
-                                CancelResetBindingsButton,
-                                Button,
-                                Node {
-                                    padding: UiRect::axes(Val::Px(6.0), Val::Px(2.0)),
-                                    ..default()
-                                },
-                                BackgroundColor(Color::srgb(0.14, 0.14, 0.18)),
-                                children![(
-                                    Text::new("CANCEL"),
-                                    dtx_ui::theme::Theme::font(9.0),
-                                    TextColor(t.text_primary),
-                                )],
-                            ));
-                        }
-                    }
-                });
-        });
+    let connected = !ports.0.is_empty()
+        && !matches!(
+            super::controls_panel::match_midi_port(live.0.midi.port.as_deref(), &ports.0),
+            super::controls_panel::PortMatch::Disconnected
+        );
 
-        // DEVICE sub-section: port selector, velocity threshold, velocity meter.
-        p.spawn((
-            Text::new("DEVICE"),
-            dtx_ui::theme::Theme::font(10.0),
-            TextColor(t.text_secondary),
-            Node {
-                margin: UiRect::top(Val::Px(4.0)),
-                ..default()
-            },
-        ));
-
-        // Port row: label + ◂ name ▸ cycler.
-        p.spawn(Node {
+    let body = panel_kit::spawn_card(p, "Device");
+    p.commands_mut().entity(body).with_children(|c| {
+        // Port row: status dot + "Port" label, ◂ name ▸ + Rescan.
+        c.spawn(Node {
             flex_direction: FlexDirection::Row,
             justify_content: JustifyContent::SpaceBetween,
             align_items: AlignItems::Center,
             ..default()
         })
         .with_children(|r| {
-            r.spawn((
-                Text::new("Port"),
-                dtx_ui::theme::Theme::font(11.0),
-                TextColor(t.text_secondary),
-            ));
+            r.spawn(Node {
+                flex_direction: FlexDirection::Row,
+                align_items: AlignItems::Center,
+                ..default()
+            })
+            .with_children(|label_row| {
+                panel_kit::spawn_channel_dot(label_row, if connected { chrome::OK } else { chrome::ERR });
+                label_row.spawn((
+                    Text::new("Port"),
+                    dtx_ui::theme::Theme::font(11.0),
+                    TextColor(t.text_secondary),
+                ));
+            });
             r.spawn(Node {
                 flex_direction: FlexDirection::Row,
                 align_items: AlignItems::Center,
                 column_gap: Val::Px(4.0),
                 ..default()
             })
-            .with_children(|c| {
-                c.spawn((
-                    PortCycle(-1),
-                    Button,
-                    Node {
-                        padding: UiRect::axes(Val::Px(6.0), Val::Px(1.0)),
-                        ..default()
-                    },
-                    BackgroundColor(Color::srgb(0.14, 0.14, 0.18)),
-                    children![(
-                        Text::new("<"),
-                        dtx_ui::theme::Theme::font(12.0),
-                        TextColor(t.text_primary)
-                    )],
-                ));
-                c.spawn((
+            .with_children(|c2| {
+                spawn_stepper_button(c2, t, PortCycle(-1), "<");
+                c2.spawn((
                     Text::new(port_label),
                     dtx_ui::theme::Theme::font(11.0),
                     TextColor(t.text_primary),
@@ -288,34 +442,22 @@ pub fn spawn_bindings_block(
                         ..default()
                     },
                     Node {
-                        max_width: Val::Px(150.0),
+                        max_width: Val::Px(140.0),
                         justify_content: JustifyContent::Center,
                         ..default()
                     },
                 ));
-                c.spawn((
-                    PortCycle(1),
-                    Button,
-                    Node {
-                        padding: UiRect::axes(Val::Px(6.0), Val::Px(1.0)),
-                        ..default()
-                    },
-                    BackgroundColor(Color::srgb(0.14, 0.14, 0.18)),
-                    children![(
-                        Text::new(">"),
-                        dtx_ui::theme::Theme::font(12.0),
-                        TextColor(t.text_primary)
-                    )],
-                ));
-                c.spawn((
+                spawn_stepper_button(c2, t, PortCycle(1), ">");
+                c2.spawn((
                     RescanPorts,
                     Button,
                     Node {
                         padding: UiRect::axes(Val::Px(6.0), Val::Px(1.0)),
                         margin: UiRect::left(Val::Px(2.0)),
+                        border_radius: BorderRadius::all(Val::Px(3.0)),
                         ..default()
                     },
-                    BackgroundColor(Color::srgb(0.14, 0.14, 0.18)),
+                    BackgroundColor(chrome::CHIP_BG),
                     children![(
                         Text::new("Rescan"),
                         dtx_ui::theme::Theme::font(10.0),
@@ -326,7 +468,7 @@ pub fn spawn_bindings_block(
         });
 
         // Velocity threshold row (◂ value ▸).
-        p.spawn(Node {
+        c.spawn(Node {
             flex_direction: FlexDirection::Row,
             justify_content: JustifyContent::SpaceBetween,
             align_items: AlignItems::Center,
@@ -344,62 +486,36 @@ pub fn spawn_bindings_block(
                 column_gap: Val::Px(4.0),
                 ..default()
             })
-            .with_children(|c| {
-                c.spawn((
-                    VelocityThresholdAdjust(-1),
-                    Button,
-                    Node {
-                        padding: UiRect::axes(Val::Px(6.0), Val::Px(1.0)),
-                        ..default()
-                    },
-                    BackgroundColor(Color::srgb(0.14, 0.14, 0.18)),
-                    children![(
-                        Text::new("<"),
-                        dtx_ui::theme::Theme::font(12.0),
-                        TextColor(t.text_primary)
-                    )],
-                ));
-                c.spawn((
+            .with_children(|c2| {
+                spawn_stepper_button(c2, t, VelocityThresholdAdjust(-1), "<");
+                c2.spawn((
                     Text::new(threshold.to_string()),
                     dtx_ui::theme::Theme::font(12.0),
                     TextColor(t.text_primary),
                     Node {
-                        min_width: Val::Px(40.0),
+                        min_width: Val::Px(30.0),
                         justify_content: JustifyContent::Center,
                         ..default()
                     },
                 ));
-                c.spawn((
-                    VelocityThresholdAdjust(1),
-                    Button,
-                    Node {
-                        padding: UiRect::axes(Val::Px(6.0), Val::Px(1.0)),
-                        ..default()
-                    },
-                    BackgroundColor(Color::srgb(0.14, 0.14, 0.18)),
-                    children![(
-                        Text::new(">"),
-                        dtx_ui::theme::Theme::font(12.0),
-                        TextColor(t.text_primary)
-                    )],
-                ));
+                spawn_stepper_button(c2, t, VelocityThresholdAdjust(1), ">");
             });
         });
 
         // Velocity meter: a dark track with an accent fill (last velocity /
         // 127) and a thin threshold tick. Width/color driven each frame by
         // `update_velocity_meter`; the tick is placed here at spawn.
-        p.spawn((
+        c.spawn((
             Node {
                 width: Val::Percent(100.0),
                 height: Val::Px(8.0),
-                margin: UiRect::top(Val::Px(3.0)),
+                margin: UiRect::top(Val::Px(2.0)),
                 position_type: PositionType::Relative,
                 overflow: Overflow::clip(),
                 border_radius: BorderRadius::all(Val::Px(2.0)),
                 ..default()
             },
-            BackgroundColor(Color::srgb(0.10, 0.10, 0.13)),
+            BackgroundColor(chrome::PANEL_BG),
         ))
         .with_children(|m| {
             m.spawn((
@@ -423,48 +539,55 @@ pub fn spawn_bindings_block(
                 BackgroundColor(Color::srgba(1.0, 1.0, 1.0, 0.6)),
             ));
         });
+    });
+}
 
-        // CHANNELS list: one row per bindable drum channel.
-        p.spawn((
-            Text::new("CHANNELS"),
-            dtx_ui::theme::Theme::font(10.0),
-            TextColor(t.text_secondary),
-            Node {
-                margin: UiRect::top(Val::Px(6.0)),
-                ..default()
-            },
-        ));
-        for ch in channels_in_display_order(lanes) {
-            let swatch = lanes
-                .col_of(ch)
-                .map(|c| lanes.column_color(c))
-                .unwrap_or(Color::WHITE);
+/// Pads card: one row per bindable channel, segment-filtered chips, unbound
+/// warning tint, selected-row accent.
+fn spawn_pads_card(
+    p: &mut ChildSpawnerCommands,
+    t: &dtx_ui::theme::Theme,
+    live: &LiveBindings,
+    lanes: &Lanes,
+    segment: ControlsSegment,
+    selected: Option<dtx_core::EChannel>,
+) {
+    let body = panel_kit::spawn_card(p, "Pads");
+    let rows = segment_rows(&live.0, segment, &lanes.0);
+    p.commands_mut().entity(body).with_children(|card| {
+        for row in rows {
+            let ch = row.channel;
+            let swatch = lanes.col_of(ch).map(|c| lanes.column_color(c)).unwrap_or(Color::WHITE);
             let name = ch.short_name().unwrap_or("?");
-            let sources = live.0.map.get(&ch).cloned().unwrap_or_default();
-            p.spawn((
+            let is_selected = selected == Some(ch);
+            let unbound = row.unbound;
+            let mut row_cmds = card.spawn((
                 BindChannelRow(ch),
                 Button,
                 Node {
                     flex_direction: FlexDirection::Row,
                     align_items: AlignItems::Center,
                     column_gap: Val::Px(4.0),
-                    padding: UiRect::axes(Val::Px(4.0), Val::Px(2.0)),
+                    padding: UiRect::axes(Val::Px(4.0), Val::Px(3.0)),
+                    border: UiRect::left(Val::Px(2.0)),
                     border_radius: BorderRadius::all(Val::Px(4.0)),
                     flex_wrap: FlexWrap::Wrap,
                     ..default()
                 },
-                BackgroundColor(Color::NONE),
-            ))
-            .with_children(|r| {
-                r.spawn((
-                    Node {
-                        width: Val::Px(10.0),
-                        height: Val::Px(10.0),
-                        border_radius: BorderRadius::all(Val::Px(2.0)),
-                        ..default()
-                    },
-                    BackgroundColor(swatch),
-                ));
+                BackgroundColor(if is_selected {
+                    chrome::ROW_SELECTED_BG
+                } else if unbound {
+                    chrome::WARN_TINT
+                } else {
+                    Color::NONE
+                }),
+                BorderColor::all(if is_selected { chrome::ACCENT } else { Color::NONE }),
+            ));
+            if unbound {
+                row_cmds.insert(UnboundRow);
+            }
+            row_cmds.with_children(|r| {
+                panel_kit::spawn_channel_dot(r, swatch);
                 r.spawn((
                     Text::new(name),
                     dtx_ui::theme::Theme::font(11.0),
@@ -474,50 +597,61 @@ pub fn spawn_bindings_block(
                         ..default()
                     },
                 ));
-                for (index, src) in sources.iter().enumerate() {
-                    r.spawn((
-                        Node {
-                            flex_direction: FlexDirection::Row,
-                            align_items: AlignItems::Center,
-                            column_gap: Val::Px(2.0),
-                            padding: UiRect::axes(Val::Px(4.0), Val::Px(1.0)),
-                            border_radius: BorderRadius::all(Val::Px(3.0)),
-                            ..default()
-                        },
-                        BackgroundColor(Color::srgb(0.18, 0.22, 0.28)),
-                    ))
-                    .with_children(|chip| {
-                        chip.spawn((
-                            Text::new(source_label(src)),
-                            dtx_ui::theme::Theme::font(10.0),
-                            TextColor(t.text_primary),
-                        ));
-                        chip.spawn((
-                            BindChipRemove { channel: ch, index },
+                for chip in &row.chips {
+                    // Chip body: hoverable (Button → Interaction drives the
+                    // shared-lane preview) but inert — no BindChipRemove, so
+                    // hovering to preview can't also delete. The `×` glyph is
+                    // its own small button carrying the remove marker.
+                    let chip_id = panel_kit::spawn_chip(
+                        r,
+                        &chip.label,
+                        chip.shared,
+                        (ChipSource { channel: ch, source: chip.source }, Button),
+                    );
+                    r.commands_mut().entity(chip_id).with_children(|cc| {
+                        cc.spawn((
+                            BindChipRemove { channel: ch, index: chip.index },
                             Button,
+                            // Clickable but does NOT block the chip body below
+                            // it from hovering — so hovering the × keeps the
+                            // shared-lane preview lit (bevy_ui picking ignores
+                            // FocusPolicy; Pickable is the real knob).
+                            Pickable {
+                                should_block_lower: false,
+                                is_hoverable: true,
+                            },
                             Node {
-                                padding: UiRect::axes(Val::Px(2.0), Val::Px(0.0)),
+                                padding: UiRect::axes(Val::Px(3.0), Val::Px(0.0)),
+                                margin: UiRect::left(Val::Px(2.0)),
                                 ..default()
                             },
                             children![(
-                                Text::new("×"),
+                                Text::new("\u{00d7}"),
                                 dtx_ui::theme::Theme::font(11.0),
-                                TextColor(t.text_secondary),
+                                TextColor(chrome::TEXT_MUTED),
                             )],
                         ));
                     });
+                }
+                if unbound {
+                    r.spawn((
+                        Text::new("no binding"),
+                        dtx_ui::theme::Theme::font(10.0),
+                        TextColor(chrome::TEXT_MUTED),
+                    ));
                 }
                 r.spawn((
                     BindCaptureStart(ch),
                     Button,
                     Node {
                         padding: UiRect::axes(Val::Px(5.0), Val::Px(1.0)),
+                        border_radius: BorderRadius::all(Val::Px(3.0)),
                         ..default()
                     },
-                    BackgroundColor(Color::srgb(0.14, 0.14, 0.18)),
+                    BackgroundColor(chrome::CHIP_BG),
                     children![(
                         Text::new("+"),
-                        dtx_ui::theme::Theme::font(12.0),
+                        dtx_ui::theme::Theme::font(11.0),
                         TextColor(t.text_primary),
                     )],
                 ));
@@ -541,10 +675,6 @@ fn handle_velocity_adjust(
             }
         }
     }
-}
-
-fn bindings_modified(bindings: &dtx_input::InputBindings) -> bool {
-    bindings != &dtx_input::InputBindings::default()
 }
 
 fn reset_bindings(live: &mut LiveBindings, rev: &mut BindingsRev) {
@@ -589,7 +719,8 @@ fn handle_bindings_reset(
     }
 }
 
-/// `×` on a chip: drop that source from the channel's list (bounds-checked).
+/// The `×` button on a chip: drop that source from the channel's list
+/// (bounds-checked). The chip body itself is inert — only the `×` removes.
 fn handle_bind_chip_remove(
     q: Query<(&Interaction, &BindChipRemove), Changed<Interaction>>,
     mut live: ResMut<LiveBindings>,
@@ -611,16 +742,56 @@ fn handle_bind_chip_remove(
 /// active Controls segment decides which device the capture listens to.
 fn handle_capture_start(
     q: Query<(&Interaction, &BindCaptureStart), Changed<Interaction>>,
-    segment: Res<super::controls_panel::ControlsSegment>,
+    segment: Res<ControlsSegment>,
     mut capture: ResMut<CaptureState>,
 ) {
     for (interaction, start) in &q {
         if *interaction == Interaction::Pressed {
             *capture = match *segment {
-                super::controls_panel::ControlsSegment::Keyboard => CaptureState::Keyboard(start.0),
-                super::controls_panel::ControlsSegment::Midi => CaptureState::Midi(start.0),
+                ControlsSegment::Keyboard => CaptureState::Keyboard(start.0),
+                ControlsSegment::Midi => CaptureState::Midi(start.0),
             };
         }
+    }
+}
+
+/// `Keyboard` / `MIDI` segment button click: switches the active segment.
+/// Gated (in `plugin`) by both `editor_open` and `profile_dialog_closed` so a
+/// segment can never switch while a profile dialog is open.
+fn handle_segment_btn(
+    q: Query<(&Interaction, &SegmentBtn), Changed<Interaction>>,
+    mut segment: ResMut<ControlsSegment>,
+) {
+    for (interaction, btn) in &q {
+        if *interaction == Interaction::Pressed && *segment != btn.0 {
+            *segment = btn.0;
+        }
+    }
+}
+
+/// Each frame, light every OTHER channel that shares the source of whichever
+/// chip is currently hovered/pressed (first match wins); nothing hovered, or a
+/// source only this channel owns, clears the highlight. A single deterministic
+/// pass — not per-entity `Changed<Interaction>` deltas, which could clobber
+/// the shared resource when the pointer jumps between two chips in one frame.
+fn update_chip_hover_highlight(
+    q: Query<(&Interaction, &ChipSource)>,
+    live: Res<LiveBindings>,
+    mut highlighted: ResMut<super::bindings_spatial::HighlightedChannels>,
+) {
+    let owners = q
+        .iter()
+        .find(|(interaction, _)| matches!(interaction, Interaction::Hovered | Interaction::Pressed))
+        .map(|(_, chip)| {
+            let all = match chip.source {
+                BindSource::Key(k) => live.0.channels_for_key(k),
+                BindSource::Midi { note } => live.0.channels_for_note(note),
+            };
+            all.into_iter().filter(|c| *c != chip.channel).collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
+    if highlighted.0 != owners {
+        highlighted.0 = owners;
     }
 }
 
@@ -731,11 +902,10 @@ fn update_velocity_meter(
     } else {
         0.0
     };
-    let amber = Color::srgb(0.85, 0.6, 0.1);
     for (mut node, mut bg) in &mut fill {
         node.width = Val::Percent(pct);
         bg.0 = if fresh && last.below_threshold {
-            amber
+            chrome::DIRTY
         } else {
             theme.0.accent
         };
@@ -792,9 +962,8 @@ mod tests {
     fn binding_rows_follow_classic_display_order() {
         use dtx_core::EChannel;
 
-        let lanes = Lanes(dtx_layout::classic());
         assert_eq!(
-            channels_in_display_order(&lanes),
+            bindable_channels_in_order(&dtx_layout::classic()),
             [
                 EChannel::LeftCymbal,
                 EChannel::HiHatClose,
@@ -816,8 +985,7 @@ mod tests {
     fn binding_rows_group_type_b_pedals_once() {
         use dtx_core::EChannel;
 
-        let lanes = Lanes(dtx_layout::nx_type_b());
-        let rows = channels_in_display_order(&lanes);
+        let rows = bindable_channels_in_order(&dtx_layout::nx_type_b());
 
         assert_eq!(rows.len(), BINDABLE_CHANNELS.len());
         for channel in BINDABLE_CHANNELS {
@@ -826,6 +994,63 @@ mod tests {
         let lp = rows.iter().position(|&row| row == EChannel::LeftPedal);
         let lbd = rows.iter().position(|&row| row == EChannel::LeftBassDrum);
         assert_eq!(lbd, lp.map(|index| index + 1));
+    }
+
+    #[test]
+    fn segment_filters_sources_and_flags_shared() {
+        use dtx_input::{BindSource, InputBindings};
+
+        let mut b = InputBindings::default();
+        b.bind_shared(dtx_core::EChannel::LeftBassDrum, BindSource::Key(KeyCode::Space));
+        let rows = segment_rows(&b, ControlsSegment::Keyboard, &dtx_layout::classic());
+
+        let bd = rows.iter().find(|r| r.channel == dtx_core::EChannel::BassDrum).unwrap();
+        assert!(bd.chips.iter().all(|c| matches!(c.source, BindSource::Key(_))));
+        assert!(bd.chips.iter().any(|c| c.shared), "Space now on BD+LBD");
+
+        let hh = rows.iter().find(|r| r.channel == dtx_core::EChannel::HiHatClose).unwrap();
+        assert!(hh.chips.iter().all(|c| !c.shared));
+    }
+
+    #[test]
+    fn segment_rows_preserve_unfiltered_source_index() {
+        // A mixed source vec: the MIDI entry sits at index 0, so the two key
+        // chips MUST report index 1 and 2 (their position in the full list),
+        // not 0 and 1 — otherwise `BindChipRemove` would delete the wrong
+        // entry once MIDI sources are filtered out of the Keyboard segment.
+        use dtx_core::EChannel;
+        use dtx_input::{BindSource, InputBindings};
+
+        let mut b = InputBindings::default();
+        b.map.insert(
+            EChannel::Snare,
+            vec![
+                BindSource::Midi { note: 60 },
+                BindSource::Key(KeyCode::KeyA),
+                BindSource::Key(KeyCode::KeyB),
+            ],
+        );
+        let rows = segment_rows(&b, ControlsSegment::Keyboard, &dtx_layout::classic());
+        let sd = rows.iter().find(|r| r.channel == EChannel::Snare).unwrap();
+        assert_eq!(sd.chips.len(), 2, "only the two key chips show in Keyboard");
+        assert_eq!(sd.chips[0].index, 1);
+        assert!(matches!(sd.chips[0].source, BindSource::Key(KeyCode::KeyA)));
+        assert_eq!(sd.chips[1].index, 2);
+        assert!(matches!(sd.chips[1].source, BindSource::Key(KeyCode::KeyB)));
+    }
+
+    #[test]
+    fn segment_rows_flag_channel_with_no_segment_source_as_unbound() {
+        // LeftBassDrum has no MIDI default (keyboard-only channel), so it must
+        // read `unbound` on the MIDI segment even though it IS bound overall.
+        let b = InputBindings::default();
+        let rows = segment_rows(&b, ControlsSegment::Midi, &dtx_layout::classic());
+        let lbd = rows
+            .iter()
+            .find(|r| r.channel == dtx_core::EChannel::LeftBassDrum)
+            .unwrap();
+        assert!(lbd.unbound);
+        assert!(lbd.chips.is_empty());
     }
 
     #[test]
@@ -838,12 +1063,11 @@ mod tests {
         live.0.bind(EChannel::Snare, BindSource::Key(KeyCode::KeyQ));
         let mut rev = BindingsRev(7);
 
-        assert!(bindings_modified(&live.0));
+        assert_ne!(live.0, dtx_input::InputBindings::default());
         reset_bindings(&mut live, &mut rev);
 
         assert_eq!(live.0, dtx_input::InputBindings::default());
         assert_eq!(rev.0, 8);
-        assert!(!bindings_modified(&live.0));
     }
 
     #[test]

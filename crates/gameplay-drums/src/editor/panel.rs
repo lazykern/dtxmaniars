@@ -2,6 +2,7 @@
 //! whenever the selection changes; control changes write straight into
 //! `WidgetLayouts` (single mutation path — undo/save cover it).
 
+use bevy::ecs::system::SystemParam;
 use bevy::prelude::*;
 use dtx_layout::{Anchor9, WidgetKind, MAX_WIDGET_SCALE, MIN_WIDGET_SCALE};
 use dtx_ui::widget::controls::{self, ControlBool, ControlValue, Slider, Stepper};
@@ -48,25 +49,6 @@ pub struct AnchorAutoCell;
 /// Reset-this-widget button.
 #[derive(Component)]
 pub struct PanelResetWidget;
-
-/// Lane panel controls (Playfield selected).
-#[derive(Component, Debug, Clone, Copy)]
-pub struct LaneReorderBtn {
-    pub index: usize,
-    pub dir: i32,
-}
-
-#[derive(Component, Debug, Clone, Copy)]
-pub struct LaneMergeBtn(pub usize);
-
-#[derive(Component, Debug, Clone, Copy)]
-pub struct ChipSplitBtn(pub dtx_core::EChannel);
-
-#[derive(Component, Debug, Clone, Copy)]
-pub struct LaneWidthSlider(pub usize);
-
-#[derive(Component)]
-pub struct PresetLabel;
 
 /// Settings rows are sized for readability from behind the kit, not just for a
 /// mouse at desk distance.
@@ -121,15 +103,6 @@ pub struct ResetTabButton;
 #[derive(Component)]
 pub struct CalibrateButton;
 
-fn preset_name(p: dtx_layout::LanePreset) -> &'static str {
-    match p {
-        dtx_layout::LanePreset::Classic => "classic",
-        dtx_layout::LanePreset::NxTypeB => "nx type-b",
-        dtx_layout::LanePreset::NxTypeD => "nx type-d",
-        dtx_layout::LanePreset::Custom => "custom",
-    }
-}
-
 pub use super::chrome::INSPECTOR_WIDTH as PANEL_WIDTH;
 
 use super::chrome::LEFT_PANEL_WIDTH;
@@ -147,7 +120,11 @@ pub fn plugin(app: &mut App) {
                 resource_changed::<super::tabs::ActiveTab>
                     .or_else(resource_changed::<EditorOpen>)
                     .or_else(resource_changed::<Lanes>)
-                    .or_else(resource_changed::<super::bindings_panel::BindingsRev>),
+                    .or_else(resource_changed::<super::bindings_panel::BindingsRev>)
+                    .or_else(resource_changed::<super::controls_panel::ControlsSegment>)
+                    .or_else(resource_changed::<super::controls_panel::ControlsFocus>)
+                    .or_else(resource_changed::<super::lanes_panel::SelectedLane>)
+                    .or_else(resource_changed::<super::lanes_panel::AddChannelPopupOpen>),
             ),
             // Right inspector rebuilds on selection change (+ tab/open) — this
             // is the only panel that reacts to Selection.
@@ -162,18 +139,6 @@ pub fn plugin(app: &mut App) {
                 handle_anchor_auto_cell,
                 handle_reset,
                 refresh_panel_values,
-                // Chained: manual edits land in Lanes first, then mirror into
-                // the draft, and only then may the draft repaint the preview —
-                // unordered execution could overwrite a same-frame edit with a
-                // stale draft arrangement.
-                (
-                    handle_lane_buttons,
-                    apply_lane_width_sliders,
-                    mirror_lane_edits_to_draft,
-                    apply_lane_draft_preview,
-                )
-                    .chain(),
-                refresh_lane_panel_values,
                 handle_settings_adjust,
                 apply_settings_sliders,
                 handle_reset_tab,
@@ -198,9 +163,59 @@ fn despawn_panel(
     }
 }
 
-/// Left content panel: renders the active tab's content. Rebuilds on
-/// tab/content change only (NOT selection). The debounce signature drops
-/// `selection.0` so picking a widget never respawns this list.
+/// Debounce signature for `rebuild_left_content`: everything the profile bar
+/// and tab content visually depend on. `bar` holds the active bar kind's
+/// selected name and dirty flag, `None` on tabs with no profile bar.
+#[derive(PartialEq, Clone)]
+struct LeftPanelSig {
+    open: bool,
+    lanes: String,
+    tab: game_shell::CustomizeTab,
+    bindings_rev: u64,
+    segment: super::controls_panel::ControlsSegment,
+    controls_focus: super::controls_panel::ControlsFocus,
+    popup: super::profile_bar_ui::ProfileBarPopup,
+    bar: Option<(String, bool)>,
+    error: Option<super::profile_bar::ProfileUiError>,
+    lane_selected: Option<usize>,
+    lane_add_popup: bool,
+}
+
+/// Controls-tab inputs bundled to stay under the system-param ceiling
+/// alongside `ProfileBarInputs`: the segment-selector focus ring and the
+/// currently selected channel (initial paint only — `highlight_selected_row`
+/// keeps it live between rebuilds).
+#[derive(SystemParam)]
+struct ControlsInputs<'w> {
+    focus: Res<'w, super::controls_panel::ControlsFocus>,
+    selected: Res<'w, super::bindings_capture::SelectedChannel>,
+    reset: Res<'w, super::bindings_panel::BindingsResetState>,
+    ports: Res<'w, super::bindings_panel::MidiPortList>,
+}
+
+/// Profile-bar inputs, bundled to stay under Bevy's system-param ceiling
+/// (`rebuild_left_content` already has a full plate of tab-content params).
+#[derive(SystemParam)]
+struct ProfileBarInputs<'w> {
+    segment: Res<'w, super::controls_panel::ControlsSegment>,
+    session: Res<'w, super::profile_state::CustomizeSession>,
+    popup: Res<'w, super::profile_bar_ui::ProfileBarPopup>,
+    error: Res<'w, super::profile_bar_ui::ProfileUiErrorState>,
+}
+
+/// Lanes-tab inputs, bundled to stay under Bevy's system-param ceiling
+/// alongside `ProfileBarInputs`/`ControlsInputs`.
+#[derive(SystemParam)]
+struct LanesInputs<'w> {
+    selected: Res<'w, super::lanes_panel::SelectedLane>,
+    add_popup: Res<'w, super::lanes_panel::AddChannelPopupOpen>,
+}
+
+/// Left content panel: renders the profile bar (Controls/Lanes only) above
+/// the active tab's content. Rebuilds on tab/content change only (NOT
+/// selection). The debounce signature drops `selection.0` so picking a
+/// widget never respawns this list.
+#[allow(clippy::too_many_arguments)]
 fn rebuild_left_content(
     mut commands: Commands,
     open: Res<EditorOpen>,
@@ -210,23 +225,40 @@ fn rebuild_left_content(
     draft: Res<super::tabs::ConfigDraft>,
     live: Res<crate::bindings::LiveBindings>,
     rev: Res<super::bindings_panel::BindingsRev>,
-    bindings_reset: Res<super::bindings_panel::BindingsResetState>,
-    ports: Res<super::bindings_panel::MidiPortList>,
     theme: Res<dtx_ui::ThemeResource>,
     midi: Option<Res<game_shell::MidiConnected>>,
+    bar: ProfileBarInputs,
+    controls: ControlsInputs,
+    lanes_ui: LanesInputs,
     existing: Query<Entity, With<LeftContentRoot>>,
-    mut last_sig: Local<Option<(bool, String, game_shell::CustomizeTab, u64)>>,
+    mut last_sig: Local<Option<LeftPanelSig>>,
 ) {
-    let sig = (
-        open.0,
-        dtx_layout::structure_signature(&lanes.0),
-        active.0,
-        rev.0,
-    );
+    let segment = *bar.segment;
+    let session = &bar.session;
+    let popup = *bar.popup;
+    let bar_error = &bar.error;
+    let bar_kind = super::profile_bar_ui::bar_kind(active.0, segment);
+    let bar_sig = bar_kind.map(|kind| {
+        let info = super::profile_bar_ui::bar_info(kind, session);
+        (info.selected, info.dirty)
+    });
+    let sig = LeftPanelSig {
+        open: open.0,
+        lanes: dtx_layout::structure_signature(&lanes.0),
+        tab: active.0,
+        bindings_rev: rev.0,
+        segment,
+        controls_focus: *controls.focus,
+        popup,
+        bar: bar_sig,
+        error: bar_error.0.clone(),
+        lane_selected: lanes_ui.selected.0,
+        lane_add_popup: lanes_ui.add_popup.0,
+    };
     if last_sig.as_ref() == Some(&sig) {
         return;
     }
-    *last_sig = Some(sig);
+    last_sig.replace(sig);
     for e in &existing {
         commands.entity(e).despawn();
     }
@@ -254,6 +286,17 @@ fn rebuild_left_content(
         ))
         .id();
 
+    if let Some(kind) = bar_kind {
+        commands.entity(root).with_children(|p| {
+            // Scope the error to this bar's kind: the error state is global
+            // and only clears on the next successful action, so an unfiltered
+            // pass would bleed a failed Keyboard rename under the MIDI/Lanes
+            // bar after a tab/segment switch.
+            let scoped_error = bar_error.0.as_ref().filter(|e| e.kind == kind);
+            super::profile_bar_ui::spawn_bar(p, &t, kind, session, popup, scoped_error);
+        });
+    }
+
     // Pads can reach these tabs on the rail but cannot work their content.
     if midi.is_some_and(|m| m.0) && super::keyboard_nav::pad_excluded(active.0) {
         commands.entity(root).with_children(|p| {
@@ -278,8 +321,11 @@ fn rebuild_left_content(
             &t,
             &live,
             &lanes,
-            &ports,
-            *bindings_reset,
+            &controls.ports,
+            *controls.reset,
+            segment,
+            *controls.focus,
+            controls.selected.0,
         );
         return;
     }
@@ -291,7 +337,13 @@ fn rebuild_left_content(
     // widget picker list (selecting Playfield here just shows no inspector —
     // the lane block lives on the dedicated Lanes tab).
     commands.entity(root).with_children(|p| match active.0 {
-        game_shell::CustomizeTab::Lanes => spawn_lane_block(p, &t, &lanes),
+        game_shell::CustomizeTab::Lanes => super::lanes_panel::spawn_lane_block(
+            p,
+            &t,
+            &lanes,
+            lanes_ui.selected.0,
+            lanes_ui.add_popup.0,
+        ),
         game_shell::CustomizeTab::Widgets => spawn_widget_list(p, &t, &selection),
         _ => {}
     });
@@ -530,161 +582,6 @@ fn rebuild_right_inspector(
             )],
         ));
     });
-}
-
-fn spawn_lane_block(p: &mut ChildSpawnerCommands, t: &dtx_ui::theme::Theme, lanes: &Lanes) {
-    p.spawn((
-        Text::new("Lanes"),
-        dtx_ui::theme::Theme::font(13.0),
-        TextColor(t.text_primary),
-    ));
-
-    // Profile row: the lane profile draft's name (built-in cycling is gone —
-    // profile selection owns built-ins now).
-    p.spawn(Node {
-        flex_direction: FlexDirection::Row,
-        align_items: AlignItems::Center,
-        column_gap: Val::Px(6.0),
-        ..default()
-    })
-    .with_children(|r| {
-        r.spawn((
-            PresetLabel,
-            Text::new(preset_name(lanes.0.preset).to_string()),
-            dtx_ui::theme::Theme::font(12.0),
-            TextColor(t.text_primary),
-            Node {
-                min_width: Val::Px(70.0),
-                ..default()
-            },
-        ));
-    });
-
-    // One row per lane: [^][v] ID (chips…) width-slider [x]
-    let last = lanes.0.lanes.len().saturating_sub(1);
-    for (i, lane) in lanes.0.lanes.iter().enumerate() {
-        let chips = dtx_layout::lane_chips(&lanes.0, i);
-        let can_merge = lanes.0.lanes.len() > 1;
-        let width = lane.width;
-        p.spawn(Node {
-            flex_direction: FlexDirection::Column,
-            row_gap: Val::Px(2.0),
-            padding: UiRect::vertical(Val::Px(2.0)),
-            ..default()
-        })
-        .with_children(|lane_col| {
-            lane_col
-                .spawn(Node {
-                    flex_direction: FlexDirection::Row,
-                    align_items: AlignItems::Center,
-                    column_gap: Val::Px(4.0),
-                    ..default()
-                })
-                .with_children(|r| {
-                    for (dir, sym, enabled) in [(-1, "^", i > 0), (1, "v", i < last)] {
-                        if enabled {
-                            r.spawn((
-                                LaneReorderBtn { index: i, dir },
-                                Button,
-                                Node {
-                                    padding: UiRect::axes(Val::Px(4.0), Val::Px(1.0)),
-                                    ..default()
-                                },
-                                BackgroundColor(Color::srgb(0.14, 0.14, 0.18)),
-                                children![(
-                                    Text::new(sym),
-                                    dtx_ui::theme::Theme::font(11.0),
-                                    TextColor(t.text_primary)
-                                )],
-                            ));
-                        } else {
-                            r.spawn((
-                                Node {
-                                    padding: UiRect::axes(Val::Px(4.0), Val::Px(1.0)),
-                                    ..default()
-                                },
-                                children![(
-                                    Text::new(sym),
-                                    dtx_ui::theme::Theme::font(11.0),
-                                    TextColor(t.text_secondary)
-                                )],
-                            ));
-                        }
-                    }
-                    r.spawn((
-                        Text::new(lane.id.clone()),
-                        dtx_ui::theme::Theme::font(12.0),
-                        TextColor(t.text_primary),
-                        Node {
-                            min_width: Val::Px(34.0),
-                            ..default()
-                        },
-                    ));
-                    // Chips: primary shown flat; secondaries are split buttons.
-                    for ch in &chips {
-                        let name = dtx_layout::channel_short_name(*ch).unwrap_or("?");
-                        if *ch == lane.primary {
-                            r.spawn((
-                                Text::new(name),
-                                dtx_ui::theme::Theme::font(10.0),
-                                TextColor(t.text_secondary),
-                            ));
-                        } else {
-                            r.spawn((
-                                ChipSplitBtn(*ch),
-                                Button,
-                                Node {
-                                    padding: UiRect::axes(Val::Px(3.0), Val::Px(0.0)),
-                                    ..default()
-                                },
-                                BackgroundColor(Color::srgb(0.18, 0.22, 0.28)),
-                                children![(
-                                    Text::new(format!("{name} x")),
-                                    dtx_ui::theme::Theme::font(10.0),
-                                    TextColor(t.text_primary),
-                                )],
-                            ));
-                        }
-                    }
-                    if can_merge {
-                        r.spawn((
-                            LaneMergeBtn(i),
-                            Button,
-                            Node {
-                                padding: UiRect::axes(Val::Px(4.0), Val::Px(1.0)),
-                                ..default()
-                            },
-                            BackgroundColor(Color::srgb(0.3, 0.14, 0.14)),
-                            children![(
-                                Text::new("x"),
-                                dtx_ui::theme::Theme::font(11.0),
-                                TextColor(t.text_primary)
-                            )],
-                        ));
-                    }
-                });
-            lane_col
-                .spawn(Node {
-                    flex_direction: FlexDirection::Row,
-                    align_items: AlignItems::Center,
-                    column_gap: Val::Px(4.0),
-                    margin: UiRect::left(Val::Px(20.0)),
-                    ..default()
-                })
-                .with_children(|r| {
-                    let e = controls::spawn_slider(
-                        r,
-                        t,
-                        Slider {
-                            min: dtx_layout::MIN_LANE_WIDTH,
-                            max: dtx_layout::MAX_LANE_WIDTH,
-                        },
-                        width,
-                    );
-                    r.commands_mut().entity(e).insert(LaneWidthSlider(i));
-                });
-        });
-    }
 }
 
 fn spawn_settings_block(
@@ -1231,140 +1128,6 @@ fn refresh_panel_values(
             if b.0 != w {
                 b.0 = w;
             }
-        }
-    }
-}
-
-fn handle_lane_buttons(
-    reorders: Query<(&LaneReorderBtn, &Interaction), Changed<Interaction>>,
-    merges: Query<(&LaneMergeBtn, &Interaction), Changed<Interaction>>,
-    splits: Query<(&ChipSplitBtn, &Interaction), Changed<Interaction>>,
-    mut lanes: ResMut<Lanes>,
-    layouts: Res<WidgetLayouts>,
-    mut undo: ResMut<super::undo::UndoStack>,
-) {
-    let mut mutate: Option<Box<dyn FnOnce(&mut dtx_layout::LaneArrangement) -> bool>> = None;
-    for (btn, i) in &reorders {
-        if *i == Interaction::Pressed {
-            let (index, dir) = (btn.index, btn.dir);
-            mutate = Some(Box::new(move |arr| {
-                dtx_layout::reorder_lane(arr, index, dir)
-            }));
-        }
-    }
-    for (btn, i) in &merges {
-        if *i == Interaction::Pressed {
-            let index = btn.0;
-            mutate = Some(Box::new(move |arr| dtx_layout::merge_lane(arr, index)));
-        }
-    }
-    for (btn, i) in &splits {
-        if *i == Interaction::Pressed {
-            let ch = btn.0;
-            mutate = Some(Box::new(move |arr| dtx_layout::split_channel(arr, ch)));
-        }
-    }
-    if let Some(f) = mutate {
-        // Snapshot BEFORE mutating; drop the snapshot if the op was a no-op.
-        let before = super::undo::Snapshot {
-            layouts: layouts.clone(),
-            lanes: lanes.clone(),
-        };
-        if f(&mut lanes.0) {
-            undo.push_snapshot(before);
-        }
-    }
-}
-
-/// Manual lane edits (buttons, sliders, undo) flow into the lane profile
-/// draft: the arrangement changes but the selected profile name is kept, so
-/// a user profile stays itself while edited instead of becoming a generic
-/// Custom. Equality-guarded against the preview mirror to terminate.
-pub fn mirror_lane_edits_to_draft(
-    lanes: Res<Lanes>,
-    mut draft: ResMut<super::profile_state::LaneProfileDraft>,
-) {
-    if !lanes.is_changed() {
-        return;
-    }
-    if draft.0.value.arrangement != lanes.0 {
-        draft.0.value.arrangement = lanes.0.clone();
-    }
-}
-
-/// Draft arrangement → live playfield preview (`Lanes`). Selecting or
-/// reverting a profile updates the draft, and the playfield follows without
-/// touching the committed registry. Equality-guarded like the mirror above.
-pub fn apply_lane_draft_preview(
-    draft: Res<super::profile_state::LaneProfileDraft>,
-    mut lanes: ResMut<Lanes>,
-) {
-    if !draft.is_changed() {
-        return;
-    }
-    if lanes.0 != draft.0.value.arrangement {
-        lanes.0 = draft.0.value.arrangement.clone();
-    }
-}
-
-/// Width slider → Lanes. One undo snapshot per mouse-hold.
-fn apply_lane_width_sliders(
-    buttons: Res<ButtonInput<MouseButton>>,
-    sliders: Query<(&LaneWidthSlider, &ControlValue), Changed<ControlValue>>,
-    mut lanes: ResMut<Lanes>,
-    layouts: Res<WidgetLayouts>,
-    mut undo: ResMut<super::undo::UndoStack>,
-    mut snapped_this_hold: Local<bool>,
-) {
-    if !buttons.pressed(MouseButton::Left) {
-        *snapped_this_hold = false;
-    }
-    let mut pending: Vec<(usize, f32)> = Vec::new();
-    for (slider, value) in &sliders {
-        let idx = slider.0;
-        let differs = lanes
-            .0
-            .lanes
-            .get(idx)
-            .map(|l| (l.width - value.0).abs() > 0.01)
-            .unwrap_or(false);
-        if differs {
-            pending.push((idx, value.0));
-        }
-    }
-    if pending.is_empty() {
-        return;
-    }
-    if !*snapped_this_hold {
-        undo.push(&layouts, &lanes);
-        *snapped_this_hold = true;
-    }
-    for (idx, w) in pending {
-        dtx_layout::set_lane_width(&mut lanes.0, idx, w);
-    }
-}
-
-/// External Lanes changes (undo, preset) → refresh slider values + preset
-/// label. Equality-guarded to terminate the write-back loop.
-fn refresh_lane_panel_values(
-    lanes: Res<Lanes>,
-    mut sliders: Query<(&LaneWidthSlider, &mut ControlValue)>,
-    mut preset_label: Query<&mut Text, With<PresetLabel>>,
-) {
-    if !lanes.is_changed() {
-        return;
-    }
-    for (slider, mut value) in &mut sliders {
-        if let Some(lane) = lanes.0.lanes.get(slider.0) {
-            if (value.0 - lane.width).abs() > 0.01 {
-                value.0 = lane.width;
-            }
-        }
-    }
-    if let Ok(mut text) = preset_label.single_mut() {
-        let want = preset_name(lanes.0.preset);
-        if text.0 != want {
-            text.0 = want.to_string();
         }
     }
 }

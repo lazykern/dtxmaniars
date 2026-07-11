@@ -67,7 +67,11 @@ pub(super) fn plugin(app: &mut App) {
             )
                 .chain()
                 .run_if(in_state(game_shell::AppState::Performance))
-                .run_if(super::editor_open),
+                .run_if(super::editor_open)
+                // Keyboard/pad nav (incl. tab switching) is suppressed while a
+                // profile dialog is open, so nav can't change the active tab or
+                // dismiss the dialog underneath it.
+                .run_if(super::profile_dialog::profile_dialog_closed),
         );
 }
 

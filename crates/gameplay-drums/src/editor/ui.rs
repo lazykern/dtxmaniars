@@ -24,7 +24,13 @@ pub fn plugin(app: &mut App) {
         Update,
         (
             spawn_ui_on_open.run_if(ui_needs_respawn),
-            (handle_buttons, handle_tab_buttons, highlight_selection).run_if(super::editor_open),
+            (handle_buttons, highlight_selection).run_if(super::editor_open),
+            // Tab clicks are suppressed while a profile dialog is open, so the
+            // active tab can't change underneath it (same gate as capture/
+            // hotkeys/close).
+            handle_tab_buttons
+                .run_if(super::editor_open)
+                .run_if(super::profile_dialog::profile_dialog_closed),
             close_on_escape
                 .run_if(super::editor_open)
                 .run_if(not(super::bindings_capture::capture_active))
@@ -266,6 +272,7 @@ fn close_on_escape(
     calib: Res<super::calibration::CalibrationState>,
     profile_session: Res<super::profile_state::CustomizeSession>,
     mut pending: ResMut<super::profile_state::PendingCloseState>,
+    dialog: Res<super::profile_dialog::ProfileDialogState>,
 ) {
     if !matches!(*calib, super::calibration::CalibrationState::Idle) {
         close_requests.clear();
@@ -274,6 +281,13 @@ fn close_on_escape(
     // While the dirty-close guard is up, Esc/Enter belong to the guard
     // (resolve_pending_close); this system must not double-handle them.
     if !matches!(*pending, super::profile_state::PendingCloseState::None) {
+        close_requests.clear();
+        return;
+    }
+    // While a profile dialog (name entry, delete confirm, dirty guard,
+    // corrupt reset) is open, Esc belongs to it (profile_dialog_ui); this
+    // system must not also close the whole Customize surface.
+    if !matches!(*dialog, super::profile_dialog::ProfileDialogState::Closed) {
         close_requests.clear();
         return;
     }

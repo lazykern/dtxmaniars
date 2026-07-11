@@ -17,7 +17,8 @@ pub mod widgets;
 
 pub use file::{parse_checked, parse_with_migrations, LanesSection, LayoutFile, LATEST_VERSION};
 pub use lane_edit::{
-    lane_chips, merge_lane, reorder_lane, set_lane_width, split_channel, structure_signature,
+    hide_lane, lane_chips, merge_channel_into_lane, merge_lane, reorder_lane, restore_lane,
+    set_lane_width, split_channel, structure_signature, unassigned_channels,
 };
 pub use lanes::{
     channel_from_short, channel_short_name, default_lane_width, DisplayLane, LaneArrangement,

@@ -48,7 +48,7 @@ pub struct LiveBindings(pub dtx_input::InputBindings);
 #[derive(Resource, Debug, Clone)]
 pub struct BindResolver {
     key_to_lanes: HashMap<KeyCode, Vec<LaneId>>,
-    note_to_lane: HashMap<u8, LaneId>,
+    note_to_lanes: HashMap<u8, Vec<LaneId>>,
     /// NoteOn velocities at or below this are ignored.
     pub velocity_threshold: u8,
 }
@@ -65,19 +65,19 @@ impl BindResolver {
     /// never depend on the display lane arrangement.
     pub fn from_profiles(keyboard: &KeyboardProfile, midi: &MidiProfile) -> Self {
         let mut key_to_lanes = HashMap::new();
-        let mut note_to_lane = HashMap::new();
+        let mut note_to_lanes = HashMap::new();
         for ch in BINDABLE_CHANNELS {
             let Some(lane) = lane_of(ch) else { continue };
             for key in keyboard.map.get(&ch).into_iter().flatten() {
                 key_to_lanes.entry(*key).or_insert_with(Vec::new).push(lane);
             }
             for note in midi.map.get(&ch).into_iter().flatten() {
-                note_to_lane.insert(*note, lane);
+                note_to_lanes.entry(*note).or_insert_with(Vec::new).push(lane);
             }
         }
         Self {
             key_to_lanes,
-            note_to_lane,
+            note_to_lanes,
             velocity_threshold: midi.velocity_threshold,
         }
     }
@@ -85,7 +85,7 @@ impl BindResolver {
     /// Build lookup tables from channel-keyed bindings.
     pub fn from_bindings(b: &InputBindings) -> Self {
         let mut key_to_lanes = HashMap::new();
-        let mut note_to_lane = HashMap::new();
+        let mut note_to_lanes = HashMap::new();
         for ch in BINDABLE_CHANNELS {
             let Some(lane) = lane_of(ch) else { continue };
             let Some(sources) = b.map.get(&ch) else {
@@ -97,14 +97,14 @@ impl BindResolver {
                         key_to_lanes.entry(*k).or_insert_with(Vec::new).push(lane);
                     }
                     BindSource::Midi { note } => {
-                        note_to_lane.insert(*note, lane);
+                        note_to_lanes.entry(*note).or_insert_with(Vec::new).push(lane);
                     }
                 }
             }
         }
         Self {
             key_to_lanes,
-            note_to_lane,
+            note_to_lanes,
             velocity_threshold: b.midi.velocity_threshold,
         }
     }
@@ -124,9 +124,17 @@ impl BindResolver {
             .flat_map(|lanes| lanes.iter().copied())
     }
 
-    /// Lane for a MIDI note, if bound.
+    /// First lane for a MIDI note, if bound.
     pub fn lane_for_note(&self, note: u8) -> Option<LaneId> {
-        self.note_to_lane.get(&note).copied()
+        self.lanes_for_note(note).next()
+    }
+
+    /// Lanes for a MIDI note (a note may be shared by several channels).
+    pub fn lanes_for_note(&self, note: u8) -> impl Iterator<Item = LaneId> + '_ {
+        self.note_to_lanes
+            .get(&note)
+            .into_iter()
+            .flat_map(|lanes| lanes.iter().copied())
     }
 }
 
@@ -166,7 +174,10 @@ fn startup_registry<T>(
     }
 }
 
-fn active_keyboard_profile(registry: &ProfileRegistry<KeyboardProfile>) -> KeyboardProfile {
+/// Look up a registry's active profile value, falling back to built-ins then
+/// the code default. Shared with the profile bar (Select/SaveAs/Rename/
+/// Delete all need the resulting active value to refresh the session draft).
+pub(crate) fn active_keyboard_profile(registry: &ProfileRegistry<KeyboardProfile>) -> KeyboardProfile {
     registry
         .profiles
         .get(&registry.active)
@@ -175,7 +186,7 @@ fn active_keyboard_profile(registry: &ProfileRegistry<KeyboardProfile>) -> Keybo
         .unwrap_or_default()
 }
 
-fn active_midi_profile(registry: &ProfileRegistry<MidiProfile>) -> MidiProfile {
+pub(crate) fn active_midi_profile(registry: &ProfileRegistry<MidiProfile>) -> MidiProfile {
     registry
         .profiles
         .get(&registry.active)
@@ -184,23 +195,26 @@ fn active_midi_profile(registry: &ProfileRegistry<MidiProfile>) -> MidiProfile {
         .unwrap_or_default()
 }
 
-/// Compose channel-keyed bindings from the active profiles so the legacy
-/// editor panels keep working against `LiveBindings` until the profile
-/// editors replace them.
-fn compose_bindings(profiles: &ActiveInputProfiles) -> InputBindings {
+/// Compose channel-keyed bindings from independent keyboard/MIDI profile
+/// values so the legacy editor panels (chip list, capture, resolver) keep
+/// working against `LiveBindings`. Shared by boot/reload and the profile
+/// bar, which recomposes `LiveBindings` from the session drafts after every
+/// Select/Save/SaveAs/Rename/Delete/Revert so the panel and resolver never
+/// lag behind the committed profile.
+pub(crate) fn compose_bindings(keyboard: &KeyboardProfile, midi: &MidiProfile) -> InputBindings {
     let mut bindings = InputBindings {
         midi: dtx_input::MidiDeviceConfig {
-            port: profiles.midi.port.clone(),
-            velocity_threshold: profiles.midi.velocity_threshold,
+            port: midi.port.clone(),
+            velocity_threshold: midi.velocity_threshold,
         },
         map: HashMap::new(),
     };
     for ch in BINDABLE_CHANNELS {
         let mut sources = Vec::new();
-        for key in profiles.keyboard.map.get(&ch).into_iter().flatten() {
+        for key in keyboard.map.get(&ch).into_iter().flatten() {
             sources.push(BindSource::Key(*key));
         }
-        for note in profiles.midi.map.get(&ch).into_iter().flatten() {
+        for note in midi.map.get(&ch).into_iter().flatten() {
             sources.push(BindSource::Midi { note: *note });
         }
         if !sources.is_empty() {
@@ -234,7 +248,7 @@ fn reload_profiles(
         midi: active_midi_profile(&midi),
     };
     *resolver = BindResolver::from_profiles(&profiles.keyboard, &profiles.midi);
-    live.0 = compose_bindings(&profiles);
+    live.0 = compose_bindings(&profiles.keyboard, &profiles.midi);
 }
 
 /// Rebuild `BindResolver` whenever `LiveBindings` changes (editor preview
@@ -358,6 +372,36 @@ mod tests {
         assert_eq!(r.lane_for_note(38), lane_of(EChannel::Snare));
         assert_eq!(r.lane_for_note(36), lane_of(EChannel::BassDrum));
         assert_eq!(r.lane_for_key(KeyCode::KeyX), lane_of(EChannel::HiHatClose));
+    }
+
+    #[test]
+    fn note_shared_by_two_channels_resolves_both_lanes() {
+        let mut b = InputBindings::default();
+        b.bind_shared(EChannel::LeftBassDrum, BindSource::Midi { note: 36 });
+        let r = BindResolver::from_bindings(&b);
+        let lanes: Vec<_> = r.lanes_for_note(36).collect();
+        assert_eq!(lanes.len(), 2, "36 owned by BD and LBD: {lanes:?}");
+        assert_eq!(r.lanes_for_note(42).count(), 1);
+        assert_eq!(r.lanes_for_note(99).count(), 0);
+    }
+
+    #[test]
+    fn note_shared_by_three_channels_resolves_three_lanes() {
+        let mut midi = MidiProfile::default();
+        midi.bind_note_shared(EChannel::LeftBassDrum, 36); // 36 already on BD
+        midi.bind_note_shared(EChannel::Snare, 36);
+        let r = BindResolver::from_profiles(&KeyboardProfile::default(), &midi);
+        assert_eq!(r.lanes_for_note(36).count(), 3);
+    }
+
+    #[test]
+    fn note_repeated_within_channel_resolves_one_lane() {
+        // Within-channel duplicates are deduped when the profile deserializes,
+        // so a saved [38, 38] fires the lane once (no double scoring).
+        let midi: MidiProfile =
+            toml::from_str("velocity_threshold = 0\n[map]\nSD = [38, 38]").expect("profile parses");
+        let r = BindResolver::from_profiles(&KeyboardProfile::default(), &midi);
+        assert_eq!(r.lanes_for_note(38).count(), 1);
     }
 
     #[test]

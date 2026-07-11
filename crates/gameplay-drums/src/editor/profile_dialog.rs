@@ -5,7 +5,7 @@
 //! name submit keeps the dialog open with an inline error so the user can
 //! correct it in place.
 
-use bevy::prelude::Resource;
+use bevy::prelude::{Res, Resource};
 use dtx_persistence::{validate_profile_name, ProfileName, ProfileNameError};
 
 use crate::editor::profile_state::{PendingProfileAction, ProfileKind};
@@ -93,6 +93,14 @@ pub fn confirm_corrupt_reset(state: &ProfileDialogState) -> Option<ProfileKind> 
         ProfileDialogState::CorruptReset { kind, .. } => Some(*kind),
         _ => None,
     }
+}
+
+/// Run condition: no profile dialog is open. While one is, capture and the
+/// panel's own hotkeys (Undo/Redo, Ctrl+S, Esc-closes-Customize) must yield
+/// to the dialog — mirrors the `PendingCloseState` gate `close_on_escape`
+/// already uses for the whole-session close guard.
+pub fn profile_dialog_closed(state: Res<ProfileDialogState>) -> bool {
+    matches!(*state, ProfileDialogState::Closed)
 }
 
 /// Apply the owning crate's backup/reset outcome to the dialog: success

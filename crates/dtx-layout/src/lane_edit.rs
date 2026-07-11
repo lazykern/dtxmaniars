@@ -91,6 +91,90 @@ pub fn merge_lane(arr: &mut LaneArrangement, index: usize) -> bool {
     true
 }
 
+/// Remove lane `index` from the arrangement; every channel it hosted becomes
+/// unassigned (absent from `arr.map`) and is returned so callers (Hidden strip)
+/// can offer each for restore. Judgment is untouched — `lane_of` in
+/// gameplay-drums routes scoring off the fixed logical order, never off this
+/// display arrangement, so an unassigned channel still gets judged; it just
+/// stops rendering a falling note / lane column.
+/// No-op on the last remaining lane or an out-of-range index (returns empty,
+/// arrangement untouched).
+pub fn hide_lane(arr: &mut LaneArrangement, index: usize) -> Vec<EChannel> {
+    if arr.lanes.len() <= 1 || index >= arr.lanes.len() {
+        return Vec::new();
+    }
+    let removed = arr.lanes.remove(index);
+    let hidden: Vec<EChannel> = crate::lanes::DRUM_CHANNELS
+        .into_iter()
+        .filter(|ch| arr.map.get(ch) == Some(&removed.id))
+        .collect();
+    for ch in &hidden {
+        arr.map.remove(ch);
+    }
+    arr.preset = LanePreset::Custom;
+    hidden
+}
+
+/// Every drum channel present in no lane, in canonical (`DRUM_CHANNELS`) order.
+pub fn unassigned_channels(arr: &LaneArrangement) -> Vec<EChannel> {
+    crate::lanes::DRUM_CHANNELS
+        .into_iter()
+        .filter(|ch| !arr.map.contains_key(ch))
+        .collect()
+}
+
+/// Append a new default-width lane whose primary (and sole) channel is
+/// `primary`. Returns false (no-op) when `primary` is already assigned to a
+/// lane; true when it appended (or remapped a degenerate id).
+pub fn restore_lane(arr: &mut LaneArrangement, primary: EChannel) -> bool {
+    if arr.map.contains_key(&primary) {
+        return false;
+    }
+    let Some(name) = channel_short_name(primary) else {
+        return false;
+    };
+    // Degenerate state guard (mirrors split_channel): a lane with this id
+    // already exists but the channel isn't mapped to it — just remap.
+    if arr.lanes.iter().any(|l| l.id == name) {
+        arr.map.insert(primary, name.to_string());
+        arr.preset = LanePreset::Custom;
+        return true;
+    }
+    arr.lanes.push(DisplayLane {
+        id: name.to_string(),
+        label: name.to_string(),
+        width: default_lane_width(primary),
+        color: None,
+        primary,
+    });
+    arr.map.insert(primary, name.to_string());
+    arr.preset = LanePreset::Custom;
+    true
+}
+
+/// Move channel `ch` onto lane `index` (remaps `ch` → that lane's id), for
+/// the Lanes detail card's "+ add" popup. No-op when `index` is out of
+/// range, `ch` is already the lane's own primary (nothing to do), or `ch` is
+/// currently the PRIMARY of some other lane — moving a primary away would
+/// leave that lane empty; split/hide it first instead.
+pub fn merge_channel_into_lane(arr: &mut LaneArrangement, ch: EChannel, index: usize) -> bool {
+    let Some(lane) = arr.lanes.get(index) else {
+        return false;
+    };
+    let id = lane.id.clone();
+    if arr.map.get(&ch) == Some(&id) {
+        return false;
+    }
+    if let Some(cur) = arr.lane_index_of(ch) {
+        if arr.lanes[cur].primary == ch {
+            return false;
+        }
+    }
+    arr.map.insert(ch, id);
+    arr.preset = LanePreset::Custom;
+    true
+}
+
 /// Channels mapped to lane `index`, primary first, rest in DRUM_CHANNELS order.
 pub fn lane_chips(arr: &LaneArrangement, index: usize) -> Vec<EChannel> {
     let Some(lane) = arr.lanes.get(index) else {
@@ -220,6 +304,114 @@ mod tests {
         }
         assert!(!merge_lane(&mut arr, 0));
         assert_invariant(&arr);
+    }
+
+    #[test]
+    fn hide_lane_unassigns_its_channels_and_restore_reinserts() {
+        let mut arr = classic();
+        let n = arr.lanes.len();
+        let hh_index = arr
+            .lanes
+            .iter()
+            .position(|l| l.primary == EChannel::HiHatClose)
+            .unwrap();
+        let hidden = hide_lane(&mut arr, hh_index);
+        assert_eq!(arr.lanes.len(), n - 1);
+        assert!(hidden.contains(&EChannel::HiHatClose));
+        // classic's HH lane also hosts HHO as a secondary chip.
+        assert!(hidden.contains(&EChannel::HiHatOpen));
+        assert!(unassigned_channels(&arr).contains(&EChannel::HiHatClose));
+        assert_eq!(arr.preset, LanePreset::Custom);
+
+        assert!(restore_lane(&mut arr, EChannel::HiHatClose));
+        assert_eq!(arr.lanes.len(), n);
+        assert!(!unassigned_channels(&arr).contains(&EChannel::HiHatClose));
+        // Secondary (HHO) isn't auto-restored — only the primary is; it stays
+        // unassigned until re-merged/split by the editor, same as spec says.
+        assert!(unassigned_channels(&arr).contains(&EChannel::HiHatOpen));
+    }
+
+    #[test]
+    fn hide_last_lane_is_refused() {
+        let mut arr = classic();
+        while arr.lanes.len() > 1 {
+            hide_lane(&mut arr, 0);
+        }
+        assert!(hide_lane(&mut arr, 0).is_empty(), "cannot hide the only lane");
+        assert_eq!(arr.lanes.len(), 1);
+    }
+
+    #[test]
+    fn hide_lane_out_of_range_is_noop() {
+        let mut arr = classic();
+        let n = arr.lanes.len();
+        assert!(hide_lane(&mut arr, n).is_empty());
+        assert_eq!(arr.lanes.len(), n);
+    }
+
+    #[test]
+    fn restore_lane_is_noop_when_already_assigned() {
+        let mut arr = classic();
+        let n = arr.lanes.len();
+        assert!(!restore_lane(&mut arr, EChannel::Snare));
+        assert_eq!(arr.lanes.len(), n, "SD already has a lane");
+    }
+
+    #[test]
+    fn unassigned_channels_reports_none_for_a_complete_arrangement() {
+        assert!(unassigned_channels(&classic()).is_empty());
+    }
+
+    #[test]
+    fn merge_channel_into_lane_remaps_a_secondary() {
+        let mut arr = classic();
+        // HHO starts as a secondary chip on the HH lane.
+        let hh = arr.lane_index_of(EChannel::HiHatClose).unwrap();
+        let cy = arr.lane_index_of(EChannel::Cymbal).unwrap();
+        assert!(merge_channel_into_lane(&mut arr, EChannel::HiHatOpen, cy));
+        assert_eq!(arr.map[&EChannel::HiHatOpen], arr.lanes[cy].id);
+        assert!(!lane_chips(&arr, hh).contains(&EChannel::HiHatOpen));
+        assert_eq!(arr.preset, LanePreset::Custom);
+        assert_invariant(&arr);
+    }
+
+    #[test]
+    fn merge_channel_into_lane_reassigns_a_hidden_channel() {
+        let mut arr = classic();
+        let hh = arr.lane_index_of(EChannel::HiHatClose).unwrap();
+        hide_lane(&mut arr, hh);
+        assert!(unassigned_channels(&arr).contains(&EChannel::HiHatClose));
+        let cy = arr.lane_index_of(EChannel::Cymbal).unwrap();
+        assert!(merge_channel_into_lane(&mut arr, EChannel::HiHatClose, cy));
+        assert!(!unassigned_channels(&arr).contains(&EChannel::HiHatClose));
+        assert_eq!(arr.map[&EChannel::HiHatClose], arr.lanes[cy].id);
+    }
+
+    #[test]
+    fn merge_channel_into_lane_refuses_to_empty_a_primary() {
+        let mut arr = classic();
+        let hh = arr.lane_index_of(EChannel::HiHatClose).unwrap();
+        let cy = arr.lane_index_of(EChannel::Cymbal).unwrap();
+        assert!(!merge_channel_into_lane(&mut arr, EChannel::HiHatClose, cy));
+        assert_eq!(arr.map[&EChannel::HiHatClose], arr.lanes[hh].id);
+        assert_eq!(arr.preset, LanePreset::Classic);
+    }
+
+    #[test]
+    fn merge_channel_into_lane_is_noop_when_already_there() {
+        let mut arr = classic();
+        let hh = arr.lane_index_of(EChannel::HiHatClose).unwrap();
+        assert!(!merge_channel_into_lane(&mut arr, EChannel::HiHatOpen, hh));
+        assert_eq!(arr.preset, LanePreset::Classic);
+    }
+
+    #[test]
+    fn width_already_clamps_to_the_shared_floor() {
+        // MIN_LANE_WIDTH lives in `lanes.rs` and is already enforced by
+        // `set_lane_width` (see `width_clamps` above) — no second floor needed.
+        let mut arr = classic();
+        set_lane_width(&mut arr, 0, 0.0);
+        assert_eq!(arr.lanes[0].width, MIN_LANE_WIDTH);
     }
 
     #[test]

@@ -80,7 +80,12 @@ pub struct LaneArrangement {
     pub preset: crate::presets::LanePreset,
     /// Display order left→right. Variable count (10 classic, 11 with HHO split…).
     pub lanes: Vec<DisplayLane>,
-    /// Every drum channel maps to a lane id present in `lanes`.
+    /// Channel→lane-id map, DISPLAY axis only. A channel absent here is
+    /// "hidden" (`lane_edit::hide_lane`/`unassigned_channels`) — it has no
+    /// on-screen lane but still judges normally, since judgment routing
+    /// (`gameplay-drums::lane_map::lane_of`) is fixed and independent of this
+    /// arrangement. Every lookup against this map (`lane_index_of`,
+    /// `is_secondary`, …) must stay `Option`-safe.
     pub map: HashMap<EChannel, String>,
 }
 

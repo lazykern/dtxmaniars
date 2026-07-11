@@ -351,6 +351,7 @@ mod tests {
             order: Some(vec!["BD".into(), "SD".into()]),
             widths: Some([("BD".into(), 120.0)].into()),
             map: Some([("CY".into(), "SD".into())].into()),
+            ..Default::default()
         }
         .resolve();
         let registry = LaneProfileRegistry {

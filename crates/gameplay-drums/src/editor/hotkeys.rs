@@ -16,7 +16,8 @@ pub(super) fn plugin(app: &mut App) {
         Update,
         editor_action_hotkeys
             .run_if(in_state(game_shell::AppState::Performance))
-            .run_if(super::editor_open),
+            .run_if(super::editor_open)
+            .run_if(super::profile_dialog::profile_dialog_closed),
     );
 }
 
