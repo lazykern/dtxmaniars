@@ -47,21 +47,12 @@ pub struct GameStartMs(pub i64);
 /// `total_ms()` = common (global config) + song (per-chart `.score.ini`).
 /// Applied where guitar BGM/SE auto-chips fire, and baked into `GameStartMs`
 /// so the playfield clock matches what the user hears.
-#[derive(Resource, Debug, Clone, Copy)]
+#[derive(Resource, Debug, Clone, Copy, Default)]
 pub struct BgmAdjustState {
     /// Global BGM adjust from `dtx_config::GameplayConfig::bgm_adjust_ms`.
     pub common_ms: i32,
     /// Per-chart BGM adjust from `<chart>.score.ini` `[File] BGMAdjust=`.
     pub song_ms: i32,
-}
-
-impl Default for BgmAdjustState {
-    fn default() -> Self {
-        Self {
-            common_ms: 0,
-            song_ms: 0,
-        }
-    }
 }
 
 impl BgmAdjustState {

@@ -2,10 +2,11 @@
 
 use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum LanePreset {
     /// Current default: NX Type-A geometry, 10 columns.
+    #[default]
     Classic,
     /// NX Type-B: pedals share one lane, SD left of pedals.
     NxTypeB,
@@ -14,11 +15,8 @@ pub enum LanePreset {
     Custom,
 }
 
-impl Default for LanePreset {
-    fn default() -> Self {
-        Self::Classic
-    }
-}
+/// One column of the classic arrangement: id, width, RGB color, source channel.
+type LaneSpec = (&'static str, f32, (f32, f32, f32), dtx_core::EChannel);
 
 /// Classic preset — ground-truth port of the old `lane_geometry::COLUMNS`.
 pub fn classic() -> crate::lanes::LaneArrangement {
@@ -26,7 +24,7 @@ pub fn classic() -> crate::lanes::LaneArrangement {
     use dtx_core::EChannel;
     use std::collections::HashMap;
 
-    let spec: [(&str, f32, (f32, f32, f32), EChannel); 10] = [
+    let spec: [LaneSpec; 10] = [
         ("LC", 72.0, (0.945, 0.247, 0.725), EChannel::LeftCymbal),
         ("HH", 49.0, (0.000, 0.541, 1.000), EChannel::HiHatClose),
         ("LP", 51.0, (1.000, 0.353, 0.627), EChannel::LeftPedal),

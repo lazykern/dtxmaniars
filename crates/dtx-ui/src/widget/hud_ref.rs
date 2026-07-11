@@ -32,6 +32,10 @@ impl HudRefRect {
     }
 }
 
+pub fn scaled_font(scale: f32, ref_size: f32) -> TextFont {
+    crate::theme::Theme::font(ref_size * scale)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -58,8 +62,4 @@ mod tests {
         assert_eq!(node.width, Val::Px(100.0));
         assert_eq!(node.height, Val::Px(20.0));
     }
-}
-
-pub fn scaled_font(scale: f32, ref_size: f32) -> TextFont {
-    crate::theme::Theme::font(ref_size * scale)
 }

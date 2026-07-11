@@ -229,12 +229,3 @@ pub fn spawn_score_detailed_panel(
         ));
     });
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    #[test]
-    fn stats_box_in_left_panel() {
-        assert!(30.0 + 200.0 <= 260.0);
-    }
-}

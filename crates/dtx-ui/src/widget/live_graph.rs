@@ -40,6 +40,8 @@ pub fn bar_area_h(ref_h: f32) -> f32 {
 
 /// Spawn the graph panel: background plate, threshold lines with labels, and
 /// `GRAPH_SLOTS` zero-height bars anchored to the panel bottom (grow upward).
+// Orthogonal display knobs; a params struct would only relocate the list (clippy::too_many_arguments).
+#[allow(clippy::too_many_arguments)]
 pub fn spawn_live_graph(
     commands: &mut Commands,
     parent: Entity,

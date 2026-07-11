@@ -269,6 +269,7 @@ fn drive_steppers(
     }
 }
 
+#[allow(clippy::type_complexity)]
 fn drive_toggles(
     mut toggles: Query<(&Interaction, &mut ControlBool), (With<Toggle>, Changed<Interaction>)>,
 ) {
@@ -306,6 +307,7 @@ fn paint_stepper_labels(
     }
 }
 
+#[allow(clippy::type_complexity)]
 fn paint_toggles(
     toggles: Query<(&ControlBool, &Children), (With<Toggle>, Changed<ControlBool>)>,
     mut knobs: Query<(&mut Node, &mut BackgroundColor), With<ToggleKnob>>,

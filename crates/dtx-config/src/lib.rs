@@ -31,7 +31,7 @@ pub use bindings::{
 pub use drums::{BdGroup, CyGroup, DrumsConfig, FtGroup, HhGroup, HitSoundPriority};
 
 /// Top-level persisted configuration. Each BocuD section becomes a sub-struct.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct Config {
     /// System: windowing, BGA, BGM, logging.
     #[serde(default)]
@@ -45,17 +45,6 @@ pub struct Config {
     /// Drums grouping / cymbal-free / hit-sound priority.
     #[serde(default)]
     pub drums: DrumsConfig,
-}
-
-impl Default for Config {
-    fn default() -> Self {
-        Self {
-            system: SystemConfig::default(),
-            gameplay: GameplayConfig::default(),
-            audio: AudioConfig::default(),
-            drums: DrumsConfig::default(),
-        }
-    }
 }
 
 /// System section — CConfigIni.cs:1-100 (subset).

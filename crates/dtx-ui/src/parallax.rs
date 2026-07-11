@@ -104,7 +104,10 @@ mod tests {
         assert_eq!(info.direction, 0);
     }
 
+    // Guards the tuned constant against future edits; clippy folds the const
+    // comparison to a literal, hence the allow (clippy::assertions_on_constants).
     #[test]
+    #[allow(clippy::assertions_on_constants)]
     fn slide_distance_is_visible_but_small() {
         assert!(SLIDE_DISTANCE_PX > 16.0);
         assert!(SLIDE_DISTANCE_PX < 96.0);

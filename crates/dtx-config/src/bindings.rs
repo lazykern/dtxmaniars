@@ -41,22 +41,13 @@ pub enum BindSource {
 }
 
 /// MIDI device options.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct MidiDeviceConfig {
     /// Substring filter for the input port name; None = first available.
     pub port: Option<String>,
     /// NoteOn velocities at or below this value are ignored.
     pub velocity_threshold: u8,
-}
-
-impl Default for MidiDeviceConfig {
-    fn default() -> Self {
-        Self {
-            port: None,
-            velocity_threshold: 0,
-        }
-    }
 }
 
 /// On-disk schema (`bindings.toml`).

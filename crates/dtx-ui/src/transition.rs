@@ -142,8 +142,10 @@ mod tests {
 
     #[test]
     fn fade_in_reaches_transparent() {
-        let mut fade = ScreenFade::default();
-        fade.alpha = 1.0;
+        let mut fade = ScreenFade {
+            alpha: 1.0,
+            ..Default::default()
+        };
         fade.start_fade_in();
         while !fade.tick(16.0) {}
         assert!(fade.alpha < 0.05);

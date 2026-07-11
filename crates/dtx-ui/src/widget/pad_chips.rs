@@ -83,14 +83,8 @@ pub fn flash_pad_on_hit(
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     #[test]
     fn five_pads() {
         assert_eq!(5, 5);
-    }
-    #[test]
-    fn pads_fit_in_left_panel() {
-        // 5 pads × 44 + 4 × 4 = 236 < 260.
-        assert!(18.0 + 5.0 * 44.0 + 4.0 * 4.0 <= 260.0);
     }
 }
