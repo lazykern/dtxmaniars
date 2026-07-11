@@ -30,6 +30,18 @@ pub struct ProfileUiError {
     pub message: String,
 }
 
+impl ProfileUiError {
+    /// Pair a transaction failure with the canonical registry path so the UI
+    /// always shows profile kind, file, and full cause.
+    pub fn from_error(error: &ProfileError, path: &Path) -> Self {
+        Self {
+            kind: error.kind,
+            path: path.to_path_buf(),
+            message: error.message.clone(),
+        }
+    }
+}
+
 /// One selector entry.
 #[derive(Debug, Clone, PartialEq)]
 pub struct ProfileBarItem {
@@ -237,6 +249,38 @@ mod tests {
         // Caller keeps the prior registry, draft, and selection on failure.
         assert_eq!(registry.active, "DTXMania default");
         assert_eq!(draft.selected, "Desk");
+    }
+
+    #[test]
+    fn transaction_error_contains_path_and_cause() {
+        let error = ProfileError {
+            kind: ProfileKind::Midi,
+            message: "midi-profiles.toml: disk full".to_owned(),
+        };
+        let ui = ProfileUiError::from_error(&error, &PathBuf::from("/cfg/midi-profiles.toml"));
+        assert_eq!(ui.kind, ProfileKind::Midi);
+        assert_eq!(ui.path, PathBuf::from("/cfg/midi-profiles.toml"));
+        assert!(ui.message.contains("disk full"));
+    }
+
+    #[test]
+    fn canonical_reread_blocks_write_after_external_corruption() {
+        let registry = user_registry(&["Desk"]);
+        let mut gate = TransactionGate { needs_reload: true };
+        let result: TransactionResult<_, KeyboardProfile> = run_transaction(
+            &mut gate,
+            &registry,
+            ProfileKind::Keyboard,
+            &PathBuf::from("keyboard-profiles.toml"),
+            || Err("registry is malformed".to_owned()),
+            |_| unreachable!("must not build on a failed reload"),
+            |_| unreachable!("must not write after a failed reload"),
+        );
+        let TransactionResult::Failed(error) = result else {
+            panic!("malformed canonical registry must abort the write");
+        };
+        assert!(error.message.contains("malformed"));
+        assert!(gate.needs_reload, "gate stays armed until a clean reload");
     }
 
     #[test]

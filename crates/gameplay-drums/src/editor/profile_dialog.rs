@@ -78,6 +78,37 @@ pub fn submit_name<'a>(
     }
 }
 
+/// Open the corrupt-registry recovery dialog. `Back up and reset` in the
+/// panel routes here first; the destructive reset itself only runs from an
+/// explicit confirmation on this dialog.
+pub fn open_corrupt_reset(kind: ProfileKind, message: String) -> ProfileDialogState {
+    ProfileDialogState::CorruptReset { kind, message }
+}
+
+/// Confirm the corrupt-registry reset. Returns the kind to reset only when
+/// the recovery dialog is actually open — a stray confirm from any other
+/// state performs nothing.
+pub fn confirm_corrupt_reset(state: &ProfileDialogState) -> Option<ProfileKind> {
+    match state {
+        ProfileDialogState::CorruptReset { kind, .. } => Some(*kind),
+        _ => None,
+    }
+}
+
+/// Apply the owning crate's backup/reset outcome to the dialog: success
+/// closes it; failure keeps it open with the full cause so the corrupt
+/// canonical file is never silently replaced by a default registry.
+pub fn apply_reset_outcome(
+    state: &ProfileDialogState,
+    kind: ProfileKind,
+    result: Result<(), String>,
+) -> ProfileDialogState {
+    match result {
+        Ok(()) => ProfileDialogState::Closed,
+        Err(message) => ProfileDialogState::CorruptReset { kind, message },
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -98,6 +129,49 @@ mod tests {
         assert_eq!(action, NameAction::SaveAs);
         assert_eq!(value, "DTXMania default", "user text is retained");
         assert!(error.is_some(), "inline error is shown");
+    }
+
+    #[test]
+    fn corrupt_registry_shows_read_only_builtins() {
+        use crate::editor::profile_state::RegistryHealth;
+        let health = RegistryHealth::read_only("cannot parse keyboard-profiles.toml");
+        assert!(!health.mutation_allowed());
+        assert!(health.error.as_deref().unwrap().contains("parse"));
+        let healthy = RegistryHealth::default();
+        assert!(healthy.mutation_allowed());
+    }
+
+    #[test]
+    fn reset_button_requires_second_confirmation() {
+        // Reset only fires from the open recovery dialog.
+        assert_eq!(confirm_corrupt_reset(&ProfileDialogState::Closed), None);
+        let open = open_corrupt_reset(ProfileKind::Keyboard, "corrupt".to_owned());
+        assert_eq!(
+            confirm_corrupt_reset(&open),
+            Some(ProfileKind::Keyboard),
+            "confirm works only after the dialog opened"
+        );
+    }
+
+    #[test]
+    fn failed_backup_does_not_create_default_registry() {
+        let open = open_corrupt_reset(ProfileKind::Midi, "corrupt".to_owned());
+        let kind = confirm_corrupt_reset(&open).expect("dialog open");
+        // Owning crate refused (e.g. backup collision): dialog stays open
+        // with the cause; no default registry state is installed here.
+        let next = apply_reset_outcome(&open, kind, Err("backup exists".to_owned()));
+        assert_eq!(
+            next,
+            ProfileDialogState::CorruptReset {
+                kind: ProfileKind::Midi,
+                message: "backup exists".to_owned()
+            }
+        );
+        // Success closes the dialog.
+        assert_eq!(
+            apply_reset_outcome(&open, kind, Ok(())),
+            ProfileDialogState::Closed
+        );
     }
 
     #[test]

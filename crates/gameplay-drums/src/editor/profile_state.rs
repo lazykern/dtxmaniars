@@ -113,6 +113,30 @@ pub struct ProfileError {
     pub message: String,
 }
 
+/// Per-kind registry health derived from startup. A registry that could not
+/// be read or validated runs read-only on built-ins: every profile mutation
+/// is disabled until the user confirms a backup-and-reset.
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct RegistryHealth {
+    /// Registry unusable: show built-ins, disable all profile mutation.
+    pub read_only: bool,
+    /// Human-readable load error for the recovery dialog.
+    pub error: Option<String>,
+}
+
+impl RegistryHealth {
+    pub fn read_only(error: impl Into<String>) -> Self {
+        Self {
+            read_only: true,
+            error: Some(error.into()),
+        }
+    }
+
+    pub fn mutation_allowed(&self) -> bool {
+        !self.read_only
+    }
+}
+
 /// Outcome of one committed-or-not registry transaction.
 #[derive(Debug)]
 pub enum TransactionResult<R, T> {
