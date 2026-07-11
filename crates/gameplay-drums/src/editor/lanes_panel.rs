@@ -75,9 +75,6 @@ pub enum LanesFocus {
     Detail,
 }
 
-/// Ref-px step for one Left/Right width nudge at the Detail level.
-pub const LANE_WIDTH_STEP: f32 = 4.0;
-
 /// What a nav verb did, for the caller to apply — `reduce_lanes_nav` stays
 /// pure and never touches `LaneArrangement` or drafts directly, mirroring
 /// `reduce_controls_nav`.
@@ -86,7 +83,8 @@ pub enum LanesNavEffect {
     None,
     /// Swap the lane at `index` with its neighbor in `dir` (-1 left, +1 right).
     Reorder { index: usize, dir: i32 },
-    /// Nudge the lane at `index`'s width by `dir` steps of `LANE_WIDTH_STEP`.
+    /// Nudge the lane at `index`'s width by `dir` steps (the driver, once
+    /// wired, picks the ref-px step and clamps via `set_lane_width`).
     AdjustWidth { index: usize, dir: i32 },
 }
 
@@ -221,6 +219,8 @@ pub fn spawn_lane_block(
     add_popup_open: bool,
 ) {
     let body = panel_kit::spawn_card(p, "Lanes");
+    // Reorder: drag pads in the preview (Task 9) for mouse; reduce_lanes_nav
+    // for keyboard (not yet driven). Rows here are select-only.
     p.commands_mut().entity(body).with_children(|card| {
         for (i, lane) in lanes.0.lanes.iter().enumerate() {
             let is_selected = selected == Some(i);
@@ -604,13 +604,11 @@ fn handle_restore_channel_btn(
 ) {
     for (btn, interaction) in &q {
         if *interaction == Interaction::Pressed {
-            let before_arr = lanes.0.clone();
             let before = Snapshot {
                 layouts: layouts.clone(),
                 lanes: lanes.clone(),
             };
-            dtx_layout::restore_lane(&mut lanes.0, btn.0);
-            if lanes.0 != before_arr {
+            if dtx_layout::restore_lane(&mut lanes.0, btn.0) {
                 undo.push_snapshot(before);
             }
         }

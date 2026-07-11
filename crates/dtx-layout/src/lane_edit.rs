@@ -124,20 +124,21 @@ pub fn unassigned_channels(arr: &LaneArrangement) -> Vec<EChannel> {
 }
 
 /// Append a new default-width lane whose primary (and sole) channel is
-/// `primary`. No-op if `primary` is already assigned to some lane.
-pub fn restore_lane(arr: &mut LaneArrangement, primary: EChannel) {
+/// `primary`. Returns false (no-op) when `primary` is already assigned to a
+/// lane; true when it appended (or remapped a degenerate id).
+pub fn restore_lane(arr: &mut LaneArrangement, primary: EChannel) -> bool {
     if arr.map.contains_key(&primary) {
-        return;
+        return false;
     }
     let Some(name) = channel_short_name(primary) else {
-        return;
+        return false;
     };
     // Degenerate state guard (mirrors split_channel): a lane with this id
     // already exists but the channel isn't mapped to it — just remap.
     if arr.lanes.iter().any(|l| l.id == name) {
         arr.map.insert(primary, name.to_string());
         arr.preset = LanePreset::Custom;
-        return;
+        return true;
     }
     arr.lanes.push(DisplayLane {
         id: name.to_string(),
@@ -148,6 +149,7 @@ pub fn restore_lane(arr: &mut LaneArrangement, primary: EChannel) {
     });
     arr.map.insert(primary, name.to_string());
     arr.preset = LanePreset::Custom;
+    true
 }
 
 /// Move channel `ch` onto lane `index` (remaps `ch` → that lane's id), for
@@ -321,7 +323,7 @@ mod tests {
         assert!(unassigned_channels(&arr).contains(&EChannel::HiHatClose));
         assert_eq!(arr.preset, LanePreset::Custom);
 
-        restore_lane(&mut arr, EChannel::HiHatClose);
+        assert!(restore_lane(&mut arr, EChannel::HiHatClose));
         assert_eq!(arr.lanes.len(), n);
         assert!(!unassigned_channels(&arr).contains(&EChannel::HiHatClose));
         // Secondary (HHO) isn't auto-restored — only the primary is; it stays
@@ -351,7 +353,7 @@ mod tests {
     fn restore_lane_is_noop_when_already_assigned() {
         let mut arr = classic();
         let n = arr.lanes.len();
-        restore_lane(&mut arr, EChannel::Snare);
+        assert!(!restore_lane(&mut arr, EChannel::Snare));
         assert_eq!(arr.lanes.len(), n, "SD already has a lane");
     }
 
