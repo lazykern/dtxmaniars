@@ -675,22 +675,13 @@ fn backup_and_reset<T: Serialize + Clone>(
             .and_then(|name| name.to_str())
             .unwrap_or("profiles.toml");
         let backup = path.with_file_name(format!("{file_name}.backup-{stamp}"));
-        if backup
-            .try_exists()
-            .map_err(|source| RegistryIoError::Backup {
-                path: path.to_path_buf(),
-                source,
-            })?
-        {
-            return Err(RegistryIoError::Backup {
-                path: path.to_path_buf(),
-                source: std::io::Error::new(
-                    std::io::ErrorKind::AlreadyExists,
-                    "timestamped backup already exists",
-                ),
-            });
-        }
-        std::fs::rename(path, &backup).map_err(|source| RegistryIoError::Backup {
+        // hard_link fails atomically with AlreadyExists, so a concurrently
+        // created backup can never be overwritten.
+        std::fs::hard_link(path, &backup).map_err(|source| RegistryIoError::Backup {
+            path: path.to_path_buf(),
+            source,
+        })?;
+        std::fs::remove_file(path).map_err(|source| RegistryIoError::Backup {
             path: path.to_path_buf(),
             source,
         })?;
@@ -1216,6 +1207,7 @@ mod tests {
         std::fs::create_dir_all(&root).expect("test directory creates");
         let path = root.join("keyboard-profiles.toml");
         save_keyboard_registry(&path, &keyboard_registry()).expect("registry writes");
+        let original = std::fs::read_to_string(&path).expect("original registry reads");
         assert!(matches!(
             backup_and_reset_keyboard_registry(&path, false, UNIX_EPOCH),
             Err(RegistryIoError::ConfirmationRequired { .. })
@@ -1223,12 +1215,16 @@ mod tests {
         let reset =
             backup_and_reset_keyboard_registry(&path, true, UNIX_EPOCH).expect("reset succeeds");
         assert_eq!(reset.active, KEYBOARD_DEFAULT_NAME);
-        let backups = std::fs::read_dir(&root)
+        let backups: Vec<_> = std::fs::read_dir(&root)
             .expect("directory reads")
             .filter_map(Result::ok)
             .filter(|entry| entry.file_name().to_string_lossy().contains("backup-"))
-            .count();
-        assert_eq!(backups, 1);
+            .collect();
+        assert_eq!(backups.len(), 1);
+        assert_eq!(
+            std::fs::read_to_string(backups[0].path()).expect("backup reads"),
+            original
+        );
         let _ = std::fs::remove_dir_all(&root);
     }
 
