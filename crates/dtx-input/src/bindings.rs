@@ -1,7 +1,7 @@
 //! Input bindings — `bindings.toml` schema + runtime types.
 //!
 //! Design: docs/superpowers/specs/2026-07-07-customize-surface-design.md §3.
-//! One keyboard key may map to multiple channels; MIDI notes stay exclusive.
+//! A key or MIDI note may map to multiple channels (shared bindings).
 //! File schema keys channels by dtx-core short names.
 
 use std::collections::{BTreeMap, HashMap};
@@ -235,10 +235,10 @@ impl InputBindings {
 
 impl BindingsFile {
     /// Resolve to runtime bindings. Unknown channel names are skipped with a
-    /// warning; duplicate MIDI notes keep the first occurrence (BTreeMap order).
+    /// warning. A key or MIDI note may appear under multiple channels
+    /// (shared bindings); every owning channel is kept.
     pub fn resolve(&self) -> InputBindings {
         let mut map: HashMap<EChannel, Vec<BindSource>> = HashMap::new();
-        let mut seen_midi: Vec<BindSource> = Vec::new();
         for (name, sources) in &self.map {
             let Some(ch) = EChannel::from_short_name(name) else {
                 eprintln!("dtx-config: bindings.toml unknown channel {name:?}; skipped");
@@ -246,15 +246,6 @@ impl BindingsFile {
             };
             let entry = map.entry(ch).or_default();
             for src in sources {
-                if matches!(src, BindSource::Midi { .. }) {
-                    if seen_midi.contains(src) {
-                        eprintln!(
-                            "dtx-config: bindings.toml duplicate MIDI source {src:?}; kept first"
-                        );
-                        continue;
-                    }
-                    seen_midi.push(*src);
-                }
                 if !entry.contains(src) {
                     entry.push(*src);
                 }
@@ -439,7 +430,7 @@ SD = [{ key = "Space" }]
     }
 
     #[test]
-    fn duplicate_midi_in_file_keeps_first() {
+    fn duplicate_midi_in_file_binds_every_owning_channel() {
         let raw = r#"
 version = 1
 [map]
@@ -447,8 +438,8 @@ BD = [{ midi = { note = 36 } }]
 SD = [{ midi = { note = 36 } }]
 "#;
         let b = parse_with_migrations(raw).resolve();
-        assert_eq!(b.channel_for_note(36), Some(EChannel::BassDrum));
-        assert!(!b.map[&EChannel::Snare].contains(&BindSource::Midi { note: 36 }));
+        assert!(b.map[&EChannel::BassDrum].contains(&BindSource::Midi { note: 36 }));
+        assert!(b.map[&EChannel::Snare].contains(&BindSource::Midi { note: 36 }));
     }
 
     #[test]

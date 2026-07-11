@@ -153,6 +153,14 @@ impl MidiProfile {
             notes.push(note);
         }
     }
+
+    /// Append `note` to `channel` without removing it from other channels.
+    pub fn bind_note_shared(&mut self, channel: EChannel, note: u8) {
+        let notes = self.map.entry(channel).or_default();
+        if !notes.contains(&note) {
+            notes.push(note);
+        }
+    }
 }
 
 #[derive(Default, Serialize, Deserialize)]
@@ -183,19 +191,6 @@ impl<'de> Deserialize<'de> for MidiProfile {
         D: Deserializer<'de>,
     {
         let dto = MidiProfileDto::deserialize(deserializer)?;
-        let mut owners = HashMap::new();
-        for (name, notes) in &dto.map {
-            if EChannel::from_short_name(name).is_none() {
-                continue;
-            }
-            for note in notes {
-                if let Some(owner) = owners.insert(*note, name) {
-                    return Err(serde::de::Error::custom(format!(
-                        "MIDI note {note} is bound to both {owner} and {name}"
-                    )));
-                }
-            }
-        }
         Ok(Self {
             port: dto.port.filter(|port| !port.is_empty()),
             velocity_threshold: dto.velocity_threshold,
@@ -314,7 +309,7 @@ pub fn split_bindings(bindings: &InputBindings) -> (KeyboardProfile, MidiProfile
         for source in sources {
             match source {
                 BindSource::Key(key) => keyboard.add_key(*channel, *key),
-                BindSource::Midi { note } => midi.bind_note(*channel, *note),
+                BindSource::Midi { note } => midi.bind_note_shared(*channel, *note),
             }
         }
     }
@@ -828,6 +823,41 @@ mod tests {
     }
 
     #[test]
+    fn midi_profile_allows_shared_note_and_round_trips() {
+        let mut p = MidiProfile::default();
+        p.bind_note_shared(EChannel::BassDrum, 36);
+        p.bind_note_shared(EChannel::LeftBassDrum, 36);
+        assert!(p.map[&EChannel::BassDrum].contains(&36));
+        assert!(p.map[&EChannel::LeftBassDrum].contains(&36));
+        let toml = toml::to_string(&p).unwrap();
+        let back: MidiProfile = toml::from_str(&toml).unwrap();
+        assert_eq!(back.map[&EChannel::BassDrum], p.map[&EChannel::BassDrum]);
+        assert_eq!(
+            back.map[&EChannel::LeftBassDrum],
+            p.map[&EChannel::LeftBassDrum]
+        );
+    }
+
+    #[test]
+    fn bind_note_still_steals_for_move_semantics() {
+        let mut p = MidiProfile::default();
+        p.bind_note_shared(EChannel::BassDrum, 36);
+        p.bind_note(EChannel::LeftBassDrum, 36);
+        assert!(!p.map[&EChannel::BassDrum].contains(&36));
+        assert!(p.map[&EChannel::LeftBassDrum].contains(&36));
+    }
+
+    #[test]
+    fn split_bindings_preserves_shared_midi_note() {
+        use crate::{BindSource, InputBindings};
+        let mut b = InputBindings::default();
+        b.bind_shared(EChannel::LeftBassDrum, BindSource::Midi { note: 36 });
+        let (_kb, midi) = split_bindings(&b);
+        assert!(midi.map[&EChannel::BassDrum].contains(&36));
+        assert!(midi.map[&EChannel::LeftBassDrum].contains(&36));
+    }
+
+    #[test]
     fn save_builtin_is_rejected() {
         let registry = keyboard_registry();
         let error = reduce_registry(
@@ -901,24 +931,21 @@ mod tests {
     }
 
     #[test]
-    fn midi_profile_rejects_note_bound_to_multiple_channels() {
-        let error =
+    fn midi_profile_allows_note_bound_to_multiple_channels_from_toml() {
+        let profile =
             toml::from_str::<MidiProfile>("velocity_threshold = 0\n[map]\nHH = [42]\nSD = [42]")
-                .expect_err("duplicate MIDI note must fail");
+                .expect("shared MIDI note parses");
 
-        assert!(error
-            .to_string()
-            .contains("MIDI note 42 is bound to both HH and SD"));
+        assert!(profile.map[&EChannel::HiHatClose].contains(&42));
+        assert!(profile.map[&EChannel::Snare].contains(&42));
     }
 
     #[test]
-    fn midi_profile_rejects_note_repeated_within_channel() {
-        let error = toml::from_str::<MidiProfile>("velocity_threshold = 0\n[map]\nHH = [42, 42]")
-            .expect_err("duplicate MIDI note must fail");
+    fn midi_profile_allows_note_repeated_within_channel_from_toml() {
+        let profile = toml::from_str::<MidiProfile>("velocity_threshold = 0\n[map]\nHH = [42, 42]")
+            .expect("repeated MIDI note parses");
 
-        assert!(error
-            .to_string()
-            .contains("MIDI note 42 is bound to both HH and HH"));
+        assert!(profile.map[&EChannel::HiHatClose].contains(&42));
     }
 
     #[test]
