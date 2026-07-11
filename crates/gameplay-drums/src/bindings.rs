@@ -5,8 +5,13 @@
 //! Rebuilt on Performance enter (config may have changed on disk).
 
 use std::collections::HashMap;
+use std::path::PathBuf;
 
 use bevy::prelude::*;
+use dtx_config::profiles::{
+    keyboard_builtins, keyboard_registry, load_keyboard_registry, load_midi_registry,
+    midi_builtins, midi_registry, KeyboardProfile, MidiProfile, ProfileRegistry, RegistryStartup,
+};
 use dtx_config::{BindSource, InputBindings, BINDABLE_CHANNELS};
 
 use crate::lane_map::{lane_of, LaneId};
@@ -14,17 +19,24 @@ use crate::lane_map::{lane_of, LaneId};
 pub(super) fn plugin(app: &mut App) {
     app.init_resource::<BindResolver>()
         .init_resource::<LiveBindings>()
+        .init_resource::<ActiveInputProfiles>()
         // Seeded at boot too: pads navigate menus before any Performance enter.
-        .add_systems(Startup, reload_bindings)
-        .add_systems(OnEnter(game_shell::AppState::Performance), reload_bindings)
+        .add_systems(Startup, reload_profiles)
+        .add_systems(OnEnter(game_shell::AppState::Performance), reload_profiles)
         .add_systems(
             Update,
-            (
-                apply_live_bindings.run_if(resource_changed::<LiveBindings>),
-                save_bindings_on_close,
-            )
+            apply_live_bindings
+                .run_if(resource_changed::<LiveBindings>)
                 .run_if(in_state(game_shell::AppState::Performance)),
         );
+}
+
+/// The committed active input profiles. Changes only after a registry write
+/// succeeds; editor previews rebuild `BindResolver` from drafts instead.
+#[derive(Resource, Debug, Clone, Default)]
+pub struct ActiveInputProfiles {
+    pub keyboard: KeyboardProfile,
+    pub midi: MidiProfile,
 }
 
 /// Live, editable bindings — the Bindings tab mutates this; the resolver +
@@ -54,6 +66,28 @@ impl Default for BindResolver {
 }
 
 impl BindResolver {
+    /// Build lookup tables from independent keyboard and MIDI profiles.
+    /// Lane ids come from the fixed logical order (`lane_map::lane_of`) and
+    /// never depend on the display lane arrangement.
+    pub fn from_profiles(keyboard: &KeyboardProfile, midi: &MidiProfile) -> Self {
+        let mut key_to_lanes = HashMap::new();
+        let mut note_to_lane = HashMap::new();
+        for ch in BINDABLE_CHANNELS {
+            let Some(lane) = lane_of(ch) else { continue };
+            for key in keyboard.map.get(&ch).into_iter().flatten() {
+                key_to_lanes.entry(*key).or_insert_with(Vec::new).push(lane);
+            }
+            for note in midi.map.get(&ch).into_iter().flatten() {
+                note_to_lane.insert(*note, lane);
+            }
+        }
+        Self {
+            key_to_lanes,
+            note_to_lane,
+            velocity_threshold: midi.velocity_threshold,
+        }
+    }
+
     /// Build lookup tables from channel-keyed bindings.
     pub fn from_bindings(b: &InputBindings) -> Self {
         let mut key_to_lanes = HashMap::new();
@@ -102,31 +136,118 @@ impl BindResolver {
     }
 }
 
-/// Reload bindings.toml on entering Performance (mirrors config load style,
-/// see lib.rs `load(&default_path())` call sites). Seeds both `LiveBindings`
-/// and `BindResolver` from the same load so they start consistent.
-fn reload_bindings(mut resolver: ResMut<BindResolver>, mut live: ResMut<LiveBindings>) {
-    let b = dtx_config::load_bindings(&dtx_config::default_bindings_path());
-    *resolver = BindResolver::from_bindings(&b);
-    live.0 = b;
+pub fn keyboard_registry_path() -> PathBuf {
+    let mut p = dtx_config::default_path();
+    p.set_file_name("keyboard-profiles.toml");
+    p
 }
 
-/// Rebuild `BindResolver` whenever `LiveBindings` changes (immediate feedback).
-/// Does NOT save — disk persistence happens on surface close.
+pub fn midi_registry_path() -> PathBuf {
+    let mut p = dtx_config::default_path();
+    p.set_file_name("midi-profiles.toml");
+    p
+}
+
+/// Unwrap a registry startup for runtime use: a failed migration write still
+/// yields a usable in-memory registry for this session; an unreadable or
+/// invalid registry falls back to built-ins without touching the file.
+fn startup_registry<T>(
+    what: &str,
+    startup: RegistryStartup<ProfileRegistry<T>>,
+    fallback: ProfileRegistry<T>,
+) -> ProfileRegistry<T> {
+    match startup {
+        RegistryStartup::Ready(registry) => registry,
+        RegistryStartup::LegacySession {
+            registry,
+            write_error,
+        } => {
+            error!("{what} profile registry migration write failed: {write_error}");
+            registry
+        }
+        RegistryStartup::ReadOnlyBuiltins(error) => {
+            error!("{what} profile registry unusable, using built-ins: {error}");
+            fallback
+        }
+    }
+}
+
+fn active_keyboard_profile(registry: &ProfileRegistry<KeyboardProfile>) -> KeyboardProfile {
+    registry
+        .profiles
+        .get(&registry.active)
+        .cloned()
+        .or_else(|| keyboard_builtins().get(&registry.active).cloned())
+        .unwrap_or_default()
+}
+
+fn active_midi_profile(registry: &ProfileRegistry<MidiProfile>) -> MidiProfile {
+    registry
+        .profiles
+        .get(&registry.active)
+        .cloned()
+        .or_else(|| midi_builtins().get(&registry.active).cloned())
+        .unwrap_or_default()
+}
+
+/// Compose channel-keyed bindings from the active profiles so the legacy
+/// editor panels keep working against `LiveBindings` until the profile
+/// editors replace them.
+fn compose_bindings(profiles: &ActiveInputProfiles) -> InputBindings {
+    let mut bindings = InputBindings {
+        midi: dtx_config::MidiDeviceConfig {
+            port: profiles.midi.port.clone(),
+            velocity_threshold: profiles.midi.velocity_threshold,
+        },
+        map: HashMap::new(),
+    };
+    for ch in BINDABLE_CHANNELS {
+        let mut sources = Vec::new();
+        for key in profiles.keyboard.map.get(&ch).into_iter().flatten() {
+            sources.push(BindSource::Key(*key));
+        }
+        for note in profiles.midi.map.get(&ch).into_iter().flatten() {
+            sources.push(BindSource::Midi { note: *note });
+        }
+        if !sources.is_empty() {
+            bindings.map.insert(ch, sources);
+        }
+    }
+    bindings
+}
+
+/// Load (or migrate) the keyboard and MIDI profile registries and resolve the
+/// active profiles into the committed resources. Runs at boot (pads navigate
+/// menus before any Performance enter) and on Performance enter.
+fn reload_profiles(
+    mut profiles: ResMut<ActiveInputProfiles>,
+    mut resolver: ResMut<BindResolver>,
+    mut live: ResMut<LiveBindings>,
+) {
+    let legacy = dtx_config::default_bindings_path();
+    let keyboard = startup_registry(
+        "keyboard",
+        load_keyboard_registry(&keyboard_registry_path(), &legacy),
+        keyboard_registry(),
+    );
+    let midi = startup_registry(
+        "MIDI",
+        load_midi_registry(&midi_registry_path(), &legacy),
+        midi_registry(),
+    );
+    *profiles = ActiveInputProfiles {
+        keyboard: active_keyboard_profile(&keyboard),
+        midi: active_midi_profile(&midi),
+    };
+    *resolver = BindResolver::from_profiles(&profiles.keyboard, &profiles.midi);
+    live.0 = compose_bindings(&profiles);
+}
+
+/// Rebuild `BindResolver` whenever `LiveBindings` changes (editor preview
+/// feedback). Does NOT save — committed profiles change only after a
+/// registry write succeeds.
 fn apply_live_bindings(live: Res<LiveBindings>, mut resolver: ResMut<BindResolver>) {
     *resolver = BindResolver::from_bindings(&live.0);
-}
-
-/// When the Customize surface closes, persist the live bindings to disk
-/// (mirrors `tabs::save_draft_on_close`).
-fn save_bindings_on_close(open: Res<crate::editor::EditorOpen>, live: Res<LiveBindings>) {
-    if !open.is_changed() || open.0 {
-        return;
-    }
-    let path = dtx_config::default_bindings_path();
-    if let Err(e) = dtx_config::save_bindings(&path, &live.0) {
-        error!("customize: failed to save bindings {}: {e}", path.display());
-    }
 }
 
 #[cfg(test)]
@@ -197,5 +318,69 @@ mod tests {
         b.midi.velocity_threshold = 30;
         let r = BindResolver::from_bindings(&b);
         assert_eq!(r.velocity_threshold, 30);
+    }
+
+    #[test]
+    fn active_profiles_compose_keyboard_and_midi() {
+        let keyboard = KeyboardProfile::default();
+        let mut midi = MidiProfile::default();
+        midi.velocity_threshold = 25;
+        let r = BindResolver::from_profiles(&keyboard, &midi);
+        assert_eq!(r.lane_for_key(KeyCode::KeyX), Some(0)); // HH
+        assert_eq!(r.lane_for_key(KeyCode::Space), Some(2)); // BD
+        assert_eq!(r.lane_for_note(38), Some(1)); // SD
+        assert_eq!(r.lane_for_note(36), Some(2)); // BD
+        assert_eq!(r.velocity_threshold, 25);
+    }
+
+    #[test]
+    fn shared_key_emits_all_fixed_logical_lanes() {
+        let mut keyboard = KeyboardProfile::default();
+        keyboard.add_key(EChannel::HiHatClose, KeyCode::KeyQ);
+        keyboard.add_key(EChannel::Snare, KeyCode::KeyQ);
+        let r = BindResolver::from_profiles(&keyboard, &MidiProfile::default());
+        assert_eq!(
+            r.lanes_for_key(KeyCode::KeyQ).collect::<Vec<_>>(),
+            vec![0, 1]
+        );
+    }
+
+    #[test]
+    fn exclusive_note_emits_one_fixed_logical_lane() {
+        let mut midi = MidiProfile::default();
+        midi.bind_note(EChannel::Snare, 36); // steal BD's note
+        let r = BindResolver::from_profiles(&KeyboardProfile::default(), &midi);
+        assert_eq!(r.lane_for_note(36), Some(1)); // now SD, exactly one lane
+        assert_eq!(midi.note_owner(36), Some(EChannel::Snare));
+    }
+
+    #[test]
+    fn changing_lane_arrangement_does_not_change_resolver_lane_id() {
+        // The resolver only consults the fixed logical order (lane_of); the
+        // display arrangement is not an input, so ids match lane_of exactly.
+        let r = BindResolver::from_profiles(&KeyboardProfile::default(), &MidiProfile::default());
+        assert_eq!(r.lane_for_note(38), lane_of(EChannel::Snare));
+        assert_eq!(r.lane_for_note(36), lane_of(EChannel::BassDrum));
+        assert_eq!(r.lane_for_key(KeyCode::KeyX), lane_of(EChannel::HiHatClose));
+    }
+
+    #[test]
+    fn failed_registry_selection_keeps_active_resolver() {
+        use dtx_config::profiles::{reduce_registry, RegistryAction};
+        let registry = dtx_config::profiles::keyboard_registry();
+        let before = ActiveInputProfiles::default();
+        let resolver = BindResolver::from_profiles(&before.keyboard, &before.midi);
+        let result = reduce_registry(
+            &registry,
+            &keyboard_builtins(),
+            RegistryAction::Select("no such profile".to_owned()),
+        );
+        assert!(result.is_err());
+        let after = BindResolver::from_profiles(&before.keyboard, &before.midi);
+        assert_eq!(
+            resolver.lane_for_key(KeyCode::KeyX),
+            after.lane_for_key(KeyCode::KeyX)
+        );
+        assert_eq!(resolver.lane_for_note(38), after.lane_for_note(38));
     }
 }
