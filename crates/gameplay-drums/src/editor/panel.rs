@@ -148,7 +148,9 @@ pub fn plugin(app: &mut App) {
                 resource_changed::<super::tabs::ActiveTab>
                     .or_else(resource_changed::<EditorOpen>)
                     .or_else(resource_changed::<Lanes>)
-                    .or_else(resource_changed::<super::bindings_panel::BindingsRev>),
+                    .or_else(resource_changed::<super::bindings_panel::BindingsRev>)
+                    .or_else(resource_changed::<super::controls_panel::ControlsSegment>)
+                    .or_else(resource_changed::<super::controls_panel::ControlsFocus>),
             ),
             // Right inspector rebuilds on selection change (+ tab/open) — this
             // is the only panel that reacts to Selection.

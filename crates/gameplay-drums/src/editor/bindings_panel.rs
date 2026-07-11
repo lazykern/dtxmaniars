@@ -592,21 +592,30 @@ fn spawn_pads_card(
                     },
                 ));
                 for chip in &row.chips {
+                    // Chip body: hoverable (Button → Interaction drives the
+                    // shared-lane preview) but inert — no BindChipRemove, so
+                    // hovering to preview can't also delete. The `×` glyph is
+                    // its own small button carrying the remove marker.
                     let chip_id = panel_kit::spawn_chip(
                         r,
                         &chip.label,
                         chip.shared,
-                        (
-                            BindChipRemove { channel: ch, index: chip.index },
-                            ChipSource(chip.source),
-                            Button,
-                        ),
+                        (ChipSource(chip.source), Button),
                     );
                     r.commands_mut().entity(chip_id).with_children(|cc| {
                         cc.spawn((
-                            Text::new("\u{00d7}"),
-                            dtx_ui::theme::Theme::font(9.0),
-                            TextColor(chrome::TEXT_MUTED),
+                            BindChipRemove { channel: ch, index: chip.index },
+                            Button,
+                            Node {
+                                padding: UiRect::axes(Val::Px(3.0), Val::Px(0.0)),
+                                margin: UiRect::left(Val::Px(2.0)),
+                                ..default()
+                            },
+                            children![(
+                                Text::new("\u{00d7}"),
+                                dtx_ui::theme::Theme::font(11.0),
+                                TextColor(chrome::TEXT_MUTED),
+                            )],
                         ));
                     });
                 }
