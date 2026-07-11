@@ -244,11 +244,19 @@ fn highlight_selection(
     }
 }
 
-/// Esc: first press deselects; with nothing selected it closes the editor
+fn should_deselect_on_escape(
+    active: game_shell::CustomizeTab,
+    selection: Option<WidgetKind>,
+) -> bool {
+    active == game_shell::CustomizeTab::Widgets && selection.is_some()
+}
+
+/// Esc: on Widgets, first press deselects; otherwise it closes the editor
 /// (pause is gated off while open).
 fn close_on_escape(
     keys: Res<ButtonInput<KeyCode>>,
     mut close_requests: MessageReader<super::EditorCloseRequest>,
+    active: Res<super::tabs::ActiveTab>,
     mut selection: ResMut<Selection>,
     mut open: ResMut<EditorOpen>,
     prev: Res<super::PrevAutoplay>,
@@ -271,7 +279,7 @@ fn close_on_escape(
     }
     let requested = close_requests.read().next().is_some();
     if requested || keys.just_pressed(KeyCode::Escape) {
-        if selection.0.is_some() {
+        if should_deselect_on_escape(active.0, selection.0) {
             selection.0 = None;
         } else {
             // Dirty profile drafts intercept the close BEFORE EditorOpen
@@ -293,5 +301,26 @@ fn close_on_escape(
                 }
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn escape_deselects_only_visible_widget_selection() {
+        assert!(!should_deselect_on_escape(
+            game_shell::CustomizeTab::Gameplay,
+            Some(WidgetKind::Combo),
+        ));
+        assert!(should_deselect_on_escape(
+            game_shell::CustomizeTab::Widgets,
+            Some(WidgetKind::Combo),
+        ));
+        assert!(!should_deselect_on_escape(
+            game_shell::CustomizeTab::Widgets,
+            None,
+        ));
     }
 }
