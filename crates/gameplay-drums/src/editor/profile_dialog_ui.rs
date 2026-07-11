@@ -59,22 +59,33 @@ fn sync_dialog(
     let t = theme.0;
     match &*dialog {
         ProfileDialogState::Closed => {}
-        ProfileDialogState::Name { action, value, error } => {
-            spawn_name_dialog(&mut commands, &t, *action, value, error.as_ref())
-        }
+        ProfileDialogState::Name {
+            action,
+            value,
+            error,
+        } => spawn_name_dialog(&mut commands, &t, *action, value, error.as_ref()),
         ProfileDialogState::ConfirmDelete { name } => spawn_confirm_delete(&mut commands, &t, name),
         ProfileDialogState::Dirty {
-            kind, builtin_selected, ..
+            kind,
+            builtin_selected,
+            ..
         } => spawn_dirty_dialog(&mut commands, &t, *kind, *builtin_selected),
         // ponytail: unreachable until startup corruption detection wires
         // open_corrupt_reset (deferred). Rendering + reset path are ready.
-        ProfileDialogState::CorruptReset { message, .. } => spawn_corrupt_dialog(&mut commands, &t, message),
+        ProfileDialogState::CorruptReset { message, .. } => {
+            spawn_corrupt_dialog(&mut commands, &t, message)
+        }
     }
 }
 
 /// Centered card over a full-screen scrim — same skeleton as
 /// `close_dialog.rs`, generalized to any dialog's content.
-fn spawn_modal(commands: &mut Commands, width: f32, t: &dtx_ui::theme::Theme, content: impl FnOnce(&mut ChildSpawnerCommands)) {
+fn spawn_modal(
+    commands: &mut Commands,
+    width: f32,
+    t: &dtx_ui::theme::Theme,
+    content: impl FnOnce(&mut ChildSpawnerCommands),
+) {
     commands
         .spawn((
             ProfileDialogRoot,
@@ -108,7 +119,13 @@ fn spawn_modal(commands: &mut Commands, width: f32, t: &dtx_ui::theme::Theme, co
         });
 }
 
-fn spawn_dialog_btn(p: &mut ChildSpawnerCommands, t: &dtx_ui::theme::Theme, button: DialogButton, label: &str, color: Color) {
+fn spawn_dialog_btn(
+    p: &mut ChildSpawnerCommands,
+    t: &dtx_ui::theme::Theme,
+    button: DialogButton,
+    label: &str,
+    color: Color,
+) {
     p.spawn((
         button,
         Button,
@@ -117,11 +134,21 @@ fn spawn_dialog_btn(p: &mut ChildSpawnerCommands, t: &dtx_ui::theme::Theme, butt
             ..default()
         },
         BackgroundColor(color),
-        children![(Text::new(label.to_owned()), dtx_ui::theme::Theme::font(14.0), TextColor(t.text_primary))],
+        children![(
+            Text::new(label.to_owned()),
+            dtx_ui::theme::Theme::font(14.0),
+            TextColor(t.text_primary)
+        )],
     ));
 }
 
-fn spawn_name_dialog(commands: &mut Commands, t: &dtx_ui::theme::Theme, action: NameAction, value: &str, error: Option<&dtx_persistence::ProfileNameError>) {
+fn spawn_name_dialog(
+    commands: &mut Commands,
+    t: &dtx_ui::theme::Theme,
+    action: NameAction,
+    value: &str,
+    error: Option<&dtx_persistence::ProfileNameError>,
+) {
     let title = match action {
         NameAction::SaveAs => "Save profile as",
         NameAction::Rename => "Rename profile",
@@ -130,7 +157,11 @@ fn spawn_name_dialog(commands: &mut Commands, t: &dtx_ui::theme::Theme, action: 
     let error_text = error.map(|e| e.to_string());
     let t = *t;
     spawn_modal(commands, 420.0, &t, move |card| {
-        card.spawn((Text::new(title), dtx_ui::theme::Theme::font(20.0), TextColor(t.text_primary)));
+        card.spawn((
+            Text::new(title),
+            dtx_ui::theme::Theme::font(20.0),
+            TextColor(t.text_primary),
+        ));
         card.spawn((
             Node {
                 padding: UiRect::all(Val::Px(8.0)),
@@ -149,7 +180,11 @@ fn spawn_name_dialog(commands: &mut Commands, t: &dtx_ui::theme::Theme, action: 
             ));
         });
         if let Some(msg) = &error_text {
-            card.spawn((Text::new(msg.clone()), dtx_ui::theme::Theme::font(11.0), TextColor(chrome::ERR)));
+            card.spawn((
+                Text::new(msg.clone()),
+                dtx_ui::theme::Theme::font(11.0),
+                TextColor(chrome::ERR),
+            ));
         }
         card.spawn(Node {
             flex_direction: FlexDirection::Row,
@@ -158,7 +193,13 @@ fn spawn_name_dialog(commands: &mut Commands, t: &dtx_ui::theme::Theme, action: 
             ..default()
         })
         .with_children(|buttons| {
-            spawn_dialog_btn(buttons, &t, DialogButton::NameCancel, "Cancel", Color::srgb(0.18, 0.18, 0.22));
+            spawn_dialog_btn(
+                buttons,
+                &t,
+                DialogButton::NameCancel,
+                "Cancel",
+                Color::srgb(0.18, 0.18, 0.22),
+            );
             spawn_dialog_btn(buttons, &t, DialogButton::NameOk, "OK", t.accent);
         });
     });
@@ -168,9 +209,15 @@ fn spawn_confirm_delete(commands: &mut Commands, t: &dtx_ui::theme::Theme, name:
     let name = name.to_owned();
     let t = *t;
     spawn_modal(commands, 380.0, &t, move |card| {
-        card.spawn((Text::new("Delete profile?"), dtx_ui::theme::Theme::font(20.0), TextColor(t.text_primary)));
         card.spawn((
-            Text::new(format!("\u{201c}{name}\u{201d} will be permanently deleted.")),
+            Text::new("Delete profile?"),
+            dtx_ui::theme::Theme::font(20.0),
+            TextColor(t.text_primary),
+        ));
+        card.spawn((
+            Text::new(format!(
+                "\u{201c}{name}\u{201d} will be permanently deleted."
+            )),
             dtx_ui::theme::Theme::font(14.0),
             TextColor(t.text_secondary),
         ));
@@ -181,8 +228,20 @@ fn spawn_confirm_delete(commands: &mut Commands, t: &dtx_ui::theme::Theme, name:
             ..default()
         })
         .with_children(|buttons| {
-            spawn_dialog_btn(buttons, &t, DialogButton::CancelDelete, "Cancel", Color::srgb(0.18, 0.18, 0.22));
-            spawn_dialog_btn(buttons, &t, DialogButton::ConfirmDelete, "Delete", chrome::ERR);
+            spawn_dialog_btn(
+                buttons,
+                &t,
+                DialogButton::CancelDelete,
+                "Cancel",
+                Color::srgb(0.18, 0.18, 0.22),
+            );
+            spawn_dialog_btn(
+                buttons,
+                &t,
+                DialogButton::ConfirmDelete,
+                "Delete",
+                chrome::ERR,
+            );
         });
     });
 }
@@ -195,9 +254,18 @@ fn kind_label(kind: ProfileKind) -> &'static str {
     }
 }
 
-fn spawn_dirty_dialog(commands: &mut Commands, t: &dtx_ui::theme::Theme, kind: ProfileKind, builtin_selected: bool) {
+fn spawn_dirty_dialog(
+    commands: &mut Commands,
+    t: &dtx_ui::theme::Theme,
+    kind: ProfileKind,
+    builtin_selected: bool,
+) {
     let layout = profile_state::dirty_dialog_layout(&[kind], builtin_selected);
-    let decisions = [CloseDecision::Cancel, CloseDecision::DiscardAll, CloseDecision::SaveAll];
+    let decisions = [
+        CloseDecision::Cancel,
+        CloseDecision::DiscardAll,
+        CloseDecision::SaveAll,
+    ];
     let label = kind_label(kind);
     let t = *t;
     spawn_modal(commands, 420.0, &t, move |card| {
@@ -207,7 +275,9 @@ fn spawn_dirty_dialog(commands: &mut Commands, t: &dtx_ui::theme::Theme, kind: P
             TextColor(t.text_primary),
         ));
         card.spawn((
-            Text::new(format!("Unsaved {label} changes will be lost if discarded.")),
+            Text::new(format!(
+                "Unsaved {label} changes will be lost if discarded."
+            )),
             dtx_ui::theme::Theme::font(13.0),
             TextColor(t.text_secondary),
         ));
@@ -241,7 +311,11 @@ fn spawn_corrupt_dialog(commands: &mut Commands, t: &dtx_ui::theme::Theme, messa
             dtx_ui::theme::Theme::font(20.0),
             TextColor(t.text_primary),
         ));
-        card.spawn((Text::new(message), dtx_ui::theme::Theme::font(13.0), TextColor(chrome::ERR)));
+        card.spawn((
+            Text::new(message),
+            dtx_ui::theme::Theme::font(13.0),
+            TextColor(chrome::ERR),
+        ));
         card.spawn((
             Text::new("Backing up and resetting replaces it with built-in defaults; other profiles are unaffected."),
             dtx_ui::theme::Theme::font(11.0),
@@ -254,8 +328,20 @@ fn spawn_corrupt_dialog(commands: &mut Commands, t: &dtx_ui::theme::Theme, messa
             ..default()
         })
         .with_children(|buttons| {
-            spawn_dialog_btn(buttons, &t, DialogButton::CorruptCancel, "Cancel", Color::srgb(0.18, 0.18, 0.22));
-            spawn_dialog_btn(buttons, &t, DialogButton::CorruptConfirm, "Back up & reset", t.accent);
+            spawn_dialog_btn(
+                buttons,
+                &t,
+                DialogButton::CorruptCancel,
+                "Cancel",
+                Color::srgb(0.18, 0.18, 0.22),
+            );
+            spawn_dialog_btn(
+                buttons,
+                &t,
+                DialogButton::CorruptConfirm,
+                "Back up & reset",
+                t.accent,
+            );
         });
     });
 }
@@ -286,7 +372,15 @@ fn handle_name_dialog_input(
         return;
     }
     if keys.just_pressed(KeyCode::Enter) {
-        submit_name_dialog(&mut dialog, dialog_kind.0, &mut session, &mut lane_draft, &mut live, &mut rev, &mut error);
+        submit_name_dialog(
+            &mut dialog,
+            dialog_kind.0,
+            &mut session,
+            &mut lane_draft,
+            &mut live,
+            &mut rev,
+            &mut error,
+        );
         chars.clear();
         return;
     }
@@ -413,9 +507,23 @@ fn handle_dialog_buttons(
         (ProfileDialogState::ConfirmDelete { .. }, DialogButton::CancelDelete) => {
             *dialog = ProfileDialogState::Closed;
         }
-        (ProfileDialogState::Dirty { kind, pending, builtin_selected }, DialogButton::Dirty(decision)) => {
+        (
+            ProfileDialogState::Dirty {
+                kind,
+                pending,
+                builtin_selected,
+            },
+            DialogButton::Dirty(decision),
+        ) => {
             let (kind, builtin_selected) = (*kind, *builtin_selected);
-            match profile_bar_ui::resolve_dirty(kind, pending, builtin_selected, decision, &mut session, &mut lane_draft) {
+            match profile_bar_ui::resolve_dirty(
+                kind,
+                pending,
+                builtin_selected,
+                decision,
+                &mut session,
+                &mut lane_draft,
+            ) {
                 Ok(needs_refresh) => {
                     error.0 = None;
                     if needs_refresh {
@@ -440,14 +548,26 @@ fn handle_dialog_buttons(
 fn backup_and_reset(kind: ProfileKind) -> Result<(), String> {
     let now = std::time::SystemTime::now();
     match kind {
-        ProfileKind::Keyboard => dtx_input::profiles::backup_and_reset_keyboard_registry(&crate::bindings::keyboard_registry_path(), true, now)
-            .map(|_| ())
-            .map_err(|error| error.to_string()),
-        ProfileKind::Midi => dtx_input::profiles::backup_and_reset_midi_registry(&crate::bindings::midi_registry_path(), true, now)
-            .map(|_| ())
-            .map_err(|error| error.to_string()),
-        ProfileKind::Lanes => dtx_layout::profiles::backup_and_reset_lane_registry(&crate::lanes::lane_registry_path(), true, now)
-            .map(|_| ())
-            .map_err(|error| error.to_string()),
+        ProfileKind::Keyboard => dtx_input::profiles::backup_and_reset_keyboard_registry(
+            &crate::bindings::keyboard_registry_path(),
+            true,
+            now,
+        )
+        .map(|_| ())
+        .map_err(|error| error.to_string()),
+        ProfileKind::Midi => dtx_input::profiles::backup_and_reset_midi_registry(
+            &crate::bindings::midi_registry_path(),
+            true,
+            now,
+        )
+        .map(|_| ())
+        .map_err(|error| error.to_string()),
+        ProfileKind::Lanes => dtx_layout::profiles::backup_and_reset_lane_registry(
+            &crate::lanes::lane_registry_path(),
+            true,
+            now,
+        )
+        .map(|_| ())
+        .map_err(|error| error.to_string()),
     }
 }

@@ -209,10 +209,90 @@ pub fn plugin(app: &mut App) {
     ));
 }
 
-/// Load the user's lane arrangement from layout.toml (defaults on absence).
+/// Load the user's lane arrangement. `lane-profiles.toml`'s active profile is
+/// authoritative (migrated from layout.toml's `[lanes]` section on first
+/// run); mirrors the keyboard/MIDI startup pattern in
+/// `bindings::reload_profiles`. Pure/path-parameterized so it's unit
+/// testable without touching the real XDG config dir.
+fn resolve_startup_lane_arrangement(
+    layout_path: &std::path::Path,
+    lane_registry_path: &std::path::Path,
+) -> dtx_layout::LaneArrangement {
+    let startup = match dtx_layout::load_layout_with_lane_authority(layout_path, lane_registry_path)
+    {
+        Ok((_, startup)) => startup,
+        Err(error) => {
+            error!("layout load failed, using default lanes: {error}");
+            return dtx_layout::classic();
+        }
+    };
+    let registry = match startup {
+        dtx_layout::LaneRegistryStartup::Ready(registry) => registry,
+        dtx_layout::LaneRegistryStartup::LegacySession { registry, write_error } => {
+            error!("lane profile registry migration write failed: {write_error}");
+            registry
+        }
+        dtx_layout::LaneRegistryStartup::ReadOnlyBuiltins(error) => {
+            error!("lane profile registry unusable, using built-ins: {error}");
+            dtx_layout::lane_registry()
+        }
+    };
+    dtx_layout::active_lane_arrangement(&registry)
+}
+
 fn load_lane_arrangement(mut lanes: ResMut<lanes::Lanes>) {
-    let file = dtx_layout::load(&dtx_layout::default_path());
-    lanes.0 = file.lanes.resolve();
+    lanes.0 = resolve_startup_lane_arrangement(&dtx_layout::default_path(), &lanes::lane_registry_path());
+}
+
+#[cfg(test)]
+mod lane_startup_tests {
+    use super::resolve_startup_lane_arrangement;
+
+    fn temp_dir(name: &str) -> std::path::PathBuf {
+        let dir = std::env::temp_dir()
+            .join("dtx-lane-startup-load")
+            .join(std::process::id().to_string())
+            .join(name);
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).expect("test dir");
+        dir
+    }
+
+    /// Regression for the redesign: booting straight into Performance (no
+    /// editor visit) must read the ACTIVE lane profile from
+    /// `lane-profiles.toml`, not just whatever `[lanes]` happens to say in
+    /// layout.toml. Simulates "picked NX Type-B, relaunched" by writing a
+    /// lane registry whose active profile disagrees with layout.toml.
+    #[test]
+    fn startup_reads_active_profile_from_lane_registry_not_layout_toml() {
+        let dir = temp_dir("registry-authority");
+        let layout_path = dir.join("layout.toml");
+        let lane_registry_path = dir.join("lane-profiles.toml");
+
+        // layout.toml still says Classic (stale compatibility snapshot).
+        std::fs::write(
+            &layout_path,
+            toml::to_string_pretty(&dtx_layout::LayoutFile::default()).expect("layout toml"),
+        )
+        .expect("write layout");
+
+        // lane-profiles.toml is the authority and says NX Type-B.
+        let registry = dtx_layout::LaneProfileRegistry {
+            active: "NX Type-B".to_owned(),
+            ..dtx_layout::lane_registry()
+        };
+        std::fs::write(
+            &lane_registry_path,
+            toml::to_string_pretty(&registry).expect("registry toml"),
+        )
+        .expect("write registry");
+
+        let arrangement = resolve_startup_lane_arrangement(&layout_path, &lane_registry_path);
+        assert_eq!(arrangement, dtx_layout::nx_type_b());
+        assert_ne!(arrangement, dtx_layout::classic());
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 }
 
 fn load_scroll_settings(mut settings: ResMut<resources::ScrollSettings>) {

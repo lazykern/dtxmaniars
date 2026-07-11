@@ -13,7 +13,9 @@ use dtx_input::profiles::{RegistryAction, RegistryStartup};
 use super::chrome;
 use super::profile_bar::{self, ProfileBarAction, ProfileUiError};
 use super::profile_dialog;
-use super::profile_state::{self, CustomizeSession, DraftEffect, LaneProfileDraft, ProfileDraft, ProfileKind};
+use super::profile_state::{
+    self, CustomizeSession, DraftEffect, LaneProfileDraft, ProfileDraft, ProfileKind,
+};
 
 /// Which surface (tab + Controls segment) owns the profile bar, if any.
 /// `Widgets`/settings tabs have no profile bar.
@@ -101,7 +103,8 @@ pub(super) fn bar_info(kind: ProfileKind, session: &CustomizeSession) -> BarInfo
         ProfileKind::Keyboard => BarInfo {
             selected: session.0.keyboard.selected.clone(),
             dirty: session.0.keyboard.is_dirty(),
-            builtin: dtx_input::profiles::keyboard_builtins().contains_key(&session.0.keyboard.selected),
+            builtin: dtx_input::profiles::keyboard_builtins()
+                .contains_key(&session.0.keyboard.selected),
         },
         ProfileKind::Midi => BarInfo {
             selected: session.0.midi.selected.clone(),
@@ -126,7 +129,9 @@ pub(super) fn kind_names(kind: ProfileKind) -> (Vec<String>, Vec<String>) {
     // (deferred); a corrupt registry then routes to CorruptReset instead.
     match kind {
         ProfileKind::Keyboard => {
-            let builtins = dtx_input::profiles::keyboard_builtins().into_keys().collect();
+            let builtins = dtx_input::profiles::keyboard_builtins()
+                .into_keys()
+                .collect();
             let users = match super::load_keyboard_startup() {
                 RegistryStartup::Ready(r) | RegistryStartup::LegacySession { registry: r, .. } => {
                     r.profiles.into_keys().collect()
@@ -149,9 +154,9 @@ pub(super) fn kind_names(kind: ProfileKind) -> (Vec<String>, Vec<String>) {
             let builtins = dtx_layout::profiles::lane_builtins().into_keys().collect();
             let users = match super::load_lane_startup() {
                 dtx_layout::profiles::LaneRegistryStartup::Ready(r)
-                | dtx_layout::profiles::LaneRegistryStartup::LegacySession { registry: r, .. } => {
-                    r.profiles.into_keys().collect()
-                }
+                | dtx_layout::profiles::LaneRegistryStartup::LegacySession {
+                    registry: r, ..
+                } => r.profiles.into_keys().collect(),
                 dtx_layout::profiles::LaneRegistryStartup::ReadOnlyBuiltins(_) => Vec::new(),
             };
             (builtins, users)
@@ -171,7 +176,11 @@ pub(super) fn registry_path(kind: ProfileKind) -> std::path::PathBuf {
 pub(super) fn save_as_suggestion(kind: ProfileKind, session: &CustomizeSession) -> String {
     let info = bar_info(kind, session);
     let (builtins, users) = kind_names(kind);
-    let existing: Vec<&str> = builtins.iter().chain(users.iter()).map(String::as_str).collect();
+    let existing: Vec<&str> = builtins
+        .iter()
+        .chain(users.iter())
+        .map(String::as_str)
+        .collect();
     dtx_persistence::suggest_copy_name(&info.selected, existing.iter().copied())
 }
 
@@ -226,7 +235,12 @@ pub(super) fn select_kind(
                 super::load_keyboard_startup(),
                 &builtins,
                 vec![RegistryAction::Select(target)],
-                |next| dtx_input::profiles::save_keyboard_registry(&crate::bindings::keyboard_registry_path(), next),
+                |next| {
+                    dtx_input::profiles::save_keyboard_registry(
+                        &crate::bindings::keyboard_registry_path(),
+                        next,
+                    )
+                },
             )?;
             let value = crate::bindings::active_keyboard_profile(&registry);
             session.0.keyboard = ProfileDraft::clean(registry.active, value);
@@ -237,19 +251,27 @@ pub(super) fn select_kind(
                 super::load_midi_startup(),
                 &builtins,
                 vec![RegistryAction::Select(target)],
-                |next| dtx_input::profiles::save_midi_registry(&crate::bindings::midi_registry_path(), next),
+                |next| {
+                    dtx_input::profiles::save_midi_registry(
+                        &crate::bindings::midi_registry_path(),
+                        next,
+                    )
+                },
             )?;
             let value = crate::bindings::active_midi_profile(&registry);
             session.0.midi = ProfileDraft::clean(registry.active, value);
         }
         ProfileKind::Lanes => {
-            let registry =
-                super::commit_lane_actions(super::load_lane_startup(), vec![super::LaneRegAction::Select(target)], super::save_lane_to_disk)?;
+            let registry = super::commit_lane_actions(
+                super::load_lane_startup(),
+                vec![super::LaneRegAction::Select(target)],
+                super::save_lane_to_disk,
+            )?;
             let draft = ProfileDraft::clean(
                 registry.active.clone(),
-                dtx_layout::profiles::LaneProfile::from_arrangement(dtx_layout::profiles::active_lane_arrangement(
-                    &registry,
-                )),
+                dtx_layout::profiles::LaneProfile::from_arrangement(
+                    dtx_layout::profiles::active_lane_arrangement(&registry),
+                ),
             );
             lane_draft.0 = draft.clone();
             session.0.lanes = draft;
@@ -274,7 +296,12 @@ pub(super) fn saveas_kind(
                 super::load_keyboard_startup(),
                 &builtins,
                 vec![RegistryAction::SaveAs { name, value }],
-                |next| dtx_input::profiles::save_keyboard_registry(&crate::bindings::keyboard_registry_path(), next),
+                |next| {
+                    dtx_input::profiles::save_keyboard_registry(
+                        &crate::bindings::keyboard_registry_path(),
+                        next,
+                    )
+                },
             )?;
             let value = crate::bindings::active_keyboard_profile(&registry);
             session.0.keyboard = ProfileDraft::clean(registry.active, value);
@@ -286,7 +313,12 @@ pub(super) fn saveas_kind(
                 super::load_midi_startup(),
                 &builtins,
                 vec![RegistryAction::SaveAs { name, value }],
-                |next| dtx_input::profiles::save_midi_registry(&crate::bindings::midi_registry_path(), next),
+                |next| {
+                    dtx_input::profiles::save_midi_registry(
+                        &crate::bindings::midi_registry_path(),
+                        next,
+                    )
+                },
             )?;
             let value = crate::bindings::active_midi_profile(&registry);
             session.0.midi = ProfileDraft::clean(registry.active, value);
@@ -303,9 +335,9 @@ pub(super) fn saveas_kind(
             )?;
             let draft = ProfileDraft::clean(
                 registry.active.clone(),
-                dtx_layout::profiles::LaneProfile::from_arrangement(dtx_layout::profiles::active_lane_arrangement(
-                    &registry,
-                )),
+                dtx_layout::profiles::LaneProfile::from_arrangement(
+                    dtx_layout::profiles::active_lane_arrangement(&registry),
+                ),
             );
             lane_draft.0 = draft.clone();
             session.0.lanes = draft;
@@ -329,7 +361,12 @@ pub(super) fn rename_kind(
                 super::load_keyboard_startup(),
                 &builtins,
                 vec![RegistryAction::Rename(name)],
-                |next| dtx_input::profiles::save_keyboard_registry(&crate::bindings::keyboard_registry_path(), next),
+                |next| {
+                    dtx_input::profiles::save_keyboard_registry(
+                        &crate::bindings::keyboard_registry_path(),
+                        next,
+                    )
+                },
             )?;
             session.0.keyboard.selected = registry.active;
         }
@@ -339,7 +376,12 @@ pub(super) fn rename_kind(
                 super::load_midi_startup(),
                 &builtins,
                 vec![RegistryAction::Rename(name)],
-                |next| dtx_input::profiles::save_midi_registry(&crate::bindings::midi_registry_path(), next),
+                |next| {
+                    dtx_input::profiles::save_midi_registry(
+                        &crate::bindings::midi_registry_path(),
+                        next,
+                    )
+                },
             )?;
             session.0.midi.selected = registry.active;
         }
@@ -370,7 +412,12 @@ pub(super) fn delete_kind(
                 super::load_keyboard_startup(),
                 &builtins,
                 vec![RegistryAction::Delete],
-                |next| dtx_input::profiles::save_keyboard_registry(&crate::bindings::keyboard_registry_path(), next),
+                |next| {
+                    dtx_input::profiles::save_keyboard_registry(
+                        &crate::bindings::keyboard_registry_path(),
+                        next,
+                    )
+                },
             )?;
             let value = crate::bindings::active_keyboard_profile(&registry);
             session.0.keyboard = ProfileDraft::clean(registry.active, value);
@@ -381,18 +428,27 @@ pub(super) fn delete_kind(
                 super::load_midi_startup(),
                 &builtins,
                 vec![RegistryAction::Delete],
-                |next| dtx_input::profiles::save_midi_registry(&crate::bindings::midi_registry_path(), next),
+                |next| {
+                    dtx_input::profiles::save_midi_registry(
+                        &crate::bindings::midi_registry_path(),
+                        next,
+                    )
+                },
             )?;
             let value = crate::bindings::active_midi_profile(&registry);
             session.0.midi = ProfileDraft::clean(registry.active, value);
         }
         ProfileKind::Lanes => {
-            let registry = super::commit_lane_actions(super::load_lane_startup(), vec![super::LaneRegAction::Delete], super::save_lane_to_disk)?;
+            let registry = super::commit_lane_actions(
+                super::load_lane_startup(),
+                vec![super::LaneRegAction::Delete],
+                super::save_lane_to_disk,
+            )?;
             let draft = ProfileDraft::clean(
                 registry.active.clone(),
-                dtx_layout::profiles::LaneProfile::from_arrangement(dtx_layout::profiles::active_lane_arrangement(
-                    &registry,
-                )),
+                dtx_layout::profiles::LaneProfile::from_arrangement(
+                    dtx_layout::profiles::active_lane_arrangement(&registry),
+                ),
             );
             lane_draft.0 = draft.clone();
             session.0.lanes = draft;
@@ -410,17 +466,24 @@ fn apply_kv_effect<T: Clone + PartialEq>(
     builtins: &std::collections::BTreeMap<String, T>,
     startup: RegistryStartup<dtx_input::profiles::ProfileRegistry<T>>,
     active_value: impl Fn(&dtx_input::profiles::ProfileRegistry<T>) -> T,
-    save_fn: impl FnOnce(&dtx_input::profiles::ProfileRegistry<T>) -> Result<(), dtx_input::profiles::RegistryIoError>,
+    save_fn: impl FnOnce(
+        &dtx_input::profiles::ProfileRegistry<T>,
+    ) -> Result<(), dtx_input::profiles::RegistryIoError>,
 ) -> Result<Option<ProfileDraft<T>>, String> {
     let (save, select) = match effect {
         DraftEffect::Noop => return Ok(None),
         DraftEffect::ResetDraft => {
-            return Ok(Some(ProfileDraft::clean(draft.selected.clone(), draft.saved.clone())));
+            return Ok(Some(ProfileDraft::clean(
+                draft.selected.clone(),
+                draft.saved.clone(),
+            )));
         }
         DraftEffect::Transaction { save, select } => (save, select),
     };
     let canonical = match &startup {
-        RegistryStartup::Ready(r) | RegistryStartup::LegacySession { registry: r, .. } => Some(r.clone()),
+        RegistryStartup::Ready(r) | RegistryStartup::LegacySession { registry: r, .. } => {
+            Some(r.clone())
+        }
         RegistryStartup::ReadOnlyBuiltins(_) => None,
     };
     let mut actions = Vec::new();
@@ -428,7 +491,10 @@ fn apply_kv_effect<T: Clone + PartialEq>(
         let action = if name == draft.selected {
             RegistryAction::Save(value)
         } else {
-            let existing: Vec<String> = canonical.as_ref().map(|r| r.profiles.keys().cloned().collect()).unwrap_or_default();
+            let existing: Vec<String> = canonical
+                .as_ref()
+                .map(|r| r.profiles.keys().cloned().collect())
+                .unwrap_or_default();
             let name = dtx_persistence::validate_profile_name(
                 &name,
                 builtins.keys().map(String::as_str),
@@ -457,7 +523,10 @@ fn apply_lane_effect(
     let (save, select) = match effect {
         DraftEffect::Noop => return Ok(None),
         DraftEffect::ResetDraft => {
-            return Ok(Some(ProfileDraft::clean(draft.selected.clone(), draft.saved.clone())));
+            return Ok(Some(ProfileDraft::clean(
+                draft.selected.clone(),
+                draft.saved.clone(),
+            )));
         }
         DraftEffect::Transaction { save, select } => (save, select),
     };
@@ -473,9 +542,14 @@ fn apply_lane_effect(
     if let Some(target) = select {
         actions.push(super::LaneRegAction::Select(target));
     }
-    let registry = super::commit_lane_actions(super::load_lane_startup(), actions, super::save_lane_to_disk)?;
-    let value =
-        dtx_layout::profiles::LaneProfile::from_arrangement(dtx_layout::profiles::active_lane_arrangement(&registry));
+    let registry = super::commit_lane_actions(
+        super::load_lane_startup(),
+        actions,
+        super::save_lane_to_disk,
+    )?;
+    let value = dtx_layout::profiles::LaneProfile::from_arrangement(
+        dtx_layout::profiles::active_lane_arrangement(&registry),
+    );
     Ok(Some(ProfileDraft::clean(registry.active.clone(), value)))
 }
 
@@ -504,8 +578,13 @@ pub(super) fn resolve_dirty(
 
     match kind {
         ProfileKind::Keyboard => {
-            let effect = reduce_dirty_action(&session.0.keyboard, builtin_selected, pending, dirty_decision)
-                .map_err(|error| error.to_string())?;
+            let effect = reduce_dirty_action(
+                &session.0.keyboard,
+                builtin_selected,
+                pending,
+                dirty_decision,
+            )
+            .map_err(|error| error.to_string())?;
             let builtins = dtx_input::profiles::keyboard_builtins();
             let next = apply_kv_effect(
                 effect,
@@ -513,7 +592,12 @@ pub(super) fn resolve_dirty(
                 &builtins,
                 super::load_keyboard_startup(),
                 crate::bindings::active_keyboard_profile,
-                |next| dtx_input::profiles::save_keyboard_registry(&crate::bindings::keyboard_registry_path(), next),
+                |next| {
+                    dtx_input::profiles::save_keyboard_registry(
+                        &crate::bindings::keyboard_registry_path(),
+                        next,
+                    )
+                },
             )?;
             let changed = next.is_some();
             if let Some(draft) = next {
@@ -522,8 +606,9 @@ pub(super) fn resolve_dirty(
             Ok(changed)
         }
         ProfileKind::Midi => {
-            let effect = reduce_dirty_action(&session.0.midi, builtin_selected, pending, dirty_decision)
-                .map_err(|error| error.to_string())?;
+            let effect =
+                reduce_dirty_action(&session.0.midi, builtin_selected, pending, dirty_decision)
+                    .map_err(|error| error.to_string())?;
             let builtins = dtx_input::profiles::midi_builtins();
             let next = apply_kv_effect(
                 effect,
@@ -531,7 +616,12 @@ pub(super) fn resolve_dirty(
                 &builtins,
                 super::load_midi_startup(),
                 crate::bindings::active_midi_profile,
-                |next| dtx_input::profiles::save_midi_registry(&crate::bindings::midi_registry_path(), next),
+                |next| {
+                    dtx_input::profiles::save_midi_registry(
+                        &crate::bindings::midi_registry_path(),
+                        next,
+                    )
+                },
             )?;
             let changed = next.is_some();
             if let Some(draft) = next {
@@ -540,8 +630,9 @@ pub(super) fn resolve_dirty(
             Ok(changed)
         }
         ProfileKind::Lanes => {
-            let effect = reduce_dirty_action(&session.0.lanes, builtin_selected, pending, dirty_decision)
-                .map_err(|error| error.to_string())?;
+            let effect =
+                reduce_dirty_action(&session.0.lanes, builtin_selected, pending, dirty_decision)
+                    .map_err(|error| error.to_string())?;
             if let Some(draft) = apply_lane_effect(effect, &session.0.lanes)? {
                 lane_draft.0 = draft.clone();
                 session.0.lanes = draft;
@@ -645,7 +736,13 @@ pub fn spawn_bar(
         });
 }
 
-fn spawn_bar_btn(p: &mut ChildSpawnerCommands, t: &dtx_ui::theme::Theme, action: ProfileBarAction, label: &str, enabled: bool) {
+fn spawn_bar_btn(
+    p: &mut ChildSpawnerCommands,
+    t: &dtx_ui::theme::Theme,
+    action: ProfileBarAction,
+    label: &str,
+    enabled: bool,
+) {
     p.spawn((
         ProfileBarBtn(action),
         Button,
@@ -653,11 +750,19 @@ fn spawn_bar_btn(p: &mut ChildSpawnerCommands, t: &dtx_ui::theme::Theme, action:
             padding: UiRect::axes(Val::Px(8.0), Val::Px(4.0)),
             ..default()
         },
-        BackgroundColor(if enabled { chrome::CARD_BG } else { chrome::PANEL_BG }),
+        BackgroundColor(if enabled {
+            chrome::CARD_BG
+        } else {
+            chrome::PANEL_BG
+        }),
         children![(
             Text::new(label.to_owned()),
             dtx_ui::theme::Theme::font(12.0),
-            TextColor(if enabled { t.text_primary } else { chrome::TEXT_MUTED }),
+            TextColor(if enabled {
+                t.text_primary
+            } else {
+                chrome::TEXT_MUTED
+            }),
         )],
     ));
 }
@@ -682,7 +787,12 @@ fn spawn_popup_container<'a>(p: &'a mut ChildSpawnerCommands) -> EntityCommands<
     ))
 }
 
-fn spawn_selector_popup(p: &mut ChildSpawnerCommands, t: &dtx_ui::theme::Theme, kind: ProfileKind, info: &BarInfo) {
+fn spawn_selector_popup(
+    p: &mut ChildSpawnerCommands,
+    t: &dtx_ui::theme::Theme,
+    kind: ProfileKind,
+    info: &BarInfo,
+) {
     let (builtins, users) = kind_names(kind);
     let items = profile_bar::profile_bar_items(
         builtins.iter().map(String::as_str),
@@ -705,20 +815,32 @@ fn spawn_selector_popup(p: &mut ChildSpawnerCommands, t: &dtx_ui::theme::Theme, 
                         border_radius: BorderRadius::all(Val::Px(4.0)),
                         ..default()
                     },
-                    BackgroundColor(if item.selected { chrome::ROW_SELECTED_BG } else { Color::NONE }),
+                    BackgroundColor(if item.selected {
+                        chrome::ROW_SELECTED_BG
+                    } else {
+                        Color::NONE
+                    }),
                 ))
                 .with_children(|row| {
                     row.spawn((
                         Text::new(label),
                         dtx_ui::theme::Theme::font(11.0),
-                        TextColor(if item.builtin { chrome::TEXT_MUTED } else { t.text_primary }),
+                        TextColor(if item.builtin {
+                            chrome::TEXT_MUTED
+                        } else {
+                            t.text_primary
+                        }),
                     ));
                 });
         }
     });
 }
 
-fn spawn_overflow_popup(p: &mut ChildSpawnerCommands, t: &dtx_ui::theme::Theme, builtin_selected: bool) {
+fn spawn_overflow_popup(
+    p: &mut ChildSpawnerCommands,
+    t: &dtx_ui::theme::Theme,
+    builtin_selected: bool,
+) {
     let actions = profile_bar::overflow_actions(builtin_selected);
     spawn_popup_container(p).with_children(|popup| {
         for action in actions {
@@ -751,7 +873,10 @@ fn spawn_overflow_popup(p: &mut ChildSpawnerCommands, t: &dtx_ui::theme::Theme, 
 
 // ===== Interaction =====
 
-fn handle_selector_toggle(q: Query<&Interaction, (With<ProfileSelectorBtn>, Changed<Interaction>)>, mut popup: ResMut<ProfileBarPopup>) {
+fn handle_selector_toggle(
+    q: Query<&Interaction, (With<ProfileSelectorBtn>, Changed<Interaction>)>,
+    mut popup: ResMut<ProfileBarPopup>,
+) {
     for interaction in &q {
         if *interaction == Interaction::Pressed {
             *popup = if *popup == ProfileBarPopup::Selector {
@@ -869,7 +994,9 @@ fn handle_bar_action_buttons(
                 Ok(()) => {
                     error.0 = None;
                     match kind {
-                        ProfileKind::Keyboard => session.0.keyboard = session.0.keyboard.saved_now(),
+                        ProfileKind::Keyboard => {
+                            session.0.keyboard = session.0.keyboard.saved_now()
+                        }
                         ProfileKind::Midi => session.0.midi = session.0.midi.saved_now(),
                         ProfileKind::Lanes => {
                             lane_draft.0 = lane_draft.0.saved_now();
@@ -882,11 +1009,17 @@ fn handle_bar_action_buttons(
         }
         ProfileBarAction::SaveAs => {
             dialog_kind.0 = Some(kind);
-            *dialog = profile_dialog::open_name_dialog(profile_dialog::NameAction::SaveAs, save_as_suggestion(kind, &session));
+            *dialog = profile_dialog::open_name_dialog(
+                profile_dialog::NameAction::SaveAs,
+                save_as_suggestion(kind, &session),
+            );
         }
         ProfileBarAction::Rename => {
             dialog_kind.0 = Some(kind);
-            *dialog = profile_dialog::open_name_dialog(profile_dialog::NameAction::Rename, info.selected.clone());
+            *dialog = profile_dialog::open_name_dialog(
+                profile_dialog::NameAction::Rename,
+                info.selected.clone(),
+            );
         }
         ProfileBarAction::Revert => {
             if info.dirty {
@@ -899,7 +1032,9 @@ fn handle_bar_action_buttons(
         }
         ProfileBarAction::Delete => {
             dialog_kind.0 = Some(kind);
-            *dialog = profile_dialog::ProfileDialogState::ConfirmDelete { name: info.selected.clone() };
+            *dialog = profile_dialog::ProfileDialogState::ConfirmDelete {
+                name: info.selected.clone(),
+            };
         }
     }
 }
@@ -913,9 +1048,21 @@ mod tests {
 
     #[test]
     fn bar_kind_follows_tab_and_segment() {
-        assert_eq!(bar_kind(CustomizeTab::Controls, ControlsSegment::Keyboard), Some(ProfileKind::Keyboard));
-        assert_eq!(bar_kind(CustomizeTab::Controls, ControlsSegment::Midi), Some(ProfileKind::Midi));
-        assert_eq!(bar_kind(CustomizeTab::Lanes, ControlsSegment::Keyboard), Some(ProfileKind::Lanes));
-        assert_eq!(bar_kind(CustomizeTab::Widgets, ControlsSegment::Keyboard), None);
+        assert_eq!(
+            bar_kind(CustomizeTab::Controls, ControlsSegment::Keyboard),
+            Some(ProfileKind::Keyboard)
+        );
+        assert_eq!(
+            bar_kind(CustomizeTab::Controls, ControlsSegment::Midi),
+            Some(ProfileKind::Midi)
+        );
+        assert_eq!(
+            bar_kind(CustomizeTab::Lanes, ControlsSegment::Keyboard),
+            Some(ProfileKind::Lanes)
+        );
+        assert_eq!(
+            bar_kind(CustomizeTab::Widgets, ControlsSegment::Keyboard),
+            None
+        );
     }
 }

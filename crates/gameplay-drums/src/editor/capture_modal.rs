@@ -100,7 +100,12 @@ fn key_label(k: KeyCode) -> String {
 }
 
 fn owners_caption(owners: &[dtx_core::EChannel]) -> String {
-    let names = owners.iter().copied().map(channel_name).collect::<Vec<_>>().join(", ");
+    let names = owners
+        .iter()
+        .copied()
+        .map(channel_name)
+        .collect::<Vec<_>>()
+        .join(", ");
     format!("also bound to {names}")
 }
 
@@ -123,14 +128,25 @@ fn modal_lines(state: &CaptureState) -> Option<ModalLines> {
             owners_caption: None,
             choice: None,
         }),
-        CaptureState::KeyArrived { key, owners, choice, .. } => Some(ModalLines {
+        CaptureState::KeyArrived {
+            key,
+            owners,
+            choice,
+            ..
+        } => Some(ModalLines {
             title: "Confirm binding".to_string(),
             subtitle: None,
             arrived: Some(key_label(*key)),
             owners_caption: (!owners.is_empty()).then(|| owners_caption(owners)),
             choice: Some(*choice),
         }),
-        CaptureState::MidiArrived { note, velocity, owners, choice, .. } => Some(ModalLines {
+        CaptureState::MidiArrived {
+            note,
+            velocity,
+            owners,
+            choice,
+            ..
+        } => Some(ModalLines {
             title: "Confirm binding".to_string(),
             subtitle: None,
             arrived: Some(format!("note {note} · velocity {velocity}")),
@@ -148,9 +164,18 @@ fn modal_lines(state: &CaptureState) -> Option<ModalLines> {
 fn live_hit_line(hit: &crate::LastMidiHit) -> Option<(String, bool)> {
     hit.at?;
     if hit.below_threshold {
-        Some((format!("note {} · velocity {} — below threshold", hit.note, hit.velocity), true))
+        Some((
+            format!(
+                "note {} · velocity {} — below threshold",
+                hit.note, hit.velocity
+            ),
+            true,
+        ))
     } else {
-        Some((format!("note {} · velocity {}", hit.note, hit.velocity), false))
+        Some((
+            format!("note {} · velocity {}", hit.note, hit.velocity),
+            false,
+        ))
     }
 }
 
@@ -168,7 +193,13 @@ fn choice_click_input(clicked: ArrivedChoice, current: ArrivedChoice) -> Arrived
 
 // ===== Render =====
 
-fn spawn_choice_btn(p: &mut ChildSpawnerCommands, t: &dtx_ui::theme::Theme, choice: ArrivedChoice, label: &str, current: ArrivedChoice) {
+fn spawn_choice_btn(
+    p: &mut ChildSpawnerCommands,
+    t: &dtx_ui::theme::Theme,
+    choice: ArrivedChoice,
+    label: &str,
+    current: ArrivedChoice,
+) {
     let active = choice == current;
     p.spawn((
         CaptureChoiceBtn(choice),
@@ -179,9 +210,21 @@ fn spawn_choice_btn(p: &mut ChildSpawnerCommands, t: &dtx_ui::theme::Theme, choi
             border_radius: BorderRadius::all(Val::Px(4.0)),
             ..default()
         },
-        BackgroundColor(if active { chrome::ROW_SELECTED_BG } else { chrome::CHIP_BG }),
-        BorderColor::all(if active { chrome::ACCENT } else { chrome::CHIP_BORDER }),
-        children![(Text::new(label.to_owned()), dtx_ui::theme::Theme::font(12.0), TextColor(t.text_primary))],
+        BackgroundColor(if active {
+            chrome::ROW_SELECTED_BG
+        } else {
+            chrome::CHIP_BG
+        }),
+        BorderColor::all(if active {
+            chrome::ACCENT
+        } else {
+            chrome::CHIP_BORDER
+        }),
+        children![(
+            Text::new(label.to_owned()),
+            dtx_ui::theme::Theme::font(12.0),
+            TextColor(t.text_primary)
+        )],
     ));
 }
 
@@ -240,24 +283,41 @@ fn sync_capture_modal(
                     BorderColor::all(chrome::CARD_BORDER),
                 ))
                 .with_children(|card| {
-                    card.spawn((Text::new(lines.title.clone()), dtx_ui::theme::Theme::font(16.0), TextColor(t.text_primary)));
+                    card.spawn((
+                        Text::new(lines.title.clone()),
+                        dtx_ui::theme::Theme::font(16.0),
+                        TextColor(t.text_primary),
+                    ));
 
                     if let Some(subtitle) = &lines.subtitle {
-                        card.spawn((Text::new(subtitle.clone()), dtx_ui::theme::Theme::font(12.0), TextColor(chrome::TEXT_MUTED)));
+                        card.spawn((
+                            Text::new(subtitle.clone()),
+                            dtx_ui::theme::Theme::font(12.0),
+                            TextColor(chrome::TEXT_MUTED),
+                        ));
                     }
 
                     if listening_midi {
-                        let (text, muted) = live.unwrap_or_else(|| ("Waiting for a hit…".to_string(), true));
+                        let (text, muted) =
+                            live.unwrap_or_else(|| ("Waiting for a hit…".to_string(), true));
                         card.spawn((
                             CaptureLiveText,
                             Text::new(text),
                             dtx_ui::theme::Theme::font(13.0),
-                            TextColor(if muted { chrome::TEXT_MUTED } else { t.text_primary }),
+                            TextColor(if muted {
+                                chrome::TEXT_MUTED
+                            } else {
+                                t.text_primary
+                            }),
                         ));
                     }
 
                     if let Some(arrived) = &lines.arrived {
-                        card.spawn((Text::new(arrived.clone()), dtx_ui::theme::Theme::font(20.0), TextColor(t.text_primary)));
+                        card.spawn((
+                            Text::new(arrived.clone()),
+                            dtx_ui::theme::Theme::font(20.0),
+                            TextColor(t.text_primary),
+                        ));
                     }
 
                     if let Some(caption) = &lines.owners_caption {
@@ -272,7 +332,11 @@ fn sync_capture_modal(
                             spawn_choice_btn(row, &t, ArrivedChoice::Shared, "Add shared", current);
                             spawn_choice_btn(row, &t, ArrivedChoice::Move, "Move here", current);
                         });
-                        card.spawn((Text::new(caption.clone()), dtx_ui::theme::Theme::font(11.0), TextColor(chrome::TEXT_MUTED)));
+                        card.spawn((
+                            Text::new(caption.clone()),
+                            dtx_ui::theme::Theme::font(11.0),
+                            TextColor(chrome::TEXT_MUTED),
+                        ));
                     } else if lines.arrived.is_some() {
                         card.spawn((
                             CaptureConfirmBtn,
@@ -282,7 +346,11 @@ fn sync_capture_modal(
                                 ..default()
                             },
                             BackgroundColor(chrome::ACCENT),
-                            children![(Text::new("Confirm (Enter)"), dtx_ui::theme::Theme::font(13.0), TextColor(t.text_primary))],
+                            children![(
+                                Text::new("Confirm (Enter)"),
+                                dtx_ui::theme::Theme::font(13.0),
+                                TextColor(t.text_primary)
+                            )],
                         ));
                     }
 
@@ -301,7 +369,11 @@ fn sync_capture_modal(
                         },
                         BackgroundColor(chrome::CHIP_BG),
                         BorderColor::all(chrome::CHIP_BORDER),
-                        children![(Text::new("Cancel (Esc)"), dtx_ui::theme::Theme::font(12.0), TextColor(chrome::TEXT_MUTED))],
+                        children![(
+                            Text::new("Cancel (Esc)"),
+                            dtx_ui::theme::Theme::font(12.0),
+                            TextColor(chrome::TEXT_MUTED)
+                        )],
                     ));
                 });
         });
@@ -322,11 +394,16 @@ fn update_capture_live_text(
     let Ok((mut text, mut color)) = q.single_mut() else {
         return;
     };
-    let (next_text, muted) = live_hit_line(&last_midi).unwrap_or_else(|| ("Waiting for a hit…".to_string(), true));
+    let (next_text, muted) =
+        live_hit_line(&last_midi).unwrap_or_else(|| ("Waiting for a hit…".to_string(), true));
     if text.0 != next_text {
         text.0 = next_text;
     }
-    *color = TextColor(if muted { chrome::TEXT_MUTED } else { theme.0.text_primary });
+    *color = TextColor(if muted {
+        chrome::TEXT_MUTED
+    } else {
+        theme.0.text_primary
+    });
 }
 
 /// Choice/confirm/cancel button clicks → `MouseArrivedInput`, drained by
@@ -342,7 +419,9 @@ fn handle_capture_mouse_input(
     mut mouse_input: ResMut<MouseArrivedInput>,
 ) {
     let current_choice = match &*capture {
-        CaptureState::KeyArrived { choice, .. } | CaptureState::MidiArrived { choice, .. } => Some(*choice),
+        CaptureState::KeyArrived { choice, .. } | CaptureState::MidiArrived { choice, .. } => {
+            Some(*choice)
+        }
         _ => None,
     };
     for (interaction, btn) in &choice_buttons {
@@ -407,7 +486,10 @@ mod tests {
             choice: ArrivedChoice::Move,
         })
         .unwrap();
-        assert_eq!(lines.owners_caption.as_deref(), Some("also bound to HH, LT"));
+        assert_eq!(
+            lines.owners_caption.as_deref(),
+            Some("also bound to HH, LT")
+        );
         assert_eq!(lines.choice, Some(ArrivedChoice::Move));
     }
 
@@ -505,7 +587,11 @@ mod tests {
         app.update();
         assert_eq!(modal_count(&mut app), 1);
         app.update();
-        assert_eq!(modal_count(&mut app), 1, "unchanged state must not respawn the modal");
+        assert_eq!(
+            modal_count(&mut app),
+            1,
+            "unchanged state must not respawn the modal"
+        );
     }
 
     #[test]
@@ -547,7 +633,11 @@ mod tests {
         // Next session re-arms the SAME binding; the Idle reset broke the gate.
         *app.world_mut().resource_mut::<CaptureState>() = arrived();
         app.update();
-        assert_eq!(modal_count(&mut app), 1, "modal respawns after the exit reset");
+        assert_eq!(
+            modal_count(&mut app),
+            1,
+            "modal respawns after the exit reset"
+        );
     }
 
     /// Build an App wired like the real plugin (sync → mouse-input → driver),
@@ -566,7 +656,12 @@ mod tests {
             .insert_resource(state)
             .add_systems(
                 Update,
-                (sync_capture_modal, handle_capture_mouse_input, capture_binding).chain(),
+                (
+                    sync_capture_modal,
+                    handle_capture_mouse_input,
+                    capture_binding,
+                )
+                    .chain(),
             );
         app.update(); // spawns modal + Cancel button
         let cancels: Vec<Entity> = {
@@ -576,7 +671,11 @@ mod tests {
                 .iter(world)
                 .collect()
         };
-        assert_eq!(cancels.len(), 1, "every non-Idle modal has exactly one Cancel button");
+        assert_eq!(
+            cancels.len(),
+            1,
+            "every non-Idle modal has exactly one Cancel button"
+        );
         for e in cancels {
             *app.world_mut().get_mut::<Interaction>(e).unwrap() = Interaction::Pressed;
         }
@@ -593,7 +692,10 @@ mod tests {
             owners: vec![],
             choice: ArrivedChoice::Shared,
         });
-        assert!(matches!(*app.world().resource::<CaptureState>(), CaptureState::Idle));
+        assert!(matches!(
+            *app.world().resource::<CaptureState>(),
+            CaptureState::Idle
+        ));
         assert!(
             app.world()
                 .resource::<crate::bindings::LiveBindings>()
@@ -609,6 +711,9 @@ mod tests {
         // Cancel must also work from the listening states, not just Arrived —
         // the driver reads it as `escape || mouse_cancel` in those arms.
         let app = cancel_via_button(CaptureState::Keyboard(dtx_core::EChannel::Snare));
-        assert!(matches!(*app.world().resource::<CaptureState>(), CaptureState::Idle));
+        assert!(matches!(
+            *app.world().resource::<CaptureState>(),
+            CaptureState::Idle
+        ));
     }
 }

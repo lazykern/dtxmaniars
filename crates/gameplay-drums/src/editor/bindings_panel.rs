@@ -902,11 +902,10 @@ fn update_velocity_meter(
     } else {
         0.0
     };
-    let amber = Color::srgb(0.85, 0.6, 0.1);
     for (mut node, mut bg) in &mut fill {
         node.width = Val::Percent(pct);
         bg.0 = if fresh && last.below_threshold {
-            amber
+            chrome::DIRTY
         } else {
             theme.0.accent
         };

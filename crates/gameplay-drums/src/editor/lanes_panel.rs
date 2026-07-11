@@ -82,10 +82,16 @@ pub enum LanesFocus {
 pub enum LanesNavEffect {
     None,
     /// Swap the lane at `index` with its neighbor in `dir` (-1 left, +1 right).
-    Reorder { index: usize, dir: i32 },
+    Reorder {
+        index: usize,
+        dir: i32,
+    },
     /// Nudge the lane at `index`'s width by `dir` steps (the driver, once
     /// wired, picks the ref-px step and clamps via `set_lane_width`).
-    AdjustWidth { index: usize, dir: i32 },
+    AdjustWidth {
+        index: usize,
+        dir: i32,
+    },
 }
 
 /// Apply one nav verb to the Lanes focus/selection state. `selected` and
@@ -431,7 +437,11 @@ fn spawn_lane_detail_card(
     });
 }
 
-fn spawn_add_channel_popup(p: &mut ChildSpawnerCommands, t: &dtx_ui::theme::Theme, addable: &[EChannel]) {
+fn spawn_add_channel_popup(
+    p: &mut ChildSpawnerCommands,
+    t: &dtx_ui::theme::Theme,
+    addable: &[EChannel],
+) {
     p.spawn((
         Node {
             position_type: PositionType::Absolute,
@@ -748,8 +758,7 @@ mod tests {
 
     #[test]
     fn lanes_rows_down_moves_selection_and_clamps_at_bottom() {
-        let (_, selected, effect) =
-            reduce_lanes_nav(LanesFocus::Rows, 0, 3, NavVerb::Down, false);
+        let (_, selected, effect) = reduce_lanes_nav(LanesFocus::Rows, 0, 3, NavVerb::Down, false);
         assert_eq!(selected, 1);
         assert_eq!(effect, LanesNavEffect::None);
         let (_, selected, _) = reduce_lanes_nav(LanesFocus::Rows, 2, 3, NavVerb::Down, false);
@@ -768,14 +777,10 @@ mod tests {
 
     #[test]
     fn lanes_rows_coarse_up_reorders_and_moves_selection_with_it() {
-        let (focus, selected, effect) =
-            reduce_lanes_nav(LanesFocus::Rows, 2, 5, NavVerb::Up, true);
+        let (focus, selected, effect) = reduce_lanes_nav(LanesFocus::Rows, 2, 5, NavVerb::Up, true);
         assert_eq!(focus, LanesFocus::Rows);
         assert_eq!(selected, 1, "selection follows the moved lane");
-        assert_eq!(
-            effect,
-            LanesNavEffect::Reorder { index: 2, dir: -1 }
-        );
+        assert_eq!(effect, LanesNavEffect::Reorder { index: 2, dir: -1 });
     }
 
     #[test]
@@ -800,10 +805,7 @@ mod tests {
     fn lanes_detail_left_right_emit_width_adjust_effects() {
         let (focus, _, effect) = reduce_lanes_nav(LanesFocus::Detail, 3, 5, NavVerb::Dec, false);
         assert_eq!(focus, LanesFocus::Detail, "stays in Detail while adjusting");
-        assert_eq!(
-            effect,
-            LanesNavEffect::AdjustWidth { index: 3, dir: -1 }
-        );
+        assert_eq!(effect, LanesNavEffect::AdjustWidth { index: 3, dir: -1 });
         let (_, _, effect) = reduce_lanes_nav(LanesFocus::Detail, 3, 5, NavVerb::Inc, false);
         assert_eq!(effect, LanesNavEffect::AdjustWidth { index: 3, dir: 1 });
     }
