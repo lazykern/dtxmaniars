@@ -175,7 +175,7 @@ fn apply_display_visibility(lines: &mut [TimingLine], display_events: &[(i32, bo
     }
 }
 
-/// Map NX ticks to measure + fraction for [`dtx_timing::math::chip_time_ms`].
+/// Map NX ticks to measure + fraction for [`chip_time_ms`](crate::timing::chip_time_ms).
 pub fn tick_to_measure_fraction(tick: i32) -> (u32, f32) {
     let measure = tick.div_euclid(TICKS_PER_MEASURE) as u32;
     let frac_tick = tick.rem_euclid(TICKS_PER_MEASURE);
