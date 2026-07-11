@@ -101,3 +101,23 @@ fn lanes_change_recomputes_playfield_layout() {
     let after = app.world().resource::<PlayfieldLayout>().col_count();
     assert_eq!(after, 11);
 }
+
+#[test]
+fn all_lane_profiles_preserve_logical_judgment_id() {
+    use gameplay_drums::lane_map::lane_of;
+    let baseline: Vec<_> = dtx_layout::DRUM_CHANNELS
+        .into_iter()
+        .map(|ch| (ch, lane_of(ch)))
+        .collect();
+    for arrangement in [
+        dtx_layout::classic(),
+        dtx_layout::nx_type_b(),
+        dtx_layout::nx_type_d(),
+    ] {
+        // Display arrangement is not an input to logical lane ids: whatever
+        // profile is active, judgment routing stays byte-identical.
+        for (ch, lane) in &baseline {
+            assert_eq!(lane_of(*ch), *lane, "{ch:?} under {:?}", arrangement.preset);
+        }
+    }
+}

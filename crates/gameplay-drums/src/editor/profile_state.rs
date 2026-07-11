@@ -5,8 +5,9 @@
 //! and runtime state changes only after the write succeeds. No Bevy or disk
 //! access lives here.
 
+use bevy::prelude::Resource;
 use dtx_config::profiles::{KeyboardProfile, MidiProfile};
-use dtx_layout::profiles::LaneProfile;
+use dtx_layout::profiles::{LaneProfile, LANE_DEFAULT_NAME};
 use dtx_persistence::ProfileName;
 
 /// One editable profile draft: the selected registry entry, its last saved
@@ -87,6 +88,22 @@ pub fn dirty_profile_kinds(session: &ProfileSession) -> Vec<ProfileKind> {
         kinds.push(ProfileKind::Lanes);
     }
     kinds
+}
+
+/// The lane profile draft edited on the Lanes tab. Manual edits mutate the
+/// draft arrangement (keeping the selected profile name) and the playfield
+/// preview mirrors it; the committed registry changes only via the profile
+/// bar's transactional actions.
+#[derive(Resource, Debug, Clone, PartialEq)]
+pub struct LaneProfileDraft(pub ProfileDraft<LaneProfile>);
+
+impl Default for LaneProfileDraft {
+    fn default() -> Self {
+        Self(ProfileDraft::clean(
+            LANE_DEFAULT_NAME,
+            LaneProfile::from_arrangement(dtx_layout::classic()),
+        ))
+    }
 }
 
 /// A failed profile transaction, reported with enough context for the UI.

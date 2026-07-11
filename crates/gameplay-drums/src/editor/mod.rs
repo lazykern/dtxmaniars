@@ -105,6 +105,7 @@ pub fn plugin(app: &mut App) {
         .init_resource::<undo::UndoStack>()
         .init_resource::<controls_panel::ControlsSegment>()
         .init_resource::<controls_panel::ControlsFocus>()
+        .init_resource::<profile_state::LaneProfileDraft>()
         .add_systems(
             Update,
             (

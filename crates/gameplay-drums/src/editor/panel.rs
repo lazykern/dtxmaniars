@@ -167,6 +167,8 @@ pub fn plugin(app: &mut App) {
                 refresh_panel_values,
                 handle_lane_buttons,
                 apply_lane_width_sliders,
+                mirror_lane_edits_to_draft,
+                apply_lane_draft_preview,
                 refresh_lane_panel_values,
                 handle_settings_adjust,
                 apply_settings_sliders,
@@ -1321,6 +1323,37 @@ fn handle_lane_buttons(
         if f(&mut lanes.0) {
             undo.push_snapshot(before);
         }
+    }
+}
+
+/// Manual lane edits (buttons, sliders, undo) flow into the lane profile
+/// draft: the arrangement changes but the selected profile name is kept, so
+/// a user profile stays itself while edited instead of becoming a generic
+/// Custom. Equality-guarded against the preview mirror to terminate.
+pub fn mirror_lane_edits_to_draft(
+    lanes: Res<Lanes>,
+    mut draft: ResMut<super::profile_state::LaneProfileDraft>,
+) {
+    if !lanes.is_changed() {
+        return;
+    }
+    if draft.0.value.arrangement != lanes.0 {
+        draft.0.value.arrangement = lanes.0.clone();
+    }
+}
+
+/// Draft arrangement → live playfield preview (`Lanes`). Selecting or
+/// reverting a profile updates the draft, and the playfield follows without
+/// touching the committed registry. Equality-guarded like the mirror above.
+pub fn apply_lane_draft_preview(
+    draft: Res<super::profile_state::LaneProfileDraft>,
+    mut lanes: ResMut<Lanes>,
+) {
+    if !draft.is_changed() {
+        return;
+    }
+    if lanes.0 != draft.0.value.arrangement {
+        lanes.0 = draft.0.value.arrangement.clone();
     }
 }
 
