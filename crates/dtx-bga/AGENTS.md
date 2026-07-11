@@ -11,20 +11,30 @@ Engine-layer crate. BGA / video playback for DTXManiaNX charts.
 - `references/DTXmaniaNX-BocuD/DTXMania/Core/Video/UINewVideoRenderer.cs`
 - `references/DTXmaniaNX-BocuD/DTXMania/Score,Song/EChannel.cs` (BGA channels)
 
-## M7 scope (this milestone)
+## M7.1 scope (implemented)
 
-- `BgaPlayer` resource: state machine (Idle → Cueing → Displaying → Ended)
-- `BgaPlugin`: scans `dtx_core::bga::bga_events(&chart)`, ticks player each frame
-- When a BGA event is due (BPM-aware timing via `dtx_timing`), spawn a placeholder `BgaLayer` UI entity
-- Movie channels are logged + skipped (M7.1: real FFmpeg decode)
+- `chart::ActiveChartRes::from_chart` resolves `#BMP`/`#BGA`/`#AVI` registries
+  to absolute paths (case-insensitive) and builds BPM/bar-length-aware
+  `TimedVisualEvent`s on the same timeline drum chips use.
+- Static `#BMP` image layers render as real `ImageNode`s (`BgaLayerOverlay`),
+  replacing colored placeholders; each event replaces only its target layer.
+- `#AVI` movies decode through `video-rs`/FFmpeg on a `MovieWorker` thread with
+  a bounded (capacity two) frame queue; the newest due RGBA frame uploads into
+  one reusable `Image` texture shown aspect-fit fullscreen behind lanes/HUD
+  (`MovieOverlay`), synced to `BgaClock` (mirrored from `GameplayClock`), with a
+  100 ms drift-seek threshold. Movie audio is ignored.
+- `BgaSettings` (from `dtx_config::SystemConfig`) gates images/movie and applies
+  opacity live; toggling and alpha update without respawn.
+- Practice seek / restart rebuild the event cursor, static layers, and movie
+  target; `clear_visuals` tears down workers, texture, and overlays on exit.
 
-## M7.1+ deferred
+## Deferred
 
-- Parse `#BMPxx: filename` and `#AVIxx: filename` directives from DTX header
-- Load actual image files via bevy asset server
-- Layer1/Layer2/Layer3 positioned overlays with display coords from chip
-- BGAPAN animation (size + position tweens)
-- FFmpeg-based movie decoding for Movie/MovieFull channels
+- `BGAPAN` / `AVIPAN` pan+zoom animation
+- Windowed (non-fullscreen) movie mode
+- Movie embedded-audio playback
+- Hardware zero-copy texture import
+- FFmpeg bundling for Windows/macOS release packaging
 
 ## Layer
 
