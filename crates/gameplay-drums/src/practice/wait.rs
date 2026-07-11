@@ -111,13 +111,15 @@ pub fn wait_flowing(state: Option<Res<WaitState>>) -> bool {
 pub fn wait_watcher(
     session: Res<PracticeSession>,
     timeline: Res<crate::timeline::ChipTimeline>,
-    judged: Res<JudgedChips>,
+    mut judged: ResMut<JudgedChips>,
     clock: Res<GameplayClock>,
     mut state: ResMut<WaitState>,
     bgm: Res<BgmHandle>,
     polyphony: Res<DrumPolyphony>,
     active: Res<ActiveDrumSounds>,
     mut instances: ResMut<Assets<AudioInstance>>,
+    mut chord_hits: ResMut<ChordHitTimes>,
+    mut toasts: ResMut<crate::practice::toast::ToastQueue>,
 ) {
     if !clock.is_ready() {
         return;
@@ -141,9 +143,24 @@ pub fn wait_watcher(
             }
         }
         WaitPhase::Halted(set) => {
-            if is_cleared(&set, &judged.0) {
-                crate::pause::resume_all_chart_audio(&bgm, &polyphony, &active, &mut instances);
-                state.phase = WaitPhase::Flowing;
+            if !is_cleared(&set, &judged.0) {
+                return;
+            }
+            match chord_spread(&chord_hits.0, &set.chips) {
+                Some(spread) if spread <= CHORD_WINDOW_MS => {
+                    for chip in &set.chips {
+                        chord_hits.0.remove(chip);
+                    }
+                    crate::pause::resume_all_chart_audio(&bgm, &polyphony, &active, &mut instances);
+                    state.phase = WaitPhase::Flowing;
+                }
+                _ => {
+                    for chip in &set.chips {
+                        judged.0.remove(chip);
+                        chord_hits.0.remove(chip);
+                    }
+                    toasts.push("Hit together — retry the chord");
+                }
             }
         }
     }
@@ -292,5 +309,81 @@ mod tests {
     fn chord_spread_none_when_a_chip_not_yet_hit() {
         let times: HashMap<usize, i64> = [(2, 1_000)].into();
         assert_eq!(chord_spread(&times, &[2, 3]), None);
+    }
+
+    fn wait_watcher_test_app(chord_hit_times: HashMap<usize, i64>) -> App {
+        let mut app = App::new();
+        let mut session = PracticeSession::default();
+        session.trainer.wait_enabled = true;
+        app.insert_resource(session);
+        app.insert_resource(ChipTimeline::default());
+        let mut judged = JudgedChips::default();
+        judged.0.insert(2);
+        judged.0.insert(3);
+        app.insert_resource(judged);
+        let mut clock = GameplayClock::default();
+        clock.start();
+        app.insert_resource(clock);
+        app.insert_resource(BgmHandle::default());
+        app.insert_resource(DrumPolyphony::default());
+        app.insert_resource(ActiveDrumSounds::default());
+        app.init_resource::<Assets<AudioInstance>>();
+        app.insert_resource(ChordHitTimes(chord_hit_times));
+        app.insert_resource(WaitState {
+            phase: WaitPhase::Halted(WaitSet {
+                target_ms: 1_000,
+                chips: vec![2, 3],
+            }),
+            waited_chips: [2, 3].into(),
+        });
+        app.init_resource::<crate::practice::toast::ToastQueue>();
+        app.add_systems(Update, wait_watcher);
+        app
+    }
+
+    #[test]
+    fn wait_watcher_clears_chord_hit_within_window() {
+        let mut app = wait_watcher_test_app([(2, 1_000), (3, 1_030)].into());
+        app.update();
+
+        let state = app.world().resource::<WaitState>();
+        assert!(!state.halted(), "spread within window must clear the halt");
+        assert!(
+            app.world().resource::<ChordHitTimes>().0.is_empty(),
+            "cleared chord's hit times must be dropped"
+        );
+    }
+
+    #[test]
+    fn wait_watcher_rejects_chord_hit_outside_window() {
+        let mut app = wait_watcher_test_app([(2, 1_000), (3, 1_080)].into());
+        app.update();
+
+        let state = app.world().resource::<WaitState>();
+        assert!(
+            state.halted(),
+            "spread outside window must reject, stay halted"
+        );
+        assert!(
+            matches!(&state.phase, WaitPhase::Halted(set) if set.chips == vec![2, 3]),
+            "same wait-set stays active for retry"
+        );
+        let judged = app.world().resource::<JudgedChips>();
+        assert!(
+            !judged.0.contains(&2) && !judged.0.contains(&3),
+            "rejected chips must be un-judged so the player can retry"
+        );
+        assert!(
+            app.world().resource::<ChordHitTimes>().0.is_empty(),
+            "rejected chord's hit times must be cleared for the retry"
+        );
+        assert_eq!(
+            app.world()
+                .resource::<crate::practice::toast::ToastQueue>()
+                .0
+                .len(),
+            1,
+            "reject should surface one feedback toast"
+        );
     }
 }
