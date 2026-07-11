@@ -1,7 +1,7 @@
 //! Wait mode: halt the clock at any unhit note until the correct pads
 //! clear it. Spec: docs/superpowers/specs/2026-07-11-practice-wait-mode-design.md
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 use crate::lane_map::lane_of;
 use crate::timeline::ChipTimeline;
@@ -51,6 +51,24 @@ pub fn is_cleared(set: &WaitSet, judged: &HashSet<usize>) -> bool {
     set.chips.iter().all(|c| judged.contains(c))
 }
 
+/// Max acceptable spread between the earliest and latest hit in a chord
+/// for it to count as "played together" (spec: 50ms, matches a Perfect
+/// judge window).
+pub const CHORD_WINDOW_MS: i64 = 50;
+
+/// Spread (`max - min`) across every `chips` entry's recorded hit time.
+/// `None` if any chip in `chips` has no recorded hit yet.
+pub fn chord_spread(times: &HashMap<usize, i64>, chips: &[usize]) -> Option<i64> {
+    let mut min = i64::MAX;
+    let mut max = i64::MIN;
+    for chip in chips {
+        let t = *times.get(chip)?;
+        min = min.min(t);
+        max = max.max(t);
+    }
+    Some(max - min)
+}
+
 use bevy::prelude::*;
 use bevy_kira_audio::prelude::AudioInstance;
 use dtx_audio::{BgmHandle, DrumPolyphony};
@@ -74,6 +92,13 @@ impl WaitState {
         matches!(self.phase, WaitPhase::Halted(_))
     }
 }
+
+/// Adjusted hit timestamp for every chip judged while wait mode is
+/// halted, keyed by chip index. Only ever holds entries for the chord
+/// currently being evaluated — cleared on chord-clear, chord-reject, and
+/// seek.
+#[derive(Resource, Debug, Default)]
+pub struct ChordHitTimes(pub HashMap<usize, i64>);
 
 /// Run condition for the clock-sync chain: tick only while not halted.
 pub fn wait_flowing(state: Option<Res<WaitState>>) -> bool {
@@ -239,5 +264,31 @@ mod tests {
         };
         assert!(!is_cleared(&set, &[2].into()));
         assert!(is_cleared(&set, &[2, 3].into()));
+    }
+
+    #[test]
+    fn chord_spread_accepts_within_window() {
+        let times: HashMap<usize, i64> = [(2, 1_000), (3, 1_030)].into();
+        assert_eq!(chord_spread(&times, &[2, 3]), Some(30));
+        assert!(chord_spread(&times, &[2, 3]).unwrap() <= CHORD_WINDOW_MS);
+    }
+
+    #[test]
+    fn chord_spread_flags_outside_window() {
+        let times: HashMap<usize, i64> = [(2, 1_000), (3, 1_080)].into();
+        assert_eq!(chord_spread(&times, &[2, 3]), Some(80));
+        assert!(chord_spread(&times, &[2, 3]).unwrap() > CHORD_WINDOW_MS);
+    }
+
+    #[test]
+    fn chord_spread_uses_full_range_for_three_notes() {
+        let times: HashMap<usize, i64> = [(2, 1_000), (3, 1_045), (4, 1_090)].into();
+        assert_eq!(chord_spread(&times, &[2, 3, 4]), Some(90));
+    }
+
+    #[test]
+    fn chord_spread_none_when_a_chip_not_yet_hit() {
+        let times: HashMap<usize, i64> = [(2, 1_000)].into();
+        assert_eq!(chord_spread(&times, &[2, 3]), None);
     }
 }
