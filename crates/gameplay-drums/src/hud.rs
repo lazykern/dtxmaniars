@@ -165,6 +165,9 @@ fn spawn_hud(
                 ..default()
             },
             BackgroundColor(Color::BLACK),
+            // Backmost HudRoot child: BGA movie (-2) and images (-1) render on
+            // top of this black board, notes/HUD (>=0) on top of the BGA.
+            ZIndex(-3),
         ));
 
         root.spawn((
@@ -231,6 +234,11 @@ fn spawn_hud(
     keyboard_viz::spawn_key_caps(&mut commands, root, &layout, &lanes, &t);
     let c_judgment = spawn_widget_container(&mut commands, root, WidgetKind::JudgmentPopup);
     judgment_popup::spawn_judgment_popup(&mut commands, c_judgment, &t);
+
+    // Route BGA image/movie overlays under HudRoot so they ride the stage
+    // transform (align/shrink with the scene in the Customize editor) and sit in
+    // its stacking context behind lanes/HUD via negative ZIndex.
+    commands.insert_resource(dtx_bga::BgaParent(Some(root)));
 }
 
 fn apply_backboard_layout(
@@ -318,6 +326,9 @@ fn despawn_hud(mut commands: Commands, query: Query<Entity, With<HudRoot>>) {
     for entity in &query {
         commands.entity(entity).despawn();
     }
+    // HudRoot is gone; drop the stale parent so BGA overlays don't try to attach
+    // to a despawned entity outside Performance.
+    commands.insert_resource(dtx_bga::BgaParent(None));
 }
 
 fn sync_hud_judgment(

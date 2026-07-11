@@ -32,6 +32,15 @@ pub struct BgaClock {
     pub current_ms: i64,
 }
 
+/// Optional parent entity for BGA overlays. A Game crate sets this to its scene
+/// root (e.g. drums `HudRoot`) so image/movie overlays become children of that
+/// root — inheriting its stage `UiTransform` (so they shrink/align with the
+/// scene in the Customize editor) and its stacking context (so negative `ZIndex`
+/// keeps them behind lanes/HUD but still above the root's own background).
+/// `None` (default) spawns overlays at the window root, as before.
+#[derive(Resource, Debug, Default, Clone, Copy)]
+pub struct BgaParent(pub Option<Entity>);
+
 /// Live visual settings, derived from `dtx_config::SystemConfig`. Alpha values
 /// are pre-divided to the 0.0..=1.0 render range.
 #[derive(Resource, Debug, Clone, Copy, PartialEq)]
@@ -204,6 +213,7 @@ pub fn plugin(app: &mut App) {
     app.init_resource::<BgaPlayer>()
         .init_resource::<BgaClock>()
         .init_resource::<BgaSettings>()
+        .init_resource::<BgaParent>()
         .init_resource::<MovieRuntime>()
         .add_systems(
             Update,
@@ -244,6 +254,7 @@ fn tick_bga_visuals(
     mut commands: Commands,
     asset_server: Res<AssetServer>,
     overlays: Query<(Entity, &BgaLayerOverlay)>,
+    bga_parent: Res<BgaParent>,
 ) {
     let Some(chart_res) = chart_res else {
         return;
@@ -261,6 +272,7 @@ fn tick_bga_visuals(
             &mut commands,
             &asset_server,
             &overlays,
+            &bga_parent,
         );
     }
     player.last_clock_ms = now;
@@ -285,6 +297,7 @@ fn tick_bga_visuals(
             &mut commands,
             &asset_server,
             &overlays,
+            &bga_parent,
         );
     }
 }
@@ -301,6 +314,7 @@ fn rebuild_on_seek(
     commands: &mut Commands,
     asset_server: &AssetServer,
     overlays: &Query<(Entity, &BgaLayerOverlay)>,
+    bga_parent: &BgaParent,
 ) {
     player.next_event_idx = chart_res
         .events
@@ -323,6 +337,7 @@ fn rebuild_on_seek(
             player,
             commands,
             asset_server,
+            bga_parent,
         );
     }
     match movie {
@@ -344,13 +359,22 @@ fn apply_image_event(
     commands: &mut Commands,
     asset_server: &AssetServer,
     overlays: &Query<(Entity, &BgaLayerOverlay)>,
+    bga_parent: &BgaParent,
 ) {
     for (entity, overlay) in overlays.iter() {
         if overlay.layer == event.layer {
             commands.entity(entity).despawn();
         }
     }
-    spawn_image_overlay(event, chart_res, settings, player, commands, asset_server);
+    spawn_image_overlay(
+        event,
+        chart_res,
+        settings,
+        player,
+        commands,
+        asset_server,
+        bga_parent,
+    );
 }
 
 /// Spawn one image overlay entity (no despawn of existing layers). Missing
@@ -362,6 +386,7 @@ fn spawn_image_overlay(
     player: &mut BgaPlayer,
     commands: &mut Commands,
     asset_server: &AssetServer,
+    bga_parent: &BgaParent,
 ) {
     let Some(path) = chart_res.bmp_path(event.asset_id) else {
         if player.warned_missing.insert((event.layer, event.asset_id)) {
@@ -380,42 +405,59 @@ fn spawn_image_overlay(
     } else {
         Visibility::Hidden
     };
-    commands.spawn((
-        BgaLayerOverlay {
-            layer: event.layer,
-            asset_id: event.asset_id,
-        },
-        Node {
-            position_type: PositionType::Absolute,
-            left: Val::Px(x),
-            top: Val::Px(y),
-            width: Val::Px(w),
-            height: Val::Px(h),
-            ..default()
-        },
-        ImageNode {
-            image: asset_server.load(path.to_string_lossy().to_string()),
-            color: Color::WHITE.with_alpha(settings.image_alpha),
-            ..default()
-        },
-        visibility,
-        ZIndex(-100),
-    ));
+    let overlay = commands
+        .spawn((
+            BgaLayerOverlay {
+                layer: event.layer,
+                asset_id: event.asset_id,
+            },
+            Node {
+                position_type: PositionType::Absolute,
+                left: Val::Percent(x),
+                top: Val::Percent(y),
+                width: Val::Percent(w),
+                height: Val::Percent(h),
+                ..default()
+            },
+            ImageNode {
+                image: asset_server.load(path.to_string_lossy().to_string()),
+                color: Color::WHITE.with_alpha(settings.image_alpha),
+                ..default()
+            },
+            visibility,
+            // Above the movie (-2) and playfield backboard, below lanes/HUD.
+            ZIndex(-1),
+        ))
+        .id();
+    parent_overlay(commands, overlay, bga_parent);
 }
 
-/// Layout rectangle (px) per image layer at the 1280x720 reference. Fullscreen
-/// for Layer3; corner/side tiles for the small layers.
+/// Attach a freshly-spawned BGA overlay to the configured scene root, if any, so
+/// it inherits the stage transform and stacking context. No-op at the window
+/// root (default), where the overlay stays a top-level node.
+fn parent_overlay(commands: &mut Commands, overlay: Entity, bga_parent: &BgaParent) {
+    if let Some(parent) = bga_parent.0 {
+        commands.entity(parent).add_child(overlay);
+    }
+}
+
+/// Layout rectangle per image layer as a **percentage** of the parent (the scene
+/// root / window), derived from the DTXMania 1280x720 reference. Percent keeps
+/// layers resolution-independent — Layer3 fills the frame; small layers tile the
+/// corners/edges. (320/1280 = 25%, 240/720 ≈ 33.33%.)
 fn image_layer_geometry(layer: BgaLayer) -> (f32, f32, f32, f32) {
+    const W: f32 = 25.0; // 320 / 1280
+    const H: f32 = 100.0 / 3.0; // 240 / 720
     match layer {
-        BgaLayer::Layer1 => (0.0, 0.0, 320.0, 240.0),
-        BgaLayer::Layer2 => (0.0, 240.0, 320.0, 240.0),
-        BgaLayer::Layer3 => (0.0, 0.0, 1280.0, 720.0),
+        BgaLayer::Layer1 => (0.0, 0.0, W, H),
+        BgaLayer::Layer2 => (0.0, H, W, H),
+        BgaLayer::Layer3 => (0.0, 0.0, 100.0, 100.0),
         BgaLayer::LayerN(n) => match n {
-            4 => (960.0, 0.0, 320.0, 240.0),
-            5 => (960.0, 240.0, 320.0, 240.0),
-            6 => (0.0, 480.0, 320.0, 240.0),
-            7 => (960.0, 480.0, 320.0, 240.0),
-            _ => (320.0, 240.0, 640.0, 240.0),
+            4 => (75.0, 0.0, W, H),
+            5 => (75.0, H, W, H),
+            6 => (0.0, 2.0 * H, W, H),
+            7 => (75.0, 2.0 * H, W, H),
+            _ => (W, H, 50.0, H),
         },
         BgaLayer::Movie | BgaLayer::MovieFull => (0.0, 0.0, 0.0, 0.0),
     }
@@ -435,6 +477,7 @@ fn drive_movie(
     mut commands: Commands,
     root_q: Query<Entity, With<MovieOverlay>>,
     mut image_q: Query<(&mut ImageNode, &mut Visibility, &mut Node), With<MovieImage>>,
+    bga_parent: Res<BgaParent>,
 ) {
     let Some(chart_res) = chart_res else {
         return;
@@ -506,6 +549,7 @@ fn drive_movie(
             aspect,
             visibility,
             settings.movie_alpha,
+            &bga_parent,
         );
     } else {
         for (mut image, mut vis, mut node) in image_q.iter_mut() {
@@ -559,8 +603,9 @@ fn spawn_movie_overlay(
     aspect: f32,
     visibility: Visibility,
     alpha: f32,
+    bga_parent: &BgaParent,
 ) {
-    commands
+    let overlay = commands
         .spawn((
             MovieOverlay,
             Node {
@@ -573,7 +618,8 @@ fn spawn_movie_overlay(
                 align_items: AlignItems::Center,
                 ..default()
             },
-            ZIndex(-110),
+            // Behind image layers (-1) and lanes/HUD, above playfield backboard.
+            ZIndex(-2),
         ))
         .with_children(|parent| {
             parent.spawn((
@@ -591,7 +637,9 @@ fn spawn_movie_overlay(
                 },
                 visibility,
             ));
-        });
+        })
+        .id();
+    parent_overlay(commands, overlay, bga_parent);
 }
 
 /// Despawn all BGA image and movie overlays and reset player + movie runtime.
