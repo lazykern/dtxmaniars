@@ -408,7 +408,12 @@ mod tests {
     fn records_hit_time_only_for_halted_chips() {
         use crate::practice::wait::ChordHitTimes;
         let mut chord_hits = ChordHitTimes::default();
-        record_chord_hit_times(&mut chord_hits, &[(2, 0_i64), (5, 3)], Some(&[2, 3]), 12_345);
+        record_chord_hit_times(
+            &mut chord_hits,
+            &[(2, 0_i64), (5, 3)],
+            Some(&[2, 3]),
+            12_345,
+        );
         assert_eq!(chord_hits.0.get(&2), Some(&12_345));
         assert_eq!(chord_hits.0.get(&5), Some(&12_345));
 

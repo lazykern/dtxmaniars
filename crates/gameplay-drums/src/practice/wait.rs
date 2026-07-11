@@ -185,16 +185,16 @@ pub(crate) fn plugin(app: &mut App) {
     app.init_resource::<WaitState>()
         .init_resource::<ChordHitTimes>()
         .add_systems(
-        FixedUpdate,
-        (
-            reset_wait_on_seek.after(crate::seek::apply_seek_system),
-            wait_watcher.after(crate::judge::judge_lane_hit_system),
-        )
-            .chain()
-            .run_if(in_state(AppState::Performance))
-            .run_if(in_state(PauseState::Running))
-            .run_if(resource_exists::<PracticeSession>),
-    );
+            FixedUpdate,
+            (
+                reset_wait_on_seek.after(crate::seek::apply_seek_system),
+                wait_watcher.after(crate::judge::judge_lane_hit_system),
+            )
+                .chain()
+                .run_if(in_state(AppState::Performance))
+                .run_if(in_state(PauseState::Running))
+                .run_if(resource_exists::<PracticeSession>),
+        );
 }
 
 #[cfg(test)]
