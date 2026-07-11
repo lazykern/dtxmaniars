@@ -98,11 +98,7 @@ pub fn confirm_corrupt_reset(state: &ProfileDialogState) -> Option<ProfileKind> 
 /// Apply the owning crate's backup/reset outcome to the dialog: success
 /// closes it; failure keeps it open with the full cause so the corrupt
 /// canonical file is never silently replaced by a default registry.
-pub fn apply_reset_outcome(
-    state: &ProfileDialogState,
-    kind: ProfileKind,
-    result: Result<(), String>,
-) -> ProfileDialogState {
+pub fn apply_reset_outcome(kind: ProfileKind, result: Result<(), String>) -> ProfileDialogState {
     match result {
         Ok(()) => ProfileDialogState::Closed,
         Err(message) => ProfileDialogState::CorruptReset { kind, message },
@@ -159,7 +155,7 @@ mod tests {
         let kind = confirm_corrupt_reset(&open).expect("dialog open");
         // Owning crate refused (e.g. backup collision): dialog stays open
         // with the cause; no default registry state is installed here.
-        let next = apply_reset_outcome(&open, kind, Err("backup exists".to_owned()));
+        let next = apply_reset_outcome(kind, Err("backup exists".to_owned()));
         assert_eq!(
             next,
             ProfileDialogState::CorruptReset {
@@ -169,7 +165,7 @@ mod tests {
         );
         // Success closes the dialog.
         assert_eq!(
-            apply_reset_outcome(&open, kind, Ok(())),
+            apply_reset_outcome(kind, Ok(())),
             ProfileDialogState::Closed
         );
     }

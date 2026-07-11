@@ -19,7 +19,7 @@
 //! stream — that made the pick chase whatever note was being judged.
 
 use bevy::prelude::*;
-use dtx_config::{BindSource, InputBindings};
+use dtx_config::BindSource;
 
 use crate::bindings::LiveBindings;
 use crate::events::LaneHit;
@@ -200,11 +200,11 @@ fn capture_binding(
     clock: Res<GameplayClock>,
     mut hits: MessageWriter<LaneHit>,
 ) {
-    let mut bind = |live: &mut LiveBindings,
-                    rev: &mut BindingsRev,
-                    hits: &mut MessageWriter<LaneHit>,
-                    channel: dtx_core::EChannel,
-                    src: BindSource| {
+    let bind = |live: &mut LiveBindings,
+                rev: &mut BindingsRev,
+                hits: &mut MessageWriter<LaneHit>,
+                channel: dtx_core::EChannel,
+                src: BindSource| {
         match src {
             BindSource::Key(_) => live.0.bind_shared(channel, src),
             BindSource::Midi { .. } => live.0.bind(channel, src),
@@ -359,6 +359,8 @@ fn highlight_selected_row(
 
 #[cfg(test)]
 mod tests {
+    use dtx_config::InputBindings;
+
     use super::*;
 
     #[test]
