@@ -1,0 +1,15 @@
+[package]
+name = "dtx-persistence"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+description = "Atomic persistence primitives. No bevy."
+
+[lints.rust]
+unsafe_code = "forbid"
+
+[dependencies]
+atomicwrites = { workspace = true }
+thiserror = { workspace = true }
