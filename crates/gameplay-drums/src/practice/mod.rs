@@ -67,7 +67,13 @@ pub(super) fn plugin(app: &mut App) {
     ));
 }
 
-fn enter_practice_session(intent: Res<PracticeIntent>, mut commands: Commands) {
+fn enter_practice_session(
+    intent: Res<PracticeIntent>,
+    mut commands: Commands,
+    mut wait_state: ResMut<wait::WaitState>,
+) {
+    wait_state.phase = wait::WaitPhase::Flowing;
+    wait_state.waited_chips.clear();
     if intent.0 {
         commands.insert_resource(PracticeSession::default());
     } else {
@@ -84,4 +90,30 @@ fn remove_practice_session(mut commands: Commands) {
 fn freeze_gauge_in_practice(mut gauge: ResMut<StageGauge>) {
     gauge.value = 1.0;
     gauge.failed = false;
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::practice::wait::{WaitSet, WaitState};
+
+    #[test]
+    fn entering_normal_play_clears_wait_halt() {
+        let mut app = App::new();
+        app.insert_resource(PracticeIntent(false));
+        app.insert_resource(WaitState {
+            phase: wait::WaitPhase::Halted(WaitSet {
+                target_ms: 1_000,
+                chips: vec![7],
+            }),
+            waited_chips: [7].into(),
+        });
+        app.add_systems(Update, enter_practice_session);
+        app.update();
+
+        let state = app.world().resource::<WaitState>();
+        assert!(!state.halted());
+        assert!(state.waited_chips.is_empty());
+        assert!(!app.world().contains_resource::<PracticeSession>());
+    }
 }
