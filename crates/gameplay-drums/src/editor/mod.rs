@@ -368,9 +368,19 @@ fn reduce_lane_registry(
     Ok(updated)
 }
 
+/// Persist the lane registry to disk. Split out so `commit_lane_actions`
+/// takes a save closure (like `commit_registry_actions`) and stays unit-
+/// testable without touching the real config path.
+pub(super) fn save_lane_to_disk(
+    registry: &dtx_layout::profiles::LaneProfileRegistry,
+) -> Result<(), dtx_layout::profiles::LaneRegistryError> {
+    dtx_layout::profiles::save_lane_registry(&crate::lanes::lane_registry_path(), registry)
+}
+
 pub(super) fn commit_lane_actions(
     registry_startup: dtx_layout::profiles::LaneRegistryStartup,
     actions: Vec<LaneRegAction>,
+    save: impl FnOnce(&dtx_layout::profiles::LaneProfileRegistry) -> Result<(), dtx_layout::profiles::LaneRegistryError>,
 ) -> Result<dtx_layout::profiles::LaneProfileRegistry, String> {
     use dtx_layout::profiles::LaneRegistryStartup;
     let mut registry = match registry_startup {
@@ -383,8 +393,7 @@ pub(super) fn commit_lane_actions(
     for action in actions {
         registry = reduce_lane_registry(&registry, &builtins, action)?;
     }
-    dtx_layout::profiles::save_lane_registry(&crate::lanes::lane_registry_path(), &registry)
-        .map_err(|error| error.to_string())?;
+    save(&registry).map_err(|error| error.to_string())?;
     Ok(registry)
 }
 
@@ -478,7 +487,7 @@ fn save_dirty_kind(
             } else {
                 LaneRegAction::Save(session.lanes.value.clone())
             };
-            commit_lane_actions(startup, vec![action]).map(|_| ())
+            commit_lane_actions(startup, vec![action], save_lane_to_disk).map(|_| ())
         }
     }
 }
@@ -589,6 +598,113 @@ pub fn editor_closed(open: Res<EditorOpen>) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // ===== Profile registry engine (pure reducers + closure-injected I/O) =====
+
+    fn lane_user_registry(active: &str, users: &[(&str, dtx_layout::LaneArrangement)]) -> dtx_layout::profiles::LaneProfileRegistry {
+        let mut registry = dtx_layout::profiles::lane_registry();
+        registry.active = active.to_owned();
+        for (name, arrangement) in users {
+            registry.profiles.insert(
+                (*name).to_owned(),
+                dtx_layout::profiles::LaneProfile::from_arrangement(arrangement.clone()),
+            );
+        }
+        registry
+    }
+
+    #[test]
+    fn reduce_lane_save_rejects_builtin_in_place() {
+        // Classic is a built-in: an in-place Save must error (forces Save As).
+        let builtins = dtx_layout::profiles::lane_builtins();
+        let registry = dtx_layout::profiles::lane_registry(); // active == "Classic"
+        let err = reduce_lane_registry(
+            &registry,
+            &builtins,
+            LaneRegAction::Save(dtx_layout::profiles::LaneProfile::from_arrangement(dtx_layout::nx_type_b())),
+        )
+        .expect_err("built-in cannot be saved in place");
+        assert!(err.contains("built-in"), "{err}");
+    }
+
+    #[test]
+    fn reduce_lane_rename_rejects_existing_name() {
+        // Renaming "Desk" onto the existing user profile "Studio" collides.
+        let builtins = dtx_layout::profiles::lane_builtins();
+        let registry = lane_user_registry(
+            "Desk",
+            &[("Desk", dtx_layout::classic()), ("Studio", dtx_layout::nx_type_b())],
+        );
+        let err = reduce_lane_registry(&registry, &builtins, LaneRegAction::Rename("Studio".to_owned()))
+            .expect_err("rename onto existing name collides");
+        assert!(err.contains("already exists"), "{err}");
+    }
+
+    #[test]
+    fn reduce_lane_delete_falls_back_to_builtin() {
+        // Deleting the active user profile drops it and selects a built-in.
+        let builtins = dtx_layout::profiles::lane_builtins();
+        let registry = lane_user_registry("Desk", &[("Desk", dtx_layout::nx_type_b())]);
+        let next = reduce_lane_registry(&registry, &builtins, LaneRegAction::Delete).expect("delete succeeds");
+        assert!(!next.profiles.contains_key("Desk"), "deleted profile is gone");
+        assert!(builtins.contains_key(&next.active), "active fell back to a built-in: {}", next.active);
+    }
+
+    #[test]
+    fn reduce_lane_saveas_inserts_new_user_profile() {
+        let builtins = dtx_layout::profiles::lane_builtins();
+        let registry = dtx_layout::profiles::lane_registry(); // active == "Classic"
+        let next = reduce_lane_registry(
+            &registry,
+            &builtins,
+            LaneRegAction::SaveAs {
+                name: "Desk".to_owned(),
+                value: dtx_layout::profiles::LaneProfile::from_arrangement(dtx_layout::nx_type_b()),
+            },
+        )
+        .expect("save as succeeds");
+        assert_eq!(next.active, "Desk", "save as selects the new profile");
+        assert_eq!(next.profiles["Desk"].arrangement, dtx_layout::nx_type_b());
+    }
+
+    #[test]
+    fn commit_registry_actions_builds_next_registry_from_action() {
+        // Happy path with an injected no-op save: SaveAs on the keyboard
+        // registry inserts the profile and selects it.
+        use dtx_input::profiles as cfg;
+        let name = dtx_persistence::validate_profile_name("Desk", [cfg::KEYBOARD_DEFAULT_NAME], [], None)
+            .expect("valid name");
+        let registry = commit_registry_actions(
+            cfg::RegistryStartup::Ready(cfg::keyboard_registry()),
+            &cfg::keyboard_builtins(),
+            vec![cfg::RegistryAction::SaveAs {
+                name,
+                value: cfg::KeyboardProfile::default(),
+            }],
+            |_| Ok(()), // no disk write in the test
+        )
+        .expect("commit succeeds");
+        assert_eq!(registry.active, "Desk");
+        assert!(registry.profiles.contains_key("Desk"));
+    }
+
+    #[test]
+    fn commit_lane_actions_builds_next_registry_from_action() {
+        // Happy path with an injected no-op save: SaveAs then the resulting
+        // registry has the new profile active.
+        let registry = commit_lane_actions(
+            dtx_layout::profiles::LaneRegistryStartup::Ready(dtx_layout::profiles::lane_registry()),
+            vec![LaneRegAction::SaveAs {
+                name: "Desk".to_owned(),
+                value: dtx_layout::profiles::LaneProfile::from_arrangement(dtx_layout::nx_type_d()),
+            }],
+            |_| Ok(()),
+        )
+        .expect("commit succeeds");
+        assert_eq!(registry.active, "Desk");
+        assert_eq!(registry.profiles["Desk"].arrangement, dtx_layout::nx_type_d());
+    }
+
     #[test]
     fn editor_open_default_false() {
         assert!(!EditorOpen::default().0);

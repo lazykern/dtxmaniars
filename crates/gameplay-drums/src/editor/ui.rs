@@ -24,7 +24,13 @@ pub fn plugin(app: &mut App) {
         Update,
         (
             spawn_ui_on_open.run_if(ui_needs_respawn),
-            (handle_buttons, handle_tab_buttons, highlight_selection).run_if(super::editor_open),
+            (handle_buttons, highlight_selection).run_if(super::editor_open),
+            // Tab clicks are suppressed while a profile dialog is open, so the
+            // active tab can't change underneath it (same gate as capture/
+            // hotkeys/close).
+            handle_tab_buttons
+                .run_if(super::editor_open)
+                .run_if(super::profile_dialog::profile_dialog_closed),
             close_on_escape
                 .run_if(super::editor_open)
                 .run_if(not(super::bindings_capture::capture_active))

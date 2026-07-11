@@ -121,6 +121,9 @@ pub(super) fn bar_info(kind: ProfileKind, session: &CustomizeSession) -> BarInfo
 /// (panel signature-gated), so this mirrors the load-fresh pattern the rest
 /// of the profile write path already uses.
 pub(super) fn kind_names(kind: ProfileKind) -> (Vec<String>, Vec<String>) {
+    // ponytail: ReadOnlyBuiltins is swallowed to an empty user list here —
+    // unreachable until startup corruption detection wires open_corrupt_reset
+    // (deferred); a corrupt registry then routes to CorruptReset instead.
     match kind {
         ProfileKind::Keyboard => {
             let builtins = dtx_input::profiles::keyboard_builtins().into_keys().collect();
@@ -241,7 +244,7 @@ pub(super) fn select_kind(
         }
         ProfileKind::Lanes => {
             let registry =
-                super::commit_lane_actions(super::load_lane_startup(), vec![super::LaneRegAction::Select(target)])?;
+                super::commit_lane_actions(super::load_lane_startup(), vec![super::LaneRegAction::Select(target)], super::save_lane_to_disk)?;
             let draft = ProfileDraft::clean(
                 registry.active.clone(),
                 dtx_layout::profiles::LaneProfile::from_arrangement(dtx_layout::profiles::active_lane_arrangement(
@@ -296,6 +299,7 @@ pub(super) fn saveas_kind(
                     name: name.as_str().to_owned(),
                     value,
                 }],
+                super::save_lane_to_disk,
             )?;
             let draft = ProfileDraft::clean(
                 registry.active.clone(),
@@ -343,6 +347,7 @@ pub(super) fn rename_kind(
             let registry = super::commit_lane_actions(
                 super::load_lane_startup(),
                 vec![super::LaneRegAction::Rename(name.as_str().to_owned())],
+                super::save_lane_to_disk,
             )?;
             lane_draft.0.selected = registry.active.clone();
             session.0.lanes.selected = registry.active;
@@ -382,7 +387,7 @@ pub(super) fn delete_kind(
             session.0.midi = ProfileDraft::clean(registry.active, value);
         }
         ProfileKind::Lanes => {
-            let registry = super::commit_lane_actions(super::load_lane_startup(), vec![super::LaneRegAction::Delete])?;
+            let registry = super::commit_lane_actions(super::load_lane_startup(), vec![super::LaneRegAction::Delete], super::save_lane_to_disk)?;
             let draft = ProfileDraft::clean(
                 registry.active.clone(),
                 dtx_layout::profiles::LaneProfile::from_arrangement(dtx_layout::profiles::active_lane_arrangement(
@@ -468,7 +473,7 @@ fn apply_lane_effect(
     if let Some(target) = select {
         actions.push(super::LaneRegAction::Select(target));
     }
-    let registry = super::commit_lane_actions(super::load_lane_startup(), actions)?;
+    let registry = super::commit_lane_actions(super::load_lane_startup(), actions, super::save_lane_to_disk)?;
     let value =
         dtx_layout::profiles::LaneProfile::from_arrangement(dtx_layout::profiles::active_lane_arrangement(&registry));
     Ok(Some(ProfileDraft::clean(registry.active.clone(), value)))

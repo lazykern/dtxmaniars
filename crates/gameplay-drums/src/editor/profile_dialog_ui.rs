@@ -66,6 +66,8 @@ fn sync_dialog(
         ProfileDialogState::Dirty {
             kind, builtin_selected, ..
         } => spawn_dirty_dialog(&mut commands, &t, *kind, *builtin_selected),
+        // ponytail: unreachable until startup corruption detection wires
+        // open_corrupt_reset (deferred). Rendering + reset path are ready.
         ProfileDialogState::CorruptReset { message, .. } => spawn_corrupt_dialog(&mut commands, &t, message),
     }
 }
