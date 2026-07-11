@@ -21,6 +21,7 @@ pub mod footer;
 pub mod hotkeys;
 pub mod keyboard_nav;
 pub mod panel;
+pub mod panel_kit;
 pub mod picking;
 pub mod profile_bar;
 pub mod profile_dialog;
