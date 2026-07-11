@@ -186,11 +186,20 @@ pub(crate) fn plugin(app: &mut App) {
         .init_resource::<ChordHitTimes>()
         .add_systems(
             FixedUpdate,
-            (
-                reset_wait_on_seek.after(crate::seek::apply_seek_system),
-                wait_watcher.after(crate::judge::judge_lane_hit_system),
-            )
-                .chain()
+            reset_wait_on_seek
+                .after(crate::seek::apply_seek_system)
+                .run_if(in_state(AppState::Performance))
+                .run_if(resource_exists::<PracticeSession>),
+        )
+        .add_systems(
+            FixedUpdate,
+            wait_watcher
+                .after(reset_wait_on_seek)
+                .after(crate::judge::judge_lane_hit_system)
+                // A seek restarts BGM on a fresh instance. Observe that
+                // handle before halting so wait mode pauses the restarted
+                // song, not the stopped pre-seek instance.
+                .after(crate::seek::start_pending_bgm)
                 .run_if(in_state(AppState::Performance))
                 .run_if(in_state(PauseState::Running))
                 .run_if(resource_exists::<PracticeSession>),
@@ -415,6 +424,36 @@ mod tests {
         assert!(
             app.world().resource::<ChordHitTimes>().0.is_empty(),
             "seek must drop any in-flight chord hit times"
+        );
+    }
+
+    #[test]
+    fn wait_watcher_runs_after_seek_bgm_restart() {
+        let source = include_str!("wait.rs");
+        let watcher = source
+            .find("wait_watcher\n                .after(reset_wait_on_seek)")
+            .expect("wait watcher registration");
+        let restart_edge = source[watcher..]
+            .find(".after(crate::seek::start_pending_bgm)")
+            .expect("wait watcher must follow the deferred seek BGM restart");
+        let plugin_end = source[watcher..]
+            .find("#[cfg(test)]")
+            .expect("plugin must precede tests");
+        assert!(restart_edge < plugin_end);
+    }
+
+    #[test]
+    fn seek_reset_is_not_gated_on_running_pause_state() {
+        let source = include_str!("wait.rs");
+        let reset = source
+            .find("reset_wait_on_seek\n                .after(crate::seek::apply_seek_system)")
+            .expect("seek reset registration");
+        let watcher = source[reset..]
+            .find("wait_watcher\n                .after(reset_wait_on_seek)")
+            .expect("wait watcher registration");
+        assert!(
+            !source[reset..reset + watcher].contains("PauseState::Running"),
+            "paused timeline seeks must still clear a stale wait halt"
         );
     }
 }
