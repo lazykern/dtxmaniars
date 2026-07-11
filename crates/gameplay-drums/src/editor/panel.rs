@@ -122,7 +122,9 @@ pub fn plugin(app: &mut App) {
                     .or_else(resource_changed::<Lanes>)
                     .or_else(resource_changed::<super::bindings_panel::BindingsRev>)
                     .or_else(resource_changed::<super::controls_panel::ControlsSegment>)
-                    .or_else(resource_changed::<super::controls_panel::ControlsFocus>),
+                    .or_else(resource_changed::<super::controls_panel::ControlsFocus>)
+                    .or_else(resource_changed::<super::lanes_panel::SelectedLane>)
+                    .or_else(resource_changed::<super::lanes_panel::AddChannelPopupOpen>),
             ),
             // Right inspector rebuilds on selection change (+ tab/open) — this
             // is the only panel that reacts to Selection.
@@ -175,6 +177,8 @@ struct LeftPanelSig {
     popup: super::profile_bar_ui::ProfileBarPopup,
     bar: Option<(String, bool)>,
     error: Option<super::profile_bar::ProfileUiError>,
+    lane_selected: Option<usize>,
+    lane_add_popup: bool,
 }
 
 /// Controls-tab inputs bundled to stay under the system-param ceiling
@@ -185,6 +189,8 @@ struct LeftPanelSig {
 struct ControlsInputs<'w> {
     focus: Res<'w, super::controls_panel::ControlsFocus>,
     selected: Res<'w, super::bindings_capture::SelectedChannel>,
+    reset: Res<'w, super::bindings_panel::BindingsResetState>,
+    ports: Res<'w, super::bindings_panel::MidiPortList>,
 }
 
 /// Profile-bar inputs, bundled to stay under Bevy's system-param ceiling
@@ -195,6 +201,14 @@ struct ProfileBarInputs<'w> {
     session: Res<'w, super::profile_state::CustomizeSession>,
     popup: Res<'w, super::profile_bar_ui::ProfileBarPopup>,
     error: Res<'w, super::profile_bar_ui::ProfileUiErrorState>,
+}
+
+/// Lanes-tab inputs, bundled to stay under Bevy's system-param ceiling
+/// alongside `ProfileBarInputs`/`ControlsInputs`.
+#[derive(SystemParam)]
+struct LanesInputs<'w> {
+    selected: Res<'w, super::lanes_panel::SelectedLane>,
+    add_popup: Res<'w, super::lanes_panel::AddChannelPopupOpen>,
 }
 
 /// Left content panel: renders the profile bar (Controls/Lanes only) above
@@ -211,12 +225,11 @@ fn rebuild_left_content(
     draft: Res<super::tabs::ConfigDraft>,
     live: Res<crate::bindings::LiveBindings>,
     rev: Res<super::bindings_panel::BindingsRev>,
-    bindings_reset: Res<super::bindings_panel::BindingsResetState>,
-    ports: Res<super::bindings_panel::MidiPortList>,
     theme: Res<dtx_ui::ThemeResource>,
     midi: Option<Res<game_shell::MidiConnected>>,
     bar: ProfileBarInputs,
     controls: ControlsInputs,
+    lanes_ui: LanesInputs,
     existing: Query<Entity, With<LeftContentRoot>>,
     mut last_sig: Local<Option<LeftPanelSig>>,
 ) {
@@ -239,6 +252,8 @@ fn rebuild_left_content(
         popup,
         bar: bar_sig,
         error: bar_error.0.clone(),
+        lane_selected: lanes_ui.selected.0,
+        lane_add_popup: lanes_ui.add_popup.0,
     };
     if last_sig.as_ref() == Some(&sig) {
         return;
@@ -306,8 +321,8 @@ fn rebuild_left_content(
             &t,
             &live,
             &lanes,
-            &ports,
-            *bindings_reset,
+            &controls.ports,
+            *controls.reset,
             segment,
             *controls.focus,
             controls.selected.0,
@@ -322,7 +337,13 @@ fn rebuild_left_content(
     // widget picker list (selecting Playfield here just shows no inspector —
     // the lane block lives on the dedicated Lanes tab).
     commands.entity(root).with_children(|p| match active.0 {
-        game_shell::CustomizeTab::Lanes => super::lanes_panel::spawn_lane_block(p, &t, &lanes),
+        game_shell::CustomizeTab::Lanes => super::lanes_panel::spawn_lane_block(
+            p,
+            &t,
+            &lanes,
+            lanes_ui.selected.0,
+            lanes_ui.add_popup.0,
+        ),
         game_shell::CustomizeTab::Widgets => spawn_widget_list(p, &t, &selection),
         _ => {}
     });

@@ -1,9 +1,13 @@
-//! Spatial bind display for the Bindings tab (spec §5).
+//! Spatial bind display for the Bindings tab (spec §5), reused by the Lanes
+//! tab (Task 8) to light the selected lane.
 //!
-//! While the Bindings tab is active and a channel is selected (by a pad hit, via
-//! `SelectedChannel`), the selected channel's lane column is outlined on the
-//! shrunk playfield and its bound sources are drawn at the lane bottom
-//! (DJMAX-style, e.g. "C  N38"). The geometry is read straight from
+//! While the Controls tab is active and a channel is selected (by a pad hit,
+//! via `SelectedChannel`), the selected channel's lane column is outlined on
+//! the shrunk playfield and its bound sources are drawn at the lane bottom
+//! (DJMAX-style, e.g. "C  N38"). While the Lanes tab is active and a row is
+//! selected (via `lanes_panel::SelectedLane`), the SAME outline lights that
+//! lane's column directly by index — no source label, since there's nothing
+//! bind-related to show there. The geometry is read straight from
 //! `PlayfieldLayout` (`col_left`/`col_width`/`lane_top`/`lane_height`), which is
 //! already resolved through the `StageRect`, so the overlay follows the stage
 //! transform (Fit preset) for free.
@@ -11,8 +15,8 @@
 //! Lifecycle mirrors `editor/stage.rs`'s `StageOutline`: one outline node + one
 //! label node spawned when the surface opens, despawned on close / `OnExit`. An
 //! `editor_open`-gated sync tracks them to the lane rect each frame and hides
-//! them when off the Bindings tab, when no channel is selected, or while peeking
-//! (Tab held to preview the play view).
+//! them when off the Controls/Lanes tabs, when nothing is selected, or while
+//! peeking (Tab held to preview the play view).
 
 use bevy::prelude::*;
 use dtx_input::BindSource;
@@ -183,12 +187,14 @@ fn despawn_overlay(
     }
 }
 
-/// Track the outline + label to the selected channel's lane rect and show them
-/// only on the Bindings tab with a live selection and no peek in progress.
+/// Track the outline + label to the selected channel's lane rect (Controls
+/// tab) or the selected lane's column (Lanes tab), one at a time, and hide
+/// both while peeking.
 #[allow(clippy::too_many_arguments)]
 fn sync_bind_overlay(
     state: Res<super::PreviewState>,
     selected: Res<SelectedChannel>,
+    lane_selected: Res<super::lanes_panel::SelectedLane>,
     pfl: Res<PlayfieldLayout>,
     lanes: Res<Lanes>,
     live: Res<LiveBindings>,
@@ -202,10 +208,17 @@ fn sync_bind_overlay(
     >,
 ) {
     let peeking = state.peeking;
-    let on_bindings = state.tab == game_shell::CustomizeTab::Controls;
-    // Resolve the selected channel's column (None → nothing to draw).
-    let col = if on_bindings && !peeking {
-        selected.0.and_then(|ch| lanes.col_of(ch).map(|c| (ch, c)))
+    // Resolve which column to light, and (Controls only) which channel's
+    // bound sources to caption underneath it.
+    let col = if peeking {
+        None
+    } else if state.tab == game_shell::CustomizeTab::Controls {
+        selected.0.and_then(|ch| lanes.col_of(ch).map(|c| (Some(ch), c)))
+    } else if state.tab == game_shell::CustomizeTab::Lanes {
+        lane_selected
+            .0
+            .filter(|&i| i < lanes.0.lanes.len())
+            .map(|i| (None, i))
     } else {
         None
     };
@@ -235,6 +248,12 @@ fn sync_bind_overlay(
     o_node.height = Val::Px(height);
     *o_border = BorderColor::all(accent);
     *o_vis = Visibility::Inherited;
+
+    // Lanes-tab selection: light the column only, no source caption.
+    let Some(ch) = ch else {
+        *l_vis = Visibility::Hidden;
+        return;
+    };
 
     // Bound sources drawn at the lane bottom (just under the judge line). Cap
     // the count so the auto-width pill stays narrow (rightmost lanes would run
