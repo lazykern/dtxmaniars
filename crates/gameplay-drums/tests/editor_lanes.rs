@@ -15,7 +15,7 @@ fn split_then_save_then_reload_preserves_arrangement() {
     assert!(split_channel(&mut lanes.0, EChannel::HiHatOpen));
     assert!(reorder_lane(&mut lanes.0, 0, 1));
     assert!(set_lane_width(&mut lanes.0, 3, 90.0));
-    let file = layout_file_from(&WidgetLayouts::default(), &lanes);
+    let file = layout_file_from(&WidgetLayouts::default(), &lanes.0);
     let resolved = file.lanes.resolve();
     assert_eq!(resolved, lanes.0);
     assert_eq!(resolved.preset, LanePreset::Custom);

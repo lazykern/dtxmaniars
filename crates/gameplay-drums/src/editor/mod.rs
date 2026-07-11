@@ -162,14 +162,15 @@ fn close_editor_on_exit(
     mut selection: ResMut<drag::Selection>,
     mut session: ResMut<game_shell::EditorSession>,
     layouts: Res<crate::widget_layout::WidgetLayouts>,
-    lanes: Res<crate::lanes::Lanes>,
+    profile_session: Res<profile_state::CustomizeSession>,
     draft: Res<tabs::ConfigDraft>,
 ) {
     if open.0 {
         // Config and widget layout keep their auto-save policy. Profile
         // drafts are NOT saved here: committed profile state changes only
-        // through explicit registry transactions (dirty close guard).
-        let file = save::layout_file_from(&layouts, &lanes);
+        // through explicit registry transactions (dirty close guard). The
+        // lane snapshot is the last committed profile, not the preview.
+        let file = save::layout_file_from(&layouts, &profile_session.0.lanes.saved.arrangement);
         if let Err(e) = dtx_layout::save(&dtx_layout::default_path(), &file) {
             warn!("layout save on exit failed: {e}");
         }

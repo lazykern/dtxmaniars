@@ -1,16 +1,24 @@
-//! Persist / reset editor edits, and cycle lane presets.
+//! Persist / reset editor edits.
+//!
+//! Widget saves stay separate from profile transactions: `layout.toml` gets
+//! the `[scene]` plus a NON-authoritative snapshot of the last committed
+//! lane profile (compatibility only — startup ignores it whenever
+//! `lane-profiles.toml` exists). Unsaved lane profile drafts are never
+//! written here and their dirty state is untouched.
 
 use bevy::prelude::*;
-use dtx_layout::{LayoutFile, LATEST_VERSION};
+use dtx_layout::{LaneArrangement, LayoutFile, LATEST_VERSION};
 
-use crate::lanes::Lanes;
 use crate::widget_layout::WidgetLayouts;
 
-/// Build a `LayoutFile` from the live resources (for saving).
-pub fn layout_file_from(layouts: &WidgetLayouts, lanes: &Lanes) -> LayoutFile {
+use super::profile_state::CustomizeSession;
+
+/// Build a `LayoutFile` from the widget scene and the committed active lane
+/// arrangement (compatibility snapshot).
+pub fn layout_file_from(layouts: &WidgetLayouts, active_lanes: &LaneArrangement) -> LayoutFile {
     LayoutFile {
         version: LATEST_VERSION,
-        lanes: dtx_layout::LanesSection::from_arrangement(&lanes.0),
+        lanes: dtx_layout::LanesSection::from_arrangement(active_lanes),
         scene: dtx_layout::SceneSection::from_map(&layouts.0),
     }
 }
@@ -28,27 +36,32 @@ pub fn plugin(app: &mut App) {
 }
 
 /// Layout auto-saves when the surface closes (EditorOpen true→false while still
-/// in Performance — the Esc route), matching the config/bindings auto-save
-/// contract. The song-ended route is covered by `close_editor_on_exit`.
+/// in Performance — the Esc route), matching the config auto-save contract.
+/// The song-ended route is covered by `close_editor_on_exit`. Snapshots the
+/// last committed lane profile, never the unsaved preview draft.
 fn save_layout_on_close(
     open: Res<super::EditorOpen>,
     layouts: Res<WidgetLayouts>,
-    lanes: Res<Lanes>,
+    session: Res<CustomizeSession>,
 ) {
     if !open.is_changed() || open.0 {
         return;
     }
-    let file = layout_file_from(&layouts, &lanes);
+    let file = layout_file_from(&layouts, &session.0.lanes.saved.arrangement);
     if let Err(e) = dtx_layout::save(&dtx_layout::default_path(), &file) {
         warn!("layout auto-save failed: {e}");
     }
 }
 
-/// Ctrl+S writes layout.toml.
-fn save_hotkey(keys: Res<ButtonInput<KeyCode>>, layouts: Res<WidgetLayouts>, lanes: Res<Lanes>) {
+/// Ctrl+S writes layout.toml. Never commits profile drafts.
+fn save_hotkey(
+    keys: Res<ButtonInput<KeyCode>>,
+    layouts: Res<WidgetLayouts>,
+    session: Res<CustomizeSession>,
+) {
     let ctrl = keys.pressed(KeyCode::ControlLeft) || keys.pressed(KeyCode::ControlRight);
     if ctrl && keys.just_pressed(KeyCode::KeyS) {
-        let file = layout_file_from(&layouts, &lanes);
+        let file = layout_file_from(&layouts, &session.0.lanes.saved.arrangement);
         match dtx_layout::save(&dtx_layout::default_path(), &file) {
             Ok(()) => info!("layout saved to {:?}", dtx_layout::default_path()),
             Err(e) => warn!("layout save failed: {e}"),
@@ -66,28 +79,16 @@ pub fn reset_all_widgets(layouts: &mut WidgetLayouts) {
     layouts.0 = dtx_layout::SceneSection::default().resolve();
 }
 
-/// Cycle to the next lane preset (Classic → NxTypeB → NxTypeD → Classic).
-pub fn next_lane_preset(lanes: &mut Lanes) {
-    use dtx_layout::LanePreset;
-    let next = match lanes.0.preset {
-        LanePreset::Classic => LanePreset::NxTypeB,
-        LanePreset::NxTypeB => LanePreset::NxTypeD,
-        LanePreset::NxTypeD | LanePreset::Custom => LanePreset::Classic,
-    };
-    lanes.0 = dtx_layout::arrangement_for(next);
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-    use dtx_layout::{LanePreset, WidgetKind};
+    use dtx_layout::WidgetKind;
 
     #[test]
     fn save_file_round_trips_through_resolve() {
         let mut layouts = WidgetLayouts::default();
         layouts.0.get_mut(&WidgetKind::Combo).unwrap().offset = (12.0, 34.0);
-        let lanes = Lanes::default();
-        let file = layout_file_from(&layouts, &lanes);
+        let file = layout_file_from(&layouts, &dtx_layout::classic());
         assert_eq!(
             file.scene.resolve()[&WidgetKind::Combo].offset,
             (12.0, 34.0)
@@ -100,17 +101,5 @@ mod tests {
         layouts.0.get_mut(&WidgetKind::Combo).unwrap().offset = (9.0, 9.0);
         reset_widget(&mut layouts, WidgetKind::Combo);
         assert_eq!(layouts.get(WidgetKind::Combo).offset, (0.0, 0.0));
-    }
-
-    #[test]
-    fn preset_cycles() {
-        let mut lanes = Lanes::default();
-        assert_eq!(lanes.0.preset, LanePreset::Classic);
-        next_lane_preset(&mut lanes);
-        assert_eq!(lanes.0.preset, LanePreset::NxTypeB);
-        next_lane_preset(&mut lanes);
-        assert_eq!(lanes.0.preset, LanePreset::NxTypeD);
-        next_lane_preset(&mut lanes);
-        assert_eq!(lanes.0.preset, LanePreset::Classic);
     }
 }
