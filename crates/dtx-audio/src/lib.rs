@@ -148,26 +148,51 @@ pub fn preload_chart_sound(
 }
 
 /// Resolve a chart-relative audio filename, matching case-insensitively if needed.
+///
+/// DTX charts authored on Windows use `\` as the path separator and may nest
+/// samples in per-instrument subfolders (e.g. `Kit\snare 01.ogg`). We normalise
+/// `\` to `/` and resolve each component in turn, falling back to a
+/// case-insensitive scan per directory level.
 pub fn resolve_chart_audio_path(chart_dir: &Path, filename: &str) -> PathBuf {
-    let direct = chart_dir.join(filename);
+    let normalized = filename.replace('\\', "/");
+
+    let direct = chart_dir.join(&normalized);
     if direct.exists() {
         return direct;
     }
 
-    let needle = filename.to_lowercase();
-    if let Ok(entries) = std::fs::read_dir(chart_dir) {
-        for entry in entries.flatten() {
-            let path = entry.path();
-            let Some(name) = path.file_name() else {
-                continue;
-            };
-            if name.to_string_lossy().to_lowercase() == needle {
-                return path;
-            }
+    let mut current = chart_dir.to_path_buf();
+    for component in normalized.split('/') {
+        if component.is_empty() || component == "." {
+            continue;
+        }
+        let candidate = current.join(component);
+        if candidate.exists() {
+            current = candidate;
+            continue;
+        }
+        match resolve_component_ci(&current, component) {
+            Some(matched) => current = matched,
+            None => return direct,
         }
     }
+    current
+}
 
-    direct
+/// Case-insensitive lookup of a single path component within `dir`.
+fn resolve_component_ci(dir: &Path, component: &str) -> Option<PathBuf> {
+    let needle = component.to_lowercase();
+    let entries = std::fs::read_dir(dir).ok()?;
+    for entry in entries.flatten() {
+        let path = entry.path();
+        let Some(name) = path.file_name() else {
+            continue;
+        };
+        if name.to_string_lossy().to_lowercase() == needle {
+            return Some(path);
+        }
+    }
+    None
 }
 
 /// Per-WAV round-robin voice index for drum polyphony.
@@ -711,6 +736,22 @@ mod tests {
 
         assert_eq!(resolved, actual);
         let _ = std::fs::remove_file(actual);
+        let _ = std::fs::remove_dir(dir);
+    }
+
+    #[test]
+    fn resolve_chart_audio_path_handles_windows_nested_backslash() {
+        let dir = std::env::temp_dir().join(format!("dtx_audio_nest_{}", std::process::id()));
+        let sub = dir.join("Kit A");
+        std::fs::create_dir_all(&sub).unwrap();
+        let actual = sub.join("snare 01.ogg");
+        std::fs::write(&actual, b"not real ogg").unwrap();
+
+        let resolved = resolve_chart_audio_path(&dir, "Kit A\\snare 01.ogg");
+
+        assert_eq!(resolved, actual);
+        let _ = std::fs::remove_file(actual);
+        let _ = std::fs::remove_dir(sub);
         let _ = std::fs::remove_dir(dir);
     }
 }

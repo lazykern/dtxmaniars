@@ -321,7 +321,9 @@ fn wav_path(
     }
     let filename = chart.assets.wav.get(wav_slot)?;
     Some(match source_dir {
-        Some(dir) => dir.join(filename).to_string_lossy().to_string(),
+        Some(dir) => dtx_audio::resolve_chart_audio_path(dir, filename)
+            .to_string_lossy()
+            .to_string(),
         None => filename.to_string(),
     })
 }
