@@ -143,6 +143,21 @@ pub fn keyboard_capture_step(
     }
 }
 
+/// A NoteOn is learnable only if it is strictly newer than the last hit this
+/// capture already consumed and has positive velocity. A stale hit that
+/// predates arming can never be learned.
+pub fn strictly_new_note(
+    note: u8,
+    velocity: u8,
+    at: Option<std::time::Instant>,
+    seen: Option<std::time::Instant>,
+) -> Option<u8> {
+    match at {
+        Some(t) if velocity > 0 && seen != Some(t) => Some(note),
+        _ => None,
+    }
+}
+
 /// Outcome of one MIDI-learn step.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MidiCaptureStep {
@@ -209,10 +224,12 @@ fn capture_binding(
             *seen_midi_at = last_midi.at;
         }
         CaptureState::Keyboard(channel) => {
+            // First non-reserved key wins even when a reserved key lands the
+            // same frame; the step still refuses reserved keys defensively.
             let step = keyboard_capture_step(
                 keys.just_pressed(KeyCode::Escape),
                 modifier_held(&keys),
-                keys.get_just_pressed().copied().next(),
+                keys.get_just_pressed().copied().find(|k| !is_reserved(*k)),
             );
             match step {
                 KeyboardCaptureStep::Pending => {}
@@ -230,16 +247,17 @@ fn capture_binding(
             }
         }
         CaptureState::Midi(channel) => {
-            // A NEW NoteOn (velocity > 0, `at` strictly newer than the one
-            // this capture already consumed). Advancing `seen_midi_at` dedupes
-            // a held/sustained note so it can't re-bind every frame.
-            let new_note = match last_midi.at {
-                Some(t) if last_midi.velocity > 0 && *seen_midi_at != Some(t) => {
-                    *seen_midi_at = Some(t);
-                    Some(last_midi.note)
-                }
-                _ => None,
-            };
+            // Advancing `seen_midi_at` dedupes a held/sustained note so it
+            // can't re-bind every frame.
+            let new_note = strictly_new_note(
+                last_midi.note,
+                last_midi.velocity,
+                last_midi.at,
+                *seen_midi_at,
+            );
+            if new_note.is_some() {
+                *seen_midi_at = last_midi.at;
+            }
             let step = midi_capture_step(
                 channel,
                 keys.just_pressed(KeyCode::Escape),
@@ -429,6 +447,26 @@ mod tests {
             (note == 38).then_some(EChannel::Snare)
         });
         assert_eq!(step, MidiCaptureStep::Bind(38));
+    }
+
+    #[test]
+    fn stale_midi_hit_is_not_learned() {
+        let armed_at = std::time::Instant::now();
+        // Hit consumed before/at arming: stale, never learned.
+        assert_eq!(
+            strictly_new_note(38, 90, Some(armed_at), Some(armed_at)),
+            None
+        );
+        // No hit at all.
+        assert_eq!(strictly_new_note(38, 90, None, None), None);
+        // Zero velocity is ignored.
+        let later = armed_at + std::time::Duration::from_millis(5);
+        assert_eq!(strictly_new_note(38, 0, Some(later), Some(armed_at)), None);
+        // Strictly newer positive-velocity NoteOn is learnable.
+        assert_eq!(
+            strictly_new_note(38, 90, Some(later), Some(armed_at)),
+            Some(38)
+        );
     }
 
     #[test]

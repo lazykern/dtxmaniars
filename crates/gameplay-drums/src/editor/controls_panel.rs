@@ -26,6 +26,54 @@ pub fn channels_in_display_order(arrangement: &LaneArrangement) -> Vec<EChannel>
     out
 }
 
+/// How a MIDI port filter resolved against the enumerated input ports.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PortMatch {
+    /// No filter: connect to the first available port.
+    FirstAvailable,
+    /// Exact case-sensitive full-name match.
+    Exact(usize),
+    /// First case-sensitive substring match in enumeration order;
+    /// `ambiguous` warns when several ports matched.
+    Substring { index: usize, ambiguous: bool },
+    /// Filter matched nothing. The profile stays active and editable.
+    Disconnected,
+}
+
+/// Normalize a stored port filter: empty or whitespace-only becomes `None`
+/// (first available).
+pub fn normalize_port_filter(filter: Option<&str>) -> Option<String> {
+    filter
+        .map(str::trim)
+        .filter(|trimmed| !trimmed.is_empty())
+        .map(str::to_owned)
+}
+
+/// Resolve a port filter against enumerated port names. Exact case-sensitive
+/// full name wins; otherwise the first case-sensitive substring match in
+/// enumeration order, flagged ambiguous when several match; no match is
+/// `Disconnected`. Never switches profiles.
+pub fn match_midi_port(filter: Option<&str>, enumerated: &[String]) -> PortMatch {
+    let Some(filter) = normalize_port_filter(filter) else {
+        return PortMatch::FirstAvailable;
+    };
+    if let Some(index) = enumerated.iter().position(|port| *port == filter) {
+        return PortMatch::Exact(index);
+    }
+    let mut matches = enumerated
+        .iter()
+        .enumerate()
+        .filter(|(_, port)| port.contains(&filter))
+        .map(|(index, _)| index);
+    match matches.next() {
+        Some(index) => PortMatch::Substring {
+            index,
+            ambiguous: matches.next().is_some(),
+        },
+        None => PortMatch::Disconnected,
+    }
+}
+
 /// Which Controls segment is active.
 #[derive(Resource, Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum ControlsSegment {
@@ -92,6 +140,67 @@ mod tests {
     use game_shell::CustomizeTab;
 
     use super::*;
+
+    #[test]
+    fn empty_port_filter_normalizes_to_none() {
+        assert_eq!(normalize_port_filter(None), None);
+        assert_eq!(normalize_port_filter(Some("")), None);
+        assert_eq!(normalize_port_filter(Some("   ")), None);
+        assert_eq!(
+            normalize_port_filter(Some(" TD-17 ")),
+            Some("TD-17".to_owned())
+        );
+        assert_eq!(match_midi_port(Some("  "), &[]), PortMatch::FirstAvailable);
+    }
+
+    #[test]
+    fn port_match_prefers_exact_case_sensitive_name() {
+        let ports = vec![
+            "TD-17 MIDI 1".to_owned(),
+            "TD-17".to_owned(),
+            "td-17".to_owned(),
+        ];
+        assert_eq!(match_midi_port(Some("TD-17"), &ports), PortMatch::Exact(1));
+        assert_eq!(match_midi_port(Some("td-17"), &ports), PortMatch::Exact(2));
+    }
+
+    #[test]
+    fn port_match_uses_first_case_sensitive_substring_and_warns() {
+        let ports = vec![
+            "Roland TD-17 MIDI 1".to_owned(),
+            "Roland TD-17 MIDI 2".to_owned(),
+        ];
+        assert_eq!(
+            match_midi_port(Some("TD-17"), &ports),
+            PortMatch::Substring {
+                index: 0,
+                ambiguous: true
+            }
+        );
+        assert_eq!(
+            match_midi_port(Some("MIDI 2"), &ports),
+            PortMatch::Substring {
+                index: 1,
+                ambiguous: false
+            }
+        );
+        // Case-sensitive: lowercase filter does not match uppercase names.
+        assert_eq!(
+            match_midi_port(Some("td-17"), &ports),
+            PortMatch::Disconnected
+        );
+    }
+
+    #[test]
+    fn missing_port_is_disconnected_without_profile_switch() {
+        let ports = vec!["Some other device".to_owned()];
+        assert_eq!(
+            match_midi_port(Some("TD-17"), &ports),
+            PortMatch::Disconnected
+        );
+        // Disconnected is a display state only: nothing here selects another
+        // profile — there is no profile input to this API at all.
+    }
 
     #[test]
     fn display_order_uses_primary_then_canonical_secondaries_once() {

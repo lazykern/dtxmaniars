@@ -6,8 +6,6 @@
 //! Edits mutate `crate::bindings::LiveBindings` (the resolver + disk follow) and
 //! bump `BindingsRev`, which re-triggers the left-panel rebuild so chips repaint.
 
-use std::collections::HashSet;
-
 use bevy::prelude::*;
 use dtx_config::{BindSource, BINDABLE_CHANNELS};
 
@@ -128,33 +126,19 @@ fn source_label(src: &BindSource) -> String {
     }
 }
 
-/// Bindings are shown in the active display arrangement, while retaining the
-/// canonical logical-pad order for secondary channels sharing a column.
+/// Bindings are shown in the active display arrangement, delegating to the
+/// shared display-order contract; bindable channels missing from the
+/// arrangement still get a row at the end.
 fn channels_in_display_order(lanes: &Lanes) -> Vec<dtx_core::EChannel> {
-    let mut channels = Vec::with_capacity(BINDABLE_CHANNELS.len());
-    let mut seen = HashSet::new();
-
-    for (col, lane) in lanes.0.lanes.iter().enumerate() {
-        let primary = lane.primary;
-        if BINDABLE_CHANNELS.contains(&primary)
-            && lanes.col_of(primary) == Some(col)
-            && seen.insert(primary)
-        {
-            channels.push(primary);
-        }
-        for channel in BINDABLE_CHANNELS {
-            if lanes.col_of(channel) == Some(col) && seen.insert(channel) {
-                channels.push(channel);
-            }
-        }
-    }
-
+    let mut channels: Vec<_> = super::controls_panel::channels_in_display_order(&lanes.0)
+        .into_iter()
+        .filter(|channel| BINDABLE_CHANNELS.contains(channel))
+        .collect();
     for channel in BINDABLE_CHANNELS {
-        if seen.insert(channel) {
+        if !channels.contains(&channel) {
             channels.push(channel);
         }
     }
-
     channels
 }
 
