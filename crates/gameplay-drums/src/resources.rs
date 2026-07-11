@@ -238,9 +238,13 @@ impl ScrollSettings {
     pub const NX_BASE_PIXELS_PER_MS: f32 = 0.17875;
 
     pub fn from_scroll_speed(multiplier: f32) -> Self {
+        Self::new(multiplier, 1.0)
+    }
+
+    pub fn new(scroll_multiplier: f32, play_speed: f32) -> Self {
         Self {
-            pixels_per_ms: Self::NX_BASE_PIXELS_PER_MS * multiplier.max(0.1),
-            play_speed: 1.0,
+            pixels_per_ms: Self::NX_BASE_PIXELS_PER_MS * scroll_multiplier.max(0.1),
+            play_speed,
         }
     }
 }
