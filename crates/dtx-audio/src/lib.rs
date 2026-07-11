@@ -148,14 +148,26 @@ pub fn preload_chart_sound(
 }
 
 /// Resolve a chart-relative audio filename, matching case-insensitively if needed.
-///
-/// Delegates to [`dtx_core::resolve_chart_asset_path`] so audio and visual
-/// loaders share one filesystem algorithm, falling back to the direct join
-/// when no file matches (preserving prior behavior for callers that load
-/// lazily).
 pub fn resolve_chart_audio_path(chart_dir: &Path, filename: &str) -> PathBuf {
-    dtx_core::resolve_chart_asset_path(chart_dir, filename)
-        .unwrap_or_else(|| chart_dir.join(filename))
+    let direct = chart_dir.join(filename);
+    if direct.exists() {
+        return direct;
+    }
+
+    let needle = filename.to_lowercase();
+    if let Ok(entries) = std::fs::read_dir(chart_dir) {
+        for entry in entries.flatten() {
+            let path = entry.path();
+            let Some(name) = path.file_name() else {
+                continue;
+            };
+            if name.to_string_lossy().to_lowercase() == needle {
+                return path;
+            }
+        }
+    }
+
+    direct
 }
 
 /// Per-WAV round-robin voice index for drum polyphony.
