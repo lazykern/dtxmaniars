@@ -586,11 +586,7 @@ fn persist_hovered_selection(
     }
 }
 
-fn update_hovered_selection(
-    cfg: &mut dtx_config::Config,
-    path: &Path,
-    difficulty: u8,
-) {
+fn update_hovered_selection(cfg: &mut dtx_config::Config, path: &Path, difficulty: u8) {
     cfg.gameplay.last_selected = Some(path.to_path_buf());
     cfg.gameplay.last_selected_difficulty = difficulty;
 }
@@ -856,6 +852,7 @@ fn spawn_song_select(
                             ("SHIFT+ENTER PRACTICE", false),
                             ("TAB SORT", false),
                             ("F5 RESCAN", false),
+                            ("F6 IMPORT", false),
                             ("F1 SETTINGS", false),
                             ("ESC BACK", false),
                         ] {
@@ -907,7 +904,7 @@ fn spawn_wheel_rows(
             },
             BackgroundColor(t.stage_panel_bg),
             Text::new(format!(
-                "no songs found — put song folders in {}\npress F5 to rescan",
+                "no songs found — put song folders in {}\npress F5 to rescan, F6 to import an archive, or drop a .zip here",
                 dtx_library::default_song_dir().display()
             )),
             Theme::font(16.0),
@@ -1502,7 +1499,11 @@ fn song_select_kb_emit(keys: Res<ButtonInput<KeyCode>>, mut out: MessageWriter<N
     } else if keys.just_pressed(KeyCode::ArrowLeft) {
         NavVerb::Dec
     } else if keys.just_pressed(KeyCode::Enter) {
-        if shift { NavVerb::Practice } else { NavVerb::Confirm }
+        if shift {
+            NavVerb::Practice
+        } else {
+            NavVerb::Confirm
+        }
     } else if keys.just_pressed(KeyCode::Escape) {
         NavVerb::Back
     } else {

@@ -24,8 +24,8 @@ use std::io::Write;
 fn make_zip(path: &Path, entries: &[(&str, &[u8])]) {
     let file = fs::File::create(path).unwrap();
     let mut w = zip::ZipWriter::new(file);
-    let opts = zip::write::SimpleFileOptions::default()
-        .compression_method(zip::CompressionMethod::Stored);
+    let opts =
+        zip::write::SimpleFileOptions::default().compression_method(zip::CompressionMethod::Stored);
     for (name, data) in entries {
         w.start_file(*name, opts).unwrap();
         w.write_all(data).unwrap();
@@ -161,7 +161,10 @@ fn zip_wrapper_with_multiple_songs_kept_together() {
 fn zip_multiple_root_dirs_get_archive_name_folder() {
     let dir = test_dir("multiroot");
     let archive = dir.join("TwoSongs.zip");
-    make_zip(&archive, &[("Song A/bsc.dtx", DTX), ("Song B/bsc.dtx", DTX)]);
+    make_zip(
+        &archive,
+        &[("Song A/bsc.dtx", DTX), ("Song B/bsc.dtx", DTX)],
+    );
     let root = dir.join("songs");
     let out = import_archive(&archive, &root).unwrap();
     assert_eq!(out.dest_name, "TwoSongs");
