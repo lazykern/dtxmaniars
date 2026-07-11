@@ -28,7 +28,7 @@ jobs:
         # line-folding + backslash continuation has bitten us before — the
         # backslash was passed through literally and apt saw a single
         # malformed package name. One line = one shell argv = no surprises.
-        run: sudo apt-get update && sudo apt-get install -y libwayland-dev libxkbcommon-dev libx11-dev libasound2-dev libudev-dev
+        run: sudo apt-get update && sudo apt-get install -y libwayland-dev libxkbcommon-dev libx11-dev libasound2-dev libudev-dev libavcodec-dev libavformat-dev libavutil-dev libswscale-dev
 
       - name: Cache cargo
         uses: Swatinem/rust-cache@v2

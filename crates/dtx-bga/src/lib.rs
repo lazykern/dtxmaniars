@@ -17,8 +17,10 @@ use dtx_core::bga::BgaLayer;
 use thiserror::Error;
 
 pub mod chart;
+pub mod video;
 
 pub use chart::{ActiveChartRes, TimedVisualEvent};
+pub use video::{DecodedFrame, MovieWorker};
 
 /// Gameplay-clock bridge: `gameplay-drums` copies the authoritative chart time
 /// (ms) here each frame so visual playback follows pause and practice seeks.

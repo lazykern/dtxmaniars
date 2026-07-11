@@ -2,7 +2,7 @@
 
 use bevy::asset::AssetPlugin;
 use bevy::prelude::*;
-use dtx_bga::{ActiveChartRes, BgaClock, BgaLayerOverlay};
+use dtx_bga::{ActiveChartRes, BgaClock, BgaLayerOverlay, MovieWorker};
 use dtx_core::bga::{bga_events, BgaLayer};
 use dtx_core::parser::parse;
 use std::fs::File;
@@ -57,6 +57,30 @@ fn static_image_event_replaces_only_target_layer() {
     assert_eq!(overlays.len(), 2, "still one entity per layer");
     assert!(overlays.contains(&(BgaLayer::Layer1, 2)), "layer1 replaced with asset 2");
     assert!(overlays.contains(&(BgaLayer::Layer3, 1)), "layer3 unchanged");
+}
+
+#[test]
+fn movie_worker_decodes_tiny_avi() {
+    let path = bga_fixture_dir().join("tiny.avi");
+    let mut worker = MovieWorker::spawn(path);
+    worker.set_target_ms(900);
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+    let frame = loop {
+        if let Some(frame) = worker.newest_due_frame(900) {
+            break frame;
+        }
+        if let Some(err) = worker.take_error() {
+            panic!("decoder error: {err}");
+        }
+        assert!(
+            std::time::Instant::now() < deadline,
+            "decoder timed out"
+        );
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    };
+    assert_eq!((frame.width, frame.height), (16, 16));
+    assert_eq!(frame.rgba.len(), 16 * 16 * 4);
+    worker.stop();
 }
 
 #[test]
