@@ -323,6 +323,8 @@ pub fn play_bgm_from_seconds(
 }
 
 /// Play a BGM file from a stream-local offset at a linear gain.
+// Orthogonal playback knobs; a params struct would only relocate the list (clippy::too_many_arguments).
+#[allow(clippy::too_many_arguments)]
 pub fn play_bgm_from_seconds_with_volume(
     audio: &Audio,
     asset_server: &AssetServer,
@@ -380,6 +382,8 @@ pub fn play_bgm_handle(
 /// Play a preloaded BGM handle, looped, with DTX mix settings.
 ///
 /// `fade_in_ms` — see [`play_bgm`].
+// Orthogonal playback knobs; a params struct would only relocate the list (clippy::too_many_arguments).
+#[allow(clippy::too_many_arguments)]
 pub fn play_bgm_handle_with_mix(
     audio: &Audio,
     bgm: &mut BgmHandle,
@@ -399,6 +403,8 @@ pub fn play_bgm_handle_with_mix(
 /// Play a preloaded BGM handle from a stream-local offset in seconds.
 ///
 /// `fade_in_ms` — see [`play_bgm`].
+// Orthogonal playback knobs; a params struct would only relocate the list (clippy::too_many_arguments).
+#[allow(clippy::too_many_arguments)]
 pub fn play_bgm_handle_with_mix_from_seconds(
     audio: &Audio,
     instances: &mut Assets<AudioInstance>,
@@ -529,6 +535,8 @@ pub fn play_sfx_handle(
 }
 
 /// Play a drum hit with polyphony round-robin per WAV slot.
+// Orthogonal playback knobs; a params struct would only relocate the list (clippy::too_many_arguments).
+#[allow(clippy::too_many_arguments)]
 pub fn play_drum_hit(
     audio: &Audio,
     asset_server: &AssetServer,
@@ -559,6 +567,8 @@ pub fn play_drum_hit(
 }
 
 /// Play a preloaded drum hit with polyphony round-robin per WAV slot.
+// Orthogonal playback knobs; a params struct would only relocate the list (clippy::too_many_arguments).
+#[allow(clippy::too_many_arguments)]
 pub fn play_drum_hit_handle(
     audio: &Audio,
     instances: &mut Assets<AudioInstance>,
