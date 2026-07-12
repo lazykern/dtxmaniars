@@ -15,7 +15,7 @@ pub use nav::{MidiConnected, NavAction, NavSource, NavVerb};
 pub use score_store::ScoreStoreResource;
 pub use states::{
     AppState, CustomizeTab, EGameMode, EditorSession, PauseState, PendingCustomizeTab,
-    PracticeIntent, StageEntity, despawn_stage,
+    PracticeIntent, SelectedDifficulty, StageEntity, despawn_stage,
 };
 pub use transition::{TransitionRequest, request_transition};
 
@@ -27,6 +27,7 @@ impl Plugin for GameShellPlugin {
         app.init_state::<AppState>()
             .init_state::<PauseState>()
             .init_resource::<states::PracticeIntent>()
+            .init_resource::<states::SelectedDifficulty>()
             .init_resource::<states::EditorSession>()
             .init_resource::<states::PendingCustomizeTab>()
             .add_plugins((
