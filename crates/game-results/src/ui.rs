@@ -1,6 +1,7 @@
 //! Results screen presentation: layout spawn/despawn + staggered reveal.
 
 use bevy::prelude::*;
+use dtx_scoring::Rank;
 use dtx_ui::{theme::Theme, ThemeResource};
 use game_shell::despawn_stage;
 use gameplay_drums::resources::{ActiveChart, Combo, DrumScoring, JudgmentCounts, Score};
@@ -23,6 +24,44 @@ pub(crate) struct ResultReveal {
 
 const STAGGER_MS: f32 = 120.0;
 const FADE_DURATION_MS: f32 = 300.0;
+
+/// Rank → theme color: SS/S gold, A green, B blue, C purple, D/E red,
+/// Unknown secondary (spec §Left panel).
+#[allow(dead_code)] // wired into spawn_result in Task 6
+pub(crate) fn rank_color(rank: Rank, theme: &Theme) -> Color {
+    match rank {
+        Rank::SS | Rank::S => theme.judgment_perfect,
+        Rank::A => theme.judgment_great,
+        Rank::B => theme.judgment_good,
+        Rank::C => theme.judgment_ok,
+        Rank::D | Rank::E => theme.judgment_miss,
+        Rank::Unknown => theme.text_secondary,
+    }
+}
+
+/// Rank headline text: `Display` string, except Unknown renders `--`.
+#[allow(dead_code)] // wired into spawn_result in Task 6
+pub(crate) fn rank_label(rank: Rank) -> String {
+    if rank == Rank::Unknown {
+        "--".into()
+    } else {
+        rank.to_string()
+    }
+}
+
+/// `912340` → `"912,340"` (comma thousands separator).
+#[allow(dead_code)] // wired into spawn_result in Task 6
+pub(crate) fn format_thousands(v: u64) -> String {
+    let digits = v.to_string();
+    let mut out = String::with_capacity(digits.len() + digits.len() / 3);
+    for (i, c) in digits.chars().enumerate() {
+        if i > 0 && (digits.len() - i).is_multiple_of(3) {
+            out.push(',');
+        }
+        out.push(c);
+    }
+    out
+}
 
 pub(crate) fn pct(count: u32, total: u32) -> f32 {
     if total == 0 {
@@ -229,5 +268,34 @@ mod tests {
     #[test]
     fn pct_zero_total_is_zero() {
         assert_eq!(pct(1, 0), 0.0);
+    }
+
+    #[test]
+    fn rank_color_total_mapping() {
+        let t = Theme::default();
+        assert_eq!(rank_color(Rank::SS, &t), t.judgment_perfect);
+        assert_eq!(rank_color(Rank::S, &t), t.judgment_perfect);
+        assert_eq!(rank_color(Rank::A, &t), t.judgment_great);
+        assert_eq!(rank_color(Rank::B, &t), t.judgment_good);
+        assert_eq!(rank_color(Rank::C, &t), t.judgment_ok);
+        assert_eq!(rank_color(Rank::D, &t), t.judgment_miss);
+        assert_eq!(rank_color(Rank::E, &t), t.judgment_miss);
+        assert_eq!(rank_color(Rank::Unknown, &t), t.text_secondary);
+    }
+
+    #[test]
+    fn rank_label_unknown_is_dashes() {
+        assert_eq!(rank_label(Rank::Unknown), "--");
+        assert_eq!(rank_label(Rank::SS), "SS");
+        assert_eq!(rank_label(Rank::A), "A");
+    }
+
+    #[test]
+    fn format_thousands_boundaries() {
+        assert_eq!(format_thousands(0), "0");
+        assert_eq!(format_thousands(999), "999");
+        assert_eq!(format_thousands(1_000), "1,000");
+        assert_eq!(format_thousands(912_340), "912,340");
+        assert_eq!(format_thousands(u64::MAX), "18,446,744,073,709,551,615");
     }
 }
