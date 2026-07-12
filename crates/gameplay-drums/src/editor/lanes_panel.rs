@@ -176,6 +176,7 @@ pub fn reduce_lanes_nav(
 }
 
 pub(super) fn plugin(app: &mut App) {
+    app.init_resource::<LanesFocus>();
     app.init_resource::<SelectedLane>()
         .init_resource::<AddChannelPopupOpen>()
         .add_systems(

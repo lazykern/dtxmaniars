@@ -287,6 +287,13 @@ pub enum PendingCloseState {
     Pending(PendingClose),
 }
 
+/// Run condition: the dirty-close guard dialog is NOT up. Keyboard nav
+/// (and the new per-tab consumers) must yield to the dialog exactly as they
+/// already yield to profile dialogs via `profile_dialog_closed`.
+pub fn pending_close_none(pending: bevy::prelude::Res<PendingCloseState>) -> bool {
+    matches!(*pending, PendingCloseState::None)
+}
+
 /// The user's answer to the close guard.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CloseDecision {

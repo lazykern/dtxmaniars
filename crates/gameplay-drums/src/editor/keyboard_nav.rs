@@ -33,6 +33,21 @@ pub fn pad_excluded(tab: CustomizeTab) -> bool {
     matches!(tab, CustomizeTab::Controls | CustomizeTab::Widgets)
 }
 
+/// True when a kit tab's OWN focus machine sits below the tab bar — the
+/// generic Rail-level ←/→ tab switch must yield there (Controls uses ←/→ to
+/// toggle the segment, Lanes Detail uses them to adjust width).
+pub fn subtab_focus_captured(
+    tab: CustomizeTab,
+    controls: super::controls_panel::ControlsFocus,
+    lanes: super::lanes_panel::LanesFocus,
+) -> bool {
+    match tab {
+        CustomizeTab::Controls => controls != super::controls_panel::ControlsFocus::TabBar,
+        CustomizeTab::Lanes => lanes != super::lanes_panel::LanesFocus::TabBar,
+        _ => false,
+    }
+}
+
 /// Can pads descend from the tab bar into this tab's rows?
 fn pad_can_enter(tab: CustomizeTab) -> bool {
     tab.is_settings() && !pad_excluded(tab)
@@ -71,7 +86,11 @@ pub(super) fn plugin(app: &mut App) {
                 // Keyboard/pad nav (incl. tab switching) is suppressed while a
                 // profile dialog is open, so nav can't change the active tab or
                 // dismiss the dialog underneath it.
-                .run_if(super::profile_dialog::profile_dialog_closed),
+                .run_if(super::profile_dialog::profile_dialog_closed)
+                // Same for the dirty-close guard: while it is up, arrows must
+                // not drive the panel underneath and Enter belongs to the
+                // dialog alone.
+                .run_if(super::profile_state::pending_close_none),
         );
 }
 
@@ -177,6 +196,8 @@ fn keyboard_emit_nav(
 
 fn settings_nav_consumer(
     mut actions: MessageReader<NavAction>,
+    controls_focus: Res<super::controls_panel::ControlsFocus>,
+    lanes_focus: Res<super::lanes_panel::LanesFocus>,
     mut active: ResMut<super::tabs::ActiveTab>,
     mut focused: ResMut<FocusedRow>,
     mut level: ResMut<NavLevel>,
@@ -197,6 +218,15 @@ fn settings_nav_consumer(
         };
     }
     for action in actions.read() {
+        // A kit tab whose own focus machine is below the tab bar owns
+        // Dec/Inc (segment toggle / width adjust) — don't also switch tabs.
+        if action.source == NavSource::Keyboard
+            && matches!(action.verb, NavVerb::Dec | NavVerb::Inc)
+            && matches!(*level, NavLevel::Rail)
+            && subtab_focus_captured(active.0, *controls_focus, *lanes_focus)
+        {
+            continue;
+        }
         let items = crate::editor::settings_data::settings_items(active.0);
         match action.source {
             NavSource::Keyboard => match &mut *level {
@@ -544,5 +574,44 @@ mod tests {
             (items[scroll].raw)(&base),
             "pad Back must revert to the adjust-entry snapshot"
         );
+    }
+
+    #[test]
+    fn rail_tab_switch_yields_while_subtab_focus_is_below_tabbar() {
+        use crate::editor::controls_panel::ControlsFocus;
+        use crate::editor::lanes_panel::LanesFocus;
+        // Controls: only a focus below TabBar captures ←/→.
+        assert!(!subtab_focus_captured(
+            CustomizeTab::Controls,
+            ControlsFocus::TabBar,
+            LanesFocus::TabBar
+        ));
+        assert!(subtab_focus_captured(
+            CustomizeTab::Controls,
+            ControlsFocus::SegmentSelector,
+            LanesFocus::TabBar
+        ));
+        assert!(subtab_focus_captured(
+            CustomizeTab::Controls,
+            ControlsFocus::Rows,
+            LanesFocus::TabBar
+        ));
+        // Lanes: Rows/Detail capture; TabBar does not.
+        assert!(!subtab_focus_captured(
+            CustomizeTab::Lanes,
+            ControlsFocus::TabBar,
+            LanesFocus::TabBar
+        ));
+        assert!(subtab_focus_captured(
+            CustomizeTab::Lanes,
+            ControlsFocus::TabBar,
+            LanesFocus::Detail
+        ));
+        // Settings tabs never capture, regardless of stale kit focus.
+        assert!(!subtab_focus_captured(
+            CustomizeTab::Gameplay,
+            ControlsFocus::Rows,
+            LanesFocus::Detail
+        ));
     }
 }
