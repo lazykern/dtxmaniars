@@ -77,8 +77,10 @@ pub fn plugin(app: &mut App) {
             (
                 sync_dialog.run_if(resource_changed::<ProfileDialogState>),
                 handle_name_dialog_input,
-                handle_dialog_keys,
-                handle_dialog_buttons,
+                // Chained: both dispatch through `dispatch_dialog_button` and
+                // take `ProfileDialogState`, so a same-frame keypress and click
+                // must resolve in a defined order.
+                (handle_dialog_keys, handle_dialog_buttons).chain(),
                 update_profile_dialog_focus_ring,
             )
                 .run_if(in_state(game_shell::AppState::Performance)),
