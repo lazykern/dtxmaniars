@@ -15,7 +15,11 @@ pub fn plugin(app: &mut App) {
         .add_systems(Update, title_input.run_if(in_state(AppState::Title)));
 }
 
-fn spawn_title(mut commands: Commands, theme: Res<ThemeResource>) {
+fn spawn_title(
+    mut commands: Commands,
+    theme: Res<ThemeResource>,
+    midi: Option<Res<game_shell::MidiConnected>>,
+) {
     let t = theme.0;
     commands
         .spawn((
@@ -81,6 +85,15 @@ fn spawn_title(mut commands: Commands, theme: Res<ThemeResource>) {
                     TextColor(Color::BLACK),
                 ));
             });
+            if midi.is_some_and(|m| m.0) {
+                root.spawn(Node {
+                    margin: UiRect::top(Val::Px(8.0)),
+                    ..default()
+                })
+                .with_children(|row| {
+                    dtx_ui::widget::nav_legend::spawn_nav_legend(row, &t, &[("BD", "start")]);
+                });
+            }
             root.spawn((Node {
                 position_type: PositionType::Absolute,
                 bottom: Val::Px(12.0),

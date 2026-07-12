@@ -467,6 +467,11 @@ fn spawn_loading(
                         TextColor(t.text_secondary),
                         LoadingStatusText,
                     ));
+                    col.spawn((
+                        Text::new("Esc — cancel"),
+                        Theme::font(12.0),
+                        TextColor(t.text_secondary),
+                    ));
                 });
             });
         });
