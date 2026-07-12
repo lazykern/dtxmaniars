@@ -864,38 +864,6 @@ fn update_hovered_desc(
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[derive(Resource, Default)]
-    struct RebuildCount(u32);
-
-    fn count_rebuild(mut count: ResMut<RebuildCount>) {
-        count.0 += 1;
-    }
-
-    #[test]
-    fn profile_popup_change_requests_left_panel_rebuild() {
-        let mut app = App::new();
-        app.init_resource::<super::super::profile_bar_ui::ProfileBarPopup>()
-            .init_resource::<RebuildCount>()
-            .add_systems(Update, count_rebuild.run_if(profile_popup_changed));
-
-        app.update();
-        app.world_mut().resource_mut::<RebuildCount>().0 = 0;
-        app.update();
-        assert_eq!(app.world().resource::<RebuildCount>().0, 0);
-
-        *app.world_mut()
-            .resource_mut::<super::super::profile_bar_ui::ProfileBarPopup>() =
-            super::super::profile_bar_ui::ProfileBarPopup::Selector;
-        app.update();
-
-        assert_eq!(app.world().resource::<RebuildCount>().0, 1);
-    }
-}
-
 fn row(
     p: &mut ChildSpawnerCommands,
     t: &dtx_ui::theme::Theme,
@@ -1288,5 +1256,37 @@ fn refresh_settings_values(
                 }
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[derive(Resource, Default)]
+    struct RebuildCount(u32);
+
+    fn count_rebuild(mut count: ResMut<RebuildCount>) {
+        count.0 += 1;
+    }
+
+    #[test]
+    fn profile_popup_change_requests_left_panel_rebuild() {
+        let mut app = App::new();
+        app.init_resource::<super::super::profile_bar_ui::ProfileBarPopup>()
+            .init_resource::<RebuildCount>()
+            .add_systems(Update, count_rebuild.run_if(profile_popup_changed));
+
+        app.update();
+        app.world_mut().resource_mut::<RebuildCount>().0 = 0;
+        app.update();
+        assert_eq!(app.world().resource::<RebuildCount>().0, 0);
+
+        *app.world_mut()
+            .resource_mut::<super::super::profile_bar_ui::ProfileBarPopup>() =
+            super::super::profile_bar_ui::ProfileBarPopup::Selector;
+        app.update();
+
+        assert_eq!(app.world().resource::<RebuildCount>().0, 1);
     }
 }

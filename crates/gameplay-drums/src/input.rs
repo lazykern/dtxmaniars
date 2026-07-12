@@ -102,6 +102,7 @@ fn compensated_audio_ms(current_audio_ms: i64, capture_delay: Duration) -> i64 {
     current_audio_ms.saturating_sub(capture_delay.as_millis() as i64)
 }
 
+#[cfg(test)]
 fn capture_targets_for_keys(
     keys: impl IntoIterator<Item = KeyCode>,
     resolver: &BindResolver,
