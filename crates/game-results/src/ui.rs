@@ -2,7 +2,7 @@
 
 use bevy::prelude::*;
 use dtx_scoring::Rank;
-use dtx_ui::{theme::Theme, ThemeResource};
+use dtx_ui::{easing::EaseFunction, theme::Theme, ThemeResource};
 use game_shell::despawn_stage;
 use gameplay_drums::resources::{ActiveChart, Combo, DrumScoring, JudgmentCounts, Score};
 
@@ -11,19 +11,45 @@ use crate::{ResultEntity, SaveStatus};
 #[derive(Component)]
 struct ResultPanel;
 
-/// Marks a stat row for staggered reveal.
+/// Marks a revealed element: fade starts at `reveal_at_ms`, rises to
+/// `target_alpha` (the element's authored alpha, e.g. 0.5 for
+/// `text_secondary`) over `FADE_DURATION_MS` with OutQuint.
 #[derive(Component)]
 pub(crate) struct StatRow {
     pub reveal_at_ms: f32,
+    pub target_alpha: f32,
 }
 
-#[derive(Resource)]
-pub(crate) struct ResultReveal {
+/// Reveal progress for the whole screen. `done` flips on timeout or on the
+/// first input (skip); while `!done` the input driver consumes everything.
+#[derive(Resource, Debug, Clone, Copy)]
+pub(crate) struct RevealState {
     pub elapsed_ms: f32,
+    pub total_ms: f32,
+    pub done: bool,
 }
 
-const STAGGER_MS: f32 = 120.0;
-const FADE_DURATION_MS: f32 = 300.0;
+impl RevealState {
+    pub(crate) fn new(last_slot: f32) -> Self {
+        Self {
+            elapsed_ms: 0.0,
+            total_ms: last_slot * STAGGER_MS + FADE_DURATION_MS,
+            done: false,
+        }
+    }
+}
+
+/// Eased alpha for one element at `elapsed_ms`. Pure.
+pub(crate) fn reveal_alpha(elapsed_ms: f32, reveal_at_ms: f32, target_alpha: f32) -> f32 {
+    let since = elapsed_ms - reveal_at_ms;
+    if since < 0.0 {
+        return 0.0;
+    }
+    EaseFunction::OutQuint.ease((since / FADE_DURATION_MS).clamp(0.0, 1.0)) * target_alpha
+}
+
+pub(crate) const STAGGER_MS: f32 = 60.0;
+pub(crate) const FADE_DURATION_MS: f32 = 350.0;
 
 /// Rank → theme color: SS/S gold, A green, B blue, C purple, D/E red,
 /// Unknown secondary (spec §Left panel).
@@ -83,7 +109,7 @@ pub(crate) fn spawn_result(
     midi: Option<Res<game_shell::MidiConnected>>,
     status: Res<SaveStatus>,
 ) {
-    commands.insert_resource(ResultReveal { elapsed_ms: 0.0 });
+    commands.insert_resource(RevealState::new(15.0));
 
     let title = chart
         .chart
@@ -192,6 +218,7 @@ pub(crate) fn spawn_result(
                 .spawn((
                     StatRow {
                         reveal_at_ms: delay,
+                        target_alpha: 1.0,
                     },
                     Node {
                         height: Val::Px(16.0),
@@ -205,6 +232,7 @@ pub(crate) fn spawn_result(
                 .spawn((
                     StatRow {
                         reveal_at_ms: delay,
+                        target_alpha: 1.0,
                     },
                     Text::new(text),
                     Theme::label_font(),
@@ -225,6 +253,7 @@ pub(crate) fn spawn_result(
             .spawn((
                 StatRow {
                     reveal_at_ms: STAGGER_MS * 15.0,
+                    target_alpha: 1.0,
                 },
                 Text::new(label),
                 Theme::label_font(),
@@ -243,17 +272,24 @@ pub(crate) fn spawn_result(
 
 pub(crate) fn animate_staggered_reveal(
     time: Res<Time>,
-    mut reveal: ResMut<ResultReveal>,
-    mut q: Query<(&StatRow, &mut TextColor)>,
+    mut reveal: ResMut<RevealState>,
+    mut q: Query<(&StatRow, Option<&mut TextColor>, Option<&mut BackgroundColor>)>,
 ) {
+    if reveal.done {
+        return;
+    }
     reveal.elapsed_ms += time.delta_secs() * 1000.0;
-    for (stat, mut color) in &mut q {
-        let since = reveal.elapsed_ms - stat.reveal_at_ms;
-        if since < 0.0 {
-            continue;
+    for (stat, text, bg) in &mut q {
+        let alpha = reveal_alpha(reveal.elapsed_ms, stat.reveal_at_ms, stat.target_alpha);
+        if let Some(mut c) = text {
+            c.0 = c.0.with_alpha(alpha);
         }
-        let alpha = (since / FADE_DURATION_MS).clamp(0.0, 1.0);
-        color.0 = color.0.with_alpha(alpha);
+        if let Some(mut b) = bg {
+            b.0 = b.0.with_alpha(alpha);
+        }
+    }
+    if reveal.elapsed_ms >= reveal.total_ms {
+        reveal.done = true;
     }
 }
 
@@ -297,5 +333,45 @@ mod tests {
         assert_eq!(format_thousands(1_000), "1,000");
         assert_eq!(format_thousands(912_340), "912,340");
         assert_eq!(format_thousands(u64::MAX), "18,446,744,073,709,551,615");
+    }
+
+    #[test]
+    fn reveal_alpha_is_zero_before_slot() {
+        assert_eq!(reveal_alpha(59.0, 60.0, 1.0), 0.0);
+    }
+
+    #[test]
+    fn reveal_alpha_is_outquint_front_loaded() {
+        // OutQuint at t=0.5 is 1 - 0.5^5 = 0.96875 — well past linear.
+        let a = reveal_alpha(FADE_DURATION_MS * 0.5, 0.0, 1.0);
+        assert!(a > 0.9, "expected front-loaded ease, got {a}");
+    }
+
+    #[test]
+    fn reveal_alpha_caps_at_target() {
+        assert_eq!(reveal_alpha(10_000.0, 0.0, 0.5), 0.5);
+    }
+
+    #[test]
+    fn reveal_state_new_totals_last_slot_plus_fade() {
+        let s = RevealState::new(13.0);
+        assert_eq!(s.total_ms, 13.0 * STAGGER_MS + FADE_DURATION_MS);
+        assert!(!s.done);
+    }
+
+    #[test]
+    fn animate_marks_done_at_timeout() {
+        use bevy::ecs::system::RunSystemOnce;
+        let mut world = World::new();
+        world.insert_resource(Time::<()>::default());
+        world.insert_resource(RevealState {
+            elapsed_ms: 2_000.0,
+            total_ms: 1_130.0,
+            done: false,
+        });
+        world
+            .run_system_once(animate_staggered_reveal)
+            .expect("system runs");
+        assert!(world.resource::<RevealState>().done);
     }
 }
