@@ -30,15 +30,37 @@ pub const HEADER_REF_FONT: f32 = 11.0;
 pub const HEADER_REF_TOP_MARGIN: f32 = 8.0;
 pub const ROW_REF_FONT: f32 = 16.0;
 pub const SMALL_REF_FONT: f32 = 12.0;
+pub const BLOCK_REF_MARGIN: f32 = 6.0;
+/// Line budget for the two trailing blocks. The rail's leftover band below
+/// the fixed rows only fits six 12-ref-px lines at scale 1.0, and an
+/// uncapped history would push lane diagnosis out of the clipped rail
+/// entirely — so each block keeps its most useful lines (newest attempts,
+/// worst lanes) and drops the tail.
+pub const HISTORY_MAX_LINES: usize = 3;
+pub const DIAG_MAX_LINES: usize = 3;
 
 /// Fixed rail content height (headers + rows + gaps + padding) in px at
-/// `scale`. Attempt history + lane diagnosis render in the leftover band
-/// and are clipped by the rail container when they run long.
+/// `scale`. Attempt history + lane diagnosis render in the leftover band;
+/// both are line-capped so they always fit (see `rail_content_height`).
 pub fn rail_fixed_content_height(scale: f32) -> f32 {
     let headers = 3.0 * (HEADER_REF_FONT * 1.2 + HEADER_REF_TOP_MARGIN);
     let rows = RailItem::ORDER.len() as f32 * ROW_REF_HEIGHT;
     let gaps = (3 + RailItem::ORDER.len() - 1) as f32 * ROW_REF_GAP;
     (headers + rows + gaps + 2.0 * RAIL_REF_PAD) * scale
+}
+
+/// Worst-case rail height including both fully-populated trailing blocks.
+pub fn rail_content_height(scale: f32) -> f32 {
+    let line = SMALL_REF_FONT * 1.2;
+    let blocks =
+        (HISTORY_MAX_LINES + DIAG_MAX_LINES) as f32 * line + 2.0 * (BLOCK_REF_MARGIN + ROW_REF_GAP);
+    rail_fixed_content_height(scale) + blocks * scale
+}
+
+/// Keeps the first `max` lines of `text` — the blocks order their most
+/// useful lines first (header, then newest attempts / worst lanes).
+pub fn clamp_lines(text: &str, max: usize) -> String {
+    text.lines().take(max).collect::<Vec<_>>().join("\n")
 }
 
 /// Root marker for the full practice HUD.
@@ -511,11 +533,14 @@ fn spawn_rail(
         }
         rail.spawn((
             AttemptHistoryText,
-            Text::new(attempt_history_text(session, timeline.end_ms)),
+            Text::new(clamp_lines(
+                &attempt_history_text(session, timeline.end_ms),
+                HISTORY_MAX_LINES,
+            )),
             scaled_font(scale, SMALL_REF_FONT),
             TextColor(theme.text_secondary),
             Node {
-                margin: UiRect::top(Val::Px(12.0 * scale)),
+                margin: UiRect::top(Val::Px(BLOCK_REF_MARGIN * scale)),
                 max_width: Val::Px((RAIL_REF_WIDTH - 2.0 * RAIL_REF_PAD) * scale),
                 flex_shrink: 0.0,
                 ..default()
@@ -523,13 +548,14 @@ fn spawn_rail(
         ));
         rail.spawn((
             LaneDiagnosisText,
-            Text::new(crate::practice::diagnosis::diagnosis_text(
-                &session.lane_diag,
+            Text::new(clamp_lines(
+                &crate::practice::diagnosis::diagnosis_text(&session.lane_diag),
+                DIAG_MAX_LINES,
             )),
             scaled_font(scale, SMALL_REF_FONT),
             TextColor(theme.text_secondary),
             Node {
-                margin: UiRect::top(Val::Px(12.0 * scale)),
+                margin: UiRect::top(Val::Px(BLOCK_REF_MARGIN * scale)),
                 max_width: Val::Px((RAIL_REF_WIDTH - 2.0 * RAIL_REF_PAD) * scale),
                 flex_shrink: 0.0,
                 ..default()
@@ -837,10 +863,16 @@ pub fn refresh_rail(
         };
     }
     if let Ok(mut t) = history.single_mut() {
-        t.0 = attempt_history_text(&session, timeline.end_ms);
+        t.0 = clamp_lines(
+            &attempt_history_text(&session, timeline.end_ms),
+            HISTORY_MAX_LINES,
+        );
     }
     if let Ok(mut t) = diag_text.single_mut() {
-        t.0 = crate::practice::diagnosis::diagnosis_text(&session.lane_diag);
+        t.0 = clamp_lines(
+            &crate::practice::diagnosis::diagnosis_text(&session.lane_diag),
+            DIAG_MAX_LINES,
+        );
     }
 }
 
@@ -925,6 +957,38 @@ mod tests {
             h < RAIL_REF_HEIGHT,
             "rail fixed content {h} ref-px must fit {RAIL_REF_HEIGHT}"
         );
+    }
+
+    #[test]
+    fn rail_worst_case_content_fits_720_reference_height() {
+        // Both trailing blocks full at their line caps must still fit, so a
+        // long attempt history can never push lane diagnosis out of the rail.
+        let h = rail_content_height(1.0);
+        assert!(
+            h <= RAIL_REF_HEIGHT,
+            "rail worst-case content {h} ref-px must fit {RAIL_REF_HEIGHT}"
+        );
+    }
+
+    #[test]
+    fn clamp_lines_keeps_leading_lines() {
+        assert_eq!(clamp_lines("a\nb\nc\nd", 3), "a\nb\nc");
+        assert_eq!(clamp_lines("a\nb", 3), "a\nb");
+    }
+
+    #[test]
+    fn history_and_diag_render_within_line_caps() {
+        let mut s = PracticeSession::default();
+        for i in 0..8 {
+            s.attempt_history.push(record(0, 50.0 + i as f32));
+        }
+        let history = clamp_lines(&attempt_history_text(&s, 16_000), HISTORY_MAX_LINES);
+        assert_eq!(history.lines().count(), HISTORY_MAX_LINES);
+        let diag = clamp_lines(
+            &crate::practice::diagnosis::diagnosis_text(&s.lane_diag),
+            DIAG_MAX_LINES,
+        );
+        assert!(diag.lines().count() <= DIAG_MAX_LINES);
     }
 
     #[test]
