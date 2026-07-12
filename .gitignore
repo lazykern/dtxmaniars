@@ -33,3 +33,4 @@ sessions.db
 
 # Local game state (per-user save data, not repo content)
 /scores.json
+.worktrees/
