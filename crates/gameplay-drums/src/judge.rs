@@ -167,6 +167,9 @@ pub(crate) fn judge_lane_hit_system(
             empty_hits.write(EmptyHit { lane: primary_lane, audio_ms: hit.audio_ms });
             continue;
         };
+        if let Some(chord_hits) = chord_hits.as_deref_mut() {
+            record_chord_hit_times(chord_hits, &[(idx, delta)], halted_chips, adjusted_hit_ms);
+        }
         judged.0.insert(idx);
         events.write(JudgmentEvent {
             lane: crate::lane_map::lane_of(chart.chart.chips[idx].channel).unwrap_or(primary_lane),
@@ -446,5 +449,15 @@ mod tests {
         let mut chord_hits2 = ChordHitTimes::default();
         record_chord_hit_times(&mut chord_hits2, &[(2, 0_i64)], None, 12_345);
         assert!(chord_hits2.0.is_empty());
+    }
+
+    #[test]
+    fn records_explicit_lane_hit_time_while_halted() {
+        use crate::practice::wait::ChordHitTimes;
+
+        let mut chord_hits = ChordHitTimes::default();
+        record_chord_hit_times(&mut chord_hits, &[(3, 0_i64)], Some(&[2, 3]), 12_345);
+
+        assert_eq!(chord_hits.0.get(&3), Some(&12_345));
     }
 }
