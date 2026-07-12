@@ -18,8 +18,8 @@ pub struct HistoryRow {
     pub rank: String,
     /// Score value.
     pub score: u32,
-    /// Perfect percentage (0..100).
-    pub perfect_pct: f32,
+    /// Weighted achievement percentage (0..100).
+    pub achievement_pct: f32,
     /// Pre-formatted UTC play time, `YYYY-MM-DD HH:MM`.
     pub played_at: String,
 }
@@ -78,7 +78,7 @@ pub fn spawn_play_history(parent: &mut ChildSpawnerCommands, theme: &Theme) {
 pub fn history_row_line(row: &HistoryRow) -> String {
     format!(
         "{:<2} {:>7}  {:>5.1}%  {}",
-        row.rank, row.score, row.perfect_pct, row.played_at
+        row.rank, row.score, row.achievement_pct, row.played_at
     )
 }
 
@@ -135,7 +135,7 @@ mod tests {
         let row = HistoryRow {
             rank: "S".into(),
             score: 982_340,
-            perfect_pct: 95.234,
+            achievement_pct: 95.234,
             played_at: "2026-07-10 14:35".into(),
         };
         assert_eq!(

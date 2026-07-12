@@ -28,6 +28,7 @@ pub(super) fn plugin(app: &mut App) {
         (track_attempt_stats, wrap_micro_report)
             .chain()
             .after(crate::judge::judge_lane_hit_system)
+            .after(crate::practice::wait::wait_watcher)
             .run_if(in_state(AppState::Performance))
             .run_if(resource_exists::<PracticeSession>),
     );

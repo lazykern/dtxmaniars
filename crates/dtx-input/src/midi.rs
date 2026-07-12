@@ -3,7 +3,7 @@
 //! `MidiSource` is the trait; `VirtualSource` is the in-memory test double.
 //! Real-device impl via `midir` is gated on the `midi` feature.
 
-use std::collections::VecDeque;
+use std::{collections::VecDeque, time::Instant};
 
 /// A source of MIDI events. Implementations may be real (via midir) or
 /// virtual (for tests). Note→channel mapping is the consumer's job
@@ -34,6 +34,7 @@ impl VirtualSource {
             note,
             velocity,
             audio_ms,
+            captured_at: Instant::now(),
         });
     }
 
@@ -84,6 +85,8 @@ pub enum MidiEvent {
         velocity: u8,
         /// AudioClock ms when event occurred.
         audio_ms: i64,
+        /// Monotonic timestamp captured when the physical event arrived.
+        captured_at: Instant,
     },
     /// Note off.
     NoteOff {
@@ -114,6 +117,7 @@ pub fn midi_bytes_to_event(bytes: &[u8], audio_ms: i64) -> Option<MidiEvent> {
             note: bytes[1],
             velocity: bytes[2],
             audio_ms,
+            captured_at: Instant::now(),
         }),
         0x90 => Some(MidiEvent::NoteOff {
             note: bytes[1],
@@ -256,14 +260,26 @@ mod tests {
     #[test]
     fn note_on_bytes_parse() {
         let e = midi_bytes_to_event(&[0x90, 38, 100], 0);
-        assert_eq!(
+        assert!(matches!(
             e,
             Some(MidiEvent::NoteOn {
                 note: 38,
                 velocity: 100,
-                audio_ms: 0
+                audio_ms: 0,
+                ..
             })
-        );
+        ));
+    }
+
+    #[test]
+    fn note_on_captures_monotonic_input_time() {
+        let before = std::time::Instant::now();
+        let Some(MidiEvent::NoteOn { captured_at, .. }) = midi_bytes_to_event(&[0x90, 38, 100], 0)
+        else {
+            panic!("expected note-on");
+        };
+
+        assert!(captured_at >= before);
     }
 
     #[test]
@@ -315,14 +331,15 @@ mod tests {
         let n = s.poll(&mut out);
         assert_eq!(n, 3);
         assert!(s.is_empty());
-        assert_eq!(
+        assert!(matches!(
             out[0],
             MidiEvent::NoteOn {
                 note: 36,
                 velocity: 100,
-                audio_ms: 500
+                audio_ms: 500,
+                ..
             }
-        );
+        ));
         assert_eq!(
             out[1],
             MidiEvent::NoteOff {

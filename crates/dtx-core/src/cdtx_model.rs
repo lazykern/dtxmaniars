@@ -29,12 +29,11 @@ pub const DEFAULT_BPM: f32 = 120.0;
 /// One BPM change (BocuD `listBPM変更`).
 ///
 /// Reference: `CDTX.cs:1070-1080` — each #BPMxx chip pushes a new entry.
-/// We pre-compute the BPM at any measure by binary search.
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub struct CachedBpmChange {
-    pub measure: u32,
-    pub bpm: f32,
-}
+///
+/// Alias of [`crate::timing::BpmChange`] so there is exactly one BPM-change
+/// type (and one timing algorithm) in the codebase — a second, measure-granular
+/// copy is how mid-measure BPM changes silently lost their position.
+pub type CachedBpmChange = crate::timing::BpmChange;
 
 /// Pre-computed chip with absolute playback time (ms).
 ///
@@ -249,51 +248,23 @@ impl CDTX {
 }
 
 /// Compute playback time in ms for a (measure, fraction) at base_bpm,
-/// accounting for any BPM changes before that measure.
+/// accounting for every BPM change at or before that position.
 ///
-/// Reference: `CChip.cs:ComputeTime` — sums interval durations and the
-/// final partial-measure at the last-applied BPM.
+/// Reference: `CChip.cs:ComputeTime`. Delegates to
+/// [`crate::timing::chip_time_ms_with_bpm_changes`] — the one segment-integral
+/// implementation, which honours each change's in-measure position.
 pub fn compute_playback_time(
     measure: u32,
     fraction: f32,
     base_bpm: f32,
     bpm_changes: &[CachedBpmChange],
 ) -> i64 {
-    if base_bpm <= 0.0 {
-        return 0;
-    }
-    let mut total_ms = 0.0_f64;
-    let mut current_bpm = base_bpm as f64;
-    let mut interval_start: u32 = 0;
-    for ch in bpm_changes {
-        if ch.measure >= measure {
-            break;
-        }
-        if ch.measure > interval_start {
-            let dur_ms = (ch.measure - interval_start) as f64 * 4.0 * 60_000.0 / current_bpm;
-            total_ms += dur_ms;
-        }
-        current_bpm = ch.bpm as f64;
-        interval_start = ch.measure;
-    }
-    let partial = (measure - interval_start) as f64 + fraction as f64;
-    total_ms += partial * 4.0 * 60_000.0 / current_bpm;
-    total_ms as i64
+    crate::timing::chip_time_ms_with_bpm_changes(measure, fraction, base_bpm, bpm_changes)
 }
 
 /// Extract BPM/BPMEx chips into a sorted list of changes.
 fn collect_bpm_changes(chart: &Chart) -> Vec<CachedBpmChange> {
-    let mut out: Vec<CachedBpmChange> = chart
-        .chips
-        .iter()
-        .filter(|c| matches!(c.channel, EChannel::BPM | EChannel::BPMEx))
-        .map(|c| CachedBpmChange {
-            measure: c.measure,
-            bpm: c.value,
-        })
-        .collect();
-    out.sort_by_key(|c| c.measure);
-    out
+    crate::timing::bpm_changes_from_chart(chart)
 }
 
 #[cfg(test)]
@@ -439,6 +410,7 @@ mod tests {
         let changes = [CachedBpmChange {
             measure: 2,
             bpm: 240.0,
+            fraction: 0.0,
         }];
         // m0..2 at 120 BPM = 4000ms
         // m2..3 at 240 BPM = 1000ms

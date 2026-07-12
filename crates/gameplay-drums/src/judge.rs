@@ -23,22 +23,9 @@ pub struct BpmChangeList {
 
 impl BpmChangeList {
     pub fn from_chart(chart: &dtx_core::Chart) -> Self {
-        let mut changes: Vec<BpmChange> = chart
-            .chips
-            .iter()
-            .filter(|c| {
-                matches!(
-                    c.channel,
-                    dtx_core::EChannel::BPM | dtx_core::EChannel::BPMEx
-                )
-            })
-            .map(|c| BpmChange {
-                measure: c.measure,
-                bpm: c.value,
-            })
-            .collect();
-        changes.sort_by_key(|c| c.measure);
-        Self { changes }
+        Self {
+            changes: dtx_core::timing::bpm_changes_from_chart(chart),
+        }
     }
 }
 
@@ -50,17 +37,9 @@ pub struct BarLengthChangeList {
 
 impl BarLengthChangeList {
     pub fn from_chart(chart: &dtx_core::Chart) -> Self {
-        let mut changes: Vec<BarLengthChange> = chart
-            .chips
-            .iter()
-            .filter(|c| c.channel == dtx_core::EChannel::BarLength)
-            .map(|c| BarLengthChange {
-                measure: c.measure,
-                ratio: c.value,
-            })
-            .collect();
-        changes.sort_by_key(|c| c.measure);
-        Self { changes }
+        Self {
+            changes: dtx_core::timing::bar_changes_from_chart(chart),
+        }
     }
 }
 
@@ -88,8 +67,10 @@ pub(crate) fn judge_lane_hit_system(
     bar_changes: Res<BarLengthChangeList>,
     drum_settings: Res<DrumGameplaySettings>,
     input_offset: Res<crate::resources::InputOffsetMs>,
+    practice: Option<Res<crate::practice::PracticeSession>>,
     wait_state: Option<Res<crate::practice::wait::WaitState>>,
     mut chord_hits: Option<ResMut<crate::practice::wait::ChordHitTimes>>,
+    mut deferred: Option<ResMut<crate::practice::wait::DeferredWaitJudgments>>,
     mut judged: ResMut<JudgedChips>,
     mut events: MessageWriter<JudgmentEvent>,
     mut empty_hits: MessageWriter<EmptyHit>,
@@ -109,6 +90,7 @@ pub(crate) fn judge_lane_hit_system(
         crate::practice::wait::WaitPhase::Halted(set) => Some(set.chips.as_slice()),
         crate::practice::wait::WaitPhase::Flowing => None,
     });
+    let defer_wait_judgments = practice.is_some_and(|session| session.trainer.wait_enabled);
 
     for hit in lane_hits.read() {
         let Some(pad) = DrumPad::from_lane(hit.lane) else {
@@ -129,7 +111,7 @@ pub(crate) fn judge_lane_hit_system(
         );
         let results = filter_to_halted_set(results, halted_chips);
         if let Some(chord_hits) = chord_hits.as_deref_mut() {
-            record_chord_hit_times(chord_hits, &results, halted_chips, adjusted_hit_ms);
+            record_chord_hit_times(chord_hits, &results, std::time::Instant::now());
         }
 
         if results.is_empty() {
@@ -142,17 +124,28 @@ pub(crate) fn judge_lane_hit_system(
 
         for (idx, delta) in results {
             judged.0.insert(idx);
-            events.write(JudgmentEvent {
+            let event = JudgmentEvent {
                 lane: hit.lane,
                 kind: classify(delta as i32),
                 delta_ms: delta,
                 chip_idx: idx,
-            });
+            };
+            if defer_wait_judgments {
+                if let Some(deferred) = deferred.as_deref_mut() {
+                    deferred.0.push(event);
+                } else {
+                    events.write(event);
+                }
+            } else {
+                events.write(event);
+            }
         }
     }
 
     for hit in input_hits.read() {
-        let Some(&primary_lane) = hit.lanes.first() else { continue };
+        let Some(&primary_lane) = hit.lanes.first() else {
+            continue;
+        };
         let adjusted_hit_ms = hit.audio_ms - input_offset.0 as i64;
         let result = resolve_explicit_lanes(
             &hit.lanes,
@@ -164,19 +157,31 @@ pub(crate) fn judge_lane_hit_system(
             halted_chips,
         );
         let Some((idx, delta)) = result else {
-            empty_hits.write(EmptyHit { lane: primary_lane, audio_ms: hit.audio_ms });
+            empty_hits.write(EmptyHit {
+                lane: primary_lane,
+                audio_ms: hit.audio_ms,
+            });
             continue;
         };
         if let Some(chord_hits) = chord_hits.as_deref_mut() {
-            record_chord_hit_times(chord_hits, &[(idx, delta)], halted_chips, adjusted_hit_ms);
+            record_chord_hit_times(chord_hits, &[(idx, delta)], hit.captured_at);
         }
         judged.0.insert(idx);
-        events.write(JudgmentEvent {
+        let event = JudgmentEvent {
             lane: crate::lane_map::lane_of(chart.chart.chips[idx].channel).unwrap_or(primary_lane),
             kind: classify(delta as i32),
             delta_ms: delta,
             chip_idx: idx,
-        });
+        };
+        if defer_wait_judgments {
+            if let Some(deferred) = deferred.as_deref_mut() {
+                deferred.0.push(event);
+            } else {
+                events.write(event);
+            }
+        } else {
+            events.write(event);
+        }
     }
 }
 
@@ -196,21 +201,16 @@ fn filter_to_halted_set(
     }
 }
 
-/// Record `hit_ms` for every `(chip_idx, _delta)` in `results` into
-/// `chord_hits`, but only while wait mode is halted (`halted_chips` is
-/// `Some`) — outside a halt there is no chord being evaluated, so there
-/// is nothing to record against.
+/// Record a physical input's monotonic timestamp for every judged chip. The
+/// timestamp is retained until seek/reset so a chord partly hit before its
+/// wait halt still has a complete simultaneity window.
 fn record_chord_hit_times(
     chord_hits: &mut crate::practice::wait::ChordHitTimes,
     results: &[(usize, i64)],
-    halted_chips: Option<&[usize]>,
-    hit_ms: i64,
+    captured_at: std::time::Instant,
 ) {
-    if halted_chips.is_none() {
-        return;
-    }
     for (idx, _delta) in results {
-        chord_hits.0.insert(*idx, hit_ms);
+        chord_hits.0.insert(*idx, captured_at);
     }
 }
 
@@ -434,30 +434,27 @@ mod tests {
     }
 
     #[test]
-    fn records_hit_time_only_for_halted_chips() {
+    fn records_monotonic_time_for_judged_chips() {
         use crate::practice::wait::ChordHitTimes;
         let mut chord_hits = ChordHitTimes::default();
-        record_chord_hit_times(
-            &mut chord_hits,
-            &[(2, 0_i64), (5, 3)],
-            Some(&[2, 3]),
-            12_345,
-        );
-        assert_eq!(chord_hits.0.get(&2), Some(&12_345));
-        assert_eq!(chord_hits.0.get(&5), Some(&12_345));
+        let at = std::time::Instant::now();
+        record_chord_hit_times(&mut chord_hits, &[(2, 0_i64), (5, 3)], at);
+        assert_eq!(chord_hits.0.get(&2), Some(&at));
+        assert_eq!(chord_hits.0.get(&5), Some(&at));
 
         let mut chord_hits2 = ChordHitTimes::default();
-        record_chord_hit_times(&mut chord_hits2, &[(2, 0_i64)], None, 12_345);
-        assert!(chord_hits2.0.is_empty());
+        record_chord_hit_times(&mut chord_hits2, &[(2, 0_i64)], at);
+        assert_eq!(chord_hits2.0.get(&2), Some(&at));
     }
 
     #[test]
-    fn records_explicit_lane_hit_time_while_halted() {
+    fn records_explicit_lane_hit_time() {
         use crate::practice::wait::ChordHitTimes;
 
         let mut chord_hits = ChordHitTimes::default();
-        record_chord_hit_times(&mut chord_hits, &[(3, 0_i64)], Some(&[2, 3]), 12_345);
+        let at = std::time::Instant::now();
+        record_chord_hit_times(&mut chord_hits, &[(3, 0_i64)], at);
 
-        assert_eq!(chord_hits.0.get(&3), Some(&12_345));
+        assert_eq!(chord_hits.0.get(&3), Some(&at));
     }
 }

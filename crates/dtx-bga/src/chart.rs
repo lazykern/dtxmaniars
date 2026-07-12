@@ -12,12 +12,9 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 use dtx_core::bga::BgaLayer;
-use dtx_core::channel::EChannel;
 use dtx_core::chart::Chart;
 use dtx_core::resolve_chart_asset_path;
-use dtx_core::timing::{
-    chip_time_ms_with_bpm_and_bar_changes, BarLengthChange, BpmChange, ChartTiming,
-};
+use dtx_core::timing::{chip_time_ms_with_bpm_and_bar_changes, ChartTiming};
 
 /// A visual chip resolved to an absolute playback time (ms) on the gameplay
 /// clock, tagged with its target layer and the `#BMP`/`#AVI` asset id it
@@ -35,27 +32,8 @@ pub struct TimedVisualEvent {
 /// Build BPM-and-bar-length-aware visual events for a chart, sorted by time
 /// with stable source order for ties.
 pub fn timed_visual_events(chart: &Chart) -> Vec<TimedVisualEvent> {
-    let mut bpm_changes: Vec<BpmChange> = chart
-        .chips
-        .iter()
-        .filter(|chip| matches!(chip.channel, EChannel::BPM | EChannel::BPMEx))
-        .map(|chip| BpmChange {
-            measure: chip.measure,
-            bpm: chip.value,
-        })
-        .collect();
-    bpm_changes.sort_by_key(|change| change.measure);
-
-    let mut bar_changes: Vec<BarLengthChange> = chart
-        .chips
-        .iter()
-        .filter(|chip| chip.channel == EChannel::BarLength)
-        .map(|chip| BarLengthChange {
-            measure: chip.measure,
-            ratio: chip.value,
-        })
-        .collect();
-    bar_changes.sort_by_key(|change| change.measure);
+    let bpm_changes = dtx_core::timing::bpm_changes_from_chart(chart);
+    let bar_changes = dtx_core::timing::bar_changes_from_chart(chart);
 
     let timing = ChartTiming {
         bpm_changes: &bpm_changes,

@@ -70,7 +70,9 @@ fn capture_key_to_lane_input(
         let captured_at = Instant::now();
         let lanes: Vec<_> = resolver.lanes_for_key(*key).collect();
         if !lanes.is_empty() {
-            pending.events.push(CapturedLaneInput { lanes, captured_at });
+            pending
+                .events
+                .push(CapturedLaneInput { lanes, captured_at });
         }
     }
 }
@@ -94,6 +96,7 @@ fn emit_pending_lane_hits(
                 clock.current_ms,
                 now.saturating_duration_since(captured.captured_at),
             ),
+            captured_at: captured.captured_at,
         });
     }
 }

@@ -53,14 +53,22 @@ pub fn chip_time_ms_with_bpm_changes_and_speed(
     ((t as f64) / (play_speed as f64)) as i64
 }
 
-/// A BPM change event at a specific measure.
+/// A BPM change event at a specific measure **and fractional position within
+/// that measure** (`0.0..1.0`).
+///
+/// DTX encodes BPM changes as slot sequences on channels `03`/`08`, exactly
+/// like note channels, so a single measure can hold several changes at
+/// different positions (e.g. `#20208: 090B` = BPM09 at 0.0, BPM0B at 0.5).
+/// Snapping them to the measure boundary mistimes everything downstream.
 ///
 /// Reference: `references/DTXmaniaNX-BocuD/DTXMania/Score,Song/CDTX.cs:1070-1080`
-/// — `n現在のBPM` updated by `listBPM変更` on each `BPM` channel chip.
+/// — `n現在のBPM` updated by `listBPM変更` as chips are walked in position order.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct BpmChange {
     pub measure: u32,
     pub bpm: f32,
+    /// Position within `measure`, `0.0..1.0`.
+    pub fraction: f32,
 }
 
 /// A bar-length (meter change) event at a specific measure — DTX channel
@@ -85,22 +93,51 @@ pub struct ChartTiming<'a> {
     pub bar_changes: &'a [BarLengthChange],
 }
 
-/// Active BPM at measure `m`: the most recent `BpmChange` at or before
-/// `m` (sorted ascending by measure), or `base_bpm` if none yet.
-fn active_bpm_at(m: u32, base_bpm: f32, sorted_bpm: &[BpmChange]) -> f64 {
-    let mut bpm = base_bpm as f64;
-    for c in sorted_bpm {
-        if c.measure > m {
-            break;
-        }
-        bpm = c.bpm as f64;
-    }
-    bpm
+/// Collect every BPM change in `chart` (channels `03` and `08`), sorted by
+/// measure then in-measure position.
+///
+/// Single source of truth: gameplay-drums, gameplay-guitar and dtx-bga all
+/// need this list and must agree on it, or a chip's audio time and its visual
+/// time drift apart.
+pub fn bpm_changes_from_chart(chart: &crate::Chart) -> Vec<BpmChange> {
+    let mut changes: Vec<BpmChange> = chart
+        .chips
+        .iter()
+        .filter(|c| matches!(c.channel, crate::EChannel::BPM | crate::EChannel::BPMEx))
+        .map(|c| BpmChange {
+            measure: c.measure,
+            bpm: c.value,
+            fraction: c.fraction,
+        })
+        .collect();
+    changes.sort_by(|a, b| {
+        (a.measure, a.fraction)
+            .partial_cmp(&(b.measure, b.fraction))
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
+    changes
+}
+
+/// Collect every bar-length (meter) change in `chart` (channel `02`), sorted
+/// by measure. Bar length is measure-granular — no fractional position.
+pub fn bar_changes_from_chart(chart: &crate::Chart) -> Vec<BarLengthChange> {
+    let mut changes: Vec<BarLengthChange> = chart
+        .chips
+        .iter()
+        .filter(|c| c.channel == crate::EChannel::BarLength)
+        .map(|c| BarLengthChange {
+            measure: c.measure,
+            ratio: c.value,
+        })
+        .collect();
+    changes.sort_by_key(|c| c.measure);
+    changes
 }
 
 /// Active bar-length ratio at measure `m`: the most recent
 /// `BarLengthChange` at or before `m` (sorted ascending by measure), or
-/// `1.0` if none yet.
+/// `1.0` if none yet. Bar length is measure-granular by DTX spec (channel
+/// `02` carries one decimal per measure), so it has no fractional position.
 fn active_bar_ratio_at(m: u32, sorted_bar: &[BarLengthChange]) -> f64 {
     let mut ratio = 1.0f64;
     for c in sorted_bar {
@@ -112,41 +149,23 @@ fn active_bar_ratio_at(m: u32, sorted_bar: &[BarLengthChange]) -> f64 {
     ratio
 }
 
-/// Active BPM strictly *before* measure `m` (a change landing exactly at
-/// `m` is excluded). Used only for the chip's own fractional remainder:
-/// mirrors the legacy interval algorithm, which never applied a change
-/// at the chip's own measure to that chip's partial-measure position
-/// (see `bpm_segment.rs::case2_one_change_with_fraction`).
-fn active_bpm_before(m: u32, base_bpm: f32, sorted_bpm: &[BpmChange]) -> f64 {
-    let mut bpm = base_bpm as f64;
-    for c in sorted_bpm {
-        if c.measure >= m {
-            break;
-        }
-        bpm = c.bpm as f64;
-    }
-    bpm
-}
-
-/// Active bar-length ratio strictly *before* measure `m`. Same rationale
-/// as `active_bpm_before` — applied only to the chip's own fractional
-/// remainder, not the full-measure sum.
-fn active_bar_ratio_before(m: u32, sorted_bar: &[BarLengthChange]) -> f64 {
-    let mut ratio = 1.0f64;
-    for c in sorted_bar {
-        if c.measure >= m {
-            break;
-        }
-        ratio = c.ratio as f64;
-    }
-    ratio
+/// Duration (ms) of a whole measure at `bpm`, scaled by the bar-length `ratio`.
+fn measure_ms(bpm: f64, ratio: f64) -> f64 {
+    ratio * 4.0 * 60_000.0 / bpm
 }
 
 /// Compute chip playback time (ms) with BPM changes AND bar-length
-/// (meter) changes folded in. Walks measures `0..measure` summing each
-/// measure's duration (`bar_ratio(m) * 4 * 60_000 / bpm(m)`), then adds
-/// the scaled partial-measure fraction. O(measure count) per call —
-/// trivial at chart-load time (called once per chip).
+/// (meter) changes folded in.
+///
+/// This is a true segment integral, not a per-measure average: a measure
+/// containing BPM changes is split at each change's fractional position and
+/// each sub-interval is accumulated at its own BPM. That matches
+/// DTXManiaNX, which walks chips in position order and updates the running
+/// BPM as it goes (`CDTX.cs:1070-1080`) — a change at position 0.5 takes
+/// effect halfway through the measure, not at the next bar line.
+///
+/// O(measures × changes-per-measure) per call — trivial at chart-load time
+/// (called once per chip).
 ///
 /// Pass `timing.bar_changes = &[]` to behave like
 /// `chip_time_ms_with_bpm_changes`.
@@ -159,24 +178,67 @@ pub fn chip_time_ms_with_bpm_and_bar_changes(
     if base_bpm <= 0.0 {
         return 0;
     }
-    let mut sorted_bpm: Vec<BpmChange> = timing.bpm_changes.to_vec();
-    sorted_bpm.sort_by_key(|c| c.measure);
+    let mut sorted_bpm: Vec<BpmChange> = timing
+        .bpm_changes
+        .iter()
+        .copied()
+        .filter(|c| c.bpm > 0.0)
+        .collect();
+    sorted_bpm.sort_by(|a, b| {
+        (a.measure, a.fraction)
+            .partial_cmp(&(b.measure, b.fraction))
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
     let mut sorted_bar: Vec<BarLengthChange> = timing.bar_changes.to_vec();
     sorted_bar.sort_by_key(|c| c.measure);
 
+    // Running BPM, updated as we sweep measures in order. Starts at the
+    // chart's `#BPM` and carries across bar lines (changes are sticky).
+    let mut bpm = base_bpm as f64;
     let mut total_ms = 0.0f64;
-    for m in 0..measure {
-        let bpm = active_bpm_at(m, base_bpm, &sorted_bpm);
+    let mut next_change = 0usize;
+
+    // Sweep every measure up to and including the chip's own, integrating the
+    // full measure for the ones before it and only up to `fraction` for its own.
+    for m in 0..=measure {
         let ratio = active_bar_ratio_at(m, &sorted_bar);
-        if bpm > 0.0 {
-            total_ms += ratio * 4.0 * 60_000.0 / bpm;
+        // How far into this measure we integrate: all of it, except the chip's
+        // own measure, where we stop at the chip. `fraction` may exceed 1.0
+        // (callers use it as a measure-relative offset); the overflow is
+        // integrated at the chip measure's own BPM and bar ratio, as before.
+        let limit = if m == measure {
+            (fraction as f64).max(0.0)
+        } else {
+            1.0
+        };
+
+        // Skip changes that landed in measures we've already passed but were
+        // not consumed (can't happen with sorted input, but keeps the cursor
+        // honest against malformed lists).
+        while next_change < sorted_bpm.len() && sorted_bpm[next_change].measure < m {
+            bpm = sorted_bpm[next_change].bpm as f64;
+            next_change += 1;
         }
+
+        let mut cursor = 0.0f64;
+        while next_change < sorted_bpm.len() && sorted_bpm[next_change].measure == m {
+            let pos = (sorted_bpm[next_change].fraction as f64).clamp(0.0, 1.0);
+            if pos > limit {
+                // Change lies after the chip inside this measure — it does not
+                // affect this chip's time. Leave it for later chips.
+                break;
+            }
+            total_ms += (pos - cursor).max(0.0) * measure_ms(bpm, ratio);
+            cursor = pos;
+            bpm = sorted_bpm[next_change].bpm as f64;
+            next_change += 1;
+        }
+        total_ms += (limit - cursor).max(0.0) * measure_ms(bpm, ratio);
+
+        // A change sitting exactly at the chip's own position contributes zero
+        // width above, so it is already applied — which is what DTXManiaNX does.
     }
-    let bpm = active_bpm_before(measure, base_bpm, &sorted_bpm);
-    let ratio = active_bar_ratio_before(measure, &sorted_bar);
-    if bpm > 0.0 {
-        total_ms += (fraction as f64) * ratio * 4.0 * 60_000.0 / bpm;
-    }
+
     total_ms as i64
 }
 

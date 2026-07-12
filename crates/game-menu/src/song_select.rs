@@ -1303,7 +1303,7 @@ fn update_left_cluster(
                     SongFolderView::difficulty_label_for(&song.path, slot_i as u8)
                 ),
                 level: song.dlevel.map(dtx_core::display_dlevel),
-                achievement: best.as_ref().map(|b| b.accuracy()),
+                achievement: best.as_ref().map(|b| b.achievement_pct()),
                 rank: best.as_ref().map(|b| b.rank.clone()),
             };
         }
@@ -1369,7 +1369,7 @@ fn update_left_cluster(
                         ref r => r.to_string(),
                     },
                     score: e.score,
-                    perfect_pct: e.perfect_pct(),
+                    achievement_pct: e.achievement_pct(),
                     played_at: format_unix_played_at(e.played_at),
                 })
                 .collect()

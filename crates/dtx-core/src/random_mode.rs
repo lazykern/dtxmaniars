@@ -192,6 +192,7 @@ mod tests {
             channel,
             value: 1.0,
             wav_slot: 0,
+            fraction: 0.0,
         }
     }
 

@@ -129,8 +129,16 @@ fn resume_chart_audio(
     polyphony: Res<DrumPolyphony>,
     active: Res<ActiveDrumSounds>,
     mut instances: ResMut<Assets<AudioInstance>>,
+    wait_state: Option<Res<crate::practice::wait::WaitState>>,
 ) {
+    if !should_resume_chart_audio(wait_state.as_deref()) {
+        return;
+    }
     resume_all_chart_audio(&bgm, &polyphony, &active, &mut instances);
+}
+
+fn should_resume_chart_audio(wait_state: Option<&crate::practice::wait::WaitState>) -> bool {
+    wait_state.is_none_or(|state| !state.halted())
 }
 
 pub fn spawn_overlay(
@@ -273,5 +281,25 @@ fn pause_menu_input(
                 request_transition(&mut requests, AppState::SongSelect);
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::practice::wait::{WaitPhase, WaitSet, WaitState};
+
+    #[test]
+    fn leaving_pause_keeps_wait_halted_audio_paused() {
+        let halted = WaitState {
+            phase: WaitPhase::Halted(WaitSet {
+                target_ms: 1_000,
+                chips: vec![7],
+            }),
+            ..default()
+        };
+
+        assert!(!should_resume_chart_audio(Some(&halted)));
+        assert!(should_resume_chart_audio(None));
     }
 }

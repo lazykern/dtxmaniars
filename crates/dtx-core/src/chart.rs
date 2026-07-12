@@ -39,6 +39,12 @@ pub struct Chip {
     /// WAV slot reference (hex id from `#WAVxx`). 0 = none.
     /// Used by BGM chips and SE chips to reference which sound to play.
     pub wav_slot: u32,
+    /// Fractional position within the measure (0.0..1.0) for channels whose
+    /// `value` is *not* the position — currently BPM/BPMEx, where `value`
+    /// holds the BPM itself. A BPM change is a mid-measure event in DTX
+    /// (channel `03`/`08` slot sequences), so the position must survive
+    /// parsing or the change snaps to the measure boundary.
+    pub fraction: f32,
 }
 
 impl Chip {
@@ -48,6 +54,7 @@ impl Chip {
             channel,
             value,
             wav_slot: 0,
+            fraction: 0.0,
         }
     }
 
@@ -57,6 +64,30 @@ impl Chip {
             channel,
             value,
             wav_slot,
+            fraction: 0.0,
+        }
+    }
+
+    /// BPM-change chip: `value` is the BPM, `fraction` its in-measure position.
+    pub fn bpm_change(measure: u32, channel: EChannel, bpm: f32, fraction: f32) -> Self {
+        Self {
+            measure,
+            channel,
+            value: bpm,
+            wav_slot: 0,
+            fraction,
+        }
+    }
+
+    /// Unresolved BPMEx reference: `wav_slot` is the `#BPMxx` id, `value` is
+    /// filled in later by `resolve_bpm_ex_chips`.
+    pub fn bpm_ex_ref(measure: u32, slot: u32, fraction: f32) -> Self {
+        Self {
+            measure,
+            channel: EChannel::BPMEx,
+            value: 0.0,
+            wav_slot: slot,
+            fraction,
         }
     }
 }

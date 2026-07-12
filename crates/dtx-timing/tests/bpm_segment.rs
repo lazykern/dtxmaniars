@@ -31,6 +31,7 @@ fn case2_one_mid_chart_change_doubles_bpm() {
     let changes = [BpmChange {
         measure: 4,
         bpm: 240.0,
+        fraction: 0.0,
     }];
     // First 4 measures at 120 BPM = 4 * 2000 = 8000ms
     // Measure 4 onward at 240 BPM = 2000ms/2 = 1000ms/measure
@@ -41,15 +42,72 @@ fn case2_one_mid_chart_change_doubles_bpm() {
 
 #[test]
 fn case2_one_change_with_fraction() {
-    // Same setup; chip at measure 4, fraction 0.5
-    // Change at measure 4 == chip measure is skipped (algorithm uses >=).
-    // So chip is at base 120 BPM: [0,4) at 120 = 8000, partial 0.5 at 120 = 1000.
+    // Same setup; chip at measure 4, fraction 0.5.
+    // The change sits at measure 4, position 0.0 — BEFORE the chip inside that
+    // measure — so the chip's own partial measure runs at the NEW bpm.
+    // DTXManiaNX walks chips in position order and updates the running BPM as
+    // it passes each one (CDTX.cs:1070-1080); it does not defer a change to the
+    // next bar line.
+    //   [0,4) at 120 = 8000
+    //   partial 0.5 of measure 4 at 240 (1000ms/measure) = 500
     let changes = [BpmChange {
         measure: 4,
         bpm: 240.0,
+        fraction: 0.0,
     }];
     let t = chip_time_ms_with_bpm_changes(4, 0.5, 120.0, &changes);
+    assert_eq!(t, 8500);
+}
+
+#[test]
+fn change_later_in_measure_does_not_affect_earlier_chip() {
+    // Change at measure 4 position 0.75; the chip at position 0.5 comes first,
+    // so it must still be timed at the OLD bpm.
+    let changes = [BpmChange {
+        measure: 4,
+        bpm: 240.0,
+        fraction: 0.75,
+    }];
+    // [0,4) at 120 = 8000, partial 0.5 at 120 (2000ms/measure) = 1000
+    let t = chip_time_ms_with_bpm_changes(4, 0.5, 120.0, &changes);
     assert_eq!(t, 9000);
+}
+
+#[test]
+fn mid_measure_change_splits_the_measure() {
+    // The core regression: two changes inside ONE measure at different
+    // positions. The measure must be integrated piecewise, not collapsed to a
+    // single BPM.
+    //
+    // Real chart: `465 - Yoru wa hikari (Rock Lady)` ext, `#20208: 090B`
+    // → #BPM09 = 71 at position 0.0, #BPM0B = 179 at position 0.5.
+    //
+    // Measure duration = half at 71 + half at 179:
+    //   half at 71  = 0.5 * 4 * 60000 / 71  ≈ 1690.1ms
+    //   half at 179 = 0.5 * 4 * 60000 / 179 ≈  670.4ms
+    //   total       ≈ 2360.5ms
+    // Snapping both changes to the bar line (the old bug) timed the whole
+    // measure at 179 ≈ 1340.8ms — ~1s short, which made every note after the
+    // slow section arrive early.
+    let changes = [
+        BpmChange {
+            measure: 0,
+            bpm: 71.0,
+            fraction: 0.0,
+        },
+        BpmChange {
+            measure: 0,
+            bpm: 179.0,
+            fraction: 0.5,
+        },
+    ];
+    // Chip at the start of the NEXT measure = the full split measure.
+    let t = chip_time_ms_with_bpm_changes(1, 0.0, 120.0, &changes);
+    assert!((t - 2360).abs() <= 1, "expected ~2360ms, got {t}");
+
+    // A chip exactly at the change point sees only the slow half.
+    let t_mid = chip_time_ms_with_bpm_changes(0, 0.5, 120.0, &changes);
+    assert!((t_mid - 1690).abs() <= 1, "expected ~1690ms, got {t_mid}");
 }
 
 #[test]
@@ -59,14 +117,17 @@ fn case3_multiple_changes_three() {
         BpmChange {
             measure: 2,
             bpm: 60.0,
+            fraction: 0.0,
         },
         BpmChange {
             measure: 4,
             bpm: 240.0,
+            fraction: 0.0,
         },
         BpmChange {
             measure: 6,
             bpm: 180.0,
+            fraction: 0.0,
         },
     ];
     // 120 BPM = 2000ms/measure
@@ -91,10 +152,12 @@ fn case3_multiple_changes_within_chip_measure() {
         BpmChange {
             measure: 1,
             bpm: 60.0,
+            fraction: 0.0,
         },
         BpmChange {
             measure: 2,
             bpm: 240.0,
+            fraction: 0.0,
         },
     ];
     // [0,1) at 120 = 2000
@@ -111,10 +174,12 @@ fn case3_unsorted_changes_produce_same_result() {
     let a = [BpmChange {
         measure: 2,
         bpm: 240.0,
+        fraction: 0.0,
     }];
     let b = [BpmChange {
         measure: 2,
         bpm: 240.0,
+        fraction: 0.0,
     }];
     let t_a = chip_time_ms_with_bpm_changes(5, 0.0, 120.0, &a);
     let t_b = chip_time_ms_with_bpm_changes(5, 0.0, 120.0, &b);
@@ -128,14 +193,17 @@ fn case3_reversed_changes() {
         BpmChange {
             measure: 6,
             bpm: 180.0,
+            fraction: 0.0,
         },
         BpmChange {
             measure: 2,
             bpm: 60.0,
+            fraction: 0.0,
         },
         BpmChange {
             measure: 4,
             bpm: 240.0,
+            fraction: 0.0,
         },
     ];
     let t_sorted = chip_time_ms_with_bpm_changes(8, 0.0, 120.0, &changes);
@@ -151,6 +219,7 @@ fn case4_fraction_greater_than_one() {
     let changes = [BpmChange {
         measure: 2,
         bpm: 60.0,
+        fraction: 0.0,
     }];
     // 120 BPM = 2000ms/measure, 60 BPM = 4000ms/measure
     // Chip at measure 1, fraction 1.5
@@ -169,40 +238,49 @@ fn case4_fraction_two_with_changes() {
     let changes = [BpmChange {
         measure: 2,
         bpm: 60.0,
+        fraction: 0.0,
     }];
     let t = chip_time_ms_with_bpm_changes(1, 2.0, 120.0, &changes);
     assert_eq!(t, 6000);
 }
 
 #[test]
-fn case5_change_at_chip_measure_uses_base() {
-    // (5) change AT the chip's measure is skipped (>= measure breaks loop).
+fn case5_change_at_chip_position_does_not_move_it() {
+    // (5) A change sitting exactly at the chip's own position spans zero time
+    // before that chip, so it cannot move it — it only affects later chips.
     let changes = [BpmChange {
         measure: 4,
         bpm: 60.0,
+        fraction: 0.0,
     }];
-    // [0, 4) at 120 = 8000
-    // Partial at 120 = 0 → 8000
+    // [0, 4) at 120 = 8000, then zero width at the chip → 8000
     let t = chip_time_ms_with_bpm_changes(4, 0.0, 120.0, &changes);
     assert_eq!(t, 8000);
 }
 
 #[test]
-fn case5_multiple_changes_at_same_measure() {
-    // Two changes at the same measure — the later one wins (per sort stability).
+fn case5_multiple_changes_at_same_position() {
+    // Two changes at the same measure AND position. Both sit at the chip's own
+    // position, so both span zero time and the chip is unmoved.
     let changes = [
         BpmChange {
             measure: 4,
             bpm: 60.0,
+            fraction: 0.0,
         },
         BpmChange {
             measure: 4,
             bpm: 240.0,
+            fraction: 0.0,
         },
     ];
-    // Both at measure 4 — chip at measure 4 uses base 120.
     let t = chip_time_ms_with_bpm_changes(4, 0.0, 120.0, &changes);
     assert_eq!(t, 8000);
+
+    // ...but a chip later in that measure sees the LAST of them (240 BPM).
+    // [0,4) at 120 = 8000, partial 0.5 at 240 (1000ms/measure) = 500
+    let t_after = chip_time_ms_with_bpm_changes(4, 0.5, 120.0, &changes);
+    assert_eq!(t_after, 8500);
 }
 
 #[test]
@@ -211,6 +289,7 @@ fn case5_change_before_chip_uses_new_bpm() {
     let changes = [BpmChange {
         measure: 2,
         bpm: 240.0,
+        fraction: 0.0,
     }];
     // [0, 2) at 120 = 4000
     // [2, 4) at 240 = 2000
@@ -235,6 +314,7 @@ fn change_at_measure_zero() {
     let changes = [BpmChange {
         measure: 0,
         bpm: 240.0,
+        fraction: 0.0,
     }];
     let t = chip_time_ms_with_bpm_changes(4, 0.0, 120.0, &changes);
     assert_eq!(t, 4000);
@@ -247,6 +327,7 @@ fn many_changes_stable() {
         .map(|i| BpmChange {
             measure: i * 2,
             bpm: 100.0 + (i as f32) * 10.0,
+            fraction: 0.0,
         })
         .collect();
     // Result should be deterministic (no panics, no NaN, monotonic with measure).
@@ -262,6 +343,7 @@ fn zero_base_bpm_returns_zero() {
     let changes = [BpmChange {
         measure: 4,
         bpm: 240.0,
+        fraction: 0.0,
     }];
     let t = chip_time_ms_with_bpm_changes(5, 0.5, 0.0, &changes);
     assert_eq!(t, 0);

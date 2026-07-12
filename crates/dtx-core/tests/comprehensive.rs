@@ -230,10 +230,12 @@ fn compute_playback_with_multiple_bpm_changes() {
         CachedBpmChange {
             measure: 1,
             bpm: 240.0,
+            fraction: 0.0,
         },
         CachedBpmChange {
             measure: 2,
             bpm: 180.0,
+            fraction: 0.0,
         },
     ];
     // m0..1 at 120 = 2000ms
@@ -249,6 +251,7 @@ fn compute_playback_partial_at_last_bpm() {
     let changes = [CachedBpmChange {
         measure: 2,
         bpm: 60.0,
+        fraction: 0.0,
     }];
     // m2 + 0.5 at 60 BPM = 4000 + 2000 = 6000
     let ms = compute_playback_time(2, 0.5, 120.0, &changes);

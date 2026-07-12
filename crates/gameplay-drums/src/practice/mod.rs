@@ -71,10 +71,14 @@ fn enter_practice_session(
     intent: Res<PracticeIntent>,
     mut commands: Commands,
     mut wait_state: ResMut<wait::WaitState>,
+    mut chord_hits: ResMut<wait::ChordHitTimes>,
+    mut deferred: ResMut<wait::DeferredWaitJudgments>,
 ) {
     wait_state.phase = wait::WaitPhase::Flowing;
     wait_state.waited_chips.clear();
     wait_state.enabled_from_ms = None;
+    chord_hits.0.clear();
+    deferred.0.clear();
     if intent.0 {
         commands.insert_resource(PracticeSession::default());
     } else {
@@ -110,6 +114,8 @@ mod tests {
             waited_chips: [7].into(),
             ..default()
         });
+        app.init_resource::<wait::ChordHitTimes>();
+        app.init_resource::<wait::DeferredWaitJudgments>();
         app.add_systems(Update, enter_practice_session);
         app.update();
 

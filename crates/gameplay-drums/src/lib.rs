@@ -577,6 +577,7 @@ mod midi_consumer {
                 note,
                 velocity,
                 audio_ms,
+                captured_at,
             } = ev
             else {
                 continue;
@@ -597,6 +598,7 @@ mod midi_consumer {
                     hits.push(InputHit {
                         lanes,
                         audio_ms: stamp_audio_ms(Some(clock_ms), audio_ms),
+                        captured_at,
                     });
                 }
             }
@@ -618,6 +620,7 @@ mod midi_consumer {
                     note: 38,
                     velocity: 90,
                     audio_ms: 0,
+                    captured_at: std::time::Instant::now(),
                 }],
                 &resolver,
                 false,
@@ -638,11 +641,13 @@ mod midi_consumer {
             b.bind_shared(dtx_core::EChannel::LeftBassDrum, BindSource::Midi { note: 36 });
             let resolver = crate::bindings::BindResolver::from_bindings(&b);
             let mut last = LastMidiHit::default();
+            let captured_at = std::time::Instant::now();
             let out = consume_midi_events(
                 [dtx_input::midi::MidiEvent::NoteOn {
                     note: 36,
                     velocity: 100,
                     audio_ms: 10,
+                    captured_at,
                 }],
                 &resolver,
                 true,
@@ -651,6 +656,7 @@ mod midi_consumer {
             );
             assert_eq!(out.hits.len(), 1, "one physical MIDI note is atomic");
             assert_eq!(out.hits[0].lanes, vec![2, 11]);
+            assert_eq!(out.hits[0].captured_at, captured_at);
             assert_eq!(out.nav_lanes, vec![2]);
         }
 
@@ -664,6 +670,7 @@ mod midi_consumer {
                     note: 38,
                     velocity: 90,
                     audio_ms: 0,
+                    captured_at: std::time::Instant::now(),
                 }],
                 &resolver,
                 false,

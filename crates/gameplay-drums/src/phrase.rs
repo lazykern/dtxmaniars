@@ -182,6 +182,7 @@ mod tests {
         let changes = vec![BpmChange {
             measure: 1,
             bpm: 240.0,
+            fraction: 0.0,
         }];
         let timing = ChartTiming {
             bpm_changes: &changes,

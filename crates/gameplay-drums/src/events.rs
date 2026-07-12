@@ -3,6 +3,7 @@
 use crate::lane_map::LaneId;
 use bevy::prelude::*;
 use dtx_scoring::JudgmentKind;
+use std::time::Instant;
 
 /// Keyboard or pad hit detected.
 ///
@@ -22,6 +23,10 @@ pub struct LaneHit {
 pub struct InputHit {
     pub lanes: Vec<LaneId>,
     pub audio_ms: i64,
+    /// Monotonic wall-clock timestamp captured at the physical input.
+    /// Unlike `audio_ms`, this keeps advancing while practice wait freezes
+    /// the gameplay clock.
+    pub captured_at: Instant,
 }
 
 /// Judge result, dispatched by the judge system, consumed by score system + HUD.

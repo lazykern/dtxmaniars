@@ -412,6 +412,17 @@ static DRUMS_ITEMS: LazyLock<Vec<SettingItem>> = LazyLock::new(|| {
             reset: |c, d| c.drums.cymbal_free = d.drums.cymbal_free,
         },
         SettingItem {
+            label: "Muting LP",
+            value: |c| bool_label(c.drums.muting_lp).to_string(),
+            adjust: |c, _| c.drums.muting_lp ^= true,
+            desc: "Let hi-hat close and left pedal hits silence ringing hi-hat sounds.",
+            group: "GROUPING",
+            control: SettingControl::Stepper,
+            raw: |_| 0.0,
+            set: |_, _| {},
+            reset: |c, d| c.drums.muting_lp = d.drums.muting_lp,
+        },
+        SettingItem {
             label: "HH Priority",
             value: |c| hsp_label(c.drums.hit_sound_priority_hh).to_string(),
             adjust: |c, d| cycle_hsp(c, HspSlot::Hh, d),
