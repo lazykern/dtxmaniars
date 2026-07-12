@@ -124,7 +124,12 @@ fn play_judgment_sounds(
         };
         let vol = chart.chart.assets.wav.volume(wav_slot);
         let pan = chart.chart.assets.wav.pan(wav_slot);
-        maybe_mute_hh_on_close(channel, &audio, &mut instances, &mut active);
+        maybe_mute_hh_on_close(
+            channel,
+            drum_settings.config.muting_lp,
+            &mut instances,
+            &mut active,
+        );
         let handle = if let Some(sound) = sound_bank.get(wav_slot) {
             dtx_audio::play_drum_hit_handle(
                 &audio,
@@ -200,7 +205,12 @@ fn play_empty_hit_sounds(
         };
         let vol = chart.chart.assets.wav.volume(wav_slot);
         let pan = chart.chart.assets.wav.pan(wav_slot);
-        maybe_mute_hh_on_close(channel, &audio, &mut instances, &mut active);
+        maybe_mute_hh_on_close(
+            channel,
+            drum_settings.config.muting_lp,
+            &mut instances,
+            &mut active,
+        );
         let handle = if let Some(sound) = sound_bank.get(wav_slot) {
             dtx_audio::play_drum_hit_handle(
                 &audio,
@@ -330,11 +340,11 @@ fn wav_path(
 
 fn maybe_mute_hh_on_close(
     channel: EChannel,
-    _audio: &Audio,
+    muting_lp: bool,
     instances: &mut Assets<AudioInstance>,
     active: &mut ActiveDrumSounds,
 ) {
-    if !should_mute_tracked_hh(channel) {
+    if !muting_lp || !should_mute_tracked_hh(channel) {
         return;
     }
     for handle in active.hh_open_instances.drain(..) {
@@ -348,14 +358,22 @@ const fn should_mute_tracked_hh(channel: EChannel) -> bool {
     matches!(channel, EChannel::HiHatClose | EChannel::LeftPedal)
 }
 
+const fn is_chokeable_hh(channel: EChannel) -> bool {
+    matches!(channel, EChannel::HiHatClose | EChannel::HiHatOpen)
+}
+
 fn track_hh_instance(
     channel: EChannel,
     handle: Handle<AudioInstance>,
     active: &mut ActiveDrumSounds,
 ) {
-    if matches!(channel, EChannel::HiHatOpen) {
-        active.hh_open_instances.push(handle);
+    if !is_chokeable_hh(channel) {
+        return;
     }
+    if active.hh_open_instances.len() >= crate::resources::MAX_TRACKED_HH_INSTANCES {
+        active.hh_open_instances.remove(0);
+    }
+    active.hh_open_instances.push(handle);
 }
 
 #[cfg(test)]
@@ -391,6 +409,38 @@ mod tests {
         assert!(should_mute_tracked_hh(EChannel::LeftPedal));
         assert!(!should_mute_tracked_hh(EChannel::HiHatOpen));
         assert!(!should_mute_tracked_hh(EChannel::Snare));
+    }
+
+    #[test]
+    fn open_and_closed_hh_are_chokeable() {
+        assert!(is_chokeable_hh(EChannel::HiHatOpen));
+        assert!(is_chokeable_hh(EChannel::HiHatClose));
+        assert!(!is_chokeable_hh(EChannel::LeftPedal));
+        assert!(!is_chokeable_hh(EChannel::LeftBassDrum));
+        assert!(!is_chokeable_hh(EChannel::Snare));
+    }
+
+    #[test]
+    fn tracked_hh_instances_are_capped() {
+        let mut active = ActiveDrumSounds::default();
+        for _ in 0..crate::resources::MAX_TRACKED_HH_INSTANCES + 8 {
+            track_hh_instance(EChannel::HiHatOpen, Handle::default(), &mut active);
+        }
+        assert_eq!(
+            active.hh_open_instances.len(),
+            crate::resources::MAX_TRACKED_HH_INSTANCES
+        );
+    }
+
+    #[test]
+    fn muting_lp_off_keeps_tracked_hh() {
+        let mut active = ActiveDrumSounds::default();
+        let mut instances = Assets::<AudioInstance>::default();
+        active.hh_open_instances.push(Handle::default());
+        maybe_mute_hh_on_close(EChannel::LeftPedal, false, &mut instances, &mut active);
+        assert_eq!(active.hh_open_instances.len(), 1);
+        maybe_mute_hh_on_close(EChannel::LeftPedal, true, &mut instances, &mut active);
+        assert!(active.hh_open_instances.is_empty());
     }
 
     #[test]

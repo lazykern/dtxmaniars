@@ -117,6 +117,9 @@ pub struct DrumsConfig {
     pub bd_group: BdGroup,
     #[serde(default)]
     pub cymbal_free: bool,
+    /// `MutingLP` — HHC/LP input silences ringing hi-hat sounds.
+    #[serde(default = "default_muting_lp")]
+    pub muting_lp: bool,
     #[serde(default)]
     pub hit_sound_priority_hh: HitSoundPriority,
     #[serde(default)]
@@ -134,6 +137,10 @@ fn default_polyphonic() -> u8 {
     4
 }
 
+fn default_muting_lp() -> bool {
+    true
+}
+
 impl Default for DrumsConfig {
     fn default() -> Self {
         Self {
@@ -142,6 +149,7 @@ impl Default for DrumsConfig {
             ft_group: FtGroup::default(),
             bd_group: BdGroup::default(),
             cymbal_free: false,
+            muting_lp: default_muting_lp(),
             hit_sound_priority_hh: HitSoundPriority::default(),
             hit_sound_priority_ft: HitSoundPriority::default(),
             hit_sound_priority_cy: HitSoundPriority::default(),

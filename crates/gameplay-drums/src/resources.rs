@@ -318,9 +318,13 @@ impl CurrentEmptyHitTemplates {
     }
 }
 
+/// Max chokeable hi-hat instances tracked at once (BocuD `LLastPlayedHHWAVNumber` caps at 16).
+pub const MAX_TRACKED_HH_INSTANCES: usize = 16;
+
 /// Tracks active HH instances for close-HH muting (BocuD LP muting pattern).
 #[derive(Resource, Default, Debug)]
 pub struct ActiveDrumSounds {
+    /// Ringing HHC and HHO instances, oldest first, capped at [`MAX_TRACKED_HH_INSTANCES`].
     pub hh_open_instances: Vec<Handle<AudioInstance>>,
     pub stick_se_instances: HashMap<dtx_core::EChannel, Handle<AudioInstance>>,
     /// Non-primary BGM channel layers (backing drums, etc.).
