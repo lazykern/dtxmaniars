@@ -4,7 +4,7 @@ use bevy::prelude::*;
 use dtx_ui::theme::Theme;
 use game_shell::AppState;
 
-use crate::events::{JudgmentEvent, LaneHit};
+use crate::events::{InputHit, JudgmentEvent, LaneHit};
 use crate::lane_map::lane_channel;
 use crate::lanes::Lanes;
 use crate::layout::PlayfieldLayout;
@@ -115,6 +115,7 @@ fn apply_key_cap_layout(layout: Res<PlayfieldLayout>, mut caps: Query<(&KeyCap, 
 
 fn flash_key_caps_on_hit(
     mut lane_hits: MessageReader<LaneHit>,
+    mut input_hits: MessageReader<InputHit>,
     mut events: MessageReader<JudgmentEvent>,
     mut caps: Query<(&KeyCap, &mut BackgroundColor)>,
     lanes: Res<Lanes>,
@@ -125,6 +126,15 @@ fn flash_key_caps_on_hit(
         let Some(col) = to_col(hit.lane) else {
             continue;
         };
+        for (cap, mut bg) in &mut caps {
+            if cap.col as usize == col {
+                bg.0 = Color::srgb(0.30, 0.30, 0.34);
+            }
+        }
+    }
+    for hit in input_hits.read() {
+        let Some(&lane) = hit.lanes.first() else { continue };
+        let Some(col) = to_col(lane) else { continue };
         for (cap, mut bg) in &mut caps {
             if cap.col as usize == col {
                 bg.0 = Color::srgb(0.30, 0.30, 0.34);

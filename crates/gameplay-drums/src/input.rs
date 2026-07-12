@@ -16,7 +16,7 @@ use bevy::prelude::*;
 use game_shell::EGameMode;
 
 use crate::bindings::BindResolver;
-use crate::events::LaneHit;
+use crate::events::InputHit;
 use crate::resources::GameplayClock;
 
 pub(super) fn plugin(app: &mut App) {
@@ -45,9 +45,9 @@ struct PendingLaneInputs {
     events: Vec<CapturedLaneInput>,
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
 struct CapturedLaneInput {
-    lane: u8,
+    lanes: Vec<u8>,
     captured_at: Instant,
 }
 
@@ -68,8 +68,9 @@ fn capture_key_to_lane_input(
     }
     for key in keys.get_just_pressed() {
         let captured_at = Instant::now();
-        for lane in resolver.lanes_for_key(*key) {
-            pending.events.push(CapturedLaneInput { lane, captured_at });
+        let lanes: Vec<_> = resolver.lanes_for_key(*key).collect();
+        if !lanes.is_empty() {
+            pending.events.push(CapturedLaneInput { lanes, captured_at });
         }
     }
 }
@@ -77,7 +78,7 @@ fn capture_key_to_lane_input(
 fn emit_pending_lane_hits(
     clock: Res<GameplayClock>,
     mut pending: ResMut<PendingLaneInputs>,
-    mut events: MessageWriter<LaneHit>,
+    mut events: MessageWriter<InputHit>,
 ) {
     if !clock.is_ready() {
         return;
@@ -87,8 +88,8 @@ fn emit_pending_lane_hits(
     }
     let now = Instant::now();
     for captured in std::mem::take(&mut pending.events) {
-        events.write(LaneHit {
-            lane: captured.lane,
+        events.write(InputHit {
+            lanes: captured.lanes,
             audio_ms: compensated_audio_ms(
                 clock.current_ms,
                 now.saturating_duration_since(captured.captured_at),
@@ -99,6 +100,16 @@ fn emit_pending_lane_hits(
 
 fn compensated_audio_ms(current_audio_ms: i64, capture_delay: Duration) -> i64 {
     current_audio_ms.saturating_sub(capture_delay.as_millis() as i64)
+}
+
+fn capture_targets_for_keys(
+    keys: impl IntoIterator<Item = KeyCode>,
+    resolver: &BindResolver,
+) -> Vec<Vec<u8>> {
+    keys.into_iter()
+        .map(|key| resolver.lanes_for_key(key).collect())
+        .filter(|lanes: &Vec<u8>| !lanes.is_empty())
+        .collect()
 }
 
 #[cfg(test)]
@@ -119,5 +130,19 @@ mod tests {
             compensated_audio_ms(1000, std::time::Duration::from_millis(12)),
             988
         );
+    }
+
+    #[test]
+    fn one_shared_key_captures_one_ordered_input() {
+        let mut bindings = dtx_input::InputBindings::default();
+        bindings.bind_shared(
+            dtx_core::EChannel::LeftBassDrum,
+            dtx_input::BindSource::Key(KeyCode::Space),
+        );
+        let resolver = crate::bindings::BindResolver::from_bindings(&bindings);
+
+        let inputs = capture_targets_for_keys([KeyCode::Space], &resolver);
+
+        assert_eq!(inputs, vec![vec![2, 11]]);
     }
 }

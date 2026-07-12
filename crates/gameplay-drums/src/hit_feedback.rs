@@ -14,7 +14,7 @@ use bevy::prelude::*;
 use bevy_kira_audio::prelude::*;
 use bevy_kira_audio::AudioSource as KiraAudioSource;
 
-use crate::events::LaneHit;
+use crate::events::{InputHit, LaneHit};
 use crate::lane_map::lane_channel;
 use crate::resources::{ActiveChart, DrumAudioSettings};
 
@@ -29,6 +29,7 @@ pub(super) fn plugin(app: &mut App) {
 
 fn play_hit_voice_on_lane_hit(
     mut hits: MessageReader<LaneHit>,
+    mut input_hits: MessageReader<InputHit>,
     settings: Res<DrumAudioSettings>,
     chart: Res<ActiveChart>,
     audio: Res<Audio>,
@@ -111,6 +112,23 @@ fn play_hit_voice_on_lane_hit(
                 pan,
                 settings.master_volume,
                 settings.drum_volume,
+            );
+        }
+    }
+    for hit in input_hits.read() {
+        let Some(&lane) = hit.lanes.first() else { continue };
+        let Some(wav_slot) = representative_wav_slot(&chart, lane) else { continue };
+        let vol = chart.chart.assets.wav.volume(wav_slot);
+        let pan = chart.chart.assets.wav.pan(wav_slot);
+        if let Some(sound) = sound_bank.get(wav_slot) {
+            dtx_audio::play_drum_hit_handle(
+                &audio, &mut instances, &mut polyphony, sound.handle.clone(), wav_slot,
+                sound.volume, sound.pan, settings.master_volume, settings.drum_volume,
+            );
+        } else if let Some(path) = wav_path(&chart.chart, wav_slot, source_dir.as_deref()) {
+            dtx_audio::play_drum_hit(
+                &audio, &asset_server, &mut instances, &mut polyphony, &path, wav_slot,
+                vol, pan, settings.master_volume, settings.drum_volume,
             );
         }
     }

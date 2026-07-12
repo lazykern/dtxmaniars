@@ -8,7 +8,7 @@
 //! `Arrived` preview (`KeyArrived` / `MidiArrived`) before commit. When the
 //! source already belongs to another channel, the preview offers a
 //! shared/move choice (←/→ toggles, defaulting to shared); Enter commits,
-//! Esc cancels. With no conflict, Enter just adds the shared binding.
+//! Esc cancels. With no conflict, Enter adds the channel as an accepted target.
 //!
 //! Esc while capturing/confirming cancels WITHOUT closing the surface:
 //! `close_on_escape` (ui.rs) is gated `not(capture_active)` so the same Esc

@@ -3,6 +3,10 @@
 Date: 2026-07-11
 Status: Approved
 
+> Superseded for runtime shared-source behavior by
+> `2026-07-12-atomic-multi-target-bindings-design.md`. A shared source now
+> produces one atomic input rather than a fan-out chord macro.
+
 ## Goal
 
 Replace the unfinished Controls and Lanes tabs in the Customize surface with a finished, dual-input (mouse + keyboard/pad) UI. This design consumes the approved profile-management design (`2026-07-11-input-and-lane-profile-management-design.md`) — profile registries, draft/save model, and Keyboard | MIDI segmentation come from that spec; this spec defines the UI shape, interaction flows, visual system, and one new runtime capability (shared-source fan-out).

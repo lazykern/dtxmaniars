@@ -188,6 +188,39 @@ pub fn resolve_judgments(
     hits.into_iter().map(|c| (c.idx, c.delta)).collect()
 }
 
+/// Resolve an explicit multi-target binding as one physical press.
+///
+/// Unlike configured drum groups, this intentionally returns at most one chip.
+/// The ordered lane list supplies the deterministic primary-first tie break.
+pub fn resolve_explicit_lanes(
+    lanes: &[LaneId],
+    audio_ms: i64,
+    chart: &Chart,
+    judged: &HashSet<usize>,
+    base_bpm: f32,
+    bpm_changes: ChartTiming<'_>,
+    allowed: Option<&[usize]>,
+) -> Option<(usize, i64)> {
+    lanes
+        .iter()
+        .enumerate()
+        .filter_map(|(priority, lane)| {
+            let pad = DrumPad::from_lane(*lane)?;
+            closest_candidate(
+                pad_channel(pad),
+                audio_ms,
+                chart,
+                judged,
+                base_bpm,
+                bpm_changes,
+            )
+            .filter(|candidate| allowed.is_none_or(|set| set.contains(&candidate.idx)))
+            .map(|candidate| (priority, candidate))
+        })
+        .min_by_key(|(priority, candidate)| (candidate.target_ms, *priority))
+        .map(|(_, candidate)| (candidate.idx, candidate.delta))
+}
+
 fn pad_channel(pad: DrumPad) -> EChannel {
     LANE_ORDER[pad as usize]
 }
@@ -1005,6 +1038,24 @@ mod tests {
         );
         assert_eq!(hits.len(), 1);
         assert_eq!(hits[0].0, 0);
+    }
+
+    #[test]
+    fn explicit_multi_target_consumes_primary_only_on_tie() {
+        let chart = chart_with(vec![
+            at(0, EChannel::BassDrum, 0.5),
+            at(0, EChannel::LeftBassDrum, 0.5),
+        ]);
+        let hit = resolve_explicit_lanes(
+            &[2, 11],
+            1000,
+            &chart,
+            &HashSet::new(),
+            120.0,
+            ChartTiming::default(),
+            None,
+        );
+        assert_eq!(hit.map(|(idx, _)| idx), Some(0));
     }
 
     #[test]
