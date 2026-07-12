@@ -31,10 +31,11 @@ pub const HEADER_REF_TOP_MARGIN: f32 = 8.0;
 pub const ROW_REF_FONT: f32 = 16.0;
 pub const SMALL_REF_FONT: f32 = 12.0;
 pub const BLOCK_REF_MARGIN: f32 = 6.0;
-/// Line budget for the two trailing blocks. The rail's leftover band below
-/// the fixed rows only fits six 12-ref-px lines at scale 1.0, and an
+/// Line budget for the two trailing blocks, header line included — so each
+/// block renders its own header plus two entries. The rail's leftover band
+/// below the fixed rows only fits six 12-ref-px lines at scale 1.0, and an
 /// uncapped history would push lane diagnosis out of the clipped rail
-/// entirely — so each block keeps its most useful lines (newest attempts,
+/// entirely; each block keeps its most useful entries (newest attempts,
 /// worst lanes) and drops the tail.
 pub const HISTORY_MAX_LINES: usize = 3;
 pub const DIAG_MAX_LINES: usize = 3;
