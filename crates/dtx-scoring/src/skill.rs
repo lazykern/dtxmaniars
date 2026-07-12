@@ -16,6 +16,9 @@ pub struct DrumAutoPlay {
 }
 
 /// NX's performance skill / completion rate (0..100).
+// Ports the NX formula, which takes every judgment count plus the autoplay
+// mask — grouping them into a struct would obscure the reference mapping.
+#[allow(clippy::too_many_arguments)]
 pub fn drum_performance_skill(
     total: u32,
     perfect: u32,
