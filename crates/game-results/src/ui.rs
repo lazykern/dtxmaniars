@@ -2,10 +2,14 @@
 
 use bevy::prelude::*;
 use dtx_scoring::Rank;
-use dtx_ui::{easing::EaseFunction, theme::Theme, ThemeResource};
-use game_shell::despawn_stage;
+use dtx_ui::easing::EaseFunction;
+use dtx_ui::motion::EnterChoreo;
+use dtx_ui::{theme::Theme, ThemeResource};
+use game_shell::{despawn_stage, SelectedDifficulty};
 use gameplay_drums::resources::{ActiveChart, Combo, DrumScoring, JudgmentCounts, Score};
+use gameplay_drums::stage_end::LastStageOutcome;
 
+use crate::input::ResultVerb;
 use crate::{ResultEntity, SaveStatus};
 
 #[derive(Component)]
@@ -51,9 +55,90 @@ pub(crate) fn reveal_alpha(elapsed_ms: f32, reveal_at_ms: f32, target_alpha: f32
 pub(crate) const STAGGER_MS: f32 = 60.0;
 pub(crate) const FADE_DURATION_MS: f32 = 350.0;
 
+// Layout (spec §Layout).
+const CARD_MAX_WIDTH: f32 = 900.0;
+const CARD_PADDING: f32 = 48.0;
+const LABEL_COL: f32 = 120.0;
+const COUNT_COL: f32 = 80.0;
+
+// Motion (spec §Motion): 24px upward slide, 350ms OutQuint per element.
+const SLIDE_OFFSET: Vec2 = Vec2::new(0.0, 24.0);
+const SLIDE_DURATION_MS: f32 = 350.0;
+
+// Stagger slots × STAGGER_MS: header → rank → failed tag → judgments →
+// divider → combo → score → save → verbs → legends. Last fade ends at
+// 13 × 60 + 350 = 1130ms (~1.1s).
+const SLOT_HEADER: f32 = 0.0;
+const SLOT_RANK: f32 = 1.0;
+const SLOT_FAILED: f32 = 2.0;
+const SLOT_JUDGE_FIRST: f32 = 3.0; // five rows: slots 3..=7
+const SLOT_TABLE_DIVIDER: f32 = 8.0;
+const SLOT_COMBO: f32 = 9.0;
+const SLOT_SCORE: f32 = 10.0;
+const SLOT_SAVE: f32 = 11.0;
+const SLOT_VERBS: f32 = 12.0;
+const SLOT_LEGEND: f32 = 13.0;
+pub(crate) const LAST_SLOT: f32 = SLOT_LEGEND;
+
+/// Marks one verb-row label; `sync_verb_row` renders the cursor onto it.
+#[derive(Component)]
+pub(crate) struct VerbLabel(#[allow(dead_code)] pub ResultVerb); // read by sync_verb_row in Task 7
+
+/// Verb label text with a width-stable selection prefix.
+pub(crate) fn verb_text(verb: ResultVerb, selected: bool) -> String {
+    let name = match verb {
+        ResultVerb::Continue => "Continue",
+        ResultVerb::Retry => "Retry",
+        ResultVerb::Practice => "Practice",
+    };
+    if selected {
+        format!("▸ {name}")
+    } else {
+        format!("  {name}")
+    }
+}
+
+/// Text element bundle with fade (to the color's own alpha) + slide at `slot`.
+fn reveal_text(
+    text: impl Into<String>,
+    font: TextFont,
+    color: Color,
+    slot: f32,
+) -> (Text, TextFont, TextColor, StatRow, EnterChoreo, UiTransform) {
+    (
+        Text::new(text),
+        font,
+        TextColor(color.with_alpha(0.0)),
+        StatRow {
+            reveal_at_ms: slot * STAGGER_MS,
+            target_alpha: color.alpha(),
+        },
+        EnterChoreo::slide(SLIDE_OFFSET, slot * STAGGER_MS, SLIDE_DURATION_MS),
+        UiTransform::default(),
+    )
+}
+
+/// 1px horizontal rule fading to a quarter-alpha `text_secondary`.
+fn divider(parent: &mut ChildSpawnerCommands, t: &Theme, slot: f32) {
+    let color = t.text_secondary.with_alpha(0.25);
+    parent.spawn((
+        Node {
+            width: Val::Percent(100.0),
+            height: Val::Px(1.0),
+            ..default()
+        },
+        BackgroundColor(color.with_alpha(0.0)),
+        StatRow {
+            reveal_at_ms: slot * STAGGER_MS,
+            target_alpha: color.alpha(),
+        },
+        EnterChoreo::slide(SLIDE_OFFSET, slot * STAGGER_MS, SLIDE_DURATION_MS),
+        UiTransform::default(),
+    ));
+}
+
 /// Rank → theme color: SS/S gold, A green, B blue, C purple, D/E red,
 /// Unknown secondary (spec §Left panel).
-#[allow(dead_code)] // wired into spawn_result in Task 6
 pub(crate) fn rank_color(rank: Rank, theme: &Theme) -> Color {
     match rank {
         Rank::SS | Rank::S => theme.judgment_perfect,
@@ -66,7 +151,6 @@ pub(crate) fn rank_color(rank: Rank, theme: &Theme) -> Color {
 }
 
 /// Rank headline text: `Display` string, except Unknown renders `--`.
-#[allow(dead_code)] // wired into spawn_result in Task 6
 pub(crate) fn rank_label(rank: Rank) -> String {
     if rank == Rank::Unknown {
         "--".into()
@@ -76,7 +160,6 @@ pub(crate) fn rank_label(rank: Rank) -> String {
 }
 
 /// `912340` → `"912,340"` (comma thousands separator).
-#[allow(dead_code)] // wired into spawn_result in Task 6
 pub(crate) fn format_thousands(v: u64) -> String {
     let digits = v.to_string();
     let mut out = String::with_capacity(digits.len() + digits.len() / 3);
@@ -106,83 +189,36 @@ pub(crate) fn spawn_result(
     counts: Res<JudgmentCounts>,
     chart: Res<ActiveChart>,
     scoring: Res<DrumScoring>,
+    difficulty: Res<SelectedDifficulty>,
+    outcome: Option<Res<LastStageOutcome>>,
     midi: Option<Res<game_shell::MidiConnected>>,
     status: Res<SaveStatus>,
 ) {
-    commands.insert_resource(RevealState::new(15.0));
+    commands.insert_resource(RevealState::new(LAST_SLOT));
+    commands.insert_resource(ResultVerb::default());
 
+    let t = theme.0;
     let title = chart
-        .chart
-        .metadata
+        .metadata()
         .title
         .clone()
         .unwrap_or_else(|| "Unknown".into());
     let artist = chart
-        .chart
-        .metadata
+        .metadata()
         .artist
         .clone()
         .unwrap_or_else(|| "Unknown".into());
-    let difficulty = chart
-        .chart
-        .metadata
+    let dlevel = chart
+        .metadata()
         .dlevel
         .map(|v| format!("{:.2}", dtx_core::display_dlevel(v)))
         .unwrap_or_else(|| "--".into());
     let total = scoring.total_notes;
     let rank = crate::result_rank(&counts, combo.max, total);
-    let t = theme.0;
+    let failed = outcome.is_some_and(|o| !o.cleared);
+    let midi_connected = midi.is_some_and(|m| m.0);
 
-    let stat_rows: Vec<(String, f32)> = vec![
-        (title.to_string(), 0.0),
-        (format!("{artist}  Lv.{difficulty}"), STAGGER_MS),
-        (String::new(), STAGGER_MS * 2.0),
-        (format!("Score     {}", score.0), STAGGER_MS * 3.0),
-        (format!("Max Combo {}", combo.max), STAGGER_MS * 4.0),
-        (format!("Rank      {rank}"), STAGGER_MS * 5.0),
-        (String::new(), STAGGER_MS * 6.0),
-        (
-            format!(
-                "Perfect   {} ({:.1}%)",
-                counts.perfect,
-                pct(counts.perfect, total)
-            ),
-            STAGGER_MS * 7.0,
-        ),
-        (
-            format!(
-                "Great     {} ({:.1}%)",
-                counts.great,
-                pct(counts.great, total)
-            ),
-            STAGGER_MS * 8.0,
-        ),
-        (
-            format!(
-                "Good      {} ({:.1}%)",
-                counts.good,
-                pct(counts.good, total)
-            ),
-            STAGGER_MS * 9.0,
-        ),
-        (
-            format!("Poor      {} ({:.1}%)", counts.ok, pct(counts.ok, total)),
-            STAGGER_MS * 10.0,
-        ),
-        (
-            format!(
-                "Miss      {} ({:.1}%)",
-                counts.miss,
-                pct(counts.miss, total)
-            ),
-            STAGGER_MS * 11.0,
-        ),
-        (format!("Total     {total}"), STAGGER_MS * 12.0),
-        (String::new(), STAGGER_MS * 13.0),
-        ("ESC / ENTER → Song Select".to_string(), STAGGER_MS * 14.0),
-    ];
-
-    let panel = commands
+    commands
         .spawn((
             ResultEntity,
             Node {
@@ -194,80 +230,303 @@ pub(crate) fn spawn_result(
             },
             BackgroundColor(t.bg_bottom),
         ))
-        .id();
-
-    let inner = commands
-        .spawn((
-            ResultPanel,
-            Node {
-                padding: UiRect::all(Val::Px(48.0)),
-                flex_direction: FlexDirection::Column,
-                row_gap: Val::Px(6.0),
-                min_width: Val::Px(400.0),
-                ..default()
-            },
-            BackgroundColor(t.panel_bg),
-        ))
-        .id();
-
-    commands.entity(panel).add_child(inner);
-
-    for (text, delay) in stat_rows {
-        if text.is_empty() {
-            let spacer = commands
-                .spawn((
-                    StatRow {
-                        reveal_at_ms: delay,
-                        target_alpha: 1.0,
-                    },
-                    Node {
-                        height: Val::Px(16.0),
-                        ..default()
-                    },
-                ))
-                .id();
-            commands.entity(inner).add_child(spacer);
-        } else {
-            let row = commands
-                .spawn((
-                    StatRow {
-                        reveal_at_ms: delay,
-                        target_alpha: 1.0,
-                    },
-                    Text::new(text),
-                    Theme::label_font(),
-                    TextColor(Color::srgba(1.0, 1.0, 1.0, 0.0)),
-                ))
-                .id();
-            commands.entity(inner).add_child(row);
-        }
-    }
-
-    let (label, color) = match *status {
-        SaveStatus::Saved => ("saved ✓", t.clear_green),
-        SaveStatus::Failed => ("save failed — score kept this session only", t.judgment_miss),
-        SaveStatus::Practice => ("", Color::NONE),
-    };
-    if !label.is_empty() {
-        let row = commands
-            .spawn((
-                StatRow {
-                    reveal_at_ms: STAGGER_MS * 15.0,
-                    target_alpha: 1.0,
+        .with_children(|root| {
+            root.spawn((
+                ResultPanel,
+                Node {
+                    width: Val::Percent(100.0),
+                    max_width: Val::Px(CARD_MAX_WIDTH),
+                    padding: UiRect::all(Val::Px(CARD_PADDING)),
+                    flex_direction: FlexDirection::Column,
+                    row_gap: Val::Px(16.0),
+                    ..default()
                 },
-                Text::new(label),
-                Theme::label_font(),
-                TextColor(color.with_alpha(0.0)),
+                BackgroundColor(t.panel_bg),
             ))
-            .id();
-        commands.entity(inner).add_child(row);
-    }
-
-    if midi.is_some_and(|m| m.0) {
-        commands.entity(inner).with_children(|p| {
-            dtx_ui::widget::nav_legend::spawn_nav_legend(p, &t, &[("BD", "continue")]);
+            .with_children(|card| {
+                spawn_header(card, &t, &title, &artist, &dlevel, difficulty.0);
+                divider(card, &t, SLOT_HEADER);
+                card.spawn(Node {
+                    flex_direction: FlexDirection::Row,
+                    column_gap: Val::Px(32.0),
+                    ..default()
+                })
+                .with_children(|body| {
+                    spawn_rank_panel(body, &t, rank, failed);
+                    spawn_stats_panel(body, &t, &counts, total, combo.max, score.0, *status);
+                });
+                divider(card, &t, SLOT_VERBS);
+                spawn_verb_row(card, &t);
+                spawn_legends(card, &t, midi_connected);
+            });
         });
-    }
+}
+
+fn spawn_header(
+    card: &mut ChildSpawnerCommands,
+    t: &Theme,
+    title: &str,
+    artist: &str,
+    dlevel: &str,
+    difficulty: u8,
+) {
+    card.spawn(Node {
+        flex_direction: FlexDirection::Column,
+        row_gap: Val::Px(4.0),
+        ..default()
+    })
+    .with_children(|head| {
+        head.spawn(reveal_text(
+            title,
+            Theme::font(28.0),
+            t.text_primary,
+            SLOT_HEADER,
+        ));
+        head.spawn(Node {
+            flex_direction: FlexDirection::Row,
+            column_gap: Val::Px(8.0),
+            align_items: AlignItems::Center,
+            ..default()
+        })
+        .with_children(|meta| {
+            meta.spawn(reveal_text(
+                format!("{artist} ·"),
+                Theme::font(16.0),
+                t.text_secondary,
+                SLOT_HEADER,
+            ));
+            meta.spawn(reveal_text(
+                format!("Lv {dlevel}"),
+                Theme::font(16.0),
+                t.difficulty_color(difficulty),
+                SLOT_HEADER,
+            ));
+        });
+    });
+}
+
+fn spawn_rank_panel(body: &mut ChildSpawnerCommands, t: &Theme, rank: Rank, failed: bool) {
+    body.spawn(Node {
+        width: Val::Percent(40.0),
+        flex_direction: FlexDirection::Column,
+        justify_content: JustifyContent::Center,
+        align_items: AlignItems::Center,
+        row_gap: Val::Px(8.0),
+        ..default()
+    })
+    .with_children(|left| {
+        left.spawn(reveal_text(
+            rank_label(rank),
+            Theme::font(160.0),
+            rank_color(rank, t),
+            SLOT_RANK,
+        ));
+        if failed {
+            left.spawn(reveal_text(
+                "STAGE FAILED",
+                Theme::font(16.0),
+                t.judgment_miss,
+                SLOT_FAILED,
+            ));
+        }
+    });
+}
+
+fn spawn_stats_panel(
+    body: &mut ChildSpawnerCommands,
+    t: &Theme,
+    counts: &JudgmentCounts,
+    total: u32,
+    max_combo: u32,
+    score: u64,
+    status: SaveStatus,
+) {
+    body.spawn(Node {
+        flex_grow: 1.0,
+        flex_direction: FlexDirection::Column,
+        justify_content: JustifyContent::Center,
+        row_gap: Val::Px(6.0),
+        ..default()
+    })
+    .with_children(|right| {
+        let rows = [
+            ("PERFECT", counts.perfect),
+            ("GREAT", counts.great),
+            ("GOOD", counts.good),
+            ("POOR", counts.ok),
+            ("MISS", counts.miss),
+        ];
+        for (i, (label, count)) in rows.into_iter().enumerate() {
+            judgment_row(right, t, label, count, total, SLOT_JUDGE_FIRST + i as f32);
+        }
+        divider(right, t, SLOT_TABLE_DIVIDER);
+        value_row(
+            right,
+            t,
+            "MAX COMBO",
+            &max_combo.to_string(),
+            Theme::font(18.0),
+            SLOT_COMBO,
+        );
+        value_row(
+            right,
+            t,
+            "SCORE",
+            &format_thousands(score),
+            Theme::font(28.0),
+            SLOT_SCORE,
+        );
+        match status {
+            SaveStatus::Saved => {
+                right.spawn(reveal_text(
+                    "saved ✓",
+                    Theme::font(14.0),
+                    t.clear_green,
+                    SLOT_SAVE,
+                ));
+            }
+            SaveStatus::Failed => {
+                right.spawn(reveal_text(
+                    "save failed — score kept this session only",
+                    Theme::font(14.0),
+                    t.judgment_miss,
+                    SLOT_SAVE,
+                ));
+            }
+            SaveStatus::Practice => {}
+        }
+    });
+}
+
+fn judgment_row(
+    parent: &mut ChildSpawnerCommands,
+    t: &Theme,
+    label: &str,
+    count: u32,
+    total: u32,
+    slot: f32,
+) {
+    parent
+        .spawn(Node {
+            flex_direction: FlexDirection::Row,
+            align_items: AlignItems::Center,
+            column_gap: Val::Px(12.0),
+            ..default()
+        })
+        .with_children(|row| {
+            row.spawn(Node {
+                width: Val::Px(LABEL_COL),
+                ..default()
+            })
+            .with_children(|cell| {
+                cell.spawn(reveal_text(
+                    label,
+                    Theme::font(18.0),
+                    t.judgment_color(label),
+                    slot,
+                ));
+            });
+            row.spawn(Node {
+                width: Val::Px(COUNT_COL),
+                justify_content: JustifyContent::FlexEnd,
+                ..default()
+            })
+            .with_children(|cell| {
+                cell.spawn(reveal_text(
+                    count.to_string(),
+                    Theme::font(18.0),
+                    t.text_primary,
+                    slot,
+                ));
+            });
+            row.spawn(reveal_text(
+                format!("{:.1}%", pct(count, total)),
+                Theme::font(14.0),
+                t.text_secondary,
+                slot,
+            ));
+        });
+}
+
+fn value_row(
+    parent: &mut ChildSpawnerCommands,
+    t: &Theme,
+    label: &str,
+    value: &str,
+    value_font: TextFont,
+    slot: f32,
+) {
+    parent
+        .spawn(Node {
+            flex_direction: FlexDirection::Row,
+            align_items: AlignItems::Baseline,
+            column_gap: Val::Px(12.0),
+            ..default()
+        })
+        .with_children(|row| {
+            row.spawn(Node {
+                width: Val::Px(LABEL_COL),
+                ..default()
+            })
+            .with_children(|cell| {
+                cell.spawn(reveal_text(label, Theme::font(14.0), t.text_secondary, slot));
+            });
+            row.spawn(reveal_text(value, value_font, t.text_primary, slot));
+        });
+}
+
+fn spawn_verb_row(card: &mut ChildSpawnerCommands, t: &Theme) {
+    card.spawn(Node {
+        width: Val::Percent(100.0),
+        flex_direction: FlexDirection::Row,
+        justify_content: JustifyContent::Center,
+        column_gap: Val::Px(32.0),
+        ..default()
+    })
+    .with_children(|row| {
+        for verb in [ResultVerb::Continue, ResultVerb::Retry, ResultVerb::Practice] {
+            let selected = verb == ResultVerb::default();
+            let color = if selected { t.accent } else { t.text_secondary };
+            row.spawn((
+                VerbLabel(verb),
+                reveal_text(verb_text(verb, selected), Theme::font(20.0), color, SLOT_VERBS),
+            ));
+        }
+    });
+}
+
+fn spawn_legends(card: &mut ChildSpawnerCommands, t: &Theme, midi_connected: bool) {
+    card.spawn((
+        Node {
+            width: Val::Percent(100.0),
+            flex_direction: FlexDirection::Column,
+            align_items: AlignItems::Center,
+            row_gap: Val::Px(4.0),
+            ..default()
+        },
+        EnterChoreo::slide(SLIDE_OFFSET, SLOT_LEGEND * STAGGER_MS, SLIDE_DURATION_MS),
+        UiTransform::default(),
+    ))
+    .with_children(|legends| {
+        if midi_connected {
+            dtx_ui::widget::nav_legend::spawn_nav_legend(
+                legends,
+                t,
+                &[
+                    ("HH/CY", "move"),
+                    ("BD", "select"),
+                    ("SD", "continue"),
+                    ("FT", "practice"),
+                ],
+            );
+        }
+        legends.spawn(reveal_text(
+            "←/→ move · Enter select · R retry · Esc continue",
+            Theme::font(12.0),
+            t.text_secondary,
+            SLOT_LEGEND,
+        ));
+    });
 }
 
 pub(crate) fn animate_staggered_reveal(
@@ -300,6 +559,105 @@ pub(crate) fn despawn_result(commands: Commands, query: Query<Entity, With<Resul
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn spawn_world() -> World {
+        let mut world = World::new();
+        world.insert_resource(ThemeResource::default());
+        world.insert_resource(Score(912_340));
+        world.insert_resource(Combo {
+            current: 0,
+            max: 214,
+        });
+        world.insert_resource(JudgmentCounts {
+            perfect: 412,
+            great: 61,
+            good: 12,
+            ok: 6,
+            miss: 9,
+        });
+        world.insert_resource(ActiveChart {
+            chart: dtx_core::Chart::default(),
+            source_path: None,
+        });
+        world.insert_resource(DrumScoring {
+            total_notes: 500,
+            ..Default::default()
+        });
+        world.insert_resource(game_shell::SelectedDifficulty(2));
+        world.insert_resource(SaveStatus::Saved);
+        world
+    }
+
+    fn all_texts(world: &mut World) -> Vec<String> {
+        let mut q = world.query::<&Text>();
+        q.iter(world).map(|t| t.0.clone()).collect()
+    }
+
+    #[test]
+    fn spawn_result_builds_verbs_columns_and_score() {
+        use bevy::ecs::system::RunSystemOnce;
+        let mut world = spawn_world();
+        world
+            .run_system_once(spawn_result)
+            .expect("spawn_result runs");
+
+        let mut verb_q = world.query::<&VerbLabel>();
+        assert_eq!(
+            verb_q.iter(&world).count(),
+            3,
+            "Continue / Retry / Practice"
+        );
+
+        let texts = all_texts(&mut world);
+        assert!(
+            texts.iter().any(|s| s == "912,340"),
+            "score separated: {texts:?}"
+        );
+        assert!(texts.iter().any(|s| s == "saved ✓"), "save line kept");
+        // 412/500 perfect, 61 great, combo 214 → XG rate 80.73 → S.
+        assert!(texts.iter().any(|s| s == "S"), "rank letter: {texts:?}");
+        assert!(
+            !texts.iter().any(|s| s == "STAGE FAILED"),
+            "no failed tag without LastStageOutcome"
+        );
+        // Column layout, not space padding: count is its own text node.
+        assert!(texts.iter().any(|s| s == "412"));
+        assert!(texts.iter().any(|s| s == "82.4%"));
+    }
+
+    #[test]
+    fn spawn_result_colors_judgment_labels() {
+        use bevy::ecs::system::RunSystemOnce;
+        let mut world = spawn_world();
+        world
+            .run_system_once(spawn_result)
+            .expect("spawn_result runs");
+        let t = Theme::default();
+        let mut q = world.query::<(&Text, &TextColor)>();
+        let (_, color) = q
+            .iter(&world)
+            .find(|(text, _)| text.0 == "PERFECT")
+            .expect("PERFECT label exists");
+        assert_eq!(color.0, t.judgment_perfect.with_alpha(0.0));
+    }
+
+    #[test]
+    fn spawn_result_failed_tag_and_unknown_rank() {
+        use bevy::ecs::system::RunSystemOnce;
+        let mut world = spawn_world();
+        world.insert_resource(LastStageOutcome { cleared: false });
+        world.insert_resource(DrumScoring {
+            total_notes: 0,
+            ..Default::default()
+        });
+        world
+            .run_system_once(spawn_result)
+            .expect("spawn_result runs");
+        let texts = all_texts(&mut world);
+        assert!(texts.iter().any(|s| s == "STAGE FAILED"));
+        assert!(texts.iter().any(|s| s == "--"), "Unknown rank renders --");
+        assert!(texts.iter().any(|s| s == "0.0%"), "zero total → 0.0%");
+    }
 
     #[test]
     fn pct_zero_total_is_zero() {

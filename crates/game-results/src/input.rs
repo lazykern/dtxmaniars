@@ -19,7 +19,6 @@ pub(crate) fn result_input(
 }
 
 /// The verb the cursor sits on. Resets to Continue on every Result enter.
-#[allow(dead_code)] // wired into the driver + spawn in Tasks 6-7
 #[derive(Resource, Default, Clone, Copy, PartialEq, Eq, Debug)]
 pub(crate) enum ResultVerb {
     #[default]
