@@ -614,6 +614,9 @@ fn spawn_pads_card(
                     Color::NONE
                 }),
                 BorderColor::all(if is_selected { chrome::ACCENT } else { Color::NONE }),
+                // Zero-width baseline; `highlight_selected_row` widens it to
+                // the FOCUS_RING while keyboard focus sits on the rows.
+                Outline::new(Val::Px(0.0), Val::Px(1.0), Color::NONE),
             ));
             if unbound {
                 row_cmds.insert(UnboundRow);

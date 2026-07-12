@@ -542,17 +542,23 @@ fn sync_selected_channel_on_capture(capture: Res<CaptureState>, mut selected: Re
 
 /// Tint the selected channel row (ROW_SELECTED_BG + accent left border) so
 /// the pick is visible in the list; an unselected, unbound row keeps its
-/// WARN_TINT baseline instead of going transparent.
+/// WARN_TINT baseline instead of going transparent. While keyboard focus is
+/// at the Rows level, the selected row additionally carries the FOCUS_RING
+/// outline — keyboard focus reads as distinct from mere selection. Runs
+/// every frame, so no repaint plumbing is needed.
 fn highlight_selected_row(
     selected: Res<SelectedChannel>,
+    focus: Res<super::controls_panel::ControlsFocus>,
     mut rows: Query<(
         &BindChannelRow,
         Has<super::bindings_panel::UnboundRow>,
         &mut BackgroundColor,
         &mut BorderColor,
+        &mut Outline,
     )>,
 ) {
-    for (row, unbound, mut bg, mut border) in &mut rows {
+    let rows_focused = *focus == super::controls_panel::ControlsFocus::Rows;
+    for (row, unbound, mut bg, mut border, mut outline) in &mut rows {
         let on = selected.0 == Some(row.0);
         *bg = BackgroundColor(if on {
             super::chrome::ROW_SELECTED_BG
@@ -562,6 +568,13 @@ fn highlight_selected_row(
             Color::NONE
         });
         *border = BorderColor::all(if on { super::chrome::ACCENT } else { Color::NONE });
+        if on && rows_focused {
+            outline.width = Val::Px(2.0);
+            outline.color = super::panel::FOCUS_RING;
+        } else {
+            outline.width = Val::Px(0.0);
+            outline.color = Color::NONE;
+        }
     }
 }
 
@@ -754,6 +767,45 @@ mod tests {
         // Share: still on HiHatClose AND now also on Snare.
         assert!(b.map[&EChannel::HiHatClose].contains(&src));
         assert!(b.map[&EChannel::Snare].contains(&src));
+    }
+
+    #[test]
+    fn rows_focus_draws_focus_ring_on_selected_row_only() {
+        use crate::editor::bindings_panel::BindChannelRow;
+        use crate::editor::controls_panel::ControlsFocus;
+        use dtx_core::EChannel;
+
+        let mut app = App::new();
+        app.insert_resource(SelectedChannel(Some(EChannel::Snare)))
+            .insert_resource(ControlsFocus::Rows)
+            .add_systems(Update, highlight_selected_row);
+        let sd = app
+            .world_mut()
+            .spawn((
+                BindChannelRow(EChannel::Snare),
+                BackgroundColor(Color::NONE),
+                BorderColor::all(Color::NONE),
+                Outline::new(Val::Px(0.0), Val::Px(1.0), Color::NONE),
+            ))
+            .id();
+        let hh = app
+            .world_mut()
+            .spawn((
+                BindChannelRow(EChannel::HiHatClose),
+                BackgroundColor(Color::NONE),
+                BorderColor::all(Color::NONE),
+                Outline::new(Val::Px(0.0), Val::Px(1.0), Color::NONE),
+            ))
+            .id();
+        app.update();
+        let width = |app: &App, e: Entity| app.world().entity(e).get::<Outline>().map(|o| o.width);
+        assert_eq!(width(&app, sd), Some(Val::Px(2.0)), "selected row ringed at Rows");
+        assert_eq!(width(&app, hh), Some(Val::Px(0.0)));
+
+        // Outside Rows the ring disappears (selection tint remains).
+        app.insert_resource(ControlsFocus::SegmentSelector);
+        app.update();
+        assert_eq!(width(&app, sd), Some(Val::Px(0.0)));
     }
 
     /// A capture armed by clicking `+` directly (no prior row click/pad hit)
