@@ -472,6 +472,8 @@ pub fn full_hud_input(
     mut session: ResMut<PracticeSession>,
     timeline: Res<ChipTimeline>,
     clock: Res<GameplayClock>,
+    mut wait_state: Option<ResMut<crate::practice::wait::WaitState>>,
+    mut chord_hits: Option<ResMut<crate::practice::wait::ChordHitTimes>>,
     mut next_pause: ResMut<NextState<PauseState>>,
     mut seeks: MessageWriter<SeekToChartTime>,
     mut requests: MessageWriter<TransitionRequest>,
@@ -610,6 +612,14 @@ pub fn full_hud_input(
                 session.trainer.wait_enabled = !session.trainer.wait_enabled;
                 if session.trainer.wait_enabled && session.trainer.ramp.armed {
                     session.trainer.ramp.armed = false;
+                }
+                if session.trainer.wait_enabled {
+                    if let (Some(wait_state), Some(chord_hits)) =
+                        (wait_state.as_deref_mut(), chord_hits.as_deref_mut())
+                    {
+                        wait_state.begin(clock.current_ms);
+                        chord_hits.0.clear();
+                    }
                 }
             }
             RailItem::RampStart

@@ -74,6 +74,7 @@ fn enter_practice_session(
 ) {
     wait_state.phase = wait::WaitPhase::Flowing;
     wait_state.waited_chips.clear();
+    wait_state.enabled_from_ms = None;
     if intent.0 {
         commands.insert_resource(PracticeSession::default());
     } else {
@@ -107,6 +108,7 @@ mod tests {
                 chips: vec![7],
             }),
             waited_chips: [7].into(),
+            ..default()
         });
         app.add_systems(Update, enter_practice_session);
         app.update();

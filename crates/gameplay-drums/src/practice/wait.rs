@@ -85,11 +85,21 @@ use crate::seek::SeekToChartTime;
 pub struct WaitState {
     pub phase: WaitPhase,
     pub waited_chips: HashSet<usize>,
+    /// Chart time at which wait mode was most recently enabled. Older notes
+    /// belong to the preceding free-play segment and must not become a halt.
+    pub enabled_from_ms: Option<i64>,
 }
 
 impl WaitState {
     pub fn halted(&self) -> bool {
         matches!(self.phase, WaitPhase::Halted(_))
+    }
+
+    /// Start a fresh wait-mode segment. This can run while the practice panel
+    /// has paused the fixed-update schedule, so it also clears a prior halt.
+    pub fn begin(&mut self, clock_ms: i64) {
+        self.phase = WaitPhase::Flowing;
+        self.enabled_from_ms = Some(clock_ms);
     }
 }
 
@@ -129,13 +139,18 @@ pub fn wait_watcher(
             crate::pause::resume_all_chart_audio(&bgm, &polyphony, &active, &mut instances);
             state.phase = WaitPhase::Flowing;
         }
+        state.enabled_from_ms = None;
+        chord_hits.0.clear();
         return;
     }
     // Clone the phase before matching: matching on `&state.phase` would
     // hold a borrow of `state` across the arm bodies (E0502).
     match state.phase.clone() {
         WaitPhase::Flowing => {
-            let span_start = session.current_attempt.start_ms;
+            let span_start = state
+                .enabled_from_ms
+                .unwrap_or(session.current_attempt.start_ms)
+                .max(session.current_attempt.start_ms);
             if let Some(set) = check_halt(&timeline, &judged.0, clock.current_ms, span_start) {
                 state.waited_chips.extend(set.chips.iter().copied());
                 crate::pause::pause_all_chart_audio(&bgm, &polyphony, &active, &mut instances);
@@ -177,6 +192,7 @@ pub fn reset_wait_on_seek(
     if seeks.read().last().is_some() {
         state.phase = WaitPhase::Flowing;
         state.waited_chips.clear();
+        state.enabled_from_ms = None;
         chord_hits.0.clear();
     }
 }
@@ -273,6 +289,20 @@ mod tests {
     }
 
     #[test]
+    fn reenabled_wait_starts_after_the_previous_free_play_segment() {
+        let tl = timeline();
+        let mut state = WaitState::default();
+        state.begin(3_000);
+
+        let span_start = state.enabled_from_ms.unwrap_or(0).max(0);
+        assert_eq!(check_halt(&tl, &HashSet::new(), 3_000, span_start), None);
+
+        let set = check_halt(&tl, &HashSet::new(), 4_001, span_start).unwrap();
+        assert_eq!(set.target_ms, 4_000);
+        assert_eq!(set.chips, vec![4]);
+    }
+
+    #[test]
     fn preroll_notes_never_halt() {
         let tl = timeline();
         let judged = HashSet::new();
@@ -349,6 +379,7 @@ mod tests {
                 chips: vec![2, 3],
             }),
             waited_chips: [2, 3].into(),
+            ..default()
         });
         app.init_resource::<crate::practice::toast::ToastQueue>();
         app.add_systems(Update, wait_watcher);
@@ -411,6 +442,7 @@ mod tests {
                 chips: vec![2],
             }),
             waited_chips: [2].into(),
+            ..default()
         });
         app.insert_resource(ChordHitTimes([(2, 1_000)].into()));
         app.add_systems(Update, reset_wait_on_seek);
