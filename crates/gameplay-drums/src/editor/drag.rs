@@ -101,6 +101,9 @@ pub fn plugin(app: &mut App) {
             .in_set(super::EditorGestureSet)
             .run_if(super::editor_open)
             .run_if(super::widgets_tab_active)
+            // Arrow-key nudge must not fire while a dialog owns ←/→.
+            .run_if(super::profile_dialog::profile_dialog_closed)
+            .run_if(super::profile_state::pending_close_none)
             .run_if(in_state(game_shell::AppState::Performance)),
     );
     app.add_systems(

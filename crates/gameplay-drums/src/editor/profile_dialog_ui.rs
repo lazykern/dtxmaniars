@@ -79,8 +79,12 @@ pub fn plugin(app: &mut App) {
                 handle_name_dialog_input,
                 // Chained: both dispatch through `dispatch_dialog_button` and
                 // take `ProfileDialogState`, so a same-frame keypress and click
-                // must resolve in a defined order.
-                (handle_dialog_keys, handle_dialog_buttons).chain(),
+                // must resolve in a defined order. Ordered after
+                // `close_on_escape` so one Esc cannot both dismiss the dialog
+                // and close Customize.
+                (handle_dialog_keys, handle_dialog_buttons)
+                    .chain()
+                    .after(super::ui::close_on_escape),
                 update_profile_dialog_focus_ring,
             )
                 .run_if(in_state(game_shell::AppState::Performance)),
