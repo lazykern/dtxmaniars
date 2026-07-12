@@ -5,9 +5,9 @@ use std::path::{Path, PathBuf};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
+use crate::Rank;
 use crate::identity::ChartIdentity;
 use crate::replay::ReplayRef;
-use crate::Rank;
 
 /// Current native store version.
 pub const STORE_VERSION: u32 = 2;
@@ -81,6 +81,21 @@ impl ScoreEntry {
             0.0
         } else {
             self.judgments.perfect as f32 / total as f32 * 100.0
+        }
+    }
+
+    /// Weighted achievement percentage used in the player-facing UI.
+    pub fn achievement_pct(&self) -> f32 {
+        let total = self.total();
+        if total == 0 {
+            0.0
+        } else {
+            let judgments = &self.judgments;
+            let weighted = judgments.perfect as f32 * 100.0
+                + judgments.great as f32 * 80.0
+                + judgments.good as f32 * 60.0
+                + judgments.poor as f32 * 40.0;
+            weighted / total as f32
         }
     }
 }

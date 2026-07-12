@@ -65,7 +65,7 @@ pub fn spawn_difficulty_grid(parent: &mut ChildSpawnerCommands, theme: &Theme) {
                 ),
             ))
             .with_children(|slot| {
-                // Left box: completion rate.
+                // Left box: best achievement.
                 slot.spawn((
                     Node {
                         width: Val::Px(110.0),
@@ -78,7 +78,7 @@ pub fn spawn_difficulty_grid(parent: &mut ChildSpawnerCommands, theme: &Theme) {
                 ))
                 .with_children(|box_l| {
                     box_l.spawn((
-                        Text::new("COMPLETION RATE"),
+                        Text::new("BEST ACHIEVEMENT"),
                         Theme::font(9.0),
                         TextColor(theme.text_secondary),
                     ));

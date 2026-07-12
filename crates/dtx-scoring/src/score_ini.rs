@@ -98,6 +98,20 @@ impl DrumScoreIni {
         }
     }
 
+    /// Weighted achievement percentage used in the player-facing UI.
+    pub fn achievement_pct(&self) -> f32 {
+        let total = self.perfect + self.great + self.good + self.poor + self.miss;
+        if total == 0 {
+            0.0
+        } else {
+            let weighted = self.perfect as f32 * 100.0
+                + self.great as f32 * 80.0
+                + self.good as f32 * 60.0
+                + self.poor as f32 * 40.0;
+            weighted / total as f32
+        }
+    }
+
     /// True when `self` is a better result than `other` (score, then accuracy,
     /// then combo). Mirrors BocuD's hi-score replacement rule.
     fn beats(&self, other: &DrumScoreIni) -> bool {
@@ -500,6 +514,20 @@ mod tests {
             score_ini_path("/songs/x.dtx"),
             PathBuf::from("/songs/x.dtx.score.ini")
         );
+    }
+
+    #[test]
+    fn achievement_weights_all_judgments() {
+        let score = DrumScoreIni {
+            perfect: 1,
+            great: 1,
+            good: 1,
+            poor: 1,
+            miss: 1,
+            ..Default::default()
+        };
+
+        assert!((score.achievement_pct() - 56.0).abs() < f32::EPSILON);
     }
 
     #[test]
