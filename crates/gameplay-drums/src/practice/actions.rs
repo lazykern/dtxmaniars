@@ -68,6 +68,7 @@ pub fn emit_practice_actions(
 /// Apply quick-tier actions. `ToggleRamp` is intentionally not handled
 /// here: `ramp::handle_toggle_ramp` consumes the same message stream
 /// with its own `MessageReader` (multiple readers are independent).
+#[allow(clippy::too_many_arguments)]
 pub fn apply_practice_actions(
     mut actions: MessageReader<PracticeAction>,
     mut session: ResMut<PracticeSession>,
@@ -76,6 +77,7 @@ pub fn apply_practice_actions(
     mut seeks: MessageWriter<SeekToChartTime>,
     mut next_pause: ResMut<NextState<PauseState>>,
     mut toasts: ResMut<ToastQueue>,
+    mut surface: ResMut<crate::pause::PracticePauseSurface>,
 ) {
     for action in actions.read() {
         match action {
@@ -137,7 +139,10 @@ pub fn apply_practice_actions(
                 });
                 toasts.push("restart");
             }
-            PracticeAction::OpenFullHud => next_pause.set(PauseState::Paused),
+            PracticeAction::OpenFullHud => {
+                *surface = crate::pause::PracticePauseSurface::Rail;
+                next_pause.set(PauseState::Paused);
+            }
             PracticeAction::ToggleRamp => {}
         }
     }
@@ -184,5 +189,37 @@ mod tests {
             Some(PracticeAction::OpenFullHud)
         );
         assert_eq!(action_for(&b, KeyCode::KeyQ), None);
+    }
+
+    #[test]
+    fn tab_opener_sets_rail_surface_and_pauses() {
+        use crate::pause::PracticePauseSurface;
+        use bevy::ecs::message::Messages;
+        use bevy::ecs::system::RunSystemOnce;
+        use bevy::prelude::*;
+
+        let mut world = World::new();
+        world.init_resource::<Messages<PracticeAction>>();
+        world.init_resource::<Messages<crate::seek::SeekToChartTime>>();
+        world.insert_resource(crate::practice::session::PracticeSession::default());
+        world.init_resource::<crate::timeline::ChipTimeline>();
+        world.init_resource::<crate::resources::GameplayClock>();
+        world.init_resource::<crate::practice::toast::ToastQueue>();
+        world.init_resource::<NextState<PauseState>>();
+        world.init_resource::<PracticePauseSurface>();
+        world.write_message(PracticeAction::OpenFullHud);
+
+        world
+            .run_system_once(apply_practice_actions)
+            .expect("apply_practice_actions runs");
+
+        assert_eq!(
+            *world.resource::<PracticePauseSurface>(),
+            PracticePauseSurface::Rail
+        );
+        assert!(matches!(
+            world.resource::<NextState<PauseState>>(),
+            NextState::Pending(PauseState::Paused)
+        ));
     }
 }

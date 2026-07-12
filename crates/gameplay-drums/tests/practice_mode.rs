@@ -70,6 +70,7 @@ fn build_app() -> App {
     .init_resource::<gameplay_drums::timeline::ChipTimeline>()
     .init_resource::<gameplay_drums::seek::PendingBgmStart>()
     .init_resource::<gameplay_drums::seek::LastSeekFrom>()
+    .init_resource::<gameplay_drums::pause::PracticePauseSurface>()
     .init_resource::<game_shell::EditorSession>()
     .add_message::<game_shell::TransitionRequest>()
     .add_message::<gameplay_drums::seek::SeekToChartTime>()

@@ -1,6 +1,8 @@
 //! Two-tier practice HUD: quick tier (mini strip, chip, toasts) during
-//! play, full HUD (timeline + right rail) while paused. Fixed overlay —
-//! deliberately NOT a dtx-layout widget (no editor-pillar dependency).
+//! play, full HUD (timeline + right rail) on the **Tab** pause tier
+//! (`PracticePauseSurface::Rail`); Esc pauses get the standard overlay.
+//! Fixed overlay — deliberately NOT a dtx-layout widget (no
+//! editor-pillar dependency).
 
 pub mod chip;
 pub mod full_hud;
@@ -19,6 +21,11 @@ pub fn format_chart_time(ms: i64) -> String {
     format!("{m}:{s:02}.{d}")
 }
 
+/// Run condition: the practice rail owns the current pause (Tab opener).
+pub fn rail_surface_active(surface: Res<crate::pause::PracticePauseSurface>) -> bool {
+    *surface == crate::pause::PracticePauseSurface::Rail
+}
+
 /// Exposed `pub` (not `pub(super)`) so integration tests can build the real
 /// HUD plugin schedule headlessly; see `tests/practice_hud.rs`.
 pub fn plugin(app: &mut App) {
@@ -27,12 +34,14 @@ pub fn plugin(app: &mut App) {
     chip::plugin(app);
     wait_prompt::plugin(app);
     app.init_resource::<full_hud::RailSelection>()
-        .init_resource::<full_hud::ExitArmed>()
+        .init_resource::<crate::pause::PracticePauseSurface>()
         .init_resource::<timeline_ui::TimelineGesture>()
         .init_resource::<crate::practice::toast::ToastQueue>()
         .add_systems(
             OnEnter(PauseState::Paused),
-            full_hud::spawn_full_hud.run_if(resource_exists::<crate::practice::PracticeSession>),
+            full_hud::spawn_full_hud
+                .run_if(resource_exists::<crate::practice::PracticeSession>)
+                .run_if(rail_surface_active),
         )
         .add_systems(OnExit(PauseState::Paused), full_hud::despawn_full_hud)
         .add_systems(
@@ -40,13 +49,16 @@ pub fn plugin(app: &mut App) {
             (
                 timeline_ui::timeline_mouse,
                 full_hud::full_hud_input,
+                full_hud::rail_mouse,
                 full_hud::transport_buttons,
+                full_hud::refresh_rail,
                 full_hud::update_full_hud_markers,
             )
                 .chain()
                 .run_if(in_state(AppState::Performance))
                 .run_if(in_state(PauseState::Paused))
-                .run_if(resource_exists::<crate::practice::PracticeSession>),
+                .run_if(resource_exists::<crate::practice::PracticeSession>)
+                .run_if(rail_surface_active),
         );
 }
 

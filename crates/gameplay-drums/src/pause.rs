@@ -16,28 +16,52 @@ use game_shell::{request_transition, AppState, PauseState, TransitionRequest};
 
 use crate::resources::ActiveDrumSounds;
 
-/// Root marker for the normal pause overlay (practice suppresses it; the
-/// practice full HUD owns PauseState::Paused — see practice/hud/full_hud.rs).
+/// Root marker for the pause overlay. In practice this spawns for the Esc
+/// surface; Tab opens the full rail instead (see PracticePauseSurface).
 #[derive(Component)]
 pub struct PauseOverlay;
 
-/// One selectable menu row.
-#[derive(Component, Clone, Copy, PartialEq, Eq)]
-enum PauseItem {
+/// One selectable pause-menu row. The set differs between normal play and
+/// practice — see [`pause_items`].
+#[derive(Component, Clone, Copy, PartialEq, Eq, Debug)]
+pub enum PauseItemKind {
     Resume,
     Retry,
     Quit,
+    RestartLoop,
+    ExitPractice,
 }
 
-impl PauseItem {
-    const ORDER: [PauseItem; 3] = [PauseItem::Resume, PauseItem::Retry, PauseItem::Quit];
-
+impl PauseItemKind {
     fn label(self) -> &'static str {
         match self {
-            PauseItem::Resume => "Resume",
-            PauseItem::Retry => "Retry",
-            PauseItem::Quit => "Quit to Song Select",
+            PauseItemKind::Resume => "Resume",
+            PauseItemKind::Retry => "Retry",
+            PauseItemKind::Quit => "Quit to Song Select",
+            PauseItemKind::RestartLoop => "Restart loop",
+            PauseItemKind::ExitPractice => "Exit Practice",
         }
+    }
+}
+
+const NORMAL_ITEMS: &[PauseItemKind] = &[
+    PauseItemKind::Resume,
+    PauseItemKind::Retry,
+    PauseItemKind::Quit,
+];
+const PRACTICE_ITEMS: &[PauseItemKind] = &[
+    PauseItemKind::Resume,
+    PauseItemKind::RestartLoop,
+    PauseItemKind::ExitPractice,
+];
+
+/// Rows for the pause overlay: practice gets Resume / Restart loop /
+/// Exit Practice; normal play keeps Resume / Retry / Quit exactly as-is.
+pub fn pause_items(practice: bool) -> &'static [PauseItemKind] {
+    if practice {
+        PRACTICE_ITEMS
+    } else {
+        NORMAL_ITEMS
     }
 }
 
@@ -45,8 +69,21 @@ impl PauseItem {
 #[derive(Resource, Default)]
 pub struct PauseSelection(pub usize);
 
+/// Which surface owns `PauseState::Paused` during practice. Esc opens the
+/// standard pause overlay; Tab opens the full practice rail. Irrelevant
+/// outside practice (the overlay always spawns); reset to `Overlay` on
+/// every return to `Running` for hygiene.
+#[derive(Resource, Default, Clone, Copy, PartialEq, Eq, Debug)]
+pub enum PracticePauseSurface {
+    #[default]
+    Overlay,
+    Rail,
+}
+
 pub(super) fn plugin(app: &mut App) {
     app.init_resource::<PauseSelection>()
+        .init_resource::<PracticePauseSurface>()
+        .add_systems(OnEnter(PauseState::Running), reset_pause_surface)
         // Always start a performance un-paused.
         .add_systems(OnEnter(AppState::Performance), force_running)
         .add_systems(OnExit(AppState::Performance), force_running)
@@ -80,13 +117,21 @@ fn toggle_pause(
     keys: Res<ButtonInput<KeyCode>>,
     state: Res<State<PauseState>>,
     mut next: ResMut<NextState<PauseState>>,
+    mut surface: ResMut<PracticePauseSurface>,
 ) {
     if keys.just_pressed(KeyCode::Escape) {
-        next.set(match state.get() {
-            PauseState::Running => PauseState::Paused,
-            PauseState::Paused => PauseState::Running,
-        });
+        match state.get() {
+            PauseState::Running => {
+                *surface = PracticePauseSurface::Overlay;
+                next.set(PauseState::Paused);
+            }
+            PauseState::Paused => next.set(PauseState::Running),
+        }
     }
+}
+
+fn reset_pause_surface(mut surface: ResMut<PracticePauseSurface>) {
+    *surface = PracticePauseSurface::Overlay;
 }
 
 pub(crate) fn pause_all_chart_audio(
@@ -145,10 +190,11 @@ pub fn spawn_overlay(
     mut commands: Commands,
     mut selection: ResMut<PauseSelection>,
     practice: Option<Res<crate::practice::PracticeSession>>,
+    surface: Res<PracticePauseSurface>,
     midi: Option<Res<game_shell::MidiConnected>>,
 ) {
-    if practice.is_some() {
-        return; // practice pause panel owns the overlay
+    if practice.is_some() && *surface == PracticePauseSurface::Rail {
+        return; // Tab-opened pause: the practice rail owns this surface
     }
     selection.0 = 0;
     let theme = Theme::default();
@@ -178,9 +224,9 @@ pub fn spawn_overlay(
                     ..default()
                 },
             ));
-            for item in PauseItem::ORDER {
+            for item in pause_items(practice.is_some()) {
                 root.spawn((
-                    item,
+                    *item,
                     Text::new(item.label()),
                     Theme::hud_font(),
                     TextColor(theme.text_secondary),
@@ -232,15 +278,18 @@ fn pause_menu_input(
     mut selection: ResMut<PauseSelection>,
     mut next_pause: ResMut<NextState<PauseState>>,
     mut requests: MessageWriter<TransitionRequest>,
-    mut rows: Query<(&PauseItem, &mut TextColor)>,
+    mut practice_actions: MessageWriter<crate::practice::actions::PracticeAction>,
+    mut rows: Query<(&PauseItemKind, &mut TextColor)>,
     practice: Option<Res<crate::practice::PracticeSession>>,
+    surface: Res<PracticePauseSurface>,
 ) {
     use game_shell::NavVerb;
-    if practice.is_some() {
-        actions.clear();
+    if practice.is_some() && *surface == PracticePauseSurface::Rail {
+        actions.clear(); // rail owns this pause; don't double-handle keys/pads
         return;
     }
-    let count = PauseItem::ORDER.len();
+    let items = pause_items(practice.is_some());
+    let count = items.len();
     let mut confirm = false;
     let mut resume = false;
     for action in actions.read() {
@@ -255,7 +304,7 @@ fn pause_menu_input(
     }
 
     let theme = Theme::default();
-    let selected = PauseItem::ORDER[selection.0];
+    let selected = items[selection.0 % count];
     for (item, mut color) in &mut rows {
         color.0 = if *item == selected {
             theme.accent
@@ -270,15 +319,22 @@ fn pause_menu_input(
     }
     if confirm {
         match selected {
-            PauseItem::Resume => next_pause.set(PauseState::Running),
-            PauseItem::Retry => {
+            PauseItemKind::Resume => next_pause.set(PauseState::Running),
+            PauseItemKind::Retry => {
                 // Reload the chart from the top via the loading screen.
                 next_pause.set(PauseState::Running);
                 request_transition(&mut requests, AppState::SongLoading);
             }
-            PauseItem::Quit => {
+            PauseItemKind::Quit | PauseItemKind::ExitPractice => {
                 next_pause.set(PauseState::Running);
                 request_transition(&mut requests, AppState::SongSelect);
+            }
+            PauseItemKind::RestartLoop => {
+                // Reuse the quick-tier effect verbatim: apply_practice_actions
+                // (gated Running) reads this message the frame after the resume
+                // transition applies — messages live two update cycles.
+                practice_actions.write(crate::practice::actions::PracticeAction::RestartLoop);
+                next_pause.set(PauseState::Running);
             }
         }
     }
@@ -288,6 +344,167 @@ fn pause_menu_input(
 mod tests {
     use super::*;
     use crate::practice::wait::{WaitPhase, WaitSet, WaitState};
+    use bevy::ecs::system::RunSystemOnce;
+
+    #[test]
+    fn esc_opener_sets_overlay_surface() {
+        let mut world = World::new();
+        let mut keys = ButtonInput::<KeyCode>::default();
+        keys.press(KeyCode::Escape);
+        world.insert_resource(keys);
+        world.insert_resource(State::new(PauseState::Running));
+        world.init_resource::<NextState<PauseState>>();
+        // Stale value from a previous Tab-opened rail must be overwritten.
+        world.insert_resource(PracticePauseSurface::Rail);
+        world
+            .run_system_once(toggle_pause)
+            .expect("toggle_pause runs");
+        assert_eq!(
+            *world.resource::<PracticePauseSurface>(),
+            PracticePauseSurface::Overlay
+        );
+        assert!(matches!(
+            world.resource::<NextState<PauseState>>(),
+            NextState::Pending(PauseState::Paused)
+        ));
+    }
+
+    #[test]
+    fn esc_while_paused_resumes_and_leaves_surface_alone() {
+        let mut world = World::new();
+        let mut keys = ButtonInput::<KeyCode>::default();
+        keys.press(KeyCode::Escape);
+        world.insert_resource(keys);
+        world.insert_resource(State::new(PauseState::Paused));
+        world.init_resource::<NextState<PauseState>>();
+        world.insert_resource(PracticePauseSurface::Rail);
+        world
+            .run_system_once(toggle_pause)
+            .expect("toggle_pause runs");
+        // The OnEnter(Running) reset handles hygiene; the toggle itself only closes.
+        assert_eq!(
+            *world.resource::<PracticePauseSurface>(),
+            PracticePauseSurface::Rail
+        );
+        assert!(matches!(
+            world.resource::<NextState<PauseState>>(),
+            NextState::Pending(PauseState::Running)
+        ));
+    }
+
+    #[test]
+    fn surface_resets_to_overlay_on_running() {
+        let mut world = World::new();
+        world.insert_resource(PracticePauseSurface::Rail);
+        world
+            .run_system_once(reset_pause_surface)
+            .expect("reset runs");
+        assert_eq!(
+            *world.resource::<PracticePauseSurface>(),
+            PracticePauseSurface::Overlay
+        );
+    }
+
+    #[test]
+    fn pause_items_normal_vs_practice() {
+        assert_eq!(
+            pause_items(false),
+            &[
+                PauseItemKind::Resume,
+                PauseItemKind::Retry,
+                PauseItemKind::Quit
+            ]
+        );
+        assert_eq!(
+            pause_items(true),
+            &[
+                PauseItemKind::Resume,
+                PauseItemKind::RestartLoop,
+                PauseItemKind::ExitPractice
+            ]
+        );
+    }
+
+    fn dispatch_world(selection: usize) -> World {
+        use bevy::ecs::message::Messages;
+        let mut world = World::new();
+        world.init_resource::<Messages<game_shell::NavAction>>();
+        world.init_resource::<Messages<TransitionRequest>>();
+        world.init_resource::<Messages<crate::practice::actions::PracticeAction>>();
+        world.insert_resource(PauseSelection(selection));
+        world.init_resource::<NextState<PauseState>>();
+        world.init_resource::<PracticePauseSurface>(); // Overlay
+        world.insert_resource(crate::practice::PracticeSession::default());
+        world.write_message(game_shell::NavAction {
+            verb: game_shell::NavVerb::Confirm,
+            source: game_shell::NavSource::Keyboard,
+            coarse: false,
+        });
+        world
+    }
+
+    #[test]
+    fn practice_confirm_exit_goes_to_song_select() {
+        use bevy::ecs::message::Messages;
+        use bevy::ecs::system::RunSystemOnce;
+        let mut world = dispatch_world(2); // Exit Practice row
+        world
+            .run_system_once(pause_menu_input)
+            .expect("pause_menu_input runs");
+        assert!(matches!(
+            world.resource::<NextState<PauseState>>(),
+            NextState::Pending(PauseState::Running)
+        ));
+        let targets: Vec<AppState> = world
+            .resource::<Messages<TransitionRequest>>()
+            .iter_current_update_messages()
+            .map(|r| r.0)
+            .collect();
+        assert_eq!(targets, vec![AppState::SongSelect]);
+    }
+
+    #[test]
+    fn practice_confirm_restart_loop_emits_action_and_resumes() {
+        use bevy::ecs::message::Messages;
+        use bevy::ecs::system::RunSystemOnce;
+        use crate::practice::actions::PracticeAction;
+        let mut world = dispatch_world(1); // Restart loop row
+        world
+            .run_system_once(pause_menu_input)
+            .expect("pause_menu_input runs");
+        assert!(matches!(
+            world.resource::<NextState<PauseState>>(),
+            NextState::Pending(PauseState::Running)
+        ));
+        let actions: Vec<PracticeAction> = world
+            .resource::<Messages<PracticeAction>>()
+            .iter_current_update_messages()
+            .copied()
+            .collect();
+        assert_eq!(actions, vec![PracticeAction::RestartLoop]);
+    }
+
+    #[test]
+    fn rail_surface_clears_actions_and_does_nothing() {
+        use bevy::ecs::message::Messages;
+        use bevy::ecs::system::RunSystemOnce;
+        let mut world = dispatch_world(0);
+        world.insert_resource(PracticePauseSurface::Rail);
+        world
+            .run_system_once(pause_menu_input)
+            .expect("pause_menu_input runs");
+        assert!(matches!(
+            world.resource::<NextState<PauseState>>(),
+            NextState::Unchanged
+        ));
+        assert_eq!(
+            world
+                .resource::<Messages<TransitionRequest>>()
+                .iter_current_update_messages()
+                .count(),
+            0
+        );
+    }
 
     #[test]
     fn leaving_pause_keeps_wait_halted_audio_paused() {
