@@ -41,12 +41,31 @@ const TOAST_MAX_LINES: usize = 5;
 /// Seconds the toast stays up after the latest outcome.
 const TOAST_SECS: f64 = 5.0;
 
+/// Semantic color of one toast line: success green, duplicate amber,
+/// error red.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ToastTone {
+    Success,
+    Warn,
+    Error,
+}
+
+impl ToastTone {
+    fn color(self, t: &Theme) -> Color {
+        match self {
+            ToastTone::Success => t.clear_green,
+            ToastTone::Warn => t.select_yellow,
+            ToastTone::Error => t.judgment_miss,
+        }
+    }
+}
+
 /// Recent import outcome lines, shown until `expires` (Time::elapsed secs).
 /// Every new outcome appends a line and refreshes the timer, so a batch
 /// of imports reads as one growing list instead of racing single toasts.
 #[derive(Resource, Default)]
 struct ImportToast {
-    lines: Vec<String>,
+    lines: Vec<(String, ToastTone)>,
     expires: f64,
 }
 
@@ -133,36 +152,45 @@ fn poll_imports(
 ) {
     let rx = channel.rx.lock().expect("import channel poisoned");
     while let Ok(result) = rx.try_recv() {
-        let text = match &result {
+        let (text, tone) = match &result {
             Ok(outcome) => {
                 if let Err(e) = db.rescan(&default_song_dir()) {
                     warn!("import: rescan failed: {e}");
                 }
                 jump.name = Some(outcome.dest_name.clone());
                 jump.frames_left = 120;
-                format!(
-                    "imported \"{}\" ({} chart{})",
-                    outcome.dest_name,
-                    outcome.chart_count,
-                    if outcome.chart_count == 1 { "" } else { "s" }
+                (
+                    format!(
+                        "imported \"{}\" ({} chart{})",
+                        outcome.dest_name,
+                        outcome.chart_count,
+                        if outcome.chart_count == 1 { "" } else { "s" }
+                    ),
+                    ToastTone::Success,
                 )
             }
-            Err(ImportError::UnsupportedFormat(f)) => {
-                format!("unsupported: {f} — extract manually")
+            Err(ImportError::UnsupportedFormat(f)) => (
+                format!("unsupported: {f} — extract manually"),
+                ToastTone::Error,
+            ),
+            Err(ImportError::NoCharts) => {
+                ("no charts found in archive".to_owned(), ToastTone::Error)
             }
-            Err(ImportError::NoCharts) => "no charts found in archive".to_owned(),
-            Err(ImportError::UnsafePath) => "archive rejected (unsafe paths)".to_owned(),
+            Err(ImportError::UnsafePath) => (
+                "archive rejected (unsafe paths)".to_owned(),
+                ToastTone::Error,
+            ),
             Err(ImportError::AlreadyImported(name)) => {
                 // Still jump: "where is it?" is the question the user is
                 // actually asking when they re-import a song.
                 jump.name = Some(name.clone());
                 jump.frames_left = 120;
-                format!("already imported: \"{name}\"")
+                (format!("already imported: \"{name}\""), ToastTone::Warn)
             }
-            Err(ImportError::Io(e)) => format!("import failed: {e}"),
+            Err(ImportError::Io(e)) => (format!("import failed: {e}"), ToastTone::Error),
         };
         info!("import: {text}");
-        toast.lines.push(text);
+        toast.lines.push((text, tone));
         if toast.lines.len() > TOAST_MAX_LINES {
             let drop = toast.lines.len() - TOAST_MAX_LINES;
             toast.lines.drain(..drop);
@@ -216,6 +244,8 @@ fn spawn_toast_node(mut commands: Commands, theme: Res<ThemeResource>) {
             right: Val::Px(24.0),
             top: Val::Px(80.0),
             padding: UiRect::all(Val::Px(12.0)),
+            flex_direction: FlexDirection::Column,
+            row_gap: Val::Px(2.0),
             ..default()
         },
         // The song-select stage is a sibling full-screen root spawned in
@@ -223,9 +253,6 @@ fn spawn_toast_node(mut commands: Commands, theme: Res<ThemeResource>) {
         // explicit z the stage can paint over the toast.
         GlobalZIndex(100),
         BackgroundColor(t.stage_panel_bg),
-        Text::new(""),
-        Theme::font(16.0),
-        TextColor(t.text_secondary),
         Visibility::Hidden,
     ));
 }
@@ -237,20 +264,37 @@ fn despawn_toast_node(mut commands: Commands, nodes: Query<Entity, With<ToastNod
 }
 
 fn update_toast(
+    mut commands: Commands,
     mut toast: ResMut<ImportToast>,
+    theme: Res<ThemeResource>,
     time: Res<Time>,
-    mut nodes: Query<(&mut Text, &mut Visibility), With<ToastNode>>,
+    mut nodes: Query<(Entity, &mut Visibility), With<ToastNode>>,
 ) {
     let expired = time.elapsed_secs_f64() > toast.expires;
     if expired && !toast.lines.is_empty() {
         toast.lines.clear();
     }
-    for (mut text, mut visibility) in &mut nodes {
+    // Rebuild children only when the lines changed (append or clear); a
+    // clear above marks the resource changed and falls through to hide.
+    if !toast.is_changed() {
+        return;
+    }
+    let t = theme.0;
+    for (entity, mut visibility) in &mut nodes {
+        commands.entity(entity).despawn_related::<Children>();
         if toast.lines.is_empty() {
             *visibility = Visibility::Hidden;
         } else {
-            text.0 = toast.lines.join("\n");
             *visibility = Visibility::Visible;
+            commands.entity(entity).with_children(|col| {
+                for (line, tone) in &toast.lines {
+                    col.spawn((
+                        Text::new(line.clone()),
+                        Theme::font(16.0),
+                        TextColor(tone.color(&t)),
+                    ));
+                }
+            });
         }
     }
 }
@@ -258,6 +302,14 @@ fn update_toast(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn toast_tone_by_outcome() {
+        let t = dtx_ui::theme::Theme::default();
+        assert_eq!(ToastTone::Success.color(&t), t.clear_green);
+        assert_eq!(ToastTone::Warn.color(&t), t.select_yellow);
+        assert_eq!(ToastTone::Error.color(&t), t.judgment_miss);
+    }
 
     #[test]
     fn folder_match_plain_and_pack() {
