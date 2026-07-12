@@ -28,17 +28,62 @@ enum DialogButton {
     CorruptCancel,
 }
 
+/// Keyboard-focused button index for the current button-row dialog
+/// (ConfirmDelete / Dirty / CorruptReset). The Name dialog keeps its own
+/// text-entry key handling and ignores this.
+#[derive(Resource, Default)]
+pub struct ProfileDialogFocus(pub usize);
+
+#[derive(Component, Clone, Copy)]
+struct DialogBtnIndex(usize);
+
+/// Button row (left→right, matching spawn order) for the current dialog.
+/// Index 0 is ALWAYS the safe dismiss. Empty for Closed/Name.
+fn dialog_buttons(state: &ProfileDialogState) -> Vec<DialogButton> {
+    match state {
+        ProfileDialogState::ConfirmDelete { .. } => {
+            vec![DialogButton::CancelDelete, DialogButton::ConfirmDelete]
+        }
+        ProfileDialogState::Dirty { .. } => vec![
+            DialogButton::Dirty(CloseDecision::Cancel),
+            DialogButton::Dirty(CloseDecision::DiscardAll),
+            DialogButton::Dirty(CloseDecision::SaveAll),
+        ],
+        ProfileDialogState::CorruptReset { .. } => {
+            vec![DialogButton::CorruptCancel, DialogButton::CorruptConfirm]
+        }
+        ProfileDialogState::Closed | ProfileDialogState::Name { .. } => Vec::new(),
+    }
+}
+
+/// Initial keyboard focus per dialog: the dirty guard uses its layout's
+/// default (Save — the layout guarantees it is never the destructive
+/// button); everything else starts on the safe dismiss.
+fn initial_focus(state: &ProfileDialogState) -> usize {
+    match state {
+        ProfileDialogState::Dirty {
+            kind,
+            builtin_selected,
+            ..
+        } => profile_state::dirty_dialog_layout(&[*kind], *builtin_selected).default_focus,
+        _ => 0,
+    }
+}
+
 pub fn plugin(app: &mut App) {
-    app.add_systems(
-        Update,
-        (
-            sync_dialog.run_if(resource_changed::<ProfileDialogState>),
-            handle_name_dialog_input,
-            handle_dialog_buttons,
+    app.init_resource::<ProfileDialogFocus>()
+        .add_systems(
+            Update,
+            (
+                sync_dialog.run_if(resource_changed::<ProfileDialogState>),
+                handle_name_dialog_input,
+                handle_dialog_keys,
+                handle_dialog_buttons,
+                update_profile_dialog_focus_ring,
+            )
+                .run_if(in_state(game_shell::AppState::Performance)),
         )
-            .run_if(in_state(game_shell::AppState::Performance)),
-    )
-    .add_systems(OnExit(game_shell::AppState::Performance), despawn_dialog);
+        .add_systems(OnExit(game_shell::AppState::Performance), despawn_dialog);
 }
 
 fn despawn_dialog(mut commands: Commands, roots: Query<Entity, With<ProfileDialogRoot>>) {
@@ -51,11 +96,13 @@ fn sync_dialog(
     mut commands: Commands,
     dialog: Res<ProfileDialogState>,
     theme: Res<dtx_ui::ThemeResource>,
+    mut focus: ResMut<ProfileDialogFocus>,
     roots: Query<Entity, With<ProfileDialogRoot>>,
 ) {
     for entity in &roots {
         commands.entity(entity).despawn();
     }
+    focus.0 = initial_focus(&dialog);
     let t = theme.0;
     match &*dialog {
         ProfileDialogState::Closed => {}
@@ -123,17 +170,20 @@ fn spawn_dialog_btn(
     p: &mut ChildSpawnerCommands,
     t: &dtx_ui::theme::Theme,
     button: DialogButton,
+    index: usize,
     label: &str,
     color: Color,
 ) {
     p.spawn((
         button,
+        DialogBtnIndex(index),
         Button,
         Node {
             padding: UiRect::axes(Val::Px(14.0), Val::Px(8.0)),
             ..default()
         },
         BackgroundColor(color),
+        Outline::new(Val::Px(0.0), Val::Px(2.0), Color::NONE),
         children![(
             Text::new(label.to_owned()),
             dtx_ui::theme::Theme::font(14.0),
@@ -197,10 +247,11 @@ fn spawn_name_dialog(
                 buttons,
                 &t,
                 DialogButton::NameCancel,
+                0,
                 "Cancel",
                 Color::srgb(0.18, 0.18, 0.22),
             );
-            spawn_dialog_btn(buttons, &t, DialogButton::NameOk, "OK", t.accent);
+            spawn_dialog_btn(buttons, &t, DialogButton::NameOk, 1, "OK", t.accent);
         });
     });
 }
@@ -232,6 +283,7 @@ fn spawn_confirm_delete(commands: &mut Commands, t: &dtx_ui::theme::Theme, name:
                 buttons,
                 &t,
                 DialogButton::CancelDelete,
+                0,
                 "Cancel",
                 Color::srgb(0.18, 0.18, 0.22),
             );
@@ -239,6 +291,7 @@ fn spawn_confirm_delete(commands: &mut Commands, t: &dtx_ui::theme::Theme, name:
                 buttons,
                 &t,
                 DialogButton::ConfirmDelete,
+                1,
                 "Delete",
                 chrome::ERR,
             );
@@ -296,7 +349,14 @@ fn spawn_dirty_dialog(
                 } else {
                     Color::srgb(0.18, 0.18, 0.22)
                 };
-                spawn_dialog_btn(buttons, &t, DialogButton::Dirty(decision), label, color);
+                spawn_dialog_btn(
+                    buttons,
+                    &t,
+                    DialogButton::Dirty(decision),
+                    index,
+                    label,
+                    color,
+                );
             }
         });
     });
@@ -332,6 +392,7 @@ fn spawn_corrupt_dialog(commands: &mut Commands, t: &dtx_ui::theme::Theme, messa
                 buttons,
                 &t,
                 DialogButton::CorruptCancel,
+                0,
                 "Cancel",
                 Color::srgb(0.18, 0.18, 0.22),
             );
@@ -339,6 +400,7 @@ fn spawn_corrupt_dialog(commands: &mut Commands, t: &dtx_ui::theme::Theme, messa
                 buttons,
                 &t,
                 DialogButton::CorruptConfirm,
+                1,
                 "Back up & reset",
                 t.accent,
             );
@@ -467,38 +529,32 @@ fn submit_name_dialog(
     *dialog = ProfileDialogState::Closed;
 }
 
-/// ConfirmDelete / Dirty / CorruptReset button clicks. Snapshots the dialog
+/// Apply one activated dialog button — shared by mouse clicks and the
+/// keyboard's Enter/Esc so both dispatch identically. Snapshots the dialog
 /// state before mutating it so the match doesn't hold a live borrow across
 /// the `*dialog = ...` writes below.
 #[allow(clippy::too_many_arguments)]
-fn handle_dialog_buttons(
-    buttons: Query<(&Interaction, &DialogButton), Changed<Interaction>>,
-    dialog_kind: Res<DialogKind>,
-    mut dialog: ResMut<ProfileDialogState>,
-    mut session: ResMut<CustomizeSession>,
-    mut lane_draft: ResMut<LaneProfileDraft>,
-    mut live: ResMut<LiveBindings>,
-    mut rev: ResMut<super::bindings_panel::BindingsRev>,
-    mut error: ResMut<ProfileUiErrorState>,
+fn dispatch_dialog_button(
+    pressed: DialogButton,
+    dialog_kind: Option<ProfileKind>,
+    dialog: &mut ProfileDialogState,
+    session: &mut CustomizeSession,
+    lane_draft: &mut LaneProfileDraft,
+    live: &mut LiveBindings,
+    rev: &mut super::bindings_panel::BindingsRev,
+    error: &mut ProfileUiErrorState,
 ) {
-    let Some(pressed) = buttons
-        .iter()
-        .find(|(interaction, _)| **interaction == Interaction::Pressed)
-        .map(|(_, button)| *button)
-    else {
-        return;
-    };
     let snapshot = dialog.clone();
     match (&snapshot, pressed) {
         (ProfileDialogState::ConfirmDelete { .. }, DialogButton::ConfirmDelete) => {
-            let Some(kind) = dialog_kind.0 else {
+            let Some(kind) = dialog_kind else {
                 *dialog = ProfileDialogState::Closed;
                 return;
             };
-            match profile_bar_ui::delete_kind(kind, &mut session, &mut lane_draft) {
+            match profile_bar_ui::delete_kind(kind, session, lane_draft) {
                 Ok(()) => {
                     error.0 = None;
-                    profile_bar_ui::refresh_live_bindings(kind, &session, &mut live, &mut rev);
+                    profile_bar_ui::refresh_live_bindings(kind, session, live, rev);
                 }
                 Err(message) => error.0 = Some(profile_bar_ui::ui_error(kind, message)),
             }
@@ -521,13 +577,13 @@ fn handle_dialog_buttons(
                 pending,
                 builtin_selected,
                 decision,
-                &mut session,
-                &mut lane_draft,
+                session,
+                lane_draft,
             ) {
                 Ok(needs_refresh) => {
                     error.0 = None;
                     if needs_refresh {
-                        profile_bar_ui::refresh_live_bindings(kind, &session, &mut live, &mut rev);
+                        profile_bar_ui::refresh_live_bindings(kind, session, live, rev);
                     }
                 }
                 Err(message) => error.0 = Some(profile_bar_ui::ui_error(kind, message)),
@@ -542,6 +598,106 @@ fn handle_dialog_buttons(
             *dialog = ProfileDialogState::Closed;
         }
         _ => {}
+    }
+}
+
+/// ConfirmDelete / Dirty / CorruptReset button clicks.
+#[allow(clippy::too_many_arguments)]
+fn handle_dialog_buttons(
+    buttons: Query<(&Interaction, &DialogButton), Changed<Interaction>>,
+    dialog_kind: Res<DialogKind>,
+    mut dialog: ResMut<ProfileDialogState>,
+    mut session: ResMut<CustomizeSession>,
+    mut lane_draft: ResMut<LaneProfileDraft>,
+    mut live: ResMut<LiveBindings>,
+    mut rev: ResMut<super::bindings_panel::BindingsRev>,
+    mut error: ResMut<ProfileUiErrorState>,
+) {
+    let Some(pressed) = buttons
+        .iter()
+        .find(|(interaction, _)| **interaction == Interaction::Pressed)
+        .map(|(_, button)| *button)
+    else {
+        return;
+    };
+    dispatch_dialog_button(
+        pressed,
+        dialog_kind.0,
+        &mut dialog,
+        &mut session,
+        &mut lane_draft,
+        &mut live,
+        &mut rev,
+        &mut error,
+    );
+}
+
+/// ←/→/Enter/Esc for the button-row dialogs. Esc always activates the safe
+/// dismiss (row index 0); Enter activates the focused button through the
+/// exact same dispatcher as a click. Skips its opening frame (the keypress
+/// that raised the dialog must not immediately act on it) and the Name
+/// dialog (own key handling).
+#[allow(clippy::too_many_arguments)]
+fn handle_dialog_keys(
+    keys: Res<ButtonInput<KeyCode>>,
+    dialog_kind: Res<DialogKind>,
+    mut focus: ResMut<ProfileDialogFocus>,
+    mut dialog: ResMut<ProfileDialogState>,
+    mut session: ResMut<CustomizeSession>,
+    mut lane_draft: ResMut<LaneProfileDraft>,
+    mut live: ResMut<LiveBindings>,
+    mut rev: ResMut<super::bindings_panel::BindingsRev>,
+    mut error: ResMut<ProfileUiErrorState>,
+) {
+    let buttons = dialog_buttons(&dialog);
+    if buttons.is_empty() || dialog.is_changed() {
+        return;
+    }
+    let next = super::close_dialog::step_focus(
+        focus.0,
+        buttons.len(),
+        keys.just_pressed(KeyCode::ArrowLeft),
+        keys.just_pressed(KeyCode::ArrowRight),
+    );
+    if next != focus.0 {
+        focus.0 = next;
+    }
+    let pressed = if keys.just_pressed(KeyCode::Escape) {
+        Some(buttons[0])
+    } else if keys.just_pressed(KeyCode::Enter) {
+        buttons.get(focus.0.min(buttons.len() - 1)).copied()
+    } else {
+        None
+    };
+    if let Some(pressed) = pressed {
+        dispatch_dialog_button(
+            pressed,
+            dialog_kind.0,
+            &mut dialog,
+            &mut session,
+            &mut lane_draft,
+            &mut live,
+            &mut rev,
+            &mut error,
+        );
+    }
+}
+
+/// FOCUS_RING on the focused button; cleared entirely for Name/Closed.
+fn update_profile_dialog_focus_ring(
+    dialog: Res<ProfileDialogState>,
+    focus: Res<ProfileDialogFocus>,
+    mut buttons: Query<(&DialogBtnIndex, &mut Outline)>,
+) {
+    let focusable = !dialog_buttons(&dialog).is_empty();
+    for (index, mut outline) in &mut buttons {
+        if focusable && index.0 == focus.0 {
+            outline.width = Val::Px(2.0);
+            outline.color = super::panel::FOCUS_RING;
+        } else {
+            outline.width = Val::Px(0.0);
+            outline.color = Color::NONE;
+        }
     }
 }
 
@@ -569,5 +725,87 @@ fn backup_and_reset(kind: ProfileKind) -> Result<(), String> {
         )
         .map(|_| ())
         .map_err(|error| error.to_string()),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::editor::profile_state::PendingProfileAction;
+
+    fn dirty_state() -> ProfileDialogState {
+        ProfileDialogState::Dirty {
+            kind: ProfileKind::Keyboard,
+            pending: PendingProfileAction::Select("Desk".to_owned()),
+            builtin_selected: false,
+        }
+    }
+
+    #[test]
+    fn dialog_buttons_put_safe_dismiss_first_and_focus_never_destructive() {
+        // ConfirmDelete: [Cancel, Delete] — initial focus on Cancel.
+        let confirm = ProfileDialogState::ConfirmDelete {
+            name: "Desk".to_owned(),
+        };
+        assert!(matches!(
+            dialog_buttons(&confirm)[0],
+            DialogButton::CancelDelete
+        ));
+        assert_eq!(dialog_buttons(&confirm).len(), 2);
+        assert_eq!(initial_focus(&confirm), 0);
+
+        // Dirty: [Cancel, Discard, Save] — initial focus = layout default
+        // (Save), which is asserted never-destructive by profile_state tests.
+        let dirty = dirty_state();
+        let buttons = dialog_buttons(&dirty);
+        assert_eq!(buttons.len(), 3);
+        assert!(matches!(
+            buttons[0],
+            DialogButton::Dirty(CloseDecision::Cancel)
+        ));
+        let layout = profile_state::dirty_dialog_layout(&[ProfileKind::Keyboard], false);
+        assert_eq!(initial_focus(&dirty), layout.default_focus);
+        assert_ne!(initial_focus(&dirty), layout.destructive);
+
+        // CorruptReset: [Cancel, Back up & reset] — initial focus on Cancel.
+        let corrupt = ProfileDialogState::CorruptReset {
+            kind: ProfileKind::Midi,
+            message: "corrupt".to_owned(),
+        };
+        assert!(matches!(
+            dialog_buttons(&corrupt)[0],
+            DialogButton::CorruptCancel
+        ));
+        assert_eq!(initial_focus(&corrupt), 0);
+
+        // Name / Closed have no traversable row (Name owns its own keys).
+        assert!(dialog_buttons(&ProfileDialogState::Closed).is_empty());
+    }
+
+    #[test]
+    fn escape_dismisses_confirm_delete_without_deleting() {
+        let mut app = App::new();
+        app.init_resource::<ButtonInput<KeyCode>>()
+            .init_resource::<DialogKind>()
+            .init_resource::<ProfileDialogFocus>()
+            .init_resource::<CustomizeSession>()
+            .init_resource::<LaneProfileDraft>()
+            .init_resource::<LiveBindings>()
+            .init_resource::<super::super::bindings_panel::BindingsRev>()
+            .init_resource::<ProfileUiErrorState>()
+            .insert_resource(ProfileDialogState::ConfirmDelete {
+                name: "Desk".to_owned(),
+            })
+            .add_systems(Update, handle_dialog_keys);
+        app.update(); // opening frame: is_changed skip
+        app.world_mut()
+            .resource_mut::<ButtonInput<KeyCode>>()
+            .press(KeyCode::Escape);
+        app.update();
+        assert_eq!(
+            *app.world().resource::<ProfileDialogState>(),
+            ProfileDialogState::Closed,
+            "Esc = safe dismiss (CancelDelete path — no registry write)"
+        );
     }
 }
