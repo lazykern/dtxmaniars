@@ -45,8 +45,21 @@ impl PauseItem {
 #[derive(Resource, Default)]
 pub struct PauseSelection(pub usize);
 
+/// Which surface owns `PauseState::Paused` during practice. Esc opens the
+/// standard pause overlay; Tab opens the full practice rail. Irrelevant
+/// outside practice (the overlay always spawns); reset to `Overlay` on
+/// every return to `Running` for hygiene.
+#[derive(Resource, Default, Clone, Copy, PartialEq, Eq, Debug)]
+pub enum PracticePauseSurface {
+    #[default]
+    Overlay,
+    Rail,
+}
+
 pub(super) fn plugin(app: &mut App) {
     app.init_resource::<PauseSelection>()
+        .init_resource::<PracticePauseSurface>()
+        .add_systems(OnEnter(PauseState::Running), reset_pause_surface)
         // Always start a performance un-paused.
         .add_systems(OnEnter(AppState::Performance), force_running)
         .add_systems(OnExit(AppState::Performance), force_running)
@@ -80,13 +93,21 @@ fn toggle_pause(
     keys: Res<ButtonInput<KeyCode>>,
     state: Res<State<PauseState>>,
     mut next: ResMut<NextState<PauseState>>,
+    mut surface: ResMut<PracticePauseSurface>,
 ) {
     if keys.just_pressed(KeyCode::Escape) {
-        next.set(match state.get() {
-            PauseState::Running => PauseState::Paused,
-            PauseState::Paused => PauseState::Running,
-        });
+        match state.get() {
+            PauseState::Running => {
+                *surface = PracticePauseSurface::Overlay;
+                next.set(PauseState::Paused);
+            }
+            PauseState::Paused => next.set(PauseState::Running),
+        }
     }
+}
+
+fn reset_pause_surface(mut surface: ResMut<PracticePauseSurface>) {
+    *surface = PracticePauseSurface::Overlay;
 }
 
 pub(crate) fn pause_all_chart_audio(
@@ -288,6 +309,66 @@ fn pause_menu_input(
 mod tests {
     use super::*;
     use crate::practice::wait::{WaitPhase, WaitSet, WaitState};
+    use bevy::ecs::system::RunSystemOnce;
+
+    #[test]
+    fn esc_opener_sets_overlay_surface() {
+        let mut world = World::new();
+        let mut keys = ButtonInput::<KeyCode>::default();
+        keys.press(KeyCode::Escape);
+        world.insert_resource(keys);
+        world.insert_resource(State::new(PauseState::Running));
+        world.init_resource::<NextState<PauseState>>();
+        // Stale value from a previous Tab-opened rail must be overwritten.
+        world.insert_resource(PracticePauseSurface::Rail);
+        world
+            .run_system_once(toggle_pause)
+            .expect("toggle_pause runs");
+        assert_eq!(
+            *world.resource::<PracticePauseSurface>(),
+            PracticePauseSurface::Overlay
+        );
+        assert!(matches!(
+            world.resource::<NextState<PauseState>>(),
+            NextState::Pending(PauseState::Paused)
+        ));
+    }
+
+    #[test]
+    fn esc_while_paused_resumes_and_leaves_surface_alone() {
+        let mut world = World::new();
+        let mut keys = ButtonInput::<KeyCode>::default();
+        keys.press(KeyCode::Escape);
+        world.insert_resource(keys);
+        world.insert_resource(State::new(PauseState::Paused));
+        world.init_resource::<NextState<PauseState>>();
+        world.insert_resource(PracticePauseSurface::Rail);
+        world
+            .run_system_once(toggle_pause)
+            .expect("toggle_pause runs");
+        // The OnEnter(Running) reset handles hygiene; the toggle itself only closes.
+        assert_eq!(
+            *world.resource::<PracticePauseSurface>(),
+            PracticePauseSurface::Rail
+        );
+        assert!(matches!(
+            world.resource::<NextState<PauseState>>(),
+            NextState::Pending(PauseState::Running)
+        ));
+    }
+
+    #[test]
+    fn surface_resets_to_overlay_on_running() {
+        let mut world = World::new();
+        world.insert_resource(PracticePauseSurface::Rail);
+        world
+            .run_system_once(reset_pause_surface)
+            .expect("reset runs");
+        assert_eq!(
+            *world.resource::<PracticePauseSurface>(),
+            PracticePauseSurface::Overlay
+        );
+    }
 
     #[test]
     fn leaving_pause_keeps_wait_halted_audio_paused() {
