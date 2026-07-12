@@ -37,6 +37,7 @@ impl Plugin for GameResultsPlugin {
 
 pub fn plugin(app: &mut App) {
     app.init_resource::<SaveStatus>()
+        .init_resource::<input::ResultVerb>()
         .add_systems(
             OnEnter(AppState::Result),
             (save_result, ui::spawn_result).chain(),
@@ -44,7 +45,12 @@ pub fn plugin(app: &mut App) {
         .add_systems(OnExit(AppState::Result), ui::despawn_result)
         .add_systems(
             Update,
-            (input::result_input, ui::animate_staggered_reveal)
+            (
+                input::result_nav,
+                ui::sync_verb_row,
+                ui::animate_staggered_reveal,
+            )
+                .chain()
                 .run_if(in_state(AppState::Result)),
         );
 }

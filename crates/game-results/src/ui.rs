@@ -82,7 +82,7 @@ pub(crate) const LAST_SLOT: f32 = SLOT_LEGEND;
 
 /// Marks one verb-row label; `sync_verb_row` renders the cursor onto it.
 #[derive(Component)]
-pub(crate) struct VerbLabel(#[allow(dead_code)] pub ResultVerb); // read by sync_verb_row in Task 7
+pub(crate) struct VerbLabel(pub ResultVerb);
 
 /// Verb label text with a width-stable selection prefix.
 pub(crate) fn verb_text(verb: ResultVerb, selected: bool) -> String {
@@ -469,7 +469,12 @@ fn value_row(
                 ..default()
             })
             .with_children(|cell| {
-                cell.spawn(reveal_text(label, Theme::font(14.0), t.text_secondary, slot));
+                cell.spawn(reveal_text(
+                    label,
+                    Theme::font(14.0),
+                    t.text_secondary,
+                    slot,
+                ));
             });
             row.spawn(reveal_text(value, value_font, t.text_primary, slot));
         });
@@ -484,12 +489,21 @@ fn spawn_verb_row(card: &mut ChildSpawnerCommands, t: &Theme) {
         ..default()
     })
     .with_children(|row| {
-        for verb in [ResultVerb::Continue, ResultVerb::Retry, ResultVerb::Practice] {
+        for verb in [
+            ResultVerb::Continue,
+            ResultVerb::Retry,
+            ResultVerb::Practice,
+        ] {
             let selected = verb == ResultVerb::default();
             let color = if selected { t.accent } else { t.text_secondary };
             row.spawn((
                 VerbLabel(verb),
-                reveal_text(verb_text(verb, selected), Theme::font(20.0), color, SLOT_VERBS),
+                reveal_text(
+                    verb_text(verb, selected),
+                    Theme::font(20.0),
+                    color,
+                    SLOT_VERBS,
+                ),
             ));
         }
     });
@@ -529,10 +543,39 @@ fn spawn_legends(card: &mut ChildSpawnerCommands, t: &Theme, midi_connected: boo
     });
 }
 
+/// Renders the verb cursor: selected = accent + `▸ ` prefix, others =
+/// secondary + two-space prefix (row width stays stable). While the reveal
+/// runs, the fade's current alpha is preserved.
+pub(crate) fn sync_verb_row(
+    theme: Res<ThemeResource>,
+    cursor: Res<ResultVerb>,
+    reveal: Res<RevealState>,
+    mut q: Query<(&VerbLabel, &mut Text, &mut TextColor)>,
+) {
+    let t = theme.0;
+    for (label, mut text, mut color) in &mut q {
+        let selected = label.0 == *cursor;
+        let next = verb_text(label.0, selected);
+        if text.0 != next {
+            text.0 = next;
+        }
+        let target = if selected { t.accent } else { t.text_secondary };
+        color.0 = if reveal.done {
+            target
+        } else {
+            target.with_alpha(color.0.alpha())
+        };
+    }
+}
+
 pub(crate) fn animate_staggered_reveal(
     time: Res<Time>,
     mut reveal: ResMut<RevealState>,
-    mut q: Query<(&StatRow, Option<&mut TextColor>, Option<&mut BackgroundColor>)>,
+    mut q: Query<(
+        &StatRow,
+        Option<&mut TextColor>,
+        Option<&mut BackgroundColor>,
+    )>,
 ) {
     if reveal.done {
         return;
@@ -715,6 +758,42 @@ mod tests {
         let s = RevealState::new(13.0);
         assert_eq!(s.total_ms, 13.0 * STAGGER_MS + FADE_DURATION_MS);
         assert!(!s.done);
+    }
+
+    #[test]
+    fn sync_verb_row_renders_cursor() {
+        use bevy::ecs::system::RunSystemOnce;
+        let mut world = World::new();
+        world.insert_resource(ThemeResource::default());
+        world.insert_resource(ResultVerb::Retry);
+        world.insert_resource(RevealState {
+            elapsed_ms: 2_000.0,
+            total_ms: 1_130.0,
+            done: true,
+        });
+        let t = Theme::default();
+        let retry = world
+            .spawn((
+                VerbLabel(ResultVerb::Retry),
+                Text::new(verb_text(ResultVerb::Retry, false)),
+                TextColor(t.text_secondary),
+            ))
+            .id();
+        let cont = world
+            .spawn((
+                VerbLabel(ResultVerb::Continue),
+                Text::new(verb_text(ResultVerb::Continue, true)),
+                TextColor(t.accent),
+            ))
+            .id();
+        world.run_system_once(sync_verb_row).expect("sync runs");
+        assert_eq!(world.get::<Text>(retry).expect("text").0, "▸ Retry");
+        assert_eq!(world.get::<TextColor>(retry).expect("color").0, t.accent);
+        assert_eq!(world.get::<Text>(cont).expect("text").0, "  Continue");
+        assert_eq!(
+            world.get::<TextColor>(cont).expect("color").0,
+            t.text_secondary
+        );
     }
 
     #[test]
