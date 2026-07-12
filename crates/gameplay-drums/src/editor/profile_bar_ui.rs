@@ -72,6 +72,9 @@ pub struct ProfileSelectorOverflowBtn;
 #[derive(Component, Clone)]
 pub struct ProfileBarBtn(pub ProfileBarAction);
 
+#[derive(SystemSet, Debug, Clone, PartialEq, Eq, Hash)]
+pub struct ProfileBarInteractionSet;
+
 pub fn plugin(app: &mut App) {
     app.init_resource::<ProfileBarPopup>()
         .init_resource::<ProfileUiErrorState>()
@@ -84,6 +87,7 @@ pub fn plugin(app: &mut App) {
                 handle_selector_item_click,
                 handle_bar_action_buttons,
             )
+                .in_set(ProfileBarInteractionSet)
                 .run_if(in_state(game_shell::AppState::Performance))
                 .run_if(super::editor_open),
         );
@@ -1046,6 +1050,13 @@ mod tests {
     use crate::editor::profile_state::ProfileKind;
     use game_shell::CustomizeTab;
 
+    #[derive(Resource, Default)]
+    struct SeenPopup(ProfileBarPopup);
+
+    fn observe_popup(popup: Res<ProfileBarPopup>, mut seen: ResMut<SeenPopup>) {
+        seen.0 = *popup;
+    }
+
     #[test]
     fn bar_kind_follows_tab_and_segment() {
         assert_eq!(
@@ -1063,6 +1074,27 @@ mod tests {
         assert_eq!(
             bar_kind(CustomizeTab::Widgets, ControlsSegment::Keyboard),
             None
+        );
+    }
+
+    #[test]
+    fn popup_toggle_is_observed_before_panel_rebuild() {
+        let mut app = App::new();
+        app.init_resource::<ProfileBarPopup>()
+            .init_resource::<SeenPopup>()
+            .add_systems(
+                Update,
+                handle_selector_toggle.in_set(ProfileBarInteractionSet),
+            )
+            .add_systems(Update, observe_popup.after(ProfileBarInteractionSet));
+        app.world_mut()
+            .spawn((ProfileSelectorBtn, Interaction::Pressed));
+
+        app.update();
+
+        assert_eq!(
+            app.world().resource::<SeenPopup>().0,
+            ProfileBarPopup::Selector
         );
     }
 }

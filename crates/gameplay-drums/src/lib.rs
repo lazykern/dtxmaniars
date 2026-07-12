@@ -143,6 +143,7 @@ pub fn plugin(app: &mut App) {
             .run_if(in_state(game_shell::AppState::Performance)),
     )
     .add_message::<events::LaneHit>()
+    .add_message::<events::InputHit>()
     .add_message::<events::JudgmentEvent>()
     .add_message::<events::NoteMissed>()
     .add_message::<events::EmptyHit>()
@@ -412,7 +413,7 @@ mod midi_consumer {
     use bevy::time::common_conditions::on_real_timer;
     use dtx_input::midi::{MidiSource, VirtualSource};
 
-    use super::events::LaneHit;
+    use super::events::InputHit;
     use crate::resources::GameplayClock;
 
     /// Last MIDI NoteOn observed by `poll_midi`, written before the threshold
@@ -535,7 +536,7 @@ mod midi_consumer {
         resolver: Res<crate::bindings::BindResolver>,
         chart: Res<crate::resources::ActiveChart>,
         clock: Res<GameplayClock>,
-        mut hits: MessageWriter<LaneHit>,
+        mut hits: MessageWriter<InputHit>,
         mut nav_hits: MessageWriter<PadNavHit>,
         mut last: ResMut<LastMidiHit>,
     ) {
@@ -556,7 +557,7 @@ mod midi_consumer {
     }
 
     struct ConsumedMidi {
-        hits: Vec<LaneHit>,
+        hits: Vec<InputHit>,
         /// Lanes for `PadNavHit`; emitted even when gameplay is not ready so
         /// pads can steer menus outside a run.
         nav_lanes: Vec<u8>,
@@ -589,11 +590,12 @@ mod midi_consumer {
             if velocity == 0 || velocity <= resolver.velocity_threshold {
                 continue;
             }
-            for lane in resolver.lanes_for_note(note) {
+            let lanes: Vec<_> = resolver.lanes_for_note(note).collect();
+            if let Some(&lane) = lanes.first() {
                 nav_lanes.push(lane);
                 if gameplay_ready {
-                    hits.push(LaneHit {
-                        lane,
+                    hits.push(InputHit {
+                        lanes,
                         audio_ms: stamp_audio_ms(Some(clock_ms), audio_ms),
                     });
                 }
@@ -630,7 +632,7 @@ mod midi_consumer {
         }
 
         #[test]
-        fn shared_note_emits_one_hit_per_owning_lane() {
+        fn shared_note_emits_one_atomic_hit() {
             use dtx_input::{BindSource, InputBindings};
             let mut b = InputBindings::default();
             b.bind_shared(dtx_core::EChannel::LeftBassDrum, BindSource::Midi { note: 36 });
@@ -647,8 +649,9 @@ mod midi_consumer {
                 0,
                 &mut last,
             );
-            assert_eq!(out.hits.len(), 2, "BD and LBD both hit");
-            assert_eq!(out.nav_lanes.len(), 2);
+            assert_eq!(out.hits.len(), 1, "one physical MIDI note is atomic");
+            assert_eq!(out.hits[0].lanes, vec![2, 11]);
+            assert_eq!(out.nav_lanes, vec![2]);
         }
 
         #[test]

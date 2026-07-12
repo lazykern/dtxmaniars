@@ -116,6 +116,7 @@ mod tests {
             .init_resource::<AutoplayEnabled>()
             .init_resource::<crate::editor::EditorOpen>()
             .add_message::<LaneHit>()
+            .add_message::<crate::events::InputHit>()
             .add_systems(Update, autoplay_system.run_if(autoplay_active));
         app
     }
@@ -141,6 +142,7 @@ mod tests {
             .init_resource::<crate::resources::InputOffsetMs>()
             .init_resource::<crate::components::LastJudgment>()
             .add_message::<LaneHit>()
+            .add_message::<crate::events::InputHit>()
             .add_message::<crate::events::JudgmentEvent>()
             .add_message::<crate::events::EmptyHit>()
             .add_systems(

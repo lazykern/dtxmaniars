@@ -4,8 +4,8 @@ use std::collections::HashSet;
 
 use bevy::prelude::*;
 
-use crate::drum_groups::{resolve_judgments, DrumPad};
-use crate::events::{EmptyHit, JudgmentEvent, LaneHit};
+use crate::drum_groups::{resolve_explicit_lanes, resolve_judgments, DrumPad};
+use crate::events::{EmptyHit, InputHit, JudgmentEvent, LaneHit};
 use crate::resources::{ActiveChart, DrumGameplaySettings, GameplayClock};
 use dtx_scoring::classify;
 use dtx_timing::math::{
@@ -81,6 +81,7 @@ pub(super) fn plugin(app: &mut App) {
 
 pub(crate) fn judge_lane_hit_system(
     mut lane_hits: MessageReader<LaneHit>,
+    mut input_hits: MessageReader<InputHit>,
     clock: Res<GameplayClock>,
     chart: Res<ActiveChart>,
     bpm_changes: Res<BpmChangeList>,
@@ -148,6 +149,34 @@ pub(crate) fn judge_lane_hit_system(
                 chip_idx: idx,
             });
         }
+    }
+
+    for hit in input_hits.read() {
+        let Some(&primary_lane) = hit.lanes.first() else { continue };
+        let adjusted_hit_ms = hit.audio_ms - input_offset.0 as i64;
+        let result = resolve_explicit_lanes(
+            &hit.lanes,
+            adjusted_hit_ms,
+            &chart.chart,
+            &judged.0,
+            base_bpm,
+            timing,
+            halted_chips,
+        );
+        let Some((idx, delta)) = result else {
+            empty_hits.write(EmptyHit { lane: primary_lane, audio_ms: hit.audio_ms });
+            continue;
+        };
+        if let Some(chord_hits) = chord_hits.as_deref_mut() {
+            record_chord_hit_times(chord_hits, &[(idx, delta)], halted_chips, adjusted_hit_ms);
+        }
+        judged.0.insert(idx);
+        events.write(JudgmentEvent {
+            lane: crate::lane_map::lane_of(chart.chart.chips[idx].channel).unwrap_or(primary_lane),
+            kind: classify(delta as i32),
+            delta_ms: delta,
+            chip_idx: idx,
+        });
     }
 }
 
@@ -420,5 +449,15 @@ mod tests {
         let mut chord_hits2 = ChordHitTimes::default();
         record_chord_hit_times(&mut chord_hits2, &[(2, 0_i64)], None, 12_345);
         assert!(chord_hits2.0.is_empty());
+    }
+
+    #[test]
+    fn records_explicit_lane_hit_time_while_halted() {
+        use crate::practice::wait::ChordHitTimes;
+
+        let mut chord_hits = ChordHitTimes::default();
+        record_chord_hit_times(&mut chord_hits, &[(3, 0_i64)], Some(&[2, 3]), 12_345);
+
+        assert_eq!(chord_hits.0.get(&3), Some(&12_345));
     }
 }

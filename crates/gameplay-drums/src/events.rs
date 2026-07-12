@@ -14,6 +14,16 @@ pub struct LaneHit {
     pub audio_ms: i64,
 }
 
+/// One physical input with its primary lane followed by accepted alternates.
+///
+/// Multi-target bindings are resolved as one atomic action by the judge; they
+/// never fan out into several independently judged lane hits.
+#[derive(Message, Debug, Clone, PartialEq, Eq)]
+pub struct InputHit {
+    pub lanes: Vec<LaneId>,
+    pub audio_ms: i64,
+}
+
 /// Judge result, dispatched by the judge system, consumed by score system + HUD.
 #[derive(Message, Debug, Clone, Copy)]
 pub struct JudgmentEvent {

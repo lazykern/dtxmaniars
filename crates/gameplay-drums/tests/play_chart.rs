@@ -12,6 +12,7 @@ use dtx_scoring::JudgmentKind;
 use dtx_timing::math::{chip_time_ms_with_bpm_changes, BpmChange};
 use gameplay_drums::autoplay::{autoplay_system, AutoplayEnabled};
 use gameplay_drums::events::LaneHit;
+use gameplay_drums::events::InputHit;
 use gameplay_drums::judge::{BarLengthChangeList, BpmChangeList};
 use gameplay_drums::resources::ActiveChart;
 use std::fs;
@@ -33,6 +34,7 @@ fn build_app() -> App {
         .init_resource::<AutoplayEnabled>()
         .init_resource::<gameplay_drums::editor::EditorOpen>()
         .add_message::<LaneHit>()
+        .add_message::<InputHit>()
         .add_message::<gameplay_drums::events::JudgmentEvent>()
         .add_systems(Update, autoplay_system);
     app

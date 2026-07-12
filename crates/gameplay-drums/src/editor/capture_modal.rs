@@ -331,7 +331,7 @@ fn sync_capture_modal(
                             ..default()
                         })
                         .with_children(|row| {
-                            spawn_choice_btn(row, &t, ArrivedChoice::Shared, "Add shared", current);
+                            spawn_choice_btn(row, &t, ArrivedChoice::Shared, "Also accept here", current);
                             spawn_choice_btn(row, &t, ArrivedChoice::Move, "Move here", current);
                         });
                         card.spawn((

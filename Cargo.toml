@@ -39,7 +39,7 @@ dev-tools = { path = "crates/dev-tools" }
 bevy = { version = "0.19", default-features = false }
 
 # Third-party (added per-crate as needed)
-bevy_kira_audio = { version = "0.26", default-features = false, features = ["ogg"] }
+bevy_kira_audio = { version = "0.26", default-features = false, features = ["ogg", "wav"] }
 thiserror = "1"
 atomicwrites = "0.4.4"
 # Chart movie decoding via system FFmpeg (LGPL). ndarray feature exposes frame
