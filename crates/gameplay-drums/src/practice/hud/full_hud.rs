@@ -83,6 +83,236 @@ impl RailItem {
 #[derive(Resource, Default)]
 pub struct RailSelection(pub usize);
 
+/// How a rail row reacts to input.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum RowKind {
+    /// ◂ value ▸: Left/Right (or the glyph buttons) adjust; row click selects only.
+    Value,
+    /// Row click / Enter runs the action.
+    Action,
+    /// Row click / Enter flips the switch.
+    Toggle,
+}
+
+pub fn rail_row_kind(item: RailItem) -> RowKind {
+    use RailItem::*;
+    match item {
+        Scrub | Rate | Snap | Preroll | RampStart | RampTarget | RampStep | RampThreshold
+        | RampStreak => RowKind::Value,
+        Resume | RestartSection | SetA | SetB | ClearLoop | RampArm => RowKind::Action,
+        Metronome | WaitMode => RowKind::Toggle,
+    }
+}
+
+/// Static left-column label for a rail row.
+pub fn rail_row_label(item: RailItem) -> &'static str {
+    match item {
+        RailItem::Resume => "Resume",
+        RailItem::Scrub => "Scrub",
+        RailItem::RestartSection => "Restart section",
+        RailItem::SetA => "Set A here",
+        RailItem::SetB => "Set B here",
+        RailItem::ClearLoop => "Clear loop",
+        RailItem::Rate => "Tempo",
+        RailItem::Snap => "Snap",
+        RailItem::Preroll => "Pre-roll",
+        RailItem::Metronome => "Count-in",
+        RailItem::RampArm => "Ramp",
+        RailItem::RampStart => "Ramp start",
+        RailItem::RampTarget => "Ramp target",
+        RailItem::RampStep => "Ramp step",
+        RailItem::RampThreshold => "Ramp pass",
+        RailItem::RampStreak => "Ramp streak",
+        RailItem::WaitMode => "Wait",
+    }
+}
+
+/// Right-column value text for a rail row; empty for pure action rows.
+pub fn rail_row_value(item: RailItem, session: &PracticeSession) -> String {
+    match item {
+        RailItem::Resume
+        | RailItem::RestartSection
+        | RailItem::SetA
+        | RailItem::SetB
+        | RailItem::ClearLoop => String::new(),
+        RailItem::Scrub => match session.transport.scrub_cursor_ms {
+            Some(ms) => format_chart_time(ms),
+            None => "—".into(),
+        },
+        RailItem::Rate => {
+            if session.trainer.ramp.armed {
+                format!(
+                    "x{:.2} (ramp x{:.2})",
+                    session.transport.user_tempo, session.trainer.ramp.step_tempo
+                )
+            } else {
+                format!("x{:.2}", session.transport.user_tempo)
+            }
+        }
+        RailItem::Snap => session.transport.snap.label().into(),
+        RailItem::Preroll => session.transport.preroll.label(),
+        RailItem::Metronome => if session.transport.metronome {
+            "on"
+        } else {
+            "off"
+        }
+        .into(),
+        RailItem::RampArm => {
+            if session.trainer.ramp.armed {
+                let (cur, total) = crate::practice::ramp::ramp_step_index(
+                    &session.trainer.ramp_config,
+                    session.transport.user_tempo,
+                );
+                format!("ON {cur}/{total}")
+            } else {
+                "off".into()
+            }
+        }
+        RailItem::RampStart => format!("x{:.2}", session.trainer.ramp_config.start_tempo),
+        RailItem::RampTarget => format!("x{:.2}", session.trainer.ramp_config.target_tempo),
+        RailItem::RampStep => format!("+{:.2}", session.trainer.ramp_config.step),
+        RailItem::RampThreshold => {
+            format!("≥{:.0}%", session.trainer.ramp_config.threshold_pct)
+        }
+        RailItem::RampStreak => format!("×{}", session.trainer.ramp_config.required_successes),
+        RailItem::WaitMode => if session.trainer.wait_enabled {
+            "ON"
+        } else {
+            "off"
+        }
+        .into(),
+    }
+}
+
+/// Left/Right adjustment for `item` (`dir` = ±1). Shared by keyboard
+/// arrows and the ◂/▸ mouse buttons — one code path for both.
+pub fn adjust_rail_item(
+    item: RailItem,
+    dir: i8,
+    session: &mut PracticeSession,
+    timeline: &ChipTimeline,
+    current_ms: i64,
+) {
+    match item {
+        RailItem::Scrub => {
+            let cur = session.transport.scrub_cursor_ms.unwrap_or(current_ms);
+            session.transport.scrub_cursor_ms =
+                Some(timeline.snap_neighbor(cur, session.transport.snap, dir));
+        }
+        RailItem::Rate => session.step_user_tempo(dir),
+        RailItem::Snap => session.transport.snap = session.transport.snap.next(),
+        RailItem::Preroll => session.transport.preroll = session.transport.preroll.next(),
+        RailItem::RampStart => {
+            let c = &mut session.trainer.ramp_config;
+            c.start_tempo = (c.start_tempo + dir as f32 * 0.05).clamp(0.5, c.target_tempo - 0.05);
+            let cfg = session.trainer.ramp_config;
+            crate::practice::ramp::clamp_to_config(&cfg, &mut session.trainer.ramp);
+        }
+        RailItem::RampTarget => {
+            let c = &mut session.trainer.ramp_config;
+            c.target_tempo = (c.target_tempo + dir as f32 * 0.05).clamp(c.start_tempo + 0.05, 1.5);
+            let cfg = session.trainer.ramp_config;
+            crate::practice::ramp::clamp_to_config(&cfg, &mut session.trainer.ramp);
+        }
+        RailItem::RampStep => {
+            let c = &mut session.trainer.ramp_config;
+            c.step = (c.step + dir as f32 * 0.05).clamp(0.05, 0.25);
+        }
+        RailItem::RampThreshold => {
+            let c = &mut session.trainer.ramp_config;
+            c.threshold_pct = (c.threshold_pct + dir as f32 * 5.0).clamp(50.0, 100.0);
+        }
+        RailItem::RampStreak => {
+            let c = &mut session.trainer.ramp_config;
+            c.required_successes = (c.required_successes as i8 + dir).clamp(1, 3) as u8;
+        }
+        _ => {}
+    }
+}
+
+/// Enter/Space (or row-click) activation for `item`. Shared by keyboard
+/// and mouse. Row semantics are unchanged from the v1 rail.
+#[allow(clippy::too_many_arguments)]
+pub fn activate_rail_item(
+    item: RailItem,
+    session: &mut PracticeSession,
+    timeline: &ChipTimeline,
+    current_ms: i64,
+    wait_state: Option<&mut crate::practice::wait::WaitState>,
+    chord_hits: Option<&mut crate::practice::wait::ChordHitTimes>,
+    next_pause: &mut NextState<PauseState>,
+    seeks: &mut MessageWriter<SeekToChartTime>,
+    practice_actions: &mut MessageWriter<crate::practice::actions::PracticeAction>,
+) {
+    match item {
+        RailItem::Resume => next_pause.set(PauseState::Running),
+        RailItem::Scrub => {
+            let intent = session.transport.scrub_cursor_ms.unwrap_or(current_ms);
+            seeks.write(SeekToChartTime {
+                target_ms: preroll_target(timeline, session.transport.preroll, intent),
+                snap: None,
+                attempt_start_ms: Some(intent),
+            });
+            next_pause.set(PauseState::Running);
+        }
+        RailItem::RestartSection => {
+            let intent = session
+                .transport
+                .loop_region
+                .map(|r| r.start_ms)
+                .unwrap_or(session.current_attempt.start_ms);
+            seeks.write(SeekToChartTime {
+                target_ms: preroll_target(timeline, session.transport.preroll, intent),
+                snap: None,
+                attempt_start_ms: Some(intent),
+            });
+            next_pause.set(PauseState::Running);
+        }
+        RailItem::SetA => {
+            let ms =
+                timeline.bar_start_before(session.transport.scrub_cursor_ms.unwrap_or(current_ms));
+            session.set_loop_start(ms);
+        }
+        RailItem::SetB => {
+            let cursor = session.transport.scrub_cursor_ms.unwrap_or(current_ms);
+            let mut ms = timeline.bar_start_before(cursor);
+            if let Some(r) = session.transport.loop_region {
+                if ms <= r.start_ms {
+                    ms = timeline.snap_neighbor(r.start_ms, crate::timeline::SnapDivisor::Bar, 1);
+                }
+            }
+            session.set_loop_end(ms);
+        }
+        RailItem::ClearLoop => session.clear_loop(),
+        RailItem::Metronome => {
+            session.transport.metronome = !session.transport.metronome;
+        }
+        RailItem::RampArm => {
+            practice_actions.write(crate::practice::actions::PracticeAction::ToggleRamp);
+        }
+        RailItem::WaitMode => {
+            session.trainer.wait_enabled = !session.trainer.wait_enabled;
+            if session.trainer.wait_enabled && session.trainer.ramp.armed {
+                session.trainer.ramp.armed = false;
+            }
+            if session.trainer.wait_enabled {
+                if let (Some(wait_state), Some(chord_hits)) = (wait_state, chord_hits) {
+                    wait_state.begin(current_ms);
+                    chord_hits.0.clear();
+                }
+            }
+        }
+        RailItem::Rate
+        | RailItem::Snap
+        | RailItem::Preroll
+        | RailItem::RampStart
+        | RailItem::RampTarget
+        | RailItem::RampStep
+        | RailItem::RampThreshold
+        | RailItem::RampStreak => {}
+    }
+}
+
 pub fn rail_label(item: RailItem, session: &PracticeSession) -> String {
     match item {
         RailItem::Resume => "Resume".into(),
@@ -447,8 +677,8 @@ pub fn despawn_full_hud(
     }
 }
 
-/// Keyboard nav for the rail (port of the v1 pause-panel input; the
-/// v1 semantics for each row are unchanged).
+/// Keyboard nav for the rail: Up/Down select, Left/Right adjust,
+/// Enter/Space activate. Mouse shares the same helpers (Task 6).
 #[allow(clippy::too_many_arguments)]
 pub fn full_hud_input(
     keys: Res<ButtonInput<KeyCode>>,
@@ -485,132 +715,24 @@ pub fn full_hud_input(
     let right = keys.just_pressed(KeyCode::ArrowRight);
     if left || right {
         let dir: i8 = if right { 1 } else { -1 };
-        match selected {
-            RailItem::Scrub => {
-                let cur = session
-                    .transport
-                    .scrub_cursor_ms
-                    .unwrap_or(clock.current_ms);
-                session.transport.scrub_cursor_ms =
-                    Some(timeline.snap_neighbor(cur, session.transport.snap, dir));
-            }
-            RailItem::Rate => session.step_user_tempo(dir),
-            RailItem::Snap => session.transport.snap = session.transport.snap.next(),
-            RailItem::Preroll => session.transport.preroll = session.transport.preroll.next(),
-            RailItem::RampStart => {
-                let c = &mut session.trainer.ramp_config;
-                c.start_tempo =
-                    (c.start_tempo + dir as f32 * 0.05).clamp(0.5, c.target_tempo - 0.05);
-                let cfg = session.trainer.ramp_config;
-                crate::practice::ramp::clamp_to_config(&cfg, &mut session.trainer.ramp);
-            }
-            RailItem::RampTarget => {
-                let c = &mut session.trainer.ramp_config;
-                c.target_tempo =
-                    (c.target_tempo + dir as f32 * 0.05).clamp(c.start_tempo + 0.05, 1.5);
-                let cfg = session.trainer.ramp_config;
-                crate::practice::ramp::clamp_to_config(&cfg, &mut session.trainer.ramp);
-            }
-            RailItem::RampStep => {
-                let c = &mut session.trainer.ramp_config;
-                c.step = (c.step + dir as f32 * 0.05).clamp(0.05, 0.25);
-            }
-            RailItem::RampThreshold => {
-                let c = &mut session.trainer.ramp_config;
-                c.threshold_pct = (c.threshold_pct + dir as f32 * 5.0).clamp(50.0, 100.0);
-            }
-            RailItem::RampStreak => {
-                let c = &mut session.trainer.ramp_config;
-                c.required_successes = (c.required_successes as i8 + dir).clamp(1, 3) as u8;
-            }
-            _ => {}
-        }
+        adjust_rail_item(selected, dir, &mut session, &timeline, clock.current_ms);
     }
 
     if keys.just_pressed(KeyCode::Enter) || keys.just_pressed(KeyCode::Space) {
-        match selected {
-            RailItem::Resume => next_pause.set(PauseState::Running),
-            RailItem::Scrub => {
-                let intent = session
-                    .transport
-                    .scrub_cursor_ms
-                    .unwrap_or(clock.current_ms);
-                seeks.write(SeekToChartTime {
-                    target_ms: preroll_target(&timeline, session.transport.preroll, intent),
-                    snap: None,
-                    attempt_start_ms: Some(intent),
-                });
-                next_pause.set(PauseState::Running);
-            }
-            RailItem::RestartSection => {
-                let intent = session
-                    .transport
-                    .loop_region
-                    .map(|r| r.start_ms)
-                    .unwrap_or(session.current_attempt.start_ms);
-                seeks.write(SeekToChartTime {
-                    target_ms: preroll_target(&timeline, session.transport.preroll, intent),
-                    snap: None,
-                    attempt_start_ms: Some(intent),
-                });
-                next_pause.set(PauseState::Running);
-            }
-            RailItem::SetA => {
-                let ms = timeline.bar_start_before(
-                    session
-                        .transport
-                        .scrub_cursor_ms
-                        .unwrap_or(clock.current_ms),
-                );
-                session.set_loop_start(ms);
-            }
-            RailItem::SetB => {
-                let cursor = session
-                    .transport
-                    .scrub_cursor_ms
-                    .unwrap_or(clock.current_ms);
-                let mut ms = timeline.bar_start_before(cursor);
-                if let Some(r) = session.transport.loop_region {
-                    if ms <= r.start_ms {
-                        ms = timeline.snap_neighbor(
-                            r.start_ms,
-                            crate::timeline::SnapDivisor::Bar,
-                            1,
-                        );
-                    }
-                }
-                session.set_loop_end(ms);
-            }
-            RailItem::ClearLoop => session.clear_loop(),
-            RailItem::Metronome => {
-                session.transport.metronome = !session.transport.metronome;
-            }
-            RailItem::Rate | RailItem::Snap | RailItem::Preroll => {}
-            RailItem::RampArm => {
-                practice_actions.write(crate::practice::actions::PracticeAction::ToggleRamp);
-            }
-            RailItem::WaitMode => {
-                session.trainer.wait_enabled = !session.trainer.wait_enabled;
-                if session.trainer.wait_enabled && session.trainer.ramp.armed {
-                    session.trainer.ramp.armed = false;
-                }
-                if session.trainer.wait_enabled {
-                    if let (Some(wait_state), Some(chord_hits)) =
-                        (wait_state.as_deref_mut(), chord_hits.as_deref_mut())
-                    {
-                        wait_state.begin(clock.current_ms);
-                        chord_hits.0.clear();
-                    }
-                }
-            }
-            RailItem::RampStart
-            | RailItem::RampTarget
-            | RailItem::RampStep
-            | RailItem::RampThreshold
-            | RailItem::RampStreak => {}
-        }
+        activate_rail_item(
+            selected,
+            &mut session,
+            &timeline,
+            clock.current_ms,
+            wait_state.as_deref_mut(),
+            chord_hits.as_deref_mut(),
+            &mut next_pause,
+            &mut seeks,
+            &mut practice_actions,
+        );
     }
 
+    // Render tail (replaced by refresh_rail in the ref-px rebuild task).
     let theme = Theme::default();
     for (item, mut text, mut color) in &mut rows {
         text.0 = rail_label(*item, &session);
@@ -701,19 +823,122 @@ mod tests {
     }
 
     #[test]
-    fn wait_rail_label_reflects_toggle() {
+    fn rail_row_value_reflects_toggles() {
         let mut s = PracticeSession::default();
-        assert_eq!(rail_label(RailItem::WaitMode, &s), "Wait  off  (Enter: on)");
+        assert_eq!(rail_row_value(RailItem::WaitMode, &s), "off");
         s.trainer.wait_enabled = true;
-        assert_eq!(rail_label(RailItem::WaitMode, &s), "Wait  ON");
+        assert_eq!(rail_row_value(RailItem::WaitMode, &s), "ON");
+        assert_eq!(rail_row_value(RailItem::Metronome, &s), "on");
+        s.transport.metronome = false;
+        assert_eq!(rail_row_value(RailItem::Metronome, &s), "off");
     }
 
     #[test]
-    fn metronome_rail_label_reflects_toggle() {
+    fn rail_row_kind_classifies_every_row() {
+        use RailItem::*;
+        for item in RailItem::ORDER {
+            let kind = rail_row_kind(item);
+            match item {
+                Scrub | Rate | Snap | Preroll | RampStart | RampTarget | RampStep
+                | RampThreshold | RampStreak => assert_eq!(kind, RowKind::Value),
+                Resume | RestartSection | SetA | SetB | ClearLoop | RampArm => {
+                    assert_eq!(kind, RowKind::Action)
+                }
+                Metronome | WaitMode => assert_eq!(kind, RowKind::Toggle),
+            }
+        }
+    }
+
+    #[test]
+    fn adjust_rate_steps_and_streak_clamps() {
+        let timeline = ChipTimeline::default();
         let mut s = PracticeSession::default();
-        assert_eq!(rail_label(RailItem::Metronome, &s), "Count-in  on");
-        s.transport.metronome = false;
-        assert_eq!(rail_label(RailItem::Metronome, &s), "Count-in  off");
+        adjust_rail_item(RailItem::Rate, 1, &mut s, &timeline, 0);
+        assert!((s.transport.user_tempo - 1.05).abs() < 1e-6);
+        for _ in 0..10 {
+            adjust_rail_item(RailItem::RampStreak, 1, &mut s, &timeline, 0);
+        }
+        assert_eq!(s.trainer.ramp_config.required_successes, 3, "clamped at 3");
+        adjust_rail_item(RailItem::Snap, 1, &mut s, &timeline, 0);
+        assert_eq!(s.transport.snap, crate::timeline::SnapDivisor::Beat);
+    }
+
+    #[test]
+    fn activate_clear_loop_disarms_ramp_and_resume_sets_running() {
+        use crate::practice::actions::PracticeAction;
+        use crate::seek::SeekToChartTime;
+        use bevy::ecs::message::Messages;
+        use bevy::ecs::system::RunSystemOnce;
+        use game_shell::PauseState;
+
+        let mut world = World::new();
+        world.init_resource::<Messages<SeekToChartTime>>();
+        world.init_resource::<Messages<PracticeAction>>();
+        world.init_resource::<NextState<PauseState>>();
+        world.init_resource::<ChipTimeline>();
+        let mut session = PracticeSession::default();
+        session.set_loop_start(2_000);
+        session.set_loop_end(6_000);
+        session.trainer.ramp.armed = true;
+        world.insert_resource(session);
+
+        world
+            .run_system_once(
+                |mut session: ResMut<PracticeSession>,
+                 timeline: Res<ChipTimeline>,
+                 mut next: ResMut<NextState<PauseState>>,
+                 mut seeks: MessageWriter<SeekToChartTime>,
+                 mut pa: MessageWriter<PracticeAction>| {
+                    activate_rail_item(
+                        RailItem::ClearLoop,
+                        &mut session,
+                        &timeline,
+                        0,
+                        None,
+                        None,
+                        &mut next,
+                        &mut seeks,
+                        &mut pa,
+                    );
+                    activate_rail_item(
+                        RailItem::Resume,
+                        &mut session,
+                        &timeline,
+                        0,
+                        None,
+                        None,
+                        &mut next,
+                        &mut seeks,
+                        &mut pa,
+                    );
+                    activate_rail_item(
+                        RailItem::RampArm,
+                        &mut session,
+                        &timeline,
+                        0,
+                        None,
+                        None,
+                        &mut next,
+                        &mut seeks,
+                        &mut pa,
+                    );
+                },
+            )
+            .expect("helpers run");
+
+        let session = world.resource::<PracticeSession>();
+        assert!(session.transport.loop_region.is_none());
+        assert!(!session.trainer.ramp.armed);
+        assert!(matches!(
+            world.resource::<NextState<PauseState>>(),
+            NextState::Pending(PauseState::Running)
+        ));
+        let toggles: Vec<PracticeAction> = world
+            .resource::<Messages<PracticeAction>>()
+            .iter_current_update_messages()
+            .copied()
+            .collect();
+        assert_eq!(toggles, vec![PracticeAction::ToggleRamp]);
     }
 
     #[test]
