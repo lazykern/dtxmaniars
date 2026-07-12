@@ -1106,7 +1106,7 @@ fn spawn_wheel_rows(
                 let display = folder_display_chart(folder, db).and_then(|i| db.songs.get(i));
                 let jacket_image = display
                     .and_then(|s| s.preimage_path.as_ref())
-                    .map(|p| load_jacket(&assets, p))
+                    .map(|p| load_jacket(assets, p))
                     .unwrap_or_default();
                 row.spawn((
                     WheelRowJacket,
