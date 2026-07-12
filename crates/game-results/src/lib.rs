@@ -18,7 +18,7 @@ use gameplay_drums::stage_end::LastStageOutcome;
 #[derive(Component)]
 pub struct ResultEntity;
 
-/// Outcome of the on-entry persistence attempt, shown as the last stat row.
+/// Outcome of the on-entry persistence attempt, shown as the save-status line.
 #[derive(Resource, Default, Clone, Copy, PartialEq, Eq, Debug)]
 pub(crate) enum SaveStatus {
     #[default]

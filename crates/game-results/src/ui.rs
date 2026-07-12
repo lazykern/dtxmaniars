@@ -12,9 +12,6 @@ use gameplay_drums::stage_end::LastStageOutcome;
 use crate::input::ResultVerb;
 use crate::{ResultEntity, SaveStatus};
 
-#[derive(Component)]
-struct ResultPanel;
-
 /// Marks a revealed element: fade starts at `reveal_at_ms`, rises to
 /// `target_alpha` (the element's authored alpha, e.g. 0.5 for
 /// `text_secondary`) over `FADE_DURATION_MS` with OutQuint.
@@ -232,7 +229,6 @@ pub(crate) fn spawn_result(
         ))
         .with_children(|root| {
             root.spawn((
-                ResultPanel,
                 Node {
                     width: Val::Percent(100.0),
                     max_width: Val::Px(CARD_MAX_WIDTH),
