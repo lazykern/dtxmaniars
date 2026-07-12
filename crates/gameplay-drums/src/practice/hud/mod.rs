@@ -6,6 +6,7 @@ pub mod chip;
 pub mod full_hud;
 pub mod mini_strip;
 pub mod timeline_ui;
+pub mod wait_prompt;
 
 use bevy::prelude::*;
 
@@ -24,6 +25,7 @@ pub fn plugin(app: &mut App) {
     use game_shell::{AppState, PauseState};
     mini_strip::plugin(app);
     chip::plugin(app);
+    wait_prompt::plugin(app);
     app.init_resource::<full_hud::RailSelection>()
         .init_resource::<full_hud::ExitArmed>()
         .init_resource::<timeline_ui::TimelineGesture>()
