@@ -71,10 +71,13 @@ fn full_hud_absent_without_practice_session() {
     assert_eq!(count, 0, "normal pause never spawns the practice HUD");
 }
 
+use gameplay_drums::pause::PracticePauseSurface;
+
 #[test]
-fn normal_pause_overlay_suppressed_in_practice() {
+fn overlay_spawns_in_practice_on_overlay_surface() {
     let mut app = build_app();
     app.init_resource::<gameplay_drums::pause::PauseSelection>()
+        .init_resource::<PracticePauseSurface>() // defaults to Overlay
         .add_systems(
             OnEnter(PauseState::Paused),
             gameplay_drums::pause::spawn_overlay,
@@ -86,7 +89,28 @@ fn normal_pause_overlay_suppressed_in_practice() {
         .query::<&gameplay_drums::pause::PauseOverlay>()
         .iter(app.world())
         .count();
-    assert_eq!(overlays, 0, "practice suppresses the normal pause overlay");
+    assert_eq!(overlays, 1, "Esc surface shows the pause overlay in practice");
+}
+
+#[test]
+fn overlay_suppressed_on_rail_surface() {
+    let mut app = build_app();
+    app.init_resource::<gameplay_drums::pause::PauseSelection>()
+        .init_resource::<PracticePauseSurface>()
+        .add_systems(
+            OnEnter(PauseState::Paused),
+            gameplay_drums::pause::spawn_overlay,
+        );
+    app.world_mut().insert_resource(PracticeSession::default());
+    app.world_mut()
+        .insert_resource(PracticePauseSurface::Rail);
+    set_paused(&mut app, true);
+    let overlays = app
+        .world_mut()
+        .query::<&gameplay_drums::pause::PauseOverlay>()
+        .iter(app.world())
+        .count();
+    assert_eq!(overlays, 0, "Tab surface suppresses the overlay; the rail owns it");
 }
 
 // The top-level `gameplay_drums::plugin` also wires `orchestrator`, `autoplay`,
