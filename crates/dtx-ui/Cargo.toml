@@ -12,6 +12,7 @@ unsafe_code = "forbid"
 
 [dependencies]
 bevy = { workspace = true, default-features = false, features = ["bevy_asset", "bevy_text", "bevy_audio", "bevy_ui", "bevy_image"] }
+chrono = { workspace = true }
 # M5+: animation crate. Pinned to git rev in workspace (bevy 0.19 not on crates.io).
 # Add `TweeningPlugin` in lib.rs when first tween is wired.
 bevy_tweening = { workspace = true }
