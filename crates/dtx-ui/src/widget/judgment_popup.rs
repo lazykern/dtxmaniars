@@ -70,6 +70,7 @@ pub fn spawn_judgment_popup(commands: &mut Commands, parent: Entity, theme: &The
             Text::new(""),
             Theme::font(56.0),
             TextColor(theme.judgment_perfect),
+            UiTransform::default(),
             Visibility::Hidden,
         ))
         .id();

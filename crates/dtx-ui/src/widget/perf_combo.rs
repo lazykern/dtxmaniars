@@ -40,6 +40,7 @@ pub fn spawn_perf_combo(
             Text::new("0"),
             scaled_font(scale, 64.0),
             TextColor(theme.text_primary),
+            UiTransform::default(),
         ));
         p.spawn((
             PerfComboCaption,

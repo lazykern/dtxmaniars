@@ -201,7 +201,7 @@ fn spawn_hud(
                 left: Val::Px(layout.strip_left()),
                 top: Val::Px(layout.judge_y()),
                 width: Val::Px(layout.strip_width()),
-                height: Val::Px(4.0 * layout.scale),
+                height: Val::Px(3.0 * layout.scale),
                 ..default()
             },
             BackgroundColor(Color::srgb(0.95, 0.85, 0.1)),
@@ -372,6 +372,7 @@ fn sync_hud_judgment(
         &mut Text,
         &mut TextColor,
         &mut Visibility,
+        &mut UiTransform,
     )>,
 ) {
     if let Some(ev) = last.0 {
@@ -379,7 +380,7 @@ fn sync_hud_judgment(
         if prev.as_ref() != Some(&key) {
             *prev = Some(key);
             let label = kind_label(ev.kind);
-            for (mut popup, mut text, mut color, mut vis) in &mut q {
+            for (mut popup, mut text, mut color, mut vis, _) in &mut q {
                 let c = popup.trigger(label, &theme.0);
                 *text = Text::new(if ev.delta_ms != 0 {
                     format!("{label} {:+}ms", ev.delta_ms)
@@ -392,9 +393,10 @@ fn sync_hud_judgment(
         }
     }
     let delta = time.delta_secs() * 1000.0;
-    for (mut popup, _, mut color, mut vis) in &mut q {
-        let (alpha, _scale) = popup.tick(delta);
+    for (mut popup, _, mut color, mut vis, mut transform) in &mut q {
+        let (alpha, scale) = popup.tick(delta);
         color.0 = color.0.with_alpha(alpha);
+        transform.scale = Vec2::splat(scale);
         if !popup.is_active() && alpha <= 0.01 {
             *vis = Visibility::Hidden;
         }
@@ -527,15 +529,16 @@ fn sync_playfield_speed(
 fn sync_perf_combo(
     combo: Res<Combo>,
     time: Res<Time>,
-    mut q: Query<(&mut ComboDisplay, &mut Text), With<perf_combo::PerfComboNumber>>,
+    mut q: Query<
+        (&mut ComboDisplay, &mut Text, &mut UiTransform),
+        With<perf_combo::PerfComboNumber>,
+    >,
 ) {
-    if !combo.is_changed() && !time.is_changed() {
-        return;
-    }
     let delta = time.delta_secs() * 1000.0;
-    for (mut display, mut text) in &mut q {
+    for (mut display, mut text, mut transform) in &mut q {
         display.set_combo(combo.current);
         display.tick(delta);
+        transform.scale = Vec2::splat(display.scale());
         *text = Text::new(format!("{}", display.last_combo));
     }
 }

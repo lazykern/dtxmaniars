@@ -119,7 +119,7 @@ pub fn spawn_score_detailed_panel(
             theme.judgment_perfect,
             theme.judgment_great,
             theme.judgment_good,
-            Color::srgb(0.75, 0.45, 0.95),
+            theme.judgment_ok,
             theme.judgment_miss,
             theme.accent,
         ];
