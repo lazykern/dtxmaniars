@@ -94,6 +94,10 @@ pub enum LanesNavEffect {
     },
 }
 
+/// Ref-px width nudge per Detail ←/→ press (Shift/coarse: ×4). Same unit as
+/// `dtx_layout::MIN_LANE_WIDTH`/`MAX_LANE_WIDTH`.
+pub const WIDTH_STEP: f32 = 4.0;
+
 /// Apply one nav verb to the Lanes focus/selection state. `selected` and
 /// `lane_count` bound the row cursor. `coarse` is the surface's existing
 /// shift-held modifier (`NavAction::coarse`, already used elsewhere for a
@@ -175,6 +179,91 @@ pub fn reduce_lanes_nav(
     }
 }
 
+/// Keyboard-only `NavAction` consumer for the Lanes tab. All focus/selection
+/// transitions go through the pure `reduce_lanes_nav`; this driver applies
+/// the returned effects: `Reorder` = one undo snapshot PER keypress + the
+/// same adjacent-swap walk mouse drag uses; `AdjustWidth` = one undo
+/// snapshot per Detail VISIT (drag's `pushed`-flag pattern) + clamped
+/// `set_lane_width`. Esc maps to `NavVerb::Back` while Detail is focused
+/// (`close_on_escape` is suppressed for that case and ordered before this).
+#[allow(clippy::too_many_arguments)]
+pub(super) fn lanes_nav_consumer(
+    mut actions: MessageReader<game_shell::NavAction>,
+    keys: Res<ButtonInput<KeyCode>>,
+    active: Res<super::tabs::ActiveTab>,
+    layouts: Res<WidgetLayouts>,
+    mut focus: ResMut<LanesFocus>,
+    mut selected: ResMut<SelectedLane>,
+    mut lanes: ResMut<Lanes>,
+    mut undo: ResMut<UndoStack>,
+    mut width_undo_pushed: Local<bool>,
+) {
+    use game_shell::{NavSource, NavVerb};
+
+    if active.is_changed() && *focus != LanesFocus::TabBar {
+        *focus = LanesFocus::TabBar;
+        *width_undo_pushed = false;
+    }
+    let mut pending: Vec<(NavVerb, bool)> = actions
+        .read()
+        .filter(|action| action.source == NavSource::Keyboard)
+        .map(|action| (action.verb, action.coarse))
+        .collect();
+    if *focus == LanesFocus::Detail && keys.just_pressed(KeyCode::Escape) {
+        pending.push((NavVerb::Back, false));
+    }
+    for (verb, coarse) in pending {
+        let lane_count = lanes.0.lanes.len();
+        let cursor = selected.0.unwrap_or(0).min(lane_count.saturating_sub(1));
+        let (next_focus, next_selected, effect) =
+            reduce_lanes_nav(*focus, cursor, lane_count, verb, coarse);
+        match effect {
+            LanesNavEffect::Reorder { index, dir } => {
+                // One snapshot per reorder keypress: each press IS a gesture
+                // (unlike drag's one-per-hold).
+                undo.push(&layouts, &lanes);
+                let target = index.saturating_add_signed(dir as isize);
+                super::lane_drag::move_lane_to(&mut lanes.0, index, target);
+            }
+            LanesNavEffect::AdjustWidth { index, dir } => {
+                if let Some(lane) = lanes.0.lanes.get(index) {
+                    let step = WIDTH_STEP * if coarse { 4.0 } else { 1.0 };
+                    let next = (lane.width + dir as f32 * step)
+                        .clamp(dtx_layout::MIN_LANE_WIDTH, dtx_layout::MAX_LANE_WIDTH);
+                    if (next - lane.width).abs() > f32::EPSILON {
+                        // One snapshot per Detail visit, armed just before
+                        // the first real mutation (lane_drag's `pushed`).
+                        if !*width_undo_pushed {
+                            undo.push(&layouts, &lanes);
+                            *width_undo_pushed = true;
+                        }
+                        dtx_layout::set_lane_width(&mut lanes.0, index, next);
+                    }
+                }
+            }
+            LanesNavEffect::None => {}
+        }
+        if next_focus != LanesFocus::Detail {
+            *width_undo_pushed = false; // re-arm for the next Detail visit
+        }
+        if *focus != next_focus {
+            *focus = next_focus;
+        }
+        if next_focus != LanesFocus::TabBar && selected.0 != Some(next_selected) {
+            selected.0 = Some(next_selected);
+        }
+    }
+}
+
+/// Run condition (negated on `ui::close_on_escape`): the Lanes detail card
+/// holds keyboard focus, so Esc means "back to rows", not "close Customize".
+pub(super) fn lanes_detail_focus(
+    active: Res<super::tabs::ActiveTab>,
+    focus: Res<LanesFocus>,
+) -> bool {
+    active.0 == game_shell::CustomizeTab::Lanes && *focus == LanesFocus::Detail
+}
+
 pub(super) fn plugin(app: &mut App) {
     app.init_resource::<LanesFocus>();
     app.init_resource::<SelectedLane>()
@@ -203,6 +292,18 @@ pub(super) fn plugin(app: &mut App) {
                 .run_if(super::editor_open)
                 .run_if(in_state(game_shell::AppState::Performance)),
         );
+
+    app.add_systems(
+        Update,
+        lanes_nav_consumer
+            .after(super::ui::close_on_escape)
+            .before(mirror_lane_edits_to_draft)
+            .run_if(super::editor_open)
+            .run_if(super::lanes_tab_active)
+            .run_if(super::profile_dialog::profile_dialog_closed)
+            .run_if(super::profile_state::pending_close_none)
+            .run_if(in_state(game_shell::AppState::Performance)),
+    );
 }
 
 /// Channels addable to lane `index`: every unassigned channel plus every
@@ -818,5 +919,109 @@ mod tests {
         assert_eq!(focus, LanesFocus::Rows);
         assert_eq!(selected, 4);
         assert_eq!(effect, LanesNavEffect::None);
+    }
+
+    #[test]
+    fn lanes_consumer_reorders_adjusts_width_and_batches_undo_per_visit() {
+        use bevy::prelude::*;
+        use game_shell::{NavAction, NavSource};
+
+        use crate::editor::undo::{Snapshot, UndoStack};
+        use crate::widget_layout::WidgetLayouts;
+
+        let mut app = App::new();
+        app.init_resource::<ButtonInput<KeyCode>>()
+            .init_resource::<LanesFocus>()
+            .init_resource::<SelectedLane>()
+            .init_resource::<Lanes>()
+            .init_resource::<WidgetLayouts>()
+            .init_resource::<UndoStack>()
+            .insert_resource(crate::editor::tabs::ActiveTab(
+                game_shell::CustomizeTab::Lanes,
+            ))
+            .add_message::<NavAction>()
+            .add_systems(Update, lanes_nav_consumer);
+        app.update(); // flush insertion change ticks
+
+        let nav = |app: &mut App, verb: NavVerb, coarse: bool| {
+            app.world_mut()
+                .resource_mut::<Messages<NavAction>>()
+                .write(NavAction {
+                    verb,
+                    source: NavSource::Keyboard,
+                    coarse,
+                });
+            app.update();
+        };
+
+        // TabBar → Rows; None selection bridges to 0.
+        nav(&mut app, NavVerb::Down, false);
+        assert_eq!(*app.world().resource::<LanesFocus>(), LanesFocus::Rows);
+        assert_eq!(app.world().resource::<SelectedLane>().0, Some(0));
+
+        // Shift+Down twice: two reorders, one undo snapshot EACH.
+        let id0 = app.world().resource::<Lanes>().0.lanes[0].id.clone();
+        nav(&mut app, NavVerb::Down, true);
+        nav(&mut app, NavVerb::Down, true);
+        assert_eq!(app.world().resource::<Lanes>().0.lanes[2].id, id0);
+        assert_eq!(app.world().resource::<SelectedLane>().0, Some(2));
+
+        // Enter → Detail; ←/→ adjust width with ONE snapshot for the visit.
+        nav(&mut app, NavVerb::Confirm, false);
+        assert_eq!(*app.world().resource::<LanesFocus>(), LanesFocus::Detail);
+        let w0 = app.world().resource::<Lanes>().0.lanes[2].width;
+        nav(&mut app, NavVerb::Inc, false); // +4
+        nav(&mut app, NavVerb::Inc, true); // +16 (coarse ×4)
+        nav(&mut app, NavVerb::Dec, false); // −4
+        let w1 = app.world().resource::<Lanes>().0.lanes[2].width;
+        assert!(
+            (w1 - (w0 + 16.0)).abs() < 0.01,
+            "4 + 16 - 4 = +16, got {}",
+            w1 - w0
+        );
+
+        // Esc backs out to Rows (does not close the surface — gated in ui.rs).
+        app.world_mut()
+            .resource_mut::<ButtonInput<KeyCode>>()
+            .press(KeyCode::Escape);
+        app.update();
+        app.world_mut()
+            .resource_mut::<ButtonInput<KeyCode>>()
+            .clear();
+        assert_eq!(*app.world().resource::<LanesFocus>(), LanesFocus::Rows);
+
+        // Second Detail visit: width undo re-arms → one MORE snapshot.
+        nav(&mut app, NavVerb::Confirm, false);
+        nav(&mut app, NavVerb::Inc, false);
+
+        // Snapshot ledger: 2 (reorders) + 1 (visit one) + 1 (visit two) = 4.
+        let world = app.world_mut();
+        let current = Snapshot {
+            layouts: world.resource::<WidgetLayouts>().clone(),
+            lanes: world.resource::<Lanes>().clone(),
+        };
+        let mut stack_pops = 0;
+        {
+            let mut stack = world.resource_mut::<UndoStack>();
+            let mut cursor = current;
+            while let Some(prev) = stack.undo(cursor.clone()) {
+                cursor = prev;
+                stack_pops += 1;
+            }
+        }
+        assert_eq!(
+            stack_pops, 4,
+            "per-press reorder undo + once-per-visit width undo"
+        );
+    }
+
+    #[test]
+    fn lanes_width_adjust_clamps_at_both_bounds() {
+        // Clamp is applied by the consumer via the shared band; verify the
+        // arithmetic contract the consumer uses.
+        let min = dtx_layout::MIN_LANE_WIDTH;
+        let max = dtx_layout::MAX_LANE_WIDTH;
+        assert_eq!((min - WIDTH_STEP).clamp(min, max), min);
+        assert_eq!((max + WIDTH_STEP * 4.0).clamp(min, max), max);
     }
 }
