@@ -356,11 +356,8 @@ fn rail_spawns_17_rows_with_adjust_buttons_at_practice_z() {
 
 use gameplay_drums::practice::hud::full_hud::{transport_buttons, TransportButton};
 
-#[test]
-fn next_bar_button_moves_scrub_cursor() {
-    let mut app = build_app();
-    app.add_systems(Update, transport_buttons);
-    // 2 bars @ 120 BPM: bar starts at 0 and 2000.
+/// 2 bars @ 120 BPM: bar starts at 0 and 2000.
+fn two_bar_timeline() -> ChipTimeline {
     let chart = dtx_core::chart::Chart {
         metadata: dtx_core::chart::Metadata {
             bpm: Some(120.0),
@@ -375,10 +372,16 @@ fn next_bar_button_moves_scrub_cursor() {
     };
     let bpm = gameplay_drums::judge::BpmChangeList::from_chart(&chart);
     let bar = gameplay_drums::judge::BarLengthChangeList::from_chart(&chart);
-    app.world_mut()
-        .insert_resource(ChipTimeline::from_chart(&chart, &bpm, &bar, 0, 4_000));
+    ChipTimeline::from_chart(&chart, &bpm, &bar, 0, 4_000)
+}
+
+#[test]
+fn next_bar_button_moves_scrub_cursor() {
+    let mut app = build_app();
+    app.add_systems(Update, transport_buttons);
+    app.world_mut().insert_resource(two_bar_timeline());
     app.world_mut().insert_resource(PracticeSession {
-        transport: gameplay_drums::practice::session::PracticeTransport {
+        transport: PracticeTransport {
             scrub_cursor_ms: Some(0),
             ..Default::default()
         },
@@ -395,4 +398,89 @@ fn next_bar_button_moves_scrub_cursor() {
         Some(2_000),
         "next-bar button advances the scrub cursor one bar"
     );
+}
+
+use gameplay_drums::practice::hud::full_hud::rail_mouse;
+
+#[test]
+fn adjust_button_click_steps_tempo_and_moves_selection() {
+    let mut app = build_app();
+    app.add_message::<gameplay_drums::seek::SeekToChartTime>()
+        .add_message::<gameplay_drums::practice::actions::PracticeAction>()
+        .add_systems(Update, rail_mouse);
+    app.world_mut().insert_resource(PracticeSession::default());
+    app.world_mut()
+        .spawn((Interaction::Pressed, RailAdjustButton(RailItem::Rate, 1)));
+    app.update();
+
+    let session = app.world().resource::<PracticeSession>();
+    assert!(
+        (session.transport.user_tempo - 1.05).abs() < 1e-6,
+        "▸ on Tempo steps +0.05 like ArrowRight"
+    );
+    let rate_idx = RailItem::ORDER
+        .iter()
+        .position(|i| *i == RailItem::Rate)
+        .expect("Rate is a rail row");
+    assert_eq!(
+        app.world().resource::<RailSelection>().0,
+        rate_idx,
+        "mouse click moves the shared selection cursor"
+    );
+}
+
+#[test]
+fn row_click_selects_and_activates_set_a() {
+    let mut app = build_app();
+    app.add_message::<gameplay_drums::seek::SeekToChartTime>()
+        .add_message::<gameplay_drums::practice::actions::PracticeAction>()
+        .add_systems(Update, rail_mouse);
+    app.world_mut().insert_resource(two_bar_timeline());
+    app.world_mut().insert_resource(PracticeSession {
+        transport: PracticeTransport {
+            scrub_cursor_ms: Some(2_500),
+            ..Default::default()
+        },
+        ..Default::default()
+    });
+    app.world_mut()
+        .spawn((Interaction::Pressed, RailRowButton(RailItem::SetA)));
+    app.update();
+
+    let session = app.world().resource::<PracticeSession>();
+    assert_eq!(
+        session.transport.loop_region.map(|r| r.start_ms),
+        Some(2_000),
+        "row click on Set A snaps the loop start to the bar"
+    );
+    let a_idx = RailItem::ORDER
+        .iter()
+        .position(|i| *i == RailItem::SetA)
+        .expect("SetA is a rail row");
+    assert_eq!(app.world().resource::<RailSelection>().0, a_idx);
+}
+
+#[test]
+fn value_row_click_selects_without_acting() {
+    let mut app = build_app();
+    app.add_message::<gameplay_drums::seek::SeekToChartTime>()
+        .add_message::<gameplay_drums::practice::actions::PracticeAction>()
+        .add_systems(Update, rail_mouse);
+    app.world_mut().insert_resource(PracticeSession::default());
+    app.world_mut()
+        .spawn((Interaction::Pressed, RailRowButton(RailItem::Scrub)));
+    app.update();
+
+    // Selection moved, but no seek was written (Scrub activation = "play here").
+    let scrub_idx = RailItem::ORDER
+        .iter()
+        .position(|i| *i == RailItem::Scrub)
+        .expect("Scrub is a rail row");
+    assert_eq!(app.world().resource::<RailSelection>().0, scrub_idx);
+    let seeks = app
+        .world()
+        .resource::<bevy::ecs::message::Messages<gameplay_drums::seek::SeekToChartTime>>()
+        .iter_current_update_messages()
+        .count();
+    assert_eq!(seeks, 0, "value-row click must not trigger play-here");
 }

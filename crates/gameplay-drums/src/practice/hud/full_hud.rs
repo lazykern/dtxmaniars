@@ -781,7 +781,7 @@ pub fn despawn_full_hud(
 }
 
 /// Keyboard nav for the rail: Up/Down select, Left/Right adjust,
-/// Enter/Space activate. Mouse shares the same helpers (Task 6).
+/// Enter/Space activate. `rail_mouse` shares the same helpers and cursor.
 #[allow(clippy::too_many_arguments)]
 pub fn full_hud_input(
     keys: Res<ButtonInput<KeyCode>>,
@@ -823,6 +823,58 @@ pub fn full_hud_input(
             &mut seeks,
             &mut practice_actions,
         );
+    }
+}
+
+/// Mouse path for the rail: row click selects (and activates action/toggle
+/// rows); ◂/▸ click adjusts. Same helpers as the keyboard path, and every
+/// click moves `RailSelection` so both inputs share one cursor.
+#[allow(clippy::too_many_arguments)]
+pub fn rail_mouse(
+    row_clicks: Query<(&Interaction, &RailRowButton), Changed<Interaction>>,
+    adjust_clicks: Query<(&Interaction, &RailAdjustButton), Changed<Interaction>>,
+    mut selection: ResMut<RailSelection>,
+    mut session: ResMut<PracticeSession>,
+    timeline: Res<ChipTimeline>,
+    clock: Res<GameplayClock>,
+    mut wait_state: Option<ResMut<crate::practice::wait::WaitState>>,
+    mut chord_hits: Option<ResMut<crate::practice::wait::ChordHitTimes>>,
+    mut next_pause: ResMut<NextState<PauseState>>,
+    mut seeks: MessageWriter<SeekToChartTime>,
+    mut practice_actions: MessageWriter<crate::practice::actions::PracticeAction>,
+) {
+    for (interaction, RailRowButton(item)) in &row_clicks {
+        if *interaction != Interaction::Pressed {
+            continue;
+        }
+        if let Some(idx) = RailItem::ORDER.iter().position(|i| i == item) {
+            selection.0 = idx;
+        }
+        // Action rows: click = select + act. Toggle rows: click = select +
+        // flip. Value rows (incl. Scrub): click = select only — adjusting
+        // is the ◂/▸ buttons' job, and Scrub's activation is "play here".
+        if rail_row_kind(*item) != RowKind::Value {
+            activate_rail_item(
+                *item,
+                &mut session,
+                &timeline,
+                clock.current_ms,
+                wait_state.as_deref_mut(),
+                chord_hits.as_deref_mut(),
+                &mut next_pause,
+                &mut seeks,
+                &mut practice_actions,
+            );
+        }
+    }
+    for (interaction, RailAdjustButton(item, dir)) in &adjust_clicks {
+        if *interaction != Interaction::Pressed {
+            continue;
+        }
+        if let Some(idx) = RailItem::ORDER.iter().position(|i| i == item) {
+            selection.0 = idx;
+        }
+        adjust_rail_item(*item, *dir, &mut session, &timeline, clock.current_ms);
     }
 }
 

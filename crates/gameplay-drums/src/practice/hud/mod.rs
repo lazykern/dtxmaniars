@@ -49,6 +49,7 @@ pub fn plugin(app: &mut App) {
             (
                 timeline_ui::timeline_mouse,
                 full_hud::full_hud_input,
+                full_hud::rail_mouse,
                 full_hud::transport_buttons,
                 full_hud::refresh_rail,
                 full_hud::update_full_hud_markers,
