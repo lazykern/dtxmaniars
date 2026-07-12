@@ -507,7 +507,9 @@ fn spawn_rail(
     root.spawn((
         rail_rect,
         rail_node,
-        BackgroundColor(Color::srgba(0.0, 0.0, 0.0, 0.5)),
+        // Opaque: the rail now sits over the Now-Playing card and the skill
+        // graph, and any translucency ghosts their text through the rows.
+        BackgroundColor(theme.stage_bg),
     ))
     .with_children(|rail| {
         for (idx, item) in RailItem::ORDER.iter().enumerate() {
