@@ -39,10 +39,10 @@ pub fn parse<R: Read>(mut reader: R) -> Result<Chart> {
     Ok(chart)
 }
 
-/// Resolve BPMEx (channel 0x08) chips: replace the placeholder `value` (which
-/// held the fractional position) with the BPM from the `#BPMxx` definition
-/// referenced by `wav_slot`. Chips whose slot has no definition are dropped so
-/// they cannot corrupt the timeline with a bogus BPM.
+/// Resolve BPMEx (channel 0x08) chips: fill `value` with the BPM from the
+/// `#BPMxx` definition referenced by `wav_slot`. The chip's `fraction` (its
+/// in-measure position) is untouched. Chips whose slot has no definition are
+/// dropped so they cannot corrupt the timeline with a bogus BPM.
 fn resolve_bpm_ex_chips(chart: &mut Chart) {
     let bpm_defs = chart.assets.bpm.clone();
     chart.chips.retain_mut(|chip| {
@@ -108,6 +108,7 @@ fn process_line(line: &str, line_no: usize, chart: &mut Chart) -> Result<()> {
         head,
         value,
         line_no,
+        &chart.assets.wav,
         &mut chart.chips,
         &mut chart.empty_hit_events,
     )?;
@@ -207,6 +208,7 @@ fn parse_chip_line(
     head: &str,
     value: &str,
     line_no: usize,
+    wav: &crate::assets::WavRegistry,
     chips: &mut Vec<Chip>,
     empty_hits: &mut Vec<EmptyHitEvent>,
 ) -> Result<()> {
@@ -242,7 +244,7 @@ fn parse_chip_line(
         let Some(lane) = nosound_byte_to_lane(channel_byte) else {
             return Ok(());
         };
-        push_empty_hit_events(measure, lane, value, empty_hits);
+        push_empty_hit_events(measure, lane, value, wav, empty_hits);
         return Ok(());
     }
 
@@ -291,14 +293,14 @@ fn parse_chip_line(
                 // Direct hex BPM. Store the resolved value immediately.
                 if let Ok(bpm) = u32::from_str_radix(pair, 16) {
                     if bpm > 0 {
-                        chips.push(Chip::new(measure, channel, bpm as f32));
+                        chips.push(Chip::bpm_change(measure, channel, bpm as f32, fraction));
                     }
                 }
             } else if let Some(slot) = base36::parse_2digit(&data, i * 2) {
                 // BPMEx reference: keep the slot id in `wav_slot`; the value is
                 // filled in by `resolve_bpm_ex_chips` once all `#BPMxx` defs are read.
                 if slot > 0 {
-                    chips.push(Chip::with_wav(measure, channel, fraction, slot));
+                    chips.push(Chip::bpm_ex_ref(measure, slot, fraction));
                 }
             }
         }
@@ -317,7 +319,7 @@ fn parse_chip_line(
         return Ok(());
     }
 
-    if is_binary_only(&data) {
+    if is_binary_only(&data) && !binary_pairs_reference_defined_wav(&data, wav) {
         push_single_char_chips(measure, channel, &data, chips);
         return Ok(());
     }
@@ -348,13 +350,21 @@ fn parse_chip_line(
     Ok(())
 }
 
-fn push_empty_hit_events(measure: u32, lane: u8, value: &str, empty_hits: &mut Vec<EmptyHitEvent>) {
+fn push_empty_hit_events(
+    measure: u32,
+    lane: u8,
+    value: &str,
+    wav: &crate::assets::WavRegistry,
+    empty_hits: &mut Vec<EmptyHitEvent>,
+) {
     let data = strip_dtx_param(value).replace(' ', "");
     if data.is_empty() {
         return;
     }
 
-    if data.len().is_multiple_of(2) && !is_binary_only(&data) {
+    if data.len().is_multiple_of(2)
+        && (!is_binary_only(&data) || binary_pairs_reference_defined_wav(&data, wav))
+    {
         let num_slots = data.len() / 2;
         for i in 0..num_slots {
             let pair = &data[i * 2..i * 2 + 2];
@@ -428,10 +438,31 @@ fn is_binary_only(data: &str) -> bool {
     data.chars().all(|c| c == '0' || c == '1')
 }
 
+fn binary_pairs_reference_defined_wav(data: &str, wav: &crate::assets::WavRegistry) -> bool {
+    data.as_bytes().chunks_exact(2).any(|pair| {
+        std::str::from_utf8(pair)
+            .ok()
+            .and_then(base36::parse_id_suffix)
+            .is_some_and(|id| id != 0 && wav.get(id).is_some())
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use std::io::Cursor;
+
+    #[test]
+    fn binary_looking_pairs_keep_base36_wav_id() {
+        let chart = parse(Cursor::new(
+            "#WAV01: snare.ogg\n#WAV11: ride.ogg\n#00119: 1100\n",
+        ))
+        .unwrap();
+
+        assert_eq!(chart.chips.len(), 1);
+        assert_eq!(chart.chips[0].channel, EChannel::RideCymbal);
+        assert_eq!(chart.chips[0].wav_slot, 37);
+    }
 
     #[test]
     fn parses_minimal_dtx() {
@@ -552,6 +583,51 @@ mod tests {
             "BPMEx value should resolve to #BPM05 (193), got {}",
             bpm_chips[0].value
         );
+    }
+
+    #[test]
+    fn bpm_ex_chips_keep_their_in_measure_position() {
+        // Regression: a measure can hold several BPM changes at different
+        // fractional positions. `#20208: 090B` (from the real Rock Lady chart)
+        // means BPM09 at 0.0 and BPM0B at 0.5. Losing the position snapped both
+        // to the bar line and mistimed everything after the slow section.
+        let input = "\
+#BPM: 181
+#BPM09: 71
+#BPM0B: 179
+#20208: 090B
+";
+        let chart = parse(Cursor::new(input)).unwrap();
+        let bpm_chips: Vec<_> = chart
+            .chips
+            .iter()
+            .filter(|c| c.channel == EChannel::BPMEx)
+            .collect();
+
+        assert_eq!(bpm_chips.len(), 2);
+        assert_eq!(bpm_chips[0].value, 71.0);
+        assert_eq!(bpm_chips[0].fraction, 0.0);
+        assert_eq!(bpm_chips[1].value, 179.0);
+        assert_eq!(bpm_chips[1].fraction, 0.5);
+    }
+
+    #[test]
+    fn bpm_direct_chips_keep_their_in_measure_position() {
+        // Same for channel 0x03: 4 slots, changes at 0.0 and 0.5.
+        // 0x78 = 120, 0xF0 = 240.
+        let input = "#00103: 780000F0\n";
+        let chart = parse(Cursor::new(input)).unwrap();
+        let bpm_chips: Vec<_> = chart
+            .chips
+            .iter()
+            .filter(|c| c.channel == EChannel::BPM)
+            .collect();
+
+        assert_eq!(bpm_chips.len(), 2);
+        assert_eq!(bpm_chips[0].value, 120.0);
+        assert_eq!(bpm_chips[0].fraction, 0.0);
+        assert_eq!(bpm_chips[1].value, 240.0);
+        assert_eq!(bpm_chips[1].fraction, 0.75);
     }
 
     #[test]

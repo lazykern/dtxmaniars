@@ -125,6 +125,7 @@ mod tests {
         let c = BpmChange {
             measure: 5,
             bpm: 180.0,
+            fraction: 0.0,
         };
         assert_eq!(c.measure, 5);
         assert!((c.bpm - 180.0).abs() < 0.01);
@@ -145,6 +146,7 @@ mod tests {
         let changes = [BpmChange {
             measure: 4,
             bpm: 240.0,
+            fraction: 0.0,
         }];
         // Measure 8 at 240 BPM should be earlier than at constant 120.
         let t_double = chip_time_ms_with_bpm_changes(8, 0.0, 120.0, &changes);
@@ -159,10 +161,12 @@ mod tests {
         let changes = [BpmChange {
             measure: 4,
             bpm: 240.0,
+            fraction: 0.0,
         }];
         let sorted_in = [BpmChange {
             measure: 4,
             bpm: 240.0,
+            fraction: 0.0,
         }];
         let t_a = chip_time_ms_with_bpm_changes(8, 0.0, 120.0, &changes);
         let t_b = chip_time_ms_with_bpm_changes(8, 0.0, 120.0, &sorted_in);
@@ -176,10 +180,12 @@ mod tests {
             BpmChange {
                 measure: 4,
                 bpm: 240.0,
+                fraction: 0.0,
             },
             BpmChange {
                 measure: 4,
                 bpm: 60.0,
+                fraction: 0.0,
             },
         ];
         // Changes AT the chip's measure are skipped (`>= measure` breaks loop).
@@ -194,6 +200,7 @@ mod tests {
         let changes = [BpmChange {
             measure: 4,
             bpm: 240.0,
+            fraction: 0.0,
         }];
         let t = chip_time_ms_with_bpm_changes(5, 0.5, 0.0, &changes);
         assert_eq!(t, 0);
@@ -311,6 +318,32 @@ mod tests {
             (t - 90438).abs() <= 2,
             "expected ~90438ms, got {t}ms (bug reproduces if this is ~86929ms)"
         );
+    }
+
+    #[test]
+    fn bar_length_change_scales_its_own_measure() {
+        // A `#02` chip on measure M sets the length of measure M itself, so a
+        // chip *inside* M is scaled by the new ratio. The chart above never
+        // puts a bar change on the chip's own measure, so it does not cover
+        // this; pin it explicitly.
+        use math::{chip_time_ms_with_bpm_and_bar_changes, BarLengthChange, ChartTiming};
+        let bar_changes = [BarLengthChange {
+            measure: 2,
+            ratio: 0.5,
+        }];
+        let timing = ChartTiming {
+            bpm_changes: &[],
+            bar_changes: &bar_changes,
+        };
+        // 120 BPM = 2000ms per full measure.
+        //   [0,2) at ratio 1.0 = 4000ms
+        //   half of measure 2, which is itself half-length: 0.5 * 0.5 * 2000 = 500ms
+        let t = chip_time_ms_with_bpm_and_bar_changes(2, 0.5, 120.0, timing);
+        assert_eq!(t, 4500);
+
+        // And the whole of measure 2 is half-length.
+        let t_next = chip_time_ms_with_bpm_and_bar_changes(3, 0.0, 120.0, timing);
+        assert_eq!(t_next, 5000);
     }
 
     fn measure_duration_ms(start: u32, end: u32, bpm: f64) -> f64 {

@@ -11,8 +11,8 @@ use dtx_scoring::gauge::{ComboState, GaugeState};
 use dtx_scoring::JudgmentKind;
 use dtx_timing::math::{chip_time_ms_with_bpm_changes, BpmChange};
 use gameplay_drums::autoplay::{autoplay_system, AutoplayEnabled};
-use gameplay_drums::events::LaneHit;
 use gameplay_drums::events::InputHit;
+use gameplay_drums::events::LaneHit;
 use gameplay_drums::judge::{BarLengthChangeList, BpmChangeList};
 use gameplay_drums::resources::ActiveChart;
 use std::fs;
@@ -113,6 +113,7 @@ fn play_chart_bpm_change_target_ms_advances() {
         &[BpmChange {
             measure: 0,
             bpm: 240.0,
+            fraction: 0.0,
         }],
     );
     // Doubling BPM halves the measure duration.
@@ -195,6 +196,7 @@ fn play_chart_full_real_game_loop() {
         .map(|c| BpmChange {
             measure: c.measure,
             bpm: c.value,
+            fraction: c.fraction,
         })
         .collect();
 

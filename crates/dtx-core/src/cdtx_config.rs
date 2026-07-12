@@ -211,6 +211,7 @@ mod tests {
         let changes = vec![BpmChange {
             measure: 2,
             bpm: 240.0,
+            fraction: 0.0,
         }];
         // [0,2) at 120 = 4000
         // [2,6) at 240 = 4000

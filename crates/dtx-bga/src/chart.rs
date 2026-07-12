@@ -35,27 +35,8 @@ pub struct TimedVisualEvent {
 /// Build BPM-and-bar-length-aware visual events for a chart, sorted by time
 /// with stable source order for ties.
 pub fn timed_visual_events(chart: &Chart) -> Vec<TimedVisualEvent> {
-    let mut bpm_changes: Vec<BpmChange> = chart
-        .chips
-        .iter()
-        .filter(|chip| matches!(chip.channel, EChannel::BPM | EChannel::BPMEx))
-        .map(|chip| BpmChange {
-            measure: chip.measure,
-            bpm: chip.value,
-        })
-        .collect();
-    bpm_changes.sort_by_key(|change| change.measure);
-
-    let mut bar_changes: Vec<BarLengthChange> = chart
-        .chips
-        .iter()
-        .filter(|chip| chip.channel == EChannel::BarLength)
-        .map(|chip| BarLengthChange {
-            measure: chip.measure,
-            ratio: chip.value,
-        })
-        .collect();
-    bar_changes.sort_by_key(|change| change.measure);
+    let bpm_changes = dtx_core::timing::bpm_changes_from_chart(chart);
+    let bar_changes = dtx_core::timing::bar_changes_from_chart(chart);
 
     let timing = ChartTiming {
         bpm_changes: &bpm_changes,

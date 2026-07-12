@@ -40,8 +40,8 @@ pub struct CChartData {
     pub chart: Chart,
     /// BGA frames in playback order.
     pub bga_frames: Vec<BgaEntry>,
-    /// BPM changes (just the (measure, bpm) pairs, no playback time).
-    pub bpm_changes: Vec<(u32, f32)>,
+    /// BPM changes (position + bpm, no playback time).
+    pub bpm_changes: Vec<crate::timing::BpmChange>,
     /// Pre-image (preview.jpg path).
     pub preimage: Option<std::path::PathBuf>,
     /// Preview audio (preview.ogg path).
@@ -90,12 +90,7 @@ impl CChartData {
     }
 
     fn collect_bpm(&mut self) {
-        for chip in &self.chart.chips {
-            if matches!(chip.channel, EChannel::BPM | EChannel::BPMEx) {
-                self.bpm_changes.push((chip.measure, chip.value));
-            }
-        }
-        self.bpm_changes.sort_by_key(|b| b.0);
+        self.bpm_changes = crate::timing::bpm_changes_from_chart(&self.chart);
     }
 
     /// Number of BGA frames.
@@ -181,7 +176,7 @@ mod tests {
     fn from_chart_collects_bpm() {
         let d = CChartData::from_chart(make_chart());
         assert_eq!(d.bpm_change_count(), 1);
-        assert_eq!(d.bpm_changes[0].1, 180.0);
+        assert_eq!(d.bpm_changes[0].bpm, 180.0);
     }
 
     #[test]
@@ -205,7 +200,7 @@ mod tests {
     fn bpm_changes_sorted_by_measure() {
         let d = CChartData::from_chart(make_chart());
         for w in d.bpm_changes.windows(2) {
-            assert!(w[0].0 <= w[1].0);
+            assert!(w[0].measure <= w[1].measure);
         }
     }
 

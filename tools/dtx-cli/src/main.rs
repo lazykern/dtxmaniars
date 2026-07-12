@@ -170,20 +170,7 @@ fn play_chart(path: &PathBuf) -> Result<()> {
     // target_ms as Perfect (delta=0). Apply score + combo + gauge with
     // the real dtx-scoring rules.
     let base_bpm = chart.metadata.bpm.unwrap_or(120.0);
-    let bpm_changes: Vec<BpmChange> = chart
-        .chips
-        .iter()
-        .filter(|c| {
-            matches!(
-                c.channel,
-                dtx_core::EChannel::BPM | dtx_core::EChannel::BPMEx
-            )
-        })
-        .map(|c| BpmChange {
-            measure: c.measure,
-            bpm: c.value,
-        })
-        .collect();
+    let bpm_changes: Vec<BpmChange> = dtx_core::timing::bpm_changes_from_chart(&chart);
 
     let mut score = 0u64;
     let mut combo = ComboState::new();
