@@ -158,6 +158,7 @@ mod tests {
             channel,
             value,
             wav_slot: 0,
+            fraction: 0.0,
         }
     }
 

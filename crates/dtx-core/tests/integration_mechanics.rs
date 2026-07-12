@@ -96,6 +96,7 @@ fn integration_chip_target_ms_bpm_change() {
     let changes = [BpmChange {
         measure: 1,
         bpm: 240.0,
+        fraction: 0.0,
     }];
     let t_with_change = chip_time_ms_with_bpm_changes(chip.measure, chip.value, 120.0, &changes);
     // With double BPM, the same chip is earlier in time.

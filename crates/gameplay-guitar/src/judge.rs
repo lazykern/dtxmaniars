@@ -37,22 +37,9 @@ pub struct BpmChangeList {
 
 impl BpmChangeList {
     pub fn from_chart(chart: &dtx_core::Chart) -> Self {
-        let mut changes: Vec<BpmChange> = chart
-            .chips
-            .iter()
-            .filter(|c| {
-                matches!(
-                    c.channel,
-                    dtx_core::EChannel::BPM | dtx_core::EChannel::BPMEx
-                )
-            })
-            .map(|c| BpmChange {
-                measure: c.measure,
-                bpm: c.value,
-            })
-            .collect();
-        changes.sort_by_key(|c| c.measure);
-        Self { changes }
+        Self {
+            changes: dtx_core::timing::bpm_changes_from_chart(chart),
+        }
     }
 }
 

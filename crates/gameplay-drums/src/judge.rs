@@ -23,22 +23,9 @@ pub struct BpmChangeList {
 
 impl BpmChangeList {
     pub fn from_chart(chart: &dtx_core::Chart) -> Self {
-        let mut changes: Vec<BpmChange> = chart
-            .chips
-            .iter()
-            .filter(|c| {
-                matches!(
-                    c.channel,
-                    dtx_core::EChannel::BPM | dtx_core::EChannel::BPMEx
-                )
-            })
-            .map(|c| BpmChange {
-                measure: c.measure,
-                bpm: c.value,
-            })
-            .collect();
-        changes.sort_by_key(|c| c.measure);
-        Self { changes }
+        Self {
+            changes: dtx_core::timing::bpm_changes_from_chart(chart),
+        }
     }
 }
 
@@ -50,17 +37,9 @@ pub struct BarLengthChangeList {
 
 impl BarLengthChangeList {
     pub fn from_chart(chart: &dtx_core::Chart) -> Self {
-        let mut changes: Vec<BarLengthChange> = chart
-            .chips
-            .iter()
-            .filter(|c| c.channel == dtx_core::EChannel::BarLength)
-            .map(|c| BarLengthChange {
-                measure: c.measure,
-                ratio: c.value,
-            })
-            .collect();
-        changes.sort_by_key(|c| c.measure);
-        Self { changes }
+        Self {
+            changes: dtx_core::timing::bar_changes_from_chart(chart),
+        }
     }
 }
 
@@ -152,7 +131,9 @@ pub(crate) fn judge_lane_hit_system(
     }
 
     for hit in input_hits.read() {
-        let Some(&primary_lane) = hit.lanes.first() else { continue };
+        let Some(&primary_lane) = hit.lanes.first() else {
+            continue;
+        };
         let adjusted_hit_ms = hit.audio_ms - input_offset.0 as i64;
         let result = resolve_explicit_lanes(
             &hit.lanes,
@@ -164,7 +145,10 @@ pub(crate) fn judge_lane_hit_system(
             halted_chips,
         );
         let Some((idx, delta)) = result else {
-            empty_hits.write(EmptyHit { lane: primary_lane, audio_ms: hit.audio_ms });
+            empty_hits.write(EmptyHit {
+                lane: primary_lane,
+                audio_ms: hit.audio_ms,
+            });
             continue;
         };
         if let Some(chord_hits) = chord_hits.as_deref_mut() {
