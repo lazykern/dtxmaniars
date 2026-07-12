@@ -36,7 +36,8 @@ pub(super) fn plugin(app: &mut App) {
                 .chain()
                 .run_if(in_state(AppState::Performance))
                 .run_if(in_state(game_shell::PauseState::Running))
-                .run_if(resource_exists::<PracticeSession>),
+                .run_if(resource_exists::<PracticeSession>)
+                .run_if(crate::editor::editor_closed),
         );
     app.init_resource::<toast::ToastQueue>().add_systems(
         Update,
@@ -123,5 +124,45 @@ mod tests {
         assert!(!state.halted());
         assert!(state.waited_chips.is_empty());
         assert!(!app.world().contains_resource::<PracticeSession>());
+    }
+
+    #[test]
+    fn practice_actions_are_dead_while_editor_is_open() {
+        let mut app = App::new();
+        app.init_resource::<ButtonInput<KeyCode>>()
+            .init_resource::<actions::PracticeBindings>()
+            .insert_resource(crate::editor::EditorOpen(true))
+            .add_message::<actions::PracticeAction>()
+            .add_systems(
+                Update,
+                actions::emit_practice_actions.run_if(crate::editor::editor_closed),
+            );
+        app.world_mut()
+            .resource_mut::<ButtonInput<KeyCode>>()
+            .press(KeyCode::Tab);
+        app.update();
+        assert!(
+            app.world()
+                .resource::<Messages<actions::PracticeAction>>()
+                .is_empty(),
+            "editor open must gate practice actions (Tab = OpenFullHud)"
+        );
+
+        // Editor closed: the same press emits again. `reset_all` (not `clear`)
+        // — Tab must leave the pressed set or the re-press is no `just_pressed`.
+        app.world_mut()
+            .resource_mut::<crate::editor::EditorOpen>()
+            .0 = false;
+        app.world_mut()
+            .resource_mut::<ButtonInput<KeyCode>>()
+            .reset_all();
+        app.world_mut()
+            .resource_mut::<ButtonInput<KeyCode>>()
+            .press(KeyCode::Tab);
+        app.update();
+        assert!(!app
+            .world()
+            .resource::<Messages<actions::PracticeAction>>()
+            .is_empty());
     }
 }

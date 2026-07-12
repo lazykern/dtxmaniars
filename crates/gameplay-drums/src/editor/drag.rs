@@ -103,6 +103,15 @@ pub fn plugin(app: &mut App) {
             .run_if(super::widgets_tab_active)
             .run_if(in_state(game_shell::AppState::Performance)),
     );
+    app.add_systems(
+        Update,
+        cycle_widget_selection
+            .run_if(super::editor_open)
+            .run_if(super::widgets_tab_active)
+            .run_if(super::profile_dialog::profile_dialog_closed)
+            .run_if(super::profile_state::pending_close_none)
+            .run_if(in_state(game_shell::AppState::Performance)),
+    );
 }
 
 /// Left-press routing (canvas only; chrome masked): scale handle → Scale
@@ -321,9 +330,62 @@ fn nudge_selected_widget(
     }
 }
 
+/// A Tab press released within this window is a "tap" (cycle selection);
+/// anything longer was the existing hold-to-peek (`update_preview_state`)
+/// and must not move the selection.
+const TAB_TAP_MAX_SECS: f32 = 0.25;
+
+/// Next/previous widget in the sidebar list order (`WidgetKind::ALL` — the
+/// exact order `panel::spawn_widget_list` renders). Wraps; `None` starts at
+/// the first entry.
+pub fn cycle_widget(current: Option<WidgetKind>, reverse: bool) -> WidgetKind {
+    let all = WidgetKind::ALL;
+    match current.and_then(|k| all.iter().position(|x| *x == k)) {
+        None => all[0],
+        Some(i) if reverse => all[(i + all.len() - 1) % all.len()],
+        Some(i) => all[(i + 1) % all.len()],
+    }
+}
+
+/// Tab-tap cycles the widget selection (Shift+Tab reverses); a held Tab
+/// stays the play-view peek. Shift is sampled at press time so releasing it
+/// mid-tap still reverses.
+fn cycle_widget_selection(
+    keys: Res<ButtonInput<KeyCode>>,
+    time: Res<Time>,
+    mut pressed: Local<Option<(f32, bool)>>,
+    mut selection: ResMut<Selection>,
+) {
+    if keys.just_pressed(KeyCode::Tab) {
+        let shift = keys.pressed(KeyCode::ShiftLeft) || keys.pressed(KeyCode::ShiftRight);
+        *pressed = Some((time.elapsed_secs(), shift));
+    }
+    if keys.just_released(KeyCode::Tab) {
+        if let Some((at, shift)) = pressed.take() {
+            if time.elapsed_secs() - at <= TAB_TAP_MAX_SECS {
+                selection.0 = Some(cycle_widget(selection.0, shift));
+            }
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn tab_cycle_walks_sidebar_order_wraps_and_reverses() {
+        let all = WidgetKind::ALL;
+        // None starts at the first list entry (both directions).
+        assert_eq!(cycle_widget(None, false), all[0]);
+        assert_eq!(cycle_widget(None, true), all[0]);
+        // Forward walk + wrap.
+        assert_eq!(cycle_widget(Some(all[0]), false), all[1]);
+        assert_eq!(cycle_widget(Some(all[all.len() - 1]), false), all[0]);
+        // Reverse walk + wrap.
+        assert_eq!(cycle_widget(Some(all[1]), true), all[0]);
+        assert_eq!(cycle_widget(Some(all[0]), true), all[all.len() - 1]);
+    }
 
     #[test]
     fn drag_adds_delta_over_scale() {
