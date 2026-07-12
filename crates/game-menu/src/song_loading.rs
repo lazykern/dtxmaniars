@@ -310,6 +310,7 @@ fn spawn_loading(
     asset_server: Res<AssetServer>,
 ) {
     let t = theme.0;
+    let difficulty_index = selection.difficulty;
     let song = selection
         .chart_index(&selection_state)
         .and_then(|i| db.songs.get(i))
@@ -416,7 +417,7 @@ fn spawn_loading(
                                 padding: UiRect::axes(Val::Px(8.0), Val::Px(2.0)),
                                 ..default()
                             },
-                            BackgroundColor(t.difficulty_color(2)),
+                            BackgroundColor(t.difficulty_color(difficulty_index)),
                         ))
                         .with_children(|chip| {
                             chip.spawn((
