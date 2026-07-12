@@ -1,6 +1,6 @@
 # DTXManiaRS Player User Stories
 
-Date: 2026-07-11
+Date: 2026-07-12
 Status: Behavioral-research baseline
 Source: `docs/notes/2026-07-11-player-manual-current-behavior.md`
 
@@ -19,10 +19,12 @@ age, skill, or demographic assumptions:
 
 ## 2. Scope boundary
 
-The current Controls and Lanes configuration experiences are excluded from UX
-judgment because they are being replaced. The stories retain only the
-player-level requirement that inputs must be configured and lanes must be
-usable.
+The merged Controls and Lanes redesign is now in scope. These stories cover
+discovering profiles, choosing Keyboard or MIDI, binding and sharing sources,
+resolving conflicts, selecting a MIDI port and threshold, arranging lanes,
+and saving or recovering drafts. They distinguish implemented player actions
+from keyboard/pad navigation described by the design but not wired to the
+visible panels.
 
 This document does evaluate whether a player can reach routine actions after
 setup. For example, inability to pause from a distant drum kit remains in scope
@@ -74,8 +76,10 @@ These are current facts shared by all three player types:
 
 - Startup loads saved settings, layout, input readiness, and score history.
 - Missing or unreadable basic settings/layout data falls back to defaults.
-- Damaged profile data can leave only built-in readiness data usable for the
-  session. The profile-management UI itself remains out of scope.
+- Damaged profile data can leave only built-in profiles usable for the session.
+  A back-up-and-reset dialog exists in the implementation but is not currently
+  wired from startup corruption detection, so players should not rely on that
+  recovery path being reachable.
 - If score history cannot load, history can appear empty with no player-facing
   recovery screen.
 - Malformed charts are skipped without a full library error-management screen.
@@ -129,7 +133,6 @@ audio and shows progress/status.
 ### Shared non-Control/Lane settings stories
 
 The following settings remain in scope because they affect routine behavior.
-The Controls and Lanes configuration UIs remain excluded.
 
 | Domain | Player-level choices or effect |
 |---|---|
@@ -166,6 +169,56 @@ Reachability after Customize has already been opened:
   to normal play without confusing it with practice count-in.
 - **SET-4:** As a practice user, I want HUD visibility choices to preserve the
   feedback I need while hiding score-oriented information when appropriate.
+
+### Shared Controls and Lanes stories
+
+Controls and lane setup are three separate profile domains: Keyboard, MIDI,
+and Lanes. Each has built-ins, user profiles, a draft, an amber dirty marker,
+selection, Save, Save As, and protected switching/closing. User profiles also
+offer Rename, Revert, and Delete. Built-ins are immutable.
+
+| Player job | What the player must physically do | Current outcome |
+|---|---|---|
+| Choose input source | Click `Keyboard` or `MIDI` | The segment, profile, and visible chips switch |
+| Inspect a channel | Click its row; for MIDI, optionally hit an already mapped pad | Row and playfield lane highlight together |
+| Add a key | Click `+`, press an allowed key, choose sharing behavior if needed, then click Confirm or press `Enter` | Key is added to the draft; confirmation can immediately fire the target lane |
+| Add a MIDI note | Click `+`, hit a new pad, review note/velocity, choose sharing behavior if needed, then click Confirm, press `Enter`, or hit the same note again | Note is added to the draft; confirmation can immediately fire the target lane |
+| Resolve a collision | Click `Add shared` or `Move here`, or press `Left`/`Right`, then confirm | Source either fans out or moves exclusively |
+| Remove one claim | Click the chip's `x` | Only that channel loses the source |
+| Check soft hits | Hit a pad while viewing the MIDI device card/capture modal | Meter and below-threshold feedback expose velocity |
+| Choose device | Click port previous/next or `Rescan`; click threshold previous/next to adjust one unit | MIDI draft updates and connection state remains visible |
+| Select/create a profile | Click profile name and a choice, or click `Save As`, type a name, then press `Enter`/click OK | Active registry/profile changes if persistence succeeds |
+| Manage a user profile | Open `...`, then click Rename, Revert, or Delete and complete its dialog | Named profile is changed, reset, or removed |
+| Select a lane | Click its row or its preview pad | Detail card and preview selection synchronize |
+| Reorder/resize | Mouse-drag a preview pad or its edge; alternatively drag the Width slider | Draft preview changes immediately and clamps width |
+| Merge/split/hide/restore | Click `+ add` and a channel, a secondary chip's `x`, `Hide lane`, or a Hidden chip | Visible lane/channel composition changes |
+| Preserve edits | Click Save/Save As, or close/switch and choose Save | User profile is written; dirty built-in becomes a copy |
+
+- **CTRL-1:** As a keyboard player, I want to test an arrived key before
+  committing so an accidental press does not silently replace my mapping.
+- **CTRL-2:** As a MIDI drummer, I want note number, velocity, threshold, port,
+  and connection state visible so I can separate device problems from mapping
+  problems.
+- **CTRL-3:** As a player using one physical source for two logical channels,
+  I want an explicit Add shared versus Move here choice and visible shared
+  markers so fan-out is intentional.
+- **CTRL-4:** As a profile user, I want switching, closing, revert, deletion,
+  and write failure to protect or clearly account for unsaved work.
+- **LANE-1:** As a player, I want list selection and playfield manipulation to
+  stay synchronized so I know which lane I am changing.
+- **LANE-2:** As a player, I want hide, restore, merge, split, width, and order
+  actions to remain reversible before I save.
+- **LANE-3:** As a keyboard/pad-only operator, I want every lane-edit command
+  reachable without a mouse. This is currently unsupported because the visible
+  Lanes panel does not drive its internal keyboard/pad reducer.
+
+Research must observe whether players understand that Controls has two
+independent profile contexts, whether `Add shared` predicts runtime fan-out,
+whether the preview pad edges look draggable, whether `Hide lane` is mistaken
+for disabling judgment, and whether dirty/profile states remain understandable
+when switching tabs or closing. Capture studies should also observe whether the
+immediate lane response on confirmation reads as useful verification or as an
+unexpected extra hit.
 
 ### Shared performance, media, and result contracts
 
@@ -275,7 +328,8 @@ These motivations and concerns are hypotheses until validated with players.
 | Import | Add playable content | Press `F6` and mouse-select files, or mouse-drag files onto the window | Valid ZIP/7z imports rescan; invalid, unsafe, duplicate, unsupported, and filtered outcomes differ | Does the player choose the correct recovery for each notification? |
 | Learn navigation | Move through songs and difficulties | Press `Up`/`Down` for songs, `Left`/`Right` for difficulty, type to search, `Tab` to sort, `Enter` to play, `Shift+Enter` for practice, and `Esc` to go back | Entire song-selection workflow is reachable | Do players try to click the wheel before reading keyboard hints? |
 | Verify timing | Make keyboard hits feel synchronized | Press `F1`, click `Calibrate`, press configured drum keys 12 times, then press `Enter` to apply or `Esc` to cancel; alternatively click/drag the Input Offset slider | Input offset can be changed | Can the player understand input offset versus BGM offset? |
-| Learn keys | Identify drum mappings | Begin with a working default or preconfigured map; configuration UI is out of scope | Keyboard can trigger all logical drum channels after readiness is established | How many keys can a new player remember without external reference? |
+| Learn and edit keys | Identify drum mappings | Press `F1`, click Controls and Keyboard, inspect rows; click `+`, press a key, review it, choose Add shared/Move here if needed, then confirm | Defaults and custom keyboard profiles are visible and editable | Do source chips and lane highlights create a usable mental map? |
+| Arrange lanes | Make the playfield match preference | Click Lanes, select a profile, then click rows/pads; drag preview pads/edges and use detail-card add/split/hide/restore actions; Save As if editing a built-in | Lane profiles and live draft preview are reachable with mouse | Do players discover preview dragging without instruction? |
 | Load chart | Wait, cancel a mistake, or recover from failure | Observe progress; use `Esc` to cancel | Cancel/failure returns to songs | Does the player understand why loading ended? |
 | First play | Complete a chart | Select difficulty and press `Enter` | Normal performance, clear/fail banner, and results are reachable | Is the HUD understandable without prior DTX knowledge? |
 | Save result | Preserve the first play | Leave Results with `Enter` or `Esc` | Leaving Results triggers a save attempt | Does the player remain on Results and close the app before the attempt occurs? |
@@ -292,6 +346,10 @@ These motivations and concerns are hypotheses until validated with players.
   explain their effect so I do not compensate in the wrong direction.
 - **KM-F5:** As a first-time player, I want to know when result persistence is
   attempted and whether it succeeded so I do not unknowingly lose a play.
+- **KM-F6:** As a new keyboard player, I want binding capture, sharing, and
+  profile saving to make the resulting gameplay keys unambiguous.
+- **KM-F7:** As a mouse user, I want lane reorder and resize targets to look
+  draggable and remain reversible before saving.
 
 ### Returning normal-play journey
 
@@ -381,7 +439,9 @@ Possible concerns:
 
 | Stage | Player intent | Current action/path | Outcome | Research focus |
 |---|---|---|---|---|
-| Readiness | Begin with a connected, mapped kit | Complete configuration before the evaluated journey; configuration UI is out of scope | Runtime attempts automatic connection/reconnection after readiness | How should readiness be confirmed without evaluating the replaced UI? |
+| Readiness | Begin with a connected, mapped kit | Press `F1`, click Controls then MIDI; select/rescan a port, strike pads to inspect activity, click threshold arrows, and inspect note chips | Connection, port, velocity, threshold, mapping, and profiles are visible | Can the player distinguish disconnected, below-threshold, and unbound states? |
+| Map a pad | Assign or correct a note | Click `+` on a channel, hit the pad, review note/velocity, choose Add shared or Move here if needed, then hit it again, press `Enter`, or click Confirm | MIDI draft updates without stealing unless Move here is chosen | Does the two-hit shortcut feel intentional or like a double trigger? |
+| Save the setup | Reuse it next session | Click Save As for a built-in, type a name, and submit; later click Save after edits | User MIDI profile becomes active if the registry write succeeds | Is the separation between MIDI and Keyboard profiles understood? |
 | Verify play input | Confirm prepared pads produce gameplay input | Strike mapped pads during a readiness check or chart | Hits above the prepared threshold produce gameplay input | Can the player recognize loss of readiness from routine game feedback? |
 | Calibrate | Align physical strike and judgment | Press keyboard `F1`, click `Calibrate`, hit configured pads 12 times, then press `Enter` to apply or `Esc` to cancel | Suggested input offset can be applied | Does a pad drummer produce stable enough samples? |
 | Learn menu grammar | Navigate without immediately reaching for keyboard | Hit HH/CY to move, BD to enter/confirm, SD to go back, and FT to start practice at difficulty level | Title, song wheel, difficulty, play, practice, results, and open pause are partially navigable | Are lane-to-command associations memorable? |
@@ -399,6 +459,8 @@ Possible concerns:
   trustworthy result before my first scored play.
 - **NM-F4:** As a player with computer access, I want keyboard/mouse fallback to
   remain available whenever pad navigation does not cover an action.
+- **NM-F5:** As a MIDI player, I want below-threshold hits and source conflicts
+  explained before commit so setup mistakes do not appear as gameplay misses.
 
 ### Returning normal-play journey
 
@@ -492,7 +554,8 @@ alone. The player must temporarily access the computer or receive help.
 | Stage | Required behavior | Current reality | Classification |
 |---|---|---|---|
 | Add songs | Import or locate content | Press `F6` and click one or more archives, or mouse-drag archives onto the window | Computer-access setup task |
-| Configure input | Establish working mappings/device | Complete this before evaluation; its UI is out of scope | Computer-access setup task |
+| Configure input | Establish working mappings/device | At the computer, open Controls, click MIDI, choose/rescan port, adjust threshold, capture pads, resolve shared/move conflicts, and save a user profile | Computer-access setup task; not operable from distant kit alone |
+| Configure lanes | Establish readable order/width | At the computer, open Lanes, select or create a profile, use mouse preview/detail actions, and save | Computer-access setup task; mouse required |
 | Calibrate | Start and accept calibration | Press `F1`, click `Calibrate`, hit pads 12 times, then press `Enter` to apply or `Esc` to cancel | Computer-access setup task |
 | Verify distant readability | Read title, wheel, difficulty, HUD, pause, results | Not verified at real room distance | Research gap |
 | Learn pad commands | Associate pads with menu verbs | Contextual legends appear when MIDI is connected | Potentially kit-accessible |
@@ -628,6 +691,8 @@ Legend:
 | Exit practice normally | Yes | Fallback | No |
 | Calibrate | Yes | Fallback plus kit taps | Setup only |
 | Change Gameplay/Audio/Drums/System after editor opens | Yes | Yes, pads or fallback | Setup only |
+| Edit Keyboard/MIDI profiles and bindings | Yes, mouse-led | Computer fallback plus pad capture | Setup only |
+| Edit lane profiles/order/width/channels | Yes, mouse required | Computer fallback | Setup only |
 | Customize HUD | Yes | Fallback | Setup only |
 | Skip clear/fail banner | Yes | Keyboard fallback | No, wait for auto-advance |
 | Confirm result save success | No visible confirmation | No visible confirmation | No visible confirmation |
@@ -636,7 +701,48 @@ Legend:
 ### Exact player-action inventory
 
 This inventory states what the player must physically do in each current
-journey. Controls and Lanes configuration actions are intentionally omitted.
+journey, including the redesigned Controls and Lanes workflows.
+
+#### Controls and profile setup
+
+| Intent | Keyboard/mouse action | MIDI action |
+|---|---|---|
+| Open Controls | Press `F1`, then click Controls | No pad action to open/enter it |
+| Choose source/profile | Click Keyboard or MIDI; click profile name and a dropdown item | No pad action |
+| Inspect a binding | Click channel row or hover a shared chip | Hit an already mapped pad to select its channel |
+| Add keyboard source | Click Keyboard and channel `+`; press key; use `Left`/`Right` or click shared/move choice; press `Enter` or click Confirm | No pad action |
+| Add MIDI source | Click MIDI and channel `+`; hit pad; use keyboard/mouse for shared/move choice; press `Enter`/click Confirm | Hit candidate; hit same note again to confirm, or a different note to replace it |
+| Cancel capture | Press `Esc` or click Cancel | No dedicated cancel hit |
+| Remove one source claim | Click chip `x` | No pad action |
+| Choose/rescan port | Click port arrows or Rescan | Strike pads only to verify input |
+| Change threshold | Click the threshold previous/next buttons; each click changes it by one | Strike pads to observe velocity/below-threshold feedback |
+| Reset bindings/device | Click Reset tab, then Confirm reset; this currently affects both source types and device fields | No pad action |
+| Save current user profile | Click Save | No pad action |
+| Create/rename profile | Click Save As or overflow Rename; type/edit name; press `Enter` or click OK | No pad action |
+| Revert/delete user profile | Click overflow Revert/Delete and complete dialog | No pad action |
+| Resolve dirty switch | Click Cancel, Discard, or Save in the guard | No pad action |
+
+Controls is not a keyboard-only or pad-only surface: mouse clicks are required
+to enter the custom panel controls. Keyboard participates in capture, choice,
+confirmation, and profile-name entry; a MIDI pad participates only while MIDI
+capture or input inspection is active.
+
+#### Lane profiles and arrangement
+
+| Intent | Mouse action | Keyboard/MIDI action |
+|---|---|---|
+| Open/select lane profile | Click Lanes, profile name, then a dropdown item | No wired keyboard/pad content navigation |
+| Select lane | Click row or playfield preview pad | No wired action |
+| Reorder lane | Drag preview pad body horizontally and release near target | No wired action |
+| Resize lane | Drag preview pad edge or detail Width slider | No wired action |
+| Merge channel | Click `+ add`, then click an available channel | No wired action |
+| Split secondary | Click its `x` chip | No wired action |
+| Hide/restore | Click Hide lane or a channel in Hidden | No wired action |
+| Undo/redo edit | Not required | Press `Ctrl+Z` / `Ctrl+Y` |
+| Save/manage profile | Click Save, Save As, selector, or overflow actions and complete dialogs | Keyboard can type/submit/cancel only after a mouse opens a dialog |
+
+The Lanes profile and preview update immediately as a draft. A distant-kit
+player must complete this entire workflow during computer-access setup.
 
 #### Startup, title, and exit
 

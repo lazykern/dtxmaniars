@@ -1,6 +1,6 @@
 # DTXManiaRS Player Manual: Current Behavior
 
-Date: 2026-07-11
+Date: 2026-07-12
 Purpose: factual player-facing baseline for later behavioral research and UX evaluation
 
 ## 1. Scope and evidence
@@ -605,7 +605,8 @@ is not otherwise explained through a dedicated recovery screen.
 
 Customize has an `Esc` hierarchy:
 
-- During keyboard binding capture, `Esc` cancels capture without closing.
+- During Keyboard or MIDI binding listening/confirmation, `Esc` cancels capture
+  without closing. The modal's `Cancel` button does the same.
 - During calibration, `Esc` cancels calibration without closing.
 - On Widgets with a widget selected, the first `Esc` deselects it.
 - A later `Esc`, or `Esc` elsewhere, requests closing.
@@ -641,8 +642,9 @@ Customize has been opened with a keyboard:
 Pad navigation is suspended while binding capture or input calibration owns raw
 drum hits.
 
-**Limited:** pads cannot enter the Controls, Lanes, or Widgets content. Those
-tabs require keyboard and/or mouse interaction.
+**Limited:** pads cannot enter the Controls, Lanes, or Widgets content. Controls
+and Lanes are currently mouse-led despite having keyboard/pad navigation logic
+in their internal model; that navigation is not wired to the visible panels.
 
 ## 14. Gameplay settings
 
@@ -727,7 +729,14 @@ Performance Info can also be toggled with `F11` during play.
 
 ## 18. Controls and MIDI setup
 
-The Controls tab shows MIDI device controls and channel bindings.
+The redesigned Controls tab has separate `Keyboard` and `MIDI` segments. Each
+segment has its own active profile, draft, dirty indicator, and binding list.
+Click the segment name to switch which source type is being edited.
+
+The selected channel row and the corresponding lane in the live playfield
+preview highlight together. Clicking a row selects it. Striking an already
+mapped MIDI pad also selects one of its assigned channels. Hovering a shared
+binding chip highlights all of that source's owning lanes.
 
 ### MIDI device actions
 
@@ -741,7 +750,7 @@ The game attempts automatic connection and reconnection. A saved MIDI device is
 restored when available; port matching can fall back to a matching or available
 device.
 
-The Controls tab includes a velocity meter. Its fill briefly shows the latest
+The MIDI segment includes a velocity meter. Its fill briefly shows the latest
 MIDI velocity, a marker shows the current threshold, and a below-threshold hit
 uses an amber indication. The fill disappears roughly 150 ms after the hit. A
 mapped hardware MIDI hit also selects its assigned channel for inspection and
@@ -749,20 +758,45 @@ spatial highlighting.
 
 ### Editing bindings
 
-Each drum channel can show keyboard keys and MIDI notes as binding chips. The
-player can remove a binding, add a binding, or reset the tab.
+Each channel row shows only the active segment's key or note chips. A shared
+marker indicates that one source is assigned to more than one channel. A row
+with no source in the active segment is warning-tinted and says `no binding`.
 
-The visible `+` action currently starts keyboard capture. Press the desired
-key. `Esc`, `Tab`, function keys `F1` through `F12`, and modified key
-combinations are reserved and cannot be captured as drum bindings.
+To add a keyboard binding:
 
-The binding panel can display and remove existing MIDI-note chips, configure
-the device, and show incoming activity.
+1. Click `Keyboard`.
+2. Click `+` on the target channel.
+3. Press the desired unmodified key.
+4. Review the arrived key in the modal.
+5. If the key is already used, click `Add shared` to keep both assignments or
+   `Move here` to remove the other assignments. `Left`/`Right` also switches
+   this choice.
+6. Click `Confirm` or press `Enter`. Click `Cancel` or press `Esc` to discard.
 
-**Unavailable:** starting MIDI-note capture from the current visible Controls
-panel. A Keyboard/MIDI segment model and MIDI conflict confirmation behavior
-exist behind the panel, but no visible control switches the `+` action from its
-default keyboard-capture mode.
+`Esc`, `Tab`, function keys `F1` through `F12`, and keys pressed with
+`Ctrl`, `Alt`, or `Super` are reserved and remain ignored while capture waits.
+
+To add a MIDI binding:
+
+1. Click `MIDI`.
+2. Click `+` on the target channel.
+3. Hit the desired pad. Only a new positive-velocity NoteOn after capture was
+   armed is accepted; a stale earlier hit is ignored.
+4. Review the arrived note number and velocity.
+5. Choose `Add shared` or `Move here` if another channel owns the note.
+6. Click `Confirm`, press `Enter`, or hit the same MIDI note again. `Esc` or
+   the modal's `Cancel` discards it. Hitting a different note replaces the
+   arrived candidate so the player can retry without reopening capture.
+
+The listening modal shows live MIDI note and velocity information. A hit at or
+below the configured threshold is shown as below threshold for diagnosis, but
+a new positive-velocity note can still be learned as a binding; the threshold
+blocks gameplay dispatch, not capture. Capture temporarily owns raw pad input,
+so pad navigation is suspended until it closes.
+
+Click a chip's `x` to remove only that channel's claim. Other owners of a
+shared source remain bound. At runtime, pressing one shared keyboard key or
+hitting one shared MIDI note generates a hit for every assigned channel.
 
 ### Controls-tab mouse actions
 
@@ -770,12 +804,13 @@ default keyboard-capture mode.
 |---|---|
 | Click previous/next beside Port | Cycle available MIDI input ports |
 | Click `Rescan` | Re-enumerate MIDI ports |
-| Click previous/next beside Velocity threshold | Decrease/increase threshold by 1 |
+| Click previous/next beside Velocity threshold | Decrease/increase threshold by 1, clamped from 0 to 127 |
+| Click `Keyboard` / `MIDI` | Switch the visible binding source and profile |
 | Click a channel row | Select that channel for inspection and spatial highlighting |
 | Click a binding chip's remove button | Remove that key or MIDI note |
-| Click `+` on a channel | Start keyboard capture for that channel |
-| Click `RESET TAB` | Open reset confirmation when bindings differ from defaults |
-| Click `CONFIRM` in reset prompt | Restore default bindings |
+| Click `+` on a channel | Start capture for the active Keyboard or MIDI segment |
+| Click `Reset tab` | Open reset confirmation |
+| Click `Confirm reset` | Restore the full composed defaults, including both source types and MIDI device fields |
 | Click `CANCEL` in reset prompt | Keep current bindings |
 
 Clicking a channel row selects it but does not perform the separate `+` or
@@ -800,14 +835,39 @@ remove actions.
 
 ### Input profiles
 
-The player data model includes separate keyboard and MIDI profiles with
-immutable built-in defaults. The built-ins are named `DTXMania default` and
-`General MIDI drums`.
+Keyboard and MIDI profiles are managed separately. Their immutable built-ins
+are `DTXMania default` and `General MIDI drums`.
 
-**Limited:** named profile operations such as Save As, Rename, Revert, Delete,
-and profile switching exist in player data, but the profile bar and dialogs are
-not visibly wired into the current Controls panel. The combined per-channel
-binding editor is the dependable current UI.
+The profile bar provides:
+
+- click the profile name to select a built-in or user profile;
+- `Save` to overwrite a dirty user profile;
+- `Save As` to enter a new profile name;
+- the overflow menu for `Save As` on built-ins, or `Rename`, `Revert`, and
+  `Delete` on user profiles; and
+- an amber dot when the current draft differs from its saved value.
+
+Built-ins cannot be overwritten, renamed, reverted, or deleted. Editing one
+requires Save As; closing with dirty built-in edits and choosing Save creates
+an automatically named copy. Name dialogs accept typed text and Backspace,
+`Enter`/`OK` submits, and `Esc`/`Cancel` closes without applying. Names are
+trimmed and limited to 48 characters. Blank names, control characters,
+reserved built-in names, and case-insensitive duplicates are rejected.
+
+When a captured key or MIDI note is confirmed while the live editor clock is
+ready, the game also emits one immediate hit on the target lane. The player may
+therefore see and hear that lane respond at the moment the binding is committed.
+
+Selecting another profile with unsaved edits asks whether to cancel, discard,
+or save before switching. Revert uses the same dirty-decision dialog. Deleting
+a user profile requires confirmation and falls back to the built-in default.
+Registry transaction failures appear below the profile bar and leave the
+current editor session available for another action.
+
+**Limited:** despite its label and placement inside one segment, `Reset tab`
+currently resets the complete combined binding/device state, not only the
+visible Keyboard or MIDI segment. This can discard changes outside the segment
+the player is looking at.
 
 ## 19. Lane arrangement
 
@@ -817,8 +877,13 @@ The player data includes these built-in lane arrangements:
 - NX Type-B
 - NX Type-D
 
-The current Lanes panel displays the active arrangement's name. Reachable
-editing actions include:
+The Lanes tab now exposes the active lane profile in the same profile bar used
+by Controls. The selector can switch among built-ins and saved user profiles;
+Save, Save As, Rename, Revert, Delete, dirty switching, and close protection
+follow the profile behavior described above.
+
+The panel contains slim visible-lane rows, a detail card for the selected lane,
+and a `Hidden` strip when any channels are unassigned. Reachable actions include:
 
 - reorder visible lanes;
 - change lane widths;
@@ -829,17 +894,31 @@ editing actions include:
 
 | Mouse action | Result |
 |---|---|
-| Click a lane's up/down button | Reorder that visible lane |
-| Drag a lane-width slider | Change that lane's width |
-| Click a lane merge button | Merge the lane into an adjacent displayed lane |
-| Click a secondary channel's split button | Give that channel its own lane again |
+| Click a lane row | Select it and open/update its detail card |
+| Click a pad in the playfield preview | Select its lane |
+| Drag the middle of a preview pad horizontally | Reorder that visible lane at drop |
+| Drag the left or right edge of a preview pad | Resize that lane continuously |
+| Drag the detail-card Width slider | Set width between the enforced minimum and maximum |
+| Click `+ add`, then a channel | Merge an unassigned or secondary channel into this lane |
+| Click `x` on a secondary-channel chip | Split it into its own visible lane |
+| Click `Hide lane` | Remove the displayed lane and place its channels in Hidden |
+| Click a channel in `Hidden` | Restore that channel as its own visible lane |
 
-Named lane profiles exist in player data with immutable built-ins.
+The primary channel is shown as fixed text in the detail card; only secondary
+chips can be split there. The add chooser does not offer another lane's primary
+channel, because moving it would leave that lane empty. Width edits clamp to a
+non-zero range. Drag operations and detail edits participate in layout
+undo/redo, and the preview updates immediately before the profile is saved.
+The final visible lane cannot be hidden. Hiding affects visual lane assignment,
+not logical judgment: a hidden channel can remain bound and its notes can still
+be hit and scored even though it has no displayed lane.
 
-**Limited:** the current Lanes workflow requires keyboard and mouse. The panel
-does not visibly provide built-in preset selection or named-profile management,
-so a player cannot switch to Classic, NX Type-B, or NX Type-D through the
-current panel. Pad navigation does not provide lane editing.
+**Limited:** lane rows themselves are selection-only, not drag handles. Lane
+reorder and edge resize require dragging the playfield preview, while other
+detail actions require clicking panel controls. The visible Lanes workflow is
+therefore mouse-dependent; keyboard/pad reorder and resize reducers exist but
+are not connected to player input. `Ctrl+Z`/`Ctrl+Y` can undo/redo edits, but
+profile Save/Save As still requires clicking the visible profile controls.
 
 ## 20. HUD widget layout
 
