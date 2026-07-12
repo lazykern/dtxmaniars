@@ -34,6 +34,10 @@ pub fn plugin(app: &mut App) {
             close_on_escape
                 .run_if(super::editor_open)
                 .run_if(not(super::bindings_capture::capture_active))
+                // Esc while the Lanes detail card is focused backs out one
+                // level (lanes_nav_consumer, ordered after this) instead of
+                // closing the surface.
+                .run_if(not(super::lanes_panel::lanes_detail_focus))
                 // Must observe CalibrationState before calibration flips it to
                 // Idle on the same Escape, else one Esc both cancels calibration
                 // and closes the surface.
@@ -259,7 +263,7 @@ fn should_deselect_on_escape(
 
 /// Esc: on Widgets, first press deselects; otherwise it closes the editor
 /// (pause is gated off while open).
-fn close_on_escape(
+pub(super) fn close_on_escape(
     keys: Res<ButtonInput<KeyCode>>,
     mut close_requests: MessageReader<super::EditorCloseRequest>,
     active: Res<super::tabs::ActiveTab>,

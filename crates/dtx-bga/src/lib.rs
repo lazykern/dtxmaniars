@@ -719,9 +719,10 @@ mod tests {
 
     #[test]
     fn image_layer_geometry_layer3_is_fullscreen() {
+        // Percent of the frame — the geometry is resolution-independent.
         assert_eq!(
             image_layer_geometry(BgaLayer::Layer3),
-            (0.0, 0.0, 1280.0, 720.0)
+            (0.0, 0.0, 100.0, 100.0)
         );
     }
 

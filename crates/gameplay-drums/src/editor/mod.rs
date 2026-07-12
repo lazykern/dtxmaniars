@@ -78,16 +78,28 @@ impl Default for PreviewState {
     }
 }
 
+/// Tab is shared: a TAP cycles the widget selection (`drag::cycle_widget_selection`),
+/// only a HOLD peeks. Gate the peek on the same `TAB_TAP_MAX_SECS` threshold the
+/// tap owner uses, else every tap flashes the chrome for a few frames.
 fn update_preview_state(
     open: Res<EditorOpen>,
     keys: Res<ButtonInput<KeyCode>>,
+    time: Res<Time>,
     active: Res<tabs::ActiveTab>,
     selection: Res<drag::Selection>,
+    mut pressed_at: Local<Option<f32>>,
     mut state: ResMut<PreviewState>,
 ) {
+    if keys.just_pressed(KeyCode::Tab) {
+        *pressed_at = Some(time.elapsed_secs());
+    }
+    if !keys.pressed(KeyCode::Tab) {
+        *pressed_at = None;
+    }
+    let held = pressed_at.is_some_and(|at| time.elapsed_secs() - at > drag::TAB_TAP_MAX_SECS);
     let next = PreviewState {
         open: open.0,
-        peeking: open.0 && keys.pressed(KeyCode::Tab),
+        peeking: open.0 && held,
         tab: active.0,
         has_inspector: active.0 == game_shell::CustomizeTab::Widgets && selection.0.is_some(),
     };
@@ -137,6 +149,7 @@ pub fn plugin(app: &mut App) {
             (
                 bindings_panel::plugin,
                 bindings_capture::plugin,
+                controls_panel::plugin,
                 bindings_spatial::plugin,
                 capture_modal::plugin,
                 drag::plugin,
@@ -825,6 +838,69 @@ mod tests {
 
         let session = &app.world().resource::<profile_state::CustomizeSession>().0;
         assert!(profile_state::dirty_profile_kinds(session).is_empty());
+    }
+
+    /// Tab is shared with `drag::cycle_widget_selection` (tap = cycle
+    /// selection): a tap must never flash the play-view peek, only a hold past
+    /// `TAB_TAP_MAX_SECS` may.
+    #[test]
+    fn tab_tap_never_peeks_but_a_hold_does() {
+        use std::time::Duration;
+
+        fn peeking(app: &App) -> bool {
+            app.world().resource::<PreviewState>().peeking
+        }
+        fn press_tab(app: &mut App) {
+            app.world_mut()
+                .resource_mut::<ButtonInput<KeyCode>>()
+                .press(KeyCode::Tab);
+            app.update();
+            // Bare App: no input plugin clears `just_pressed` between frames.
+            app.world_mut()
+                .resource_mut::<ButtonInput<KeyCode>>()
+                .clear();
+        }
+        fn advance(app: &mut App, ms: u64) {
+            app.world_mut()
+                .resource_mut::<Time>()
+                .advance_by(Duration::from_millis(ms));
+            app.update();
+        }
+
+        let mut app = App::new();
+        app.init_resource::<Time>()
+            .init_resource::<ButtonInput<KeyCode>>()
+            .init_resource::<tabs::ActiveTab>()
+            .init_resource::<drag::Selection>()
+            .init_resource::<PreviewState>()
+            .insert_resource(EditorOpen(true))
+            .add_systems(Update, update_preview_state);
+
+        // Tap: held well under the threshold, then released.
+        press_tab(&mut app);
+        assert!(!peeking(&app), "the press frame of a tap must not peek");
+        advance(&mut app, 100);
+        assert!(!peeking(&app), "a sub-threshold hold must not peek");
+        app.world_mut()
+            .resource_mut::<ButtonInput<KeyCode>>()
+            .release(KeyCode::Tab);
+        app.update();
+        assert!(!peeking(&app), "releasing a tap must not peek");
+
+        // Hold: the same key, held past the threshold, peeks.
+        app.world_mut()
+            .resource_mut::<ButtonInput<KeyCode>>()
+            .reset_all();
+        press_tab(&mut app);
+        advance(&mut app, 300);
+        assert!(peeking(&app), "a hold past TAB_TAP_MAX_SECS peeks");
+
+        // Release ends the peek and re-arms for the next tab.
+        app.world_mut()
+            .resource_mut::<ButtonInput<KeyCode>>()
+            .release(KeyCode::Tab);
+        app.update();
+        assert!(!peeking(&app), "release ends the peek");
     }
 
     #[test]

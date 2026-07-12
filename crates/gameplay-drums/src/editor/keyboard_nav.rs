@@ -33,6 +33,23 @@ pub fn pad_excluded(tab: CustomizeTab) -> bool {
     matches!(tab, CustomizeTab::Controls | CustomizeTab::Widgets)
 }
 
+/// True when a kit tab's OWN focus machine sits below the tab bar — the
+/// generic Rail-level ←/→ tab switch must yield there. Focus below the bar
+/// means the rail keys don't apply at all: some of those levels bind ←/→
+/// themselves (Controls' segment toggle, Lanes Detail's width), others (Lanes
+/// Rows) simply ignore them — either way a tab switch would be a surprise.
+pub fn subtab_focus_captured(
+    tab: CustomizeTab,
+    controls: super::controls_panel::ControlsFocus,
+    lanes: super::lanes_panel::LanesFocus,
+) -> bool {
+    match tab {
+        CustomizeTab::Controls => controls != super::controls_panel::ControlsFocus::TabBar,
+        CustomizeTab::Lanes => lanes != super::lanes_panel::LanesFocus::TabBar,
+        _ => false,
+    }
+}
+
 /// Can pads descend from the tab bar into this tab's rows?
 fn pad_can_enter(tab: CustomizeTab) -> bool {
     tab.is_settings() && !pad_excluded(tab)
@@ -71,7 +88,16 @@ pub(super) fn plugin(app: &mut App) {
                 // Keyboard/pad nav (incl. tab switching) is suppressed while a
                 // profile dialog is open, so nav can't change the active tab or
                 // dismiss the dialog underneath it.
-                .run_if(super::profile_dialog::profile_dialog_closed),
+                .run_if(super::profile_dialog::profile_dialog_closed)
+                // Same for the dirty-close guard: while it is up, arrows must
+                // not drive the panel underneath and Enter belongs to the
+                // dialog alone.
+                .run_if(super::profile_state::pending_close_none)
+                // And for an armed capture: its modal owns ←/→ (Shared/Move)
+                // and Enter. A MOUSE-armed capture leaves ControlsFocus on the
+                // TabBar, so `subtab_focus_captured` does NOT cover this — one
+                // ←/→ would toggle the modal choice AND switch tabs underneath.
+                .run_if(not(super::bindings_capture::capture_active)),
         );
 }
 
@@ -177,6 +203,8 @@ fn keyboard_emit_nav(
 
 fn settings_nav_consumer(
     mut actions: MessageReader<NavAction>,
+    controls_focus: Res<super::controls_panel::ControlsFocus>,
+    lanes_focus: Res<super::lanes_panel::LanesFocus>,
     mut active: ResMut<super::tabs::ActiveTab>,
     mut focused: ResMut<FocusedRow>,
     mut level: ResMut<NavLevel>,
@@ -197,6 +225,15 @@ fn settings_nav_consumer(
         };
     }
     for action in actions.read() {
+        // A kit tab whose own focus machine is below the tab bar owns
+        // Dec/Inc (segment toggle / width adjust) — don't also switch tabs.
+        if action.source == NavSource::Keyboard
+            && matches!(action.verb, NavVerb::Dec | NavVerb::Inc)
+            && matches!(*level, NavLevel::Rail)
+            && subtab_focus_captured(active.0, *controls_focus, *lanes_focus)
+        {
+            continue;
+        }
         let items = crate::editor::settings_data::settings_items(active.0);
         match action.source {
             NavSource::Keyboard => match &mut *level {
@@ -544,5 +581,103 @@ mod tests {
             (items[scroll].raw)(&base),
             "pad Back must revert to the adjust-entry snapshot"
         );
+    }
+
+    /// A capture armed by MOUSE (clicking `+` on a row) leaves `ControlsFocus`
+    /// on the TabBar, so `subtab_focus_captured` does not cover it: without the
+    /// plugin-level capture gate, the ←/→ that toggles the conflict modal's
+    /// Shared/Move choice ALSO switches the tab underneath it.
+    #[test]
+    fn armed_capture_gates_the_whole_nav_chain() {
+        use crate::editor::bindings_capture::{ArrivedChoice, CaptureState};
+
+        fn app_in_controls() -> App {
+            let mut app = App::new();
+            app.add_plugins(bevy::state::app::StatesPlugin)
+                .insert_state(game_shell::AppState::Performance)
+                .init_resource::<ButtonInput<KeyCode>>()
+                .init_resource::<crate::editor::controls_panel::ControlsFocus>()
+                .init_resource::<crate::editor::lanes_panel::LanesFocus>()
+                .init_resource::<crate::editor::tabs::ConfigDraft>()
+                .init_resource::<crate::editor::bindings_capture::CaptureState>()
+                .init_resource::<crate::editor::profile_dialog::ProfileDialogState>()
+                .init_resource::<crate::editor::profile_state::PendingCloseState>()
+                .insert_resource(crate::editor::EditorOpen(true))
+                .insert_resource(crate::editor::tabs::ActiveTab(CustomizeTab::Controls))
+                .add_message::<NavAction>()
+                .add_message::<crate::editor::EditorCloseRequest>()
+                .add_plugins(plugin);
+            app.update();
+            app
+        }
+        fn press_right(app: &mut App) -> CustomizeTab {
+            app.world_mut()
+                .resource_mut::<ButtonInput<KeyCode>>()
+                .press(KeyCode::ArrowRight);
+            app.update();
+            app.world().resource::<crate::editor::tabs::ActiveTab>().0
+        }
+
+        // Baseline: no capture, focus on the bar → ←/→ switches tabs.
+        let mut app = app_in_controls();
+        assert_ne!(
+            press_right(&mut app),
+            CustomizeTab::Controls,
+            "with no capture armed, Right switches tabs"
+        );
+
+        // Same press with a mouse-armed capture awaiting confirm: the modal owns
+        // ←/→, so the tab must not move.
+        let mut app = app_in_controls();
+        app.world_mut().insert_resource(CaptureState::KeyArrived {
+            channel: dtx_core::EChannel::Snare,
+            key: KeyCode::KeyQ,
+            owners: vec![dtx_core::EChannel::HighTom],
+            choice: ArrivedChoice::Shared,
+        });
+        assert_eq!(
+            press_right(&mut app),
+            CustomizeTab::Controls,
+            "an armed capture must gate the nav chain (no tab switch under the modal)"
+        );
+    }
+
+    #[test]
+    fn rail_tab_switch_yields_while_subtab_focus_is_below_tabbar() {
+        use crate::editor::controls_panel::ControlsFocus;
+        use crate::editor::lanes_panel::LanesFocus;
+        // Controls: only a focus below TabBar captures ←/→.
+        assert!(!subtab_focus_captured(
+            CustomizeTab::Controls,
+            ControlsFocus::TabBar,
+            LanesFocus::TabBar
+        ));
+        assert!(subtab_focus_captured(
+            CustomizeTab::Controls,
+            ControlsFocus::SegmentSelector,
+            LanesFocus::TabBar
+        ));
+        assert!(subtab_focus_captured(
+            CustomizeTab::Controls,
+            ControlsFocus::Rows,
+            LanesFocus::TabBar
+        ));
+        // Lanes: Rows/Detail capture; TabBar does not.
+        assert!(!subtab_focus_captured(
+            CustomizeTab::Lanes,
+            ControlsFocus::TabBar,
+            LanesFocus::TabBar
+        ));
+        assert!(subtab_focus_captured(
+            CustomizeTab::Lanes,
+            ControlsFocus::TabBar,
+            LanesFocus::Detail
+        ));
+        // Settings tabs never capture, regardless of stale kit focus.
+        assert!(!subtab_focus_captured(
+            CustomizeTab::Gameplay,
+            ControlsFocus::Rows,
+            LanesFocus::Detail
+        ));
     }
 }

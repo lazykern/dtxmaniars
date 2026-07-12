@@ -79,7 +79,7 @@ pub fn edge_width(current_px: f32, dx: f32) -> f32 {
 
 /// Repeatedly swap `from` toward `target` one step at a time — `reorder_lane`
 /// only swaps adjacent lanes, so an arbitrary drop index walks there.
-fn move_lane_to(arr: &mut LaneArrangement, mut from: usize, target: usize) {
+pub(super) fn move_lane_to(arr: &mut LaneArrangement, mut from: usize, target: usize) {
     while from < target {
         dtx_layout::reorder_lane(arr, from, 1);
         from += 1;

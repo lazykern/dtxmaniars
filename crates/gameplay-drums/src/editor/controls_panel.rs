@@ -9,7 +9,12 @@
 use bevy::prelude::*;
 use dtx_core::EChannel;
 use dtx_layout::{lane_chips, LaneArrangement};
-use game_shell::NavVerb;
+use game_shell::{NavAction, NavSource, NavVerb};
+
+use super::bindings_capture::{CaptureState, SelectedChannel};
+use super::bindings_panel::BindingsRev;
+use crate::bindings::LiveBindings;
+use crate::lanes::Lanes;
 
 /// Channels in display order for Controls rows: display lanes left-to-right,
 /// primary channel first, remaining mapped channels in canonical
@@ -133,6 +138,166 @@ pub fn reduce_controls_nav(
             _ => (focus, segment),
         },
     }
+}
+
+/// Outcome of one Up/Down step through the Controls rows.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RowStep {
+    /// Up from the first row: focus returns to the segment selector.
+    ToSegmentSelector,
+    /// The row cursor lands on this channel.
+    Select(EChannel),
+    /// Nothing to do (Down on an empty row list).
+    None,
+}
+
+/// Step the row cursor through `channels` (the panel's display order). A
+/// missing or stale `current` clamps to the first channel; Up from the first
+/// row hands focus back to the segment selector (the reducer's Rows+Up arm).
+pub fn step_channel(channels: &[EChannel], current: Option<EChannel>, dir: i32) -> RowStep {
+    if channels.is_empty() {
+        return if dir < 0 {
+            RowStep::ToSegmentSelector
+        } else {
+            RowStep::None
+        };
+    }
+    let Some(index) = current.and_then(|ch| channels.iter().position(|c| *c == ch)) else {
+        return RowStep::Select(channels[0]);
+    };
+    if dir < 0 {
+        if index == 0 {
+            RowStep::ToSegmentSelector
+        } else {
+            RowStep::Select(channels[index - 1])
+        }
+    } else {
+        RowStep::Select(channels[(index + 1).min(channels.len() - 1)])
+    }
+}
+
+/// Keyboard-only `NavAction` consumer for the Controls tab. Level moves go
+/// through the pure `reduce_controls_nav`; at `Rows` the consumer owns what
+/// the reducer doesn't model: the row cursor (`SelectedChannel` through the
+/// panel's display order), Enter → capture arming, Backspace → delete the
+/// last binding of the selected channel in the active segment.
+///
+/// Ordered `.after(capture_binding)`: Enter is NOT a reserved capture key,
+/// so the press that arms a capture must already be stale when the capture
+/// machine next reads the keyboard — and the Enter that commits an Arrived
+/// state must not re-enter here and instantly re-arm (covered by the
+/// `capture.is_changed()` skip).
+#[allow(clippy::too_many_arguments)]
+pub(super) fn controls_nav_consumer(
+    mut actions: MessageReader<NavAction>,
+    keys: Res<ButtonInput<KeyCode>>,
+    active: Res<super::tabs::ActiveTab>,
+    lanes: Res<Lanes>,
+    mut capture: ResMut<CaptureState>,
+    mut focus: ResMut<ControlsFocus>,
+    mut segment: ResMut<ControlsSegment>,
+    mut selected: ResMut<SelectedChannel>,
+    mut live: ResMut<LiveBindings>,
+    mut rev: ResMut<BindingsRev>,
+) {
+    if active.0 != game_shell::CustomizeTab::Controls {
+        return; // own reader: unread messages just expire
+    }
+    if active.is_changed() && *focus != ControlsFocus::TabBar {
+        // Fresh visit (tab switched here): keyboard focus restarts at the bar.
+        *focus = ControlsFocus::TabBar;
+    }
+    // Only the state matters, never `capture.is_changed()`: `capture_binding`
+    // does a `mem::take` on `CaptureState` every frame, so the change tick is
+    // always set and testing it would dead-lock this consumer forever. The
+    // two self-capture hazards are already closed elsewhere — we run
+    // `.after(capture_binding)`, and `keyboard_emit_nav` is gated on
+    // `not(capture_active)` so a capture keypress emits no verb at all.
+    if !matches!(*capture, CaptureState::Idle) {
+        actions.clear();
+        return;
+    }
+    let channels = super::bindings_panel::bindable_channels_in_order(&lanes.0);
+    // Backspace is not a NavVerb — read it directly, Rows level only.
+    if *focus == ControlsFocus::Rows && keys.just_pressed(KeyCode::Backspace) {
+        if let Some(channel) = selected.0 {
+            if let Some(index) =
+                super::bindings_panel::last_segment_source_index(&live.0, channel, *segment)
+            {
+                if let Some(sources) = live.0.map.get_mut(&channel) {
+                    sources.remove(index);
+                    rev.0 = rev.0.wrapping_add(1);
+                }
+            }
+        }
+    }
+    for action in actions.read() {
+        if action.source != NavSource::Keyboard {
+            continue;
+        }
+        match (*focus, action.verb) {
+            (ControlsFocus::Rows, NavVerb::Up) | (ControlsFocus::Rows, NavVerb::Down) => {
+                let dir = if action.verb == NavVerb::Up { -1 } else { 1 };
+                match step_channel(&channels, selected.0, dir) {
+                    RowStep::ToSegmentSelector => {
+                        let (next_focus, next_segment) =
+                            reduce_controls_nav(*focus, *segment, NavVerb::Up);
+                        if *focus != next_focus {
+                            *focus = next_focus;
+                        }
+                        if *segment != next_segment {
+                            *segment = next_segment;
+                        }
+                    }
+                    RowStep::Select(channel) => {
+                        if selected.0 != Some(channel) {
+                            selected.0 = Some(channel);
+                        }
+                    }
+                    RowStep::None => {}
+                }
+            }
+            (ControlsFocus::Rows, NavVerb::Confirm) => {
+                if let Some(channel) = selected.0.filter(|ch| channels.contains(ch)) {
+                    *capture = match *segment {
+                        ControlsSegment::Keyboard => CaptureState::Keyboard(channel),
+                        ControlsSegment::Midi => CaptureState::Midi(channel),
+                    };
+                    actions.clear();
+                    return; // the capture flow owns input from here
+                }
+            }
+            _ => {
+                let (next_focus, next_segment) = reduce_controls_nav(*focus, *segment, action.verb);
+                let entered_rows =
+                    *focus != ControlsFocus::Rows && next_focus == ControlsFocus::Rows;
+                if *focus != next_focus {
+                    *focus = next_focus;
+                }
+                if *segment != next_segment {
+                    *segment = next_segment;
+                }
+                if entered_rows && !selected.0.is_some_and(|ch| channels.contains(&ch)) {
+                    // Seed the row cursor so Enter/Backspace always target a row.
+                    if let Some(first) = channels.first() {
+                        selected.0 = Some(*first);
+                    }
+                }
+            }
+        }
+    }
+}
+
+pub(super) fn plugin(app: &mut App) {
+    app.add_systems(
+        Update,
+        controls_nav_consumer
+            .after(super::bindings_capture::capture_binding)
+            .run_if(in_state(game_shell::AppState::Performance))
+            .run_if(super::editor_open)
+            .run_if(super::profile_dialog::profile_dialog_closed)
+            .run_if(super::profile_state::pending_close_none),
+    );
 }
 
 #[cfg(test)]
@@ -272,6 +437,195 @@ mod tests {
         let (focus, segment) = reduce_controls_nav(focus, ControlsSegment::Midi, NavVerb::Up);
         assert_eq!(focus, ControlsFocus::TabBar);
         assert_eq!(segment, ControlsSegment::Midi, "segment survives leaving");
+    }
+
+    #[test]
+    fn row_step_walks_display_order_and_hands_off_at_top() {
+        use dtx_core::EChannel;
+        let chs = [EChannel::LeftCymbal, EChannel::HiHatClose, EChannel::Snare];
+        // Stale / missing selection clamps to the first channel.
+        assert_eq!(
+            step_channel(&chs, None, 1),
+            RowStep::Select(EChannel::LeftCymbal)
+        );
+        assert_eq!(
+            step_channel(&chs, Some(EChannel::Cymbal), -1),
+            RowStep::Select(EChannel::LeftCymbal),
+            "channel not in display order clamps to first"
+        );
+        // Down walks and clamps at the bottom.
+        assert_eq!(
+            step_channel(&chs, Some(EChannel::LeftCymbal), 1),
+            RowStep::Select(EChannel::HiHatClose)
+        );
+        assert_eq!(
+            step_channel(&chs, Some(EChannel::Snare), 1),
+            RowStep::Select(EChannel::Snare)
+        );
+        // Up from the first row returns focus to the segment selector.
+        assert_eq!(
+            step_channel(&chs, Some(EChannel::HiHatClose), -1),
+            RowStep::Select(EChannel::LeftCymbal)
+        );
+        assert_eq!(
+            step_channel(&chs, Some(EChannel::LeftCymbal), -1),
+            RowStep::ToSegmentSelector
+        );
+        // Empty list: Up hands off, Down does nothing.
+        assert_eq!(step_channel(&[], None, -1), RowStep::ToSegmentSelector);
+        assert_eq!(step_channel(&[], None, 1), RowStep::None);
+    }
+
+    #[test]
+    fn keyboard_descends_arms_capture_and_deletes_last_binding() {
+        use crate::editor::bindings_capture::{CaptureState, SelectedChannel};
+        use crate::editor::bindings_panel::BindingsRev;
+        use bevy::prelude::*;
+        use dtx_core::EChannel;
+        use game_shell::{NavAction, NavSource};
+
+        let mut app = App::new();
+        app.init_resource::<ButtonInput<KeyCode>>()
+            .init_resource::<ControlsFocus>()
+            .init_resource::<ControlsSegment>()
+            .init_resource::<CaptureState>()
+            .init_resource::<SelectedChannel>()
+            .init_resource::<BindingsRev>()
+            .init_resource::<crate::bindings::LiveBindings>()
+            .init_resource::<crate::lanes::Lanes>()
+            .insert_resource(crate::editor::tabs::ActiveTab(
+                game_shell::CustomizeTab::Controls,
+            ))
+            .add_message::<NavAction>()
+            .add_systems(Update, controls_nav_consumer);
+        // First update flushes the ActiveTab insertion's change tick.
+        app.update();
+
+        fn nav(app: &mut App, verb: NavVerb) {
+            app.world_mut()
+                .resource_mut::<Messages<NavAction>>()
+                .write(NavAction {
+                    verb,
+                    source: NavSource::Keyboard,
+                    coarse: false,
+                });
+            app.update();
+        }
+
+        nav(&mut app, NavVerb::Down);
+        assert_eq!(
+            *app.world().resource::<ControlsFocus>(),
+            ControlsFocus::SegmentSelector
+        );
+        nav(&mut app, NavVerb::Down);
+        assert_eq!(
+            *app.world().resource::<ControlsFocus>(),
+            ControlsFocus::Rows
+        );
+        assert_eq!(
+            app.world().resource::<SelectedChannel>().0,
+            Some(EChannel::LeftCymbal),
+            "entering Rows seeds the cursor with the first display channel"
+        );
+        nav(&mut app, NavVerb::Down);
+        assert_eq!(
+            app.world().resource::<SelectedChannel>().0,
+            Some(EChannel::HiHatClose)
+        );
+
+        // Backspace deletes the LAST keyboard source of the selected channel.
+        let before = app
+            .world()
+            .resource::<crate::bindings::LiveBindings>()
+            .0
+            .map
+            .get(&EChannel::HiHatClose)
+            .map(Vec::len)
+            .expect("HH has default bindings");
+        app.world_mut()
+            .resource_mut::<ButtonInput<KeyCode>>()
+            .press(KeyCode::Backspace);
+        app.update();
+        app.world_mut()
+            .resource_mut::<ButtonInput<KeyCode>>()
+            .clear();
+        let after = app
+            .world()
+            .resource::<crate::bindings::LiveBindings>()
+            .0
+            .map
+            .get(&EChannel::HiHatClose)
+            .map(Vec::len)
+            .expect("HH row still present");
+        assert_eq!(after, before - 1, "one keyboard source removed");
+        assert_eq!(
+            app.world().resource::<BindingsRev>().0,
+            1,
+            "repaint requested"
+        );
+
+        // Enter arms keyboard capture for the selected channel.
+        nav(&mut app, NavVerb::Confirm);
+        assert!(matches!(
+            *app.world().resource::<CaptureState>(),
+            CaptureState::Keyboard(EChannel::HiHatClose)
+        ));
+
+        // While the capture is armed the consumer is inert.
+        nav(&mut app, NavVerb::Down);
+        assert_eq!(
+            app.world().resource::<SelectedChannel>().0,
+            Some(EChannel::HiHatClose),
+            "capture owns input; row cursor frozen"
+        );
+    }
+
+    #[test]
+    fn consumer_survives_capture_state_touched_every_frame() {
+        // Production `capture_binding` does a `mem::take` on `CaptureState`
+        // every frame, so its change tick is permanently set. A consumer that
+        // bailed on `capture.is_changed()` would be dead in the real app while
+        // still passing every test that leaves the resource alone.
+        use crate::editor::bindings_capture::{CaptureState, SelectedChannel};
+        use crate::editor::bindings_panel::BindingsRev;
+        use bevy::prelude::*;
+        use game_shell::{NavAction, NavSource};
+
+        fn touch_capture(mut capture: ResMut<CaptureState>) {
+            let taken = std::mem::take(&mut *capture);
+            *capture = taken;
+        }
+
+        let mut app = App::new();
+        app.init_resource::<ButtonInput<KeyCode>>()
+            .init_resource::<ControlsFocus>()
+            .init_resource::<ControlsSegment>()
+            .init_resource::<CaptureState>()
+            .init_resource::<SelectedChannel>()
+            .init_resource::<BindingsRev>()
+            .init_resource::<crate::bindings::LiveBindings>()
+            .init_resource::<crate::lanes::Lanes>()
+            .insert_resource(crate::editor::tabs::ActiveTab(
+                game_shell::CustomizeTab::Controls,
+            ))
+            .add_message::<NavAction>()
+            .add_systems(Update, (touch_capture, controls_nav_consumer).chain());
+        app.update();
+
+        app.world_mut()
+            .resource_mut::<Messages<NavAction>>()
+            .write(NavAction {
+                verb: NavVerb::Down,
+                source: NavSource::Keyboard,
+                coarse: false,
+            });
+        app.update();
+
+        assert_eq!(
+            *app.world().resource::<ControlsFocus>(),
+            ControlsFocus::SegmentSelector,
+            "a permanently-changed CaptureState must not freeze the consumer"
+        );
     }
 
     #[test]
