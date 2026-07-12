@@ -4,8 +4,9 @@
 //! Fixed overlay — not a dtx-layout widget.
 
 use bevy::prelude::*;
-use dtx_ui::theme::Theme;
+use dtx_ui::theme::{Theme, REF_HEIGHT, REF_WIDTH};
 use dtx_ui::widget::density_strip::{spawn_density_strip, time_to_pct};
+use dtx_ui::widget::hud_ref::{scaled_font, HudRefRect};
 use game_shell::PauseState;
 
 use super::format_chart_time;
@@ -13,6 +14,32 @@ use crate::practice::session::{preroll_target, PracticeSession};
 use crate::resources::GameplayClock;
 use crate::seek::SeekToChartTime;
 use crate::timeline::ChipTimeline;
+
+/// Rail geometry in ref-px (1280x720 reference space, scaled by
+/// `PlayfieldLayout::scale`). The rail sits flush with the ref right edge
+/// (identical to `right: 0` at 16:9) so it scales with the Now-Playing
+/// card by construction — no collision at 1080p, no overflow at 720p.
+pub const RAIL_REF_WIDTH: f32 = 300.0;
+pub const TIMELINE_REF_HEIGHT: f32 = 72.0;
+pub const RAIL_REF_LEFT: f32 = REF_WIDTH - RAIL_REF_WIDTH;
+pub const RAIL_REF_HEIGHT: f32 = REF_HEIGHT - TIMELINE_REF_HEIGHT;
+pub const RAIL_REF_PAD: f32 = 12.0;
+pub const ROW_REF_HEIGHT: f32 = 22.0;
+pub const ROW_REF_GAP: f32 = 4.0;
+pub const HEADER_REF_FONT: f32 = 11.0;
+pub const HEADER_REF_TOP_MARGIN: f32 = 8.0;
+pub const ROW_REF_FONT: f32 = 16.0;
+pub const SMALL_REF_FONT: f32 = 12.0;
+
+/// Fixed rail content height (headers + rows + gaps + padding) in px at
+/// `scale`. Attempt history + lane diagnosis render in the leftover band
+/// and are clipped by the rail container when they run long.
+pub fn rail_fixed_content_height(scale: f32) -> f32 {
+    let headers = 3.0 * (HEADER_REF_FONT * 1.2 + HEADER_REF_TOP_MARGIN);
+    let rows = RailItem::ORDER.len() as f32 * ROW_REF_HEIGHT;
+    let gaps = (3 + RailItem::ORDER.len() - 1) as f32 * ROW_REF_GAP;
+    (headers + rows + gaps + 2.0 * RAIL_REF_PAD) * scale
+}
 
 /// Root marker for the full practice HUD.
 #[derive(Component)]
@@ -35,8 +62,20 @@ pub struct AttemptHistoryText;
 #[derive(Component)]
 pub struct LaneDiagnosisText;
 
+/// Whole-row click target: click selects (and activates non-value rows).
+#[derive(Component)]
+pub struct RailRowButton(pub RailItem);
+
+/// ◂ / ▸ adjust glyph: `1` field is the direction (−1 / +1).
+#[derive(Component)]
+pub struct RailAdjustButton(pub RailItem, pub i8);
+
+/// Right-column value text of a row (rewritten every frame by `refresh_rail`).
+#[derive(Component)]
+pub struct RailValueText(pub RailItem);
+
 /// One selectable right-rail row.
-#[derive(Component, Clone, Copy, PartialEq, Eq)]
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum RailItem {
     Resume,
     Scrub,
@@ -313,77 +352,6 @@ pub fn activate_rail_item(
     }
 }
 
-pub fn rail_label(item: RailItem, session: &PracticeSession) -> String {
-    match item {
-        RailItem::Resume => "Resume".into(),
-        RailItem::Scrub => match session.transport.scrub_cursor_ms {
-            Some(ms) => format!("Scrub  ◀ {} ▶   (Enter: play here)", format_chart_time(ms)),
-            None => "Scrub  ◀ ▶".into(),
-        },
-        RailItem::RestartSection => "Restart section".into(),
-        RailItem::SetA => "Set A here".into(),
-        RailItem::SetB => "Set B here".into(),
-        RailItem::ClearLoop => "Clear loop".into(),
-        RailItem::Rate => {
-            if session.trainer.ramp.armed {
-                format!(
-                    "Tempo  ◀ x{:.2} ▶   (ramp x{:.2})",
-                    session.transport.user_tempo, session.trainer.ramp.step_tempo
-                )
-            } else {
-                format!("Tempo  ◀ x{:.2} ▶", session.transport.user_tempo)
-            }
-        }
-        RailItem::Snap => format!("Snap  ◀ {} ▶", session.transport.snap.label()),
-        RailItem::Preroll => format!("Pre-roll  ◀ {} ▶", session.transport.preroll.label()),
-        RailItem::Metronome => format!(
-            "Count-in  {}",
-            if session.transport.metronome {
-                "on"
-            } else {
-                "off"
-            }
-        ),
-        RailItem::RampArm => {
-            if session.trainer.ramp.armed {
-                let (cur, total) = crate::practice::ramp::ramp_step_index(
-                    &session.trainer.ramp_config,
-                    session.transport.user_tempo,
-                );
-                format!("Ramp  ON  ({cur}/{total})")
-            } else {
-                "Ramp  off  (Enter: arm)".into()
-            }
-        }
-        RailItem::RampStart => format!(
-            "Ramp start  ◀ x{:.2} ▶",
-            session.trainer.ramp_config.start_tempo
-        ),
-        RailItem::RampTarget => format!(
-            "Ramp target  ◀ x{:.2} ▶",
-            session.trainer.ramp_config.target_tempo
-        ),
-        RailItem::RampStep => format!("Ramp step  ◀ +{:.2} ▶", session.trainer.ramp_config.step),
-        RailItem::RampThreshold => {
-            format!(
-                "Ramp pass  ◀ ≥{:.0}% ▶",
-                session.trainer.ramp_config.threshold_pct
-            )
-        }
-        RailItem::RampStreak => format!(
-            "Ramp streak  ◀ ×{} ▶",
-            session.trainer.ramp_config.required_successes
-        ),
-        RailItem::WaitMode => {
-            if session.trainer.wait_enabled {
-                "Wait  ON".into()
-            } else {
-                "Wait  off  (Enter: on)".into()
-            }
-        }
-    }
-}
-
 /// Attempts for the current span only (armed A/B region, or the
 /// implicit whole-song span when none). `end_ms` = chart end (reserved
 /// for future span-end display; span identity is start-keyed).
@@ -467,9 +435,14 @@ pub fn spawn_full_hud(
     mut session: ResMut<PracticeSession>,
     clock: Res<GameplayClock>,
     timeline: Res<ChipTimeline>,
+    layout: Option<Res<crate::layout::PlayfieldLayout>>,
 ) {
     selection.0 = 0;
     session.transport.scrub_cursor_ms = Some(clock.current_ms);
+    // Missing layout (headless tests) falls back to identity — never panic.
+    let (scale, origin) = layout
+        .map(|l| (l.scale, l.origin))
+        .unwrap_or((1.0, Vec2::ZERO));
     let theme = Theme::default();
     commands
         .spawn((
@@ -481,187 +454,291 @@ pub fn spawn_full_hud(
                 ..default()
             },
             BackgroundColor(Color::srgba(0.0, 0.0, 0.0, 0.6)),
-            GlobalZIndex(1000),
+            GlobalZIndex(crate::ui_z::PRACTICE_FULL_HUD),
         ))
         .with_children(|root| {
-            // Right rail.
-            root.spawn((
-                Node {
-                    position_type: PositionType::Absolute,
-                    right: Val::Px(0.0),
-                    top: Val::Px(0.0),
-                    bottom: Val::Px(72.0),
-                    width: Val::Px(340.0),
-                    flex_direction: FlexDirection::Column,
-                    justify_content: JustifyContent::Center,
-                    row_gap: Val::Px(8.0),
-                    padding: UiRect::all(Val::Px(16.0)),
-                    ..default()
-                },
-                BackgroundColor(Color::srgba(0.0, 0.0, 0.0, 0.5)),
-            ))
-            .with_children(|rail| {
-                rail.spawn((
-                    Text::new("PRACTICE"),
-                    Theme::title_font(),
-                    TextColor(theme.text_primary),
-                    Node {
-                        margin: UiRect::bottom(Val::Px(12.0)),
-                        ..default()
-                    },
-                ));
-                for (idx, item) in RailItem::ORDER.iter().enumerate() {
-                    let header = match idx {
-                        0 => Some("TRANSPORT"),
-                        7 => Some("LOOP"),
-                        10 => Some("TRAINER"),
-                        _ => None,
-                    };
-                    if let Some(h) = header {
-                        rail.spawn((
-                            Text::new(h),
-                            Theme::label_font(),
-                            TextColor(theme.text_secondary.with_alpha(0.6)),
-                            Node {
-                                margin: UiRect::top(Val::Px(8.0)),
-                                ..default()
-                            },
-                        ));
-                    }
-                    rail.spawn((
-                        *item,
-                        Text::new(rail_label(*item, &session)),
-                        Theme::hud_font(),
-                        TextColor(theme.text_secondary),
-                    ));
-                }
-                rail.spawn((
-                    AttemptHistoryText,
-                    Text::new(attempt_history_text(&session, timeline.end_ms)),
-                    Theme::label_font(),
-                    TextColor(theme.text_secondary),
-                    Node {
-                        margin: UiRect::top(Val::Px(12.0)),
-                        ..default()
-                    },
-                ));
-                rail.spawn((
-                    LaneDiagnosisText,
-                    Text::new(crate::practice::diagnosis::diagnosis_text(
-                        &session.lane_diag,
-                    )),
-                    Theme::label_font(),
-                    TextColor(theme.text_secondary),
-                    Node {
-                        margin: UiRect::top(Val::Px(12.0)),
-                        ..default()
-                    },
-                ));
-            });
+            spawn_rail(root, &theme, scale, origin, &session, &timeline);
+            spawn_timeline_row(root, &theme, scale, origin, &clock, &timeline);
+        });
+}
 
-            // Bottom timeline row: time text + density strip.
-            root.spawn((
-                Node {
-                    position_type: PositionType::Absolute,
-                    left: Val::Px(0.0),
-                    right: Val::Px(0.0),
-                    bottom: Val::Px(0.0),
-                    height: Val::Px(72.0),
-                    flex_direction: FlexDirection::Row,
-                    align_items: AlignItems::Center,
-                    column_gap: Val::Px(12.0),
-                    padding: UiRect::horizontal(Val::Px(12.0)),
-                    ..default()
-                },
-                BackgroundColor(Color::srgba(0.0, 0.0, 0.0, 0.75)),
-            ))
-            .with_children(|row| {
-                for button in [
-                    TransportButton::PrevBar,
-                    TransportButton::Resume,
-                    TransportButton::NextBar,
-                ] {
-                    row.spawn((
-                        button,
+fn spawn_rail(
+    root: &mut ChildSpawnerCommands,
+    theme: &Theme,
+    scale: f32,
+    origin: Vec2,
+    session: &PracticeSession,
+    timeline: &ChipTimeline,
+) {
+    let rail_rect = HudRefRect::new(RAIL_REF_LEFT, 0.0, RAIL_REF_WIDTH, RAIL_REF_HEIGHT);
+    let mut rail_node = Node {
+        position_type: PositionType::Absolute,
+        flex_direction: FlexDirection::Column,
+        row_gap: Val::Px(ROW_REF_GAP * scale),
+        padding: UiRect::all(Val::Px(RAIL_REF_PAD * scale)),
+        // ponytail: worst-case history/diag overflow clips at the rail
+        // bottom; add a scroll view only if players actually hit it.
+        overflow: Overflow::clip_y(),
+        ..default()
+    };
+    rail_rect.apply(scale, origin, &mut rail_node);
+    root.spawn((
+        rail_rect,
+        rail_node,
+        BackgroundColor(Color::srgba(0.0, 0.0, 0.0, 0.5)),
+    ))
+    .with_children(|rail| {
+        for (idx, item) in RailItem::ORDER.iter().enumerate() {
+            let header = match idx {
+                0 => Some("TRANSPORT"),
+                7 => Some("LOOP"),
+                10 => Some("TRAINER"),
+                _ => None,
+            };
+            if let Some(h) = header {
+                rail.spawn((
+                    Text::new(h),
+                    scaled_font(scale, HEADER_REF_FONT),
+                    TextColor(theme.text_secondary),
+                    Node {
+                        margin: UiRect::top(Val::Px(HEADER_REF_TOP_MARGIN * scale)),
+                        flex_shrink: 0.0,
+                        ..default()
+                    },
+                ));
+            }
+            spawn_rail_row(rail, theme, scale, *item, session);
+        }
+        rail.spawn((
+            AttemptHistoryText,
+            Text::new(attempt_history_text(session, timeline.end_ms)),
+            scaled_font(scale, SMALL_REF_FONT),
+            TextColor(theme.text_secondary),
+            Node {
+                margin: UiRect::top(Val::Px(12.0 * scale)),
+                max_width: Val::Px((RAIL_REF_WIDTH - 2.0 * RAIL_REF_PAD) * scale),
+                flex_shrink: 0.0,
+                ..default()
+            },
+        ));
+        rail.spawn((
+            LaneDiagnosisText,
+            Text::new(crate::practice::diagnosis::diagnosis_text(
+                &session.lane_diag,
+            )),
+            scaled_font(scale, SMALL_REF_FONT),
+            TextColor(theme.text_secondary),
+            Node {
+                margin: UiRect::top(Val::Px(12.0 * scale)),
+                max_width: Val::Px((RAIL_REF_WIDTH - 2.0 * RAIL_REF_PAD) * scale),
+                flex_shrink: 0.0,
+                ..default()
+            },
+        ));
+    });
+}
+
+fn spawn_rail_row(
+    rail: &mut ChildSpawnerCommands,
+    theme: &Theme,
+    scale: f32,
+    item: RailItem,
+    session: &PracticeSession,
+) {
+    rail.spawn((
+        RailRowButton(item),
+        Button,
+        Node {
+            height: Val::Px(ROW_REF_HEIGHT * scale),
+            flex_direction: FlexDirection::Row,
+            justify_content: JustifyContent::SpaceBetween,
+            align_items: AlignItems::Center,
+            column_gap: Val::Px(6.0 * scale),
+            padding: UiRect::horizontal(Val::Px(4.0 * scale)),
+            flex_shrink: 0.0,
+            ..default()
+        },
+        BackgroundColor(Color::NONE),
+    ))
+    .with_children(|row| {
+        row.spawn((
+            Text::new(rail_row_label(item)),
+            scaled_font(scale, ROW_REF_FONT),
+            TextColor(theme.text_primary),
+        ));
+        if rail_row_kind(item) == RowKind::Value {
+            row.spawn(Node {
+                flex_direction: FlexDirection::Row,
+                align_items: AlignItems::Center,
+                column_gap: Val::Px(4.0 * scale),
+                ..default()
+            })
+            .with_children(|value| {
+                value
+                    .spawn((
+                        RailAdjustButton(item, -1),
                         Button,
                         Node {
-                            padding: UiRect::axes(Val::Px(10.0), Val::Px(4.0)),
+                            padding: UiRect::axes(Val::Px(4.0 * scale), Val::Px(1.0 * scale)),
                             ..default()
                         },
                         BackgroundColor(Color::srgba(1.0, 1.0, 1.0, 0.08)),
                     ))
                     .with_children(|b| {
                         b.spawn((
-                            Text::new(button.label()),
-                            Theme::label_font(),
-                            TextColor(theme.text_primary),
+                            Text::new("◂"),
+                            scaled_font(scale, ROW_REF_FONT),
+                            TextColor(theme.text_secondary),
                         ));
                     });
-                }
-                row.spawn((
-                    HudTimeText,
-                    Text::new(format_chart_time(clock.current_ms)),
-                    Theme::hud_font(),
+                value.spawn((
+                    RailValueText(item),
+                    Text::new(rail_row_value(item, session)),
+                    scaled_font(scale, ROW_REF_FONT),
                     TextColor(theme.text_primary),
                 ));
-                let strip = spawn_density_strip(row, &timeline.density, &theme);
-                row.commands().entity(strip).insert(FullHudTimelineStrip);
-                row.commands().entity(strip).with_children(|markers| {
-                    // Bar ticks along the top edge.
-                    for &bar in &timeline.bar_ms {
-                        markers.spawn((
-                            Node {
-                                position_type: PositionType::Absolute,
-                                left: Val::Percent(time_to_pct(bar, timeline.end_ms)),
-                                top: Val::Px(0.0),
-                                width: Val::Px(1.0),
-                                height: Val::Px(8.0),
-                                ..default()
-                            },
-                            BackgroundColor(theme.text_secondary.with_alpha(0.6)),
+                value
+                    .spawn((
+                        RailAdjustButton(item, 1),
+                        Button,
+                        Node {
+                            padding: UiRect::axes(Val::Px(4.0 * scale), Val::Px(1.0 * scale)),
+                            ..default()
+                        },
+                        BackgroundColor(Color::srgba(1.0, 1.0, 1.0, 0.08)),
+                    ))
+                    .with_children(|b| {
+                        b.spawn((
+                            Text::new("▸"),
+                            scaled_font(scale, ROW_REF_FONT),
+                            TextColor(theme.text_secondary),
                         ));
-                    }
-                    markers.spawn((
-                        HudLoopFill,
-                        Node {
-                            position_type: PositionType::Absolute,
-                            left: Val::Percent(0.0),
-                            top: Val::Px(0.0),
-                            bottom: Val::Px(0.0),
-                            width: Val::Percent(0.0),
-                            ..default()
-                        },
-                        BackgroundColor(Color::srgba(0.3, 0.9, 0.5, 0.25)),
-                        Visibility::Hidden,
-                    ));
-                    markers.spawn((
-                        HudPlayhead,
-                        Node {
-                            position_type: PositionType::Absolute,
-                            left: Val::Percent(0.0),
-                            top: Val::Px(0.0),
-                            bottom: Val::Px(0.0),
-                            width: Val::Px(2.0),
-                            ..default()
-                        },
-                        BackgroundColor(theme.accent),
-                    ));
-                    markers.spawn((
-                        HudScrubCursor,
-                        Node {
-                            position_type: PositionType::Absolute,
-                            left: Val::Percent(0.0),
-                            top: Val::Px(0.0),
-                            bottom: Val::Px(0.0),
-                            width: Val::Px(2.0),
-                            ..default()
-                        },
-                        BackgroundColor(Color::WHITE),
-                        Visibility::Hidden,
-                    ));
-                });
+                    });
             });
+        } else {
+            row.spawn((
+                RailValueText(item),
+                Text::new(rail_row_value(item, session)),
+                scaled_font(scale, ROW_REF_FONT),
+                TextColor(theme.text_primary),
+            ));
+        }
+    });
+}
+
+fn spawn_timeline_row(
+    root: &mut ChildSpawnerCommands,
+    theme: &Theme,
+    scale: f32,
+    origin: Vec2,
+    clock: &GameplayClock,
+    timeline: &ChipTimeline,
+) {
+    // Width 0 in the ref rect = "don't write width": the node stretches
+    // window-wide via left+right. Top-anchored at ref 648 so the rail's
+    // bottom edge and the timeline's top edge coincide at every scale.
+    let row_rect = HudRefRect::new(0.0, RAIL_REF_HEIGHT, 0.0, TIMELINE_REF_HEIGHT);
+    let mut row_node = Node {
+        position_type: PositionType::Absolute,
+        right: Val::Px(0.0),
+        flex_direction: FlexDirection::Row,
+        align_items: AlignItems::Center,
+        column_gap: Val::Px(12.0 * scale),
+        padding: UiRect::horizontal(Val::Px(12.0 * scale)),
+        ..default()
+    };
+    row_rect.apply(scale, origin, &mut row_node);
+    root.spawn((
+        row_rect,
+        row_node,
+        BackgroundColor(Color::srgba(0.0, 0.0, 0.0, 0.75)),
+    ))
+    .with_children(|row| {
+        for button in [
+            TransportButton::PrevBar,
+            TransportButton::Resume,
+            TransportButton::NextBar,
+        ] {
+            row.spawn((
+                button,
+                Button,
+                Node {
+                    padding: UiRect::axes(Val::Px(10.0 * scale), Val::Px(4.0 * scale)),
+                    ..default()
+                },
+                BackgroundColor(Color::srgba(1.0, 1.0, 1.0, 0.08)),
+            ))
+            .with_children(|b| {
+                b.spawn((
+                    Text::new(button.label()),
+                    scaled_font(scale, SMALL_REF_FONT),
+                    TextColor(theme.text_primary),
+                ));
+            });
+        }
+        row.spawn((
+            HudTimeText,
+            Text::new(format_chart_time(clock.current_ms)),
+            scaled_font(scale, ROW_REF_FONT),
+            TextColor(theme.text_primary),
+        ));
+        let strip = spawn_density_strip(row, &timeline.density, theme);
+        row.commands().entity(strip).insert(FullHudTimelineStrip);
+        row.commands().entity(strip).with_children(|markers| {
+            // Bar ticks along the top edge (1px hairline stays device-px).
+            for &bar in &timeline.bar_ms {
+                markers.spawn((
+                    Node {
+                        position_type: PositionType::Absolute,
+                        left: Val::Percent(time_to_pct(bar, timeline.end_ms)),
+                        top: Val::Px(0.0),
+                        width: Val::Px(1.0),
+                        height: Val::Px(8.0 * scale),
+                        ..default()
+                    },
+                    BackgroundColor(theme.text_secondary.with_alpha(0.6)),
+                ));
+            }
+            markers.spawn((
+                HudLoopFill,
+                Node {
+                    position_type: PositionType::Absolute,
+                    left: Val::Percent(0.0),
+                    top: Val::Px(0.0),
+                    bottom: Val::Px(0.0),
+                    width: Val::Percent(0.0),
+                    ..default()
+                },
+                BackgroundColor(Color::srgba(0.3, 0.9, 0.5, 0.25)),
+                Visibility::Hidden,
+            ));
+            markers.spawn((
+                HudPlayhead,
+                Node {
+                    position_type: PositionType::Absolute,
+                    left: Val::Percent(0.0),
+                    top: Val::Px(0.0),
+                    bottom: Val::Px(0.0),
+                    width: Val::Px(2.0),
+                    ..default()
+                },
+                BackgroundColor(theme.accent),
+            ));
+            markers.spawn((
+                HudScrubCursor,
+                Node {
+                    position_type: PositionType::Absolute,
+                    left: Val::Percent(0.0),
+                    top: Val::Px(0.0),
+                    bottom: Val::Px(0.0),
+                    width: Val::Px(2.0),
+                    ..default()
+                },
+                BackgroundColor(Color::WHITE),
+                Visibility::Hidden,
+            ));
         });
+    });
 }
 
 pub fn despawn_full_hud(
@@ -691,16 +768,6 @@ pub fn full_hud_input(
     mut next_pause: ResMut<NextState<PauseState>>,
     mut seeks: MessageWriter<SeekToChartTime>,
     mut practice_actions: MessageWriter<crate::practice::actions::PracticeAction>,
-    mut rows: Query<(&RailItem, &mut Text, &mut TextColor)>,
-    mut history: Query<&mut Text, (With<AttemptHistoryText>, Without<RailItem>)>,
-    mut diag_text: Query<
-        &mut Text,
-        (
-            With<LaneDiagnosisText>,
-            Without<RailItem>,
-            Without<AttemptHistoryText>,
-        ),
-    >,
 ) {
     let count = RailItem::ORDER.len();
     if keys.just_pressed(KeyCode::ArrowDown) {
@@ -731,15 +798,42 @@ pub fn full_hud_input(
             &mut practice_actions,
         );
     }
+}
 
-    // Render tail (replaced by refresh_rail in the ref-px rebuild task).
+/// Re-render selection highlight + row values each frame while the rail is
+/// open. Selected row: `selection_highlight` background + accent value.
+#[allow(clippy::type_complexity)]
+pub fn refresh_rail(
+    selection: Res<RailSelection>,
+    session: Res<PracticeSession>,
+    timeline: Res<ChipTimeline>,
+    mut rows: Query<(&RailRowButton, &mut BackgroundColor)>,
+    mut values: Query<(&RailValueText, &mut Text, &mut TextColor)>,
+    mut history: Query<&mut Text, (With<AttemptHistoryText>, Without<RailValueText>)>,
+    mut diag_text: Query<
+        &mut Text,
+        (
+            With<LaneDiagnosisText>,
+            Without<RailValueText>,
+            Without<AttemptHistoryText>,
+        ),
+    >,
+) {
     let theme = Theme::default();
-    for (item, mut text, mut color) in &mut rows {
-        text.0 = rail_label(*item, &session);
+    let selected = RailItem::ORDER[selection.0 % RailItem::ORDER.len()];
+    for (RailRowButton(item), mut bg) in &mut rows {
+        bg.0 = if *item == selected {
+            theme.selection_highlight
+        } else {
+            Color::NONE
+        };
+    }
+    for (RailValueText(item), mut text, mut color) in &mut values {
+        text.0 = rail_row_value(*item, &session);
         color.0 = if *item == selected {
             theme.accent
         } else {
-            theme.text_secondary
+            theme.text_primary
         };
     }
     if let Ok(mut t) = history.single_mut() {
@@ -820,6 +914,17 @@ mod tests {
             waited: 0,
             flow_pct: 0.0,
         }
+    }
+
+    #[test]
+    fn rail_fixed_content_fits_720_reference_height() {
+        // Spec fit check: headers + rows + gaps + padding at scale 1.0 must
+        // leave room inside the 648 ref-px band above the timeline row.
+        let h = rail_fixed_content_height(1.0);
+        assert!(
+            h < RAIL_REF_HEIGHT,
+            "rail fixed content {h} ref-px must fit {RAIL_REF_HEIGHT}"
+        );
     }
 
     #[test]

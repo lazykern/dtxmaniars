@@ -321,6 +321,39 @@ fn rail_clear_loop_disarms_the_ramp() {
     );
 }
 
+use gameplay_drums::practice::hud::full_hud::{RailAdjustButton, RailRowButton};
+
+#[test]
+fn rail_spawns_17_rows_with_adjust_buttons_at_practice_z() {
+    let mut app = build_app();
+    app.world_mut().insert_resource(PracticeSession::default());
+    set_rail_surface(&mut app);
+    set_paused(&mut app, true);
+
+    let rows = app
+        .world_mut()
+        .query::<&RailRowButton>()
+        .iter(app.world())
+        .count();
+    assert_eq!(rows, 17, "one clickable row per RailItem");
+
+    let adjusts = app
+        .world_mut()
+        .query::<&RailAdjustButton>()
+        .iter(app.world())
+        .count();
+    assert_eq!(adjusts, 18, "9 value rows x (◂ + ▸)");
+
+    let z = app
+        .world_mut()
+        .query::<(&FullHudRoot, &GlobalZIndex)>()
+        .iter(app.world())
+        .map(|(_, z)| z.0)
+        .next()
+        .expect("full HUD root has a GlobalZIndex");
+    assert_eq!(z, 1000, "ui_z::PRACTICE_FULL_HUD");
+}
+
 use gameplay_drums::practice::hud::full_hud::{transport_buttons, TransportButton};
 
 #[test]
