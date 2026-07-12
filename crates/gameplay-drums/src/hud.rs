@@ -5,8 +5,9 @@ use dtx_scoring::JudgmentKind;
 use dtx_ui::{
     theme::REF_WIDTH,
     widget::{
-        combo_display::ComboDisplay, frame_chrome, hud_ref::HudRefRect, judgment_popup, live_graph,
-        now_playing, perf_combo, phrase_meter, playfield_speed, score_detailed, song_progress,
+        combo_display::ComboDisplay, frame_chrome, gauge_bar, hud_ref::HudRefRect, judgment_popup,
+        live_graph, now_playing, perf_combo, phrase_meter, playfield_speed, score_detailed,
+        song_progress,
     },
     ThemeResource,
 };
@@ -83,6 +84,7 @@ pub fn plugin(app: &mut App) {
             (
                 apply_backboard_layout,
                 apply_hit_line_layout,
+                apply_gauge_layout,
                 apply_progress_layout,
                 apply_speed_layout,
                 apply_hud_ref_layout,
@@ -98,6 +100,7 @@ pub fn plugin(app: &mut App) {
             (
                 apply_backboard_layout,
                 apply_hit_line_layout,
+                apply_gauge_layout,
                 apply_progress_layout,
                 apply_speed_layout,
                 apply_hud_ref_layout,
@@ -114,6 +117,7 @@ pub fn plugin(app: &mut App) {
             sync_perf_combo,
             sync_now_playing,
             sync_song_progress,
+            sync_stage_gauge,
             sync_phrase_meter,
             sync_phrase_playhead,
             sync_hud_judgment,
@@ -217,6 +221,15 @@ fn spawn_hud(
         layout.ref_strip_left(),
         layout.ref_strip_left() + layout.ref_strip_width(),
     );
+    let c_gauge = spawn_widget_container(&mut commands, root, WidgetKind::Gauge);
+    gauge_bar::spawn_stage_gauge(
+        &mut commands,
+        c_gauge,
+        &t,
+        s,
+        layout.ref_strip_left(),
+        layout.ref_strip_width(),
+    );
     let c_score = spawn_widget_container(&mut commands, root, WidgetKind::ScorePanel);
     score_detailed::spawn_score_detailed_panel(&mut commands, c_score, &t, s);
     let c_phrase = spawn_widget_container(&mut commands, root, WidgetKind::PhraseMeter);
@@ -293,6 +306,50 @@ fn apply_hit_line_layout(
         node.top = Val::Px(layout.judge_y());
         node.width = Val::Px(layout.strip_width());
         node.height = Val::Px(3.0 * layout.scale);
+    }
+}
+
+fn apply_gauge_layout(
+    layout: Res<PlayfieldLayout>,
+    mut tracks: Query<(&mut Node, &mut gauge_bar::GaugeBarWidget)>,
+    mut ticks: Query<
+        &mut Node,
+        (
+            With<gauge_bar::GaugeThresholdTick>,
+            Without<gauge_bar::GaugeBarWidget>,
+        ),
+    >,
+) {
+    let s = layout.scale;
+    for (mut node, mut bar) in &mut tracks {
+        node.left = Val::Px(layout.strip_left());
+        node.top = Val::Px(64.0 * s + layout.origin.y);
+        node.width = Val::Px(layout.strip_width());
+        node.height = Val::Px(10.0 * s);
+        bar.track_width = layout.strip_width();
+    }
+    for mut node in &mut ticks {
+        node.top = Val::Px(-2.0 * s);
+        node.width = Val::Px(2.0 * s);
+        node.height = Val::Px(14.0 * s);
+    }
+}
+
+fn sync_stage_gauge(
+    gauge: Res<crate::gauge::StageGauge>,
+    time: Res<Time>,
+    mut bars: Query<&mut gauge_bar::GaugeBarWidget>,
+    mut fills: Query<(&mut Node, &mut BackgroundColor), With<gauge_bar::GaugeFill>>,
+) {
+    // One stage gauge per HUD.
+    let Some(mut bar) = bars.iter_mut().next() else {
+        return;
+    };
+    bar.set_pct(gauge.pct());
+    bar.tick(time.delta_secs() * 1000.0);
+    for (mut node, mut color) in &mut fills {
+        node.width = Val::Px(bar.fill_width());
+        color.0 = crate::gauge::gauge_fill_color(gauge.value, gauge.failed);
     }
 }
 

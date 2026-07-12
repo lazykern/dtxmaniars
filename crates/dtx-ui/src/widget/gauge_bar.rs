@@ -47,6 +47,69 @@ impl GaugeBarWidget {
 #[derive(Component)]
 pub struct GaugeFill;
 
+/// White notch at the track's left edge marking "empty = failed".
+#[derive(Component)]
+pub struct GaugeThresholdTick;
+
+/// Horizontal stage gauge across the top of the playfield strip, just under
+/// the 60 ref-px frame-chrome speaker bar. `ref_x`/`ref_w` are ref-px strip
+/// bounds; `s` is layout scale.
+pub fn spawn_stage_gauge(
+    commands: &mut Commands,
+    parent: Entity,
+    theme: &crate::theme::Theme,
+    s: f32,
+    ref_x: f32,
+    ref_w: f32,
+) -> Entity {
+    let track = commands
+        .spawn((
+            GaugeBarWidget {
+                track_width: ref_w * s,
+                ..Default::default()
+            },
+            Node {
+                position_type: PositionType::Absolute,
+                left: Val::Px(ref_x * s),
+                top: Val::Px(64.0 * s),
+                width: Val::Px(ref_w * s),
+                height: Val::Px(10.0 * s),
+                ..default()
+            },
+            BackgroundColor(theme.gauge_track),
+        ))
+        .id();
+    let fill = commands
+        .spawn((
+            GaugeFill,
+            Node {
+                width: Val::Px(0.0),
+                height: Val::Percent(100.0),
+                ..default()
+            },
+            BackgroundColor(theme.gauge_fill),
+        ))
+        .id();
+    commands.entity(track).add_child(fill);
+    let tick = commands
+        .spawn((
+            GaugeThresholdTick,
+            Node {
+                position_type: PositionType::Absolute,
+                left: Val::Px(0.0),
+                top: Val::Px(-2.0 * s),
+                width: Val::Px(2.0 * s),
+                height: Val::Px(14.0 * s),
+                ..default()
+            },
+            BackgroundColor(Color::srgba(1.0, 1.0, 1.0, 0.6)),
+        ))
+        .id();
+    commands.entity(track).add_child(tick);
+    commands.entity(parent).add_child(track);
+    track
+}
+
 pub fn sync_gauge_bar(
     pct: f32,
     time: Res<Time>,
@@ -74,5 +137,15 @@ mod tests {
             ..Default::default()
         };
         assert!((g.fill_width() - 140.0).abs() < 0.1);
+    }
+
+    #[test]
+    fn stage_gauge_track_width_follows_ref_width() {
+        let g = GaugeBarWidget {
+            track_width: 558.0,
+            pct: 50.0,
+            ..Default::default()
+        };
+        assert!((g.fill_width() - 279.0).abs() < 0.1);
     }
 }
