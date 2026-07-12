@@ -118,8 +118,10 @@ pub(crate) fn result_nav(
         for (stat, text, bg) in &mut fades {
             if let Some(mut c) = text {
                 c.0 = c.0.with_alpha(stat.target_alpha);
-            }
-            if let Some(mut b) = bg {
+            } else if let Some(mut b) = bg {
+                // Same guard as animate_staggered_reveal: text entities carry
+                // a default (transparent black) BackgroundColor that must not
+                // be faded in.
                 b.0 = b.0.with_alpha(stat.target_alpha);
             }
         }

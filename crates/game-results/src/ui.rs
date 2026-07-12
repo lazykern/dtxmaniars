@@ -581,8 +581,10 @@ pub(crate) fn animate_staggered_reveal(
         let alpha = reveal_alpha(reveal.elapsed_ms, stat.reveal_at_ms, stat.target_alpha);
         if let Some(mut c) = text {
             c.0 = c.0.with_alpha(alpha);
-        }
-        if let Some(mut b) = bg {
+        } else if let Some(mut b) = bg {
+            // Node-only elements (dividers). Text entities also carry an
+            // auto-inserted default BackgroundColor (transparent black);
+            // fading that would paint a black chip behind every glyph.
             b.0 = b.0.with_alpha(alpha);
         }
     }
