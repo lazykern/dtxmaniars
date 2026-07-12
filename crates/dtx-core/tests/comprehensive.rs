@@ -255,7 +255,7 @@ fn compute_playback_partial_at_last_bpm() {
     }];
     // m2 + 0.5 at 60 BPM = 4000 + 2000 = 6000
     let ms = compute_playback_time(2, 0.5, 120.0, &changes);
-    assert_eq!(ms, 5000);
+    assert_eq!(ms, 6000);
 }
 
 // =================== CScoreIni tests ===================
