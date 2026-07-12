@@ -159,8 +159,10 @@ fn modal_lines(state: &CaptureState) -> Option<ModalLines> {
 /// Live "note N · velocity V" line for the `Midi(ch)` listening state.
 /// `None` before any hit has been observed since capture armed; `Some((text,
 /// muted))` after — `muted` true when the hit was below the velocity
-/// threshold (it never reaches the capture machine, but the user should
-/// still see it landed).
+/// threshold. Below-threshold hits still reach capture (velocity > 0 is the
+/// only gate; the threshold blocks gameplay dispatch, not learning). Shown
+/// muted so the player can diagnose soft pads while still being able to bind
+/// them.
 fn live_hit_line(hit: &crate::LastMidiHit) -> Option<(String, bool)> {
     hit.at?;
     if hit.below_threshold {

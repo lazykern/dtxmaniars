@@ -181,6 +181,8 @@ fn close_editor_on_exit(
     show_perf_info: Res<crate::resources::ShowPerfInfo>,
     mut capture: ResMut<bindings_capture::CaptureState>,
     mut mouse_arrived: ResMut<bindings_capture::MouseArrivedInput>,
+    time: Res<Time>,
+    mut save_err: ResMut<footer::EditorSaveError>,
 ) {
     if open.0 {
         // Config and widget layout keep their auto-save policy. Profile
@@ -190,9 +192,11 @@ fn close_editor_on_exit(
         let file = save::layout_file_from(&layouts, &profile_session.0.lanes.saved.arrangement);
         if let Err(e) = dtx_layout::save(&dtx_layout::default_path(), &file) {
             warn!("layout save on exit failed: {e}");
+            save_err.set(time.elapsed_secs_f64(), format!("save failed: {e}"));
         }
         if let Err(e) = dtx_config::save(&dtx_config::default_path(), &draft.0) {
             warn!("config save on exit failed: {e}");
+            save_err.set(time.elapsed_secs_f64(), format!("save failed: {e}"));
         }
         perf_draft.sync_from_editor(&draft.0, show_perf_info.0);
         autoplay.0 = prev.0;

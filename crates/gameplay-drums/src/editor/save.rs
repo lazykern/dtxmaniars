@@ -45,6 +45,8 @@ fn save_layout_on_close(
     layouts: Res<WidgetLayouts>,
     session: Res<CustomizeSession>,
     state: Res<State<game_shell::AppState>>,
+    time: Res<Time>,
+    mut err: ResMut<super::footer::EditorSaveError>,
     mut was_open: Local<bool>,
 ) {
     if !super::should_persist_close(
@@ -57,6 +59,7 @@ fn save_layout_on_close(
     let file = layout_file_from(&layouts, &session.0.lanes.saved.arrangement);
     if let Err(e) = dtx_layout::save(&dtx_layout::default_path(), &file) {
         warn!("layout auto-save failed: {e}");
+        err.set(time.elapsed_secs_f64(), format!("save failed: {e}"));
     }
 }
 
@@ -65,13 +68,18 @@ fn save_hotkey(
     keys: Res<ButtonInput<KeyCode>>,
     layouts: Res<WidgetLayouts>,
     session: Res<CustomizeSession>,
+    time: Res<Time>,
+    mut err: ResMut<super::footer::EditorSaveError>,
 ) {
     let ctrl = keys.pressed(KeyCode::ControlLeft) || keys.pressed(KeyCode::ControlRight);
     if ctrl && keys.just_pressed(KeyCode::KeyS) {
         let file = layout_file_from(&layouts, &session.0.lanes.saved.arrangement);
         match dtx_layout::save(&dtx_layout::default_path(), &file) {
             Ok(()) => info!("layout saved to {:?}", dtx_layout::default_path()),
-            Err(e) => warn!("layout save failed: {e}"),
+            Err(e) => {
+                warn!("layout save failed: {e}");
+                err.set(time.elapsed_secs_f64(), format!("save failed: {e}"));
+            }
         }
     }
 }
