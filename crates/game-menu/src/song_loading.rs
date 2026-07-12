@@ -311,6 +311,7 @@ fn spawn_loading(
 ) {
     let t = theme.0;
     let difficulty_index = selection.difficulty;
+    commands.insert_resource(game_shell::SelectedDifficulty(difficulty_index));
     let song = selection
         .chart_index(&selection_state)
         .and_then(|i| db.songs.get(i))

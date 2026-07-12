@@ -100,6 +100,13 @@ pub fn despawn_stage<T: Component>(mut commands: Commands, query: Query<Entity, 
 #[derive(Resource, Debug, Clone, Copy, Default)]
 pub struct PracticeIntent(pub bool);
 
+/// Difficulty index (0 = BASIC) of the chart being played — the same value
+/// the song wheel uses. Written by song loading on every SongLoading enter;
+/// read by game-results to color the Lv chip. Lives in game-shell so
+/// game-results doesn't need game-menu (same precedent as [`PracticeIntent`]).
+#[derive(Resource, Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct SelectedDifficulty(pub u8);
+
 /// True while the layout-editor session (title → F2) is active: Performance
 /// runs on autoplay in a seamless loop with the editor open; Esc exits to
 /// Title instead of Results.
@@ -220,5 +227,10 @@ mod tests {
         assert_eq!(CustomizeTab::Widgets.next(), CustomizeTab::Gameplay);
         assert_eq!(CustomizeTab::Gameplay.prev(), CustomizeTab::Widgets);
         assert_eq!(CustomizeTab::Audio.prev(), CustomizeTab::Gameplay);
+    }
+
+    #[test]
+    fn selected_difficulty_defaults_to_basic() {
+        assert_eq!(SelectedDifficulty::default().0, 0);
     }
 }
