@@ -141,19 +141,52 @@ pub fn capture_footer_text(state: &super::bindings_capture::CaptureState) -> Opt
     }
 }
 
-/// Refresh the left-hand description when the hovered row, capture state or
-/// save-error banner changes. Priority: armed capture > save-error banner >
-/// hover description. The banner shows in `chrome::ERR` red until it expires,
-/// then the normal description (and color) is restored.
+/// Key-hint line for the focused kit-tab level; None = fall through to the
+/// hover description. Sits below capture text and the save-error banner in
+/// the footer's priority chain.
+pub fn nav_hint_text(
+    tab: game_shell::CustomizeTab,
+    controls: super::controls_panel::ControlsFocus,
+    lanes: super::lanes_panel::LanesFocus,
+) -> Option<&'static str> {
+    use super::controls_panel::ControlsFocus;
+    use super::lanes_panel::LanesFocus;
+    match tab {
+        game_shell::CustomizeTab::Controls if controls == ControlsFocus::Rows => {
+            Some("Enter capture · Bksp remove")
+        }
+        game_shell::CustomizeTab::Lanes => match lanes {
+            LanesFocus::Rows => Some("↑↓ select · Shift+↑↓ reorder · Enter detail"),
+            LanesFocus::Detail => Some("←→ width · Shift ×4 · Esc back"),
+            LanesFocus::TabBar => None,
+        },
+        _ => None,
+    }
+}
+
+/// Refresh the left-hand description when the hovered row, capture state,
+/// focused nav level or save-error banner changes. Priority: armed capture >
+/// save-error banner > nav key hint > hover description. The banner shows in
+/// `chrome::ERR` red until it expires, then the normal description (and
+/// color) is restored.
 fn update_footer_desc(
     desc: Res<HoveredDesc>,
     capture: Res<super::bindings_capture::CaptureState>,
+    active: Res<super::tabs::ActiveTab>,
+    controls_focus: Res<super::controls_panel::ControlsFocus>,
+    lanes_focus: Res<super::lanes_panel::LanesFocus>,
     time: Res<Time>,
     theme: Res<dtx_ui::ThemeResource>,
     mut err: ResMut<EditorSaveError>,
     mut q: Query<(&mut Text, &mut TextColor), With<FooterDescText>>,
 ) {
-    if !desc.is_changed() && !capture.is_changed() && err.message.is_none() {
+    if !desc.is_changed()
+        && !capture.is_changed()
+        && !active.is_changed()
+        && !controls_focus.is_changed()
+        && !lanes_focus.is_changed()
+        && err.message.is_none()
+    {
         return;
     }
     if err.message.is_some() && time.elapsed_secs_f64() >= err.until_secs {
@@ -163,6 +196,8 @@ fn update_footer_desc(
         (cap, theme.0.text_primary)
     } else if let Some(msg) = &err.message {
         (msg.clone(), super::chrome::ERR)
+    } else if let Some(hint) = nav_hint_text(active.0, *controls_focus, *lanes_focus) {
+        (hint.to_string(), theme.0.text_primary)
     } else {
         (desc_text(&desc), theme.0.text_primary)
     };
@@ -180,5 +215,44 @@ fn update_footer_desc(
 fn despawn_footer(mut commands: Commands, existing: Query<Entity, With<FooterRoot>>) {
     for e in &existing {
         commands.entity(e).despawn();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::editor::controls_panel::ControlsFocus;
+    use crate::editor::lanes_panel::LanesFocus;
+    use game_shell::CustomizeTab;
+
+    #[test]
+    fn nav_hints_cover_controls_rows_and_lanes_levels() {
+        // Controls: hint only at Rows.
+        assert_eq!(
+            nav_hint_text(CustomizeTab::Controls, ControlsFocus::Rows, LanesFocus::TabBar),
+            Some("Enter capture · Bksp remove")
+        );
+        assert_eq!(
+            nav_hint_text(CustomizeTab::Controls, ControlsFocus::SegmentSelector, LanesFocus::TabBar),
+            None
+        );
+        // Lanes: per-level hints.
+        assert_eq!(
+            nav_hint_text(CustomizeTab::Lanes, ControlsFocus::TabBar, LanesFocus::Rows),
+            Some("↑↓ select · Shift+↑↓ reorder · Enter detail")
+        );
+        assert_eq!(
+            nav_hint_text(CustomizeTab::Lanes, ControlsFocus::TabBar, LanesFocus::Detail),
+            Some("←→ width · Shift ×4 · Esc back")
+        );
+        assert_eq!(
+            nav_hint_text(CustomizeTab::Lanes, ControlsFocus::TabBar, LanesFocus::TabBar),
+            None
+        );
+        // Other tabs: never.
+        assert_eq!(
+            nav_hint_text(CustomizeTab::Gameplay, ControlsFocus::Rows, LanesFocus::Detail),
+            None
+        );
     }
 }
