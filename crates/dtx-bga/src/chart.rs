@@ -12,12 +12,9 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 use dtx_core::bga::BgaLayer;
-use dtx_core::channel::EChannel;
 use dtx_core::chart::Chart;
 use dtx_core::resolve_chart_asset_path;
-use dtx_core::timing::{
-    chip_time_ms_with_bpm_and_bar_changes, BarLengthChange, BpmChange, ChartTiming,
-};
+use dtx_core::timing::{chip_time_ms_with_bpm_and_bar_changes, ChartTiming};
 
 /// A visual chip resolved to an absolute playback time (ms) on the gameplay
 /// clock, tagged with its target layer and the `#BMP`/`#AVI` asset id it
