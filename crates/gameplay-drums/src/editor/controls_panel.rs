@@ -207,7 +207,13 @@ pub(super) fn controls_nav_consumer(
         // Fresh visit (tab switched here): keyboard focus restarts at the bar.
         *focus = ControlsFocus::TabBar;
     }
-    if !matches!(*capture, CaptureState::Idle) || capture.is_changed() {
+    // Only the state matters, never `capture.is_changed()`: `capture_binding`
+    // does a `mem::take` on `CaptureState` every frame, so the change tick is
+    // always set and testing it would dead-lock this consumer forever. The
+    // two self-capture hazards are already closed elsewhere — we run
+    // `.after(capture_binding)`, and `keyboard_emit_nav` is gated on
+    // `not(capture_active)` so a capture keypress emits no verb at all.
+    if !matches!(*capture, CaptureState::Idle) {
         actions.clear();
         return;
     }
@@ -571,6 +577,54 @@ mod tests {
             app.world().resource::<SelectedChannel>().0,
             Some(EChannel::HiHatClose),
             "capture owns input; row cursor frozen"
+        );
+    }
+
+    #[test]
+    fn consumer_survives_capture_state_touched_every_frame() {
+        // Production `capture_binding` does a `mem::take` on `CaptureState`
+        // every frame, so its change tick is permanently set. A consumer that
+        // bailed on `capture.is_changed()` would be dead in the real app while
+        // still passing every test that leaves the resource alone.
+        use crate::editor::bindings_capture::{CaptureState, SelectedChannel};
+        use crate::editor::bindings_panel::BindingsRev;
+        use bevy::prelude::*;
+        use game_shell::{NavAction, NavSource};
+
+        fn touch_capture(mut capture: ResMut<CaptureState>) {
+            let taken = std::mem::take(&mut *capture);
+            *capture = taken;
+        }
+
+        let mut app = App::new();
+        app.init_resource::<ButtonInput<KeyCode>>()
+            .init_resource::<ControlsFocus>()
+            .init_resource::<ControlsSegment>()
+            .init_resource::<CaptureState>()
+            .init_resource::<SelectedChannel>()
+            .init_resource::<BindingsRev>()
+            .init_resource::<crate::bindings::LiveBindings>()
+            .init_resource::<crate::lanes::Lanes>()
+            .insert_resource(crate::editor::tabs::ActiveTab(
+                game_shell::CustomizeTab::Controls,
+            ))
+            .add_message::<NavAction>()
+            .add_systems(Update, (touch_capture, controls_nav_consumer).chain());
+        app.update();
+
+        app.world_mut()
+            .resource_mut::<Messages<NavAction>>()
+            .write(NavAction {
+                verb: NavVerb::Down,
+                source: NavSource::Keyboard,
+                coarse: false,
+            });
+        app.update();
+
+        assert_eq!(
+            *app.world().resource::<ControlsFocus>(),
+            ControlsFocus::SegmentSelector,
+            "a permanently-changed CaptureState must not freeze the consumer"
         );
     }
 
