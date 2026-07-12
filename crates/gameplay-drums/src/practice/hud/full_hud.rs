@@ -1,12 +1,12 @@
 //! Full practice HUD (paused tier), layout B "L-shape": bottom density
 //! timeline (mouse scrub + drag loop; keyboard scrub kept) + right rail
-//! (rate, snap, pre-roll, ramp config, attempt history, restart, exit).
+//! (rate, snap, pre-roll, ramp config, attempt history, restart).
 //! Fixed overlay — not a dtx-layout widget.
 
 use bevy::prelude::*;
 use dtx_ui::theme::Theme;
 use dtx_ui::widget::density_strip::{spawn_density_strip, time_to_pct};
-use game_shell::{request_transition, AppState, PauseState, TransitionRequest};
+use game_shell::PauseState;
 
 use super::format_chart_time;
 use crate::practice::session::{preroll_target, PracticeSession};
@@ -55,11 +55,10 @@ pub enum RailItem {
     RampThreshold,
     RampStreak,
     WaitMode,
-    ExitPractice,
 }
 
 impl RailItem {
-    pub const ORDER: [RailItem; 18] = [
+    pub const ORDER: [RailItem; 17] = [
         RailItem::Resume,
         RailItem::Scrub,
         RailItem::RestartSection,
@@ -77,7 +76,6 @@ impl RailItem {
         RailItem::RampThreshold,
         RailItem::RampStreak,
         RailItem::WaitMode,
-        RailItem::ExitPractice,
     ];
 }
 
@@ -85,11 +83,7 @@ impl RailItem {
 #[derive(Resource, Default)]
 pub struct RailSelection(pub usize);
 
-/// Exit needs a second Enter press (confirm); reset on selection move.
-#[derive(Resource, Default)]
-pub struct ExitArmed(pub bool);
-
-pub fn rail_label(item: RailItem, session: &PracticeSession, exit_armed: bool) -> String {
+pub fn rail_label(item: RailItem, session: &PracticeSession) -> String {
     match item {
         RailItem::Resume => "Resume".into(),
         RailItem::Scrub => match session.transport.scrub_cursor_ms {
@@ -155,13 +149,6 @@ pub fn rail_label(item: RailItem, session: &PracticeSession, exit_armed: bool) -
                 "Wait  ON".into()
             } else {
                 "Wait  off  (Enter: on)".into()
-            }
-        }
-        RailItem::ExitPractice => {
-            if exit_armed {
-                "Exit practice — Enter again to confirm".into()
-            } else {
-                "Exit practice".into()
             }
         }
     }
@@ -247,13 +234,11 @@ pub fn transport_buttons(
 pub fn spawn_full_hud(
     mut commands: Commands,
     mut selection: ResMut<RailSelection>,
-    mut exit_armed: ResMut<ExitArmed>,
     mut session: ResMut<PracticeSession>,
     clock: Res<GameplayClock>,
     timeline: Res<ChipTimeline>,
 ) {
     selection.0 = 0;
-    exit_armed.0 = false;
     session.transport.scrub_cursor_ms = Some(clock.current_ms);
     let theme = Theme::default();
     commands
@@ -315,7 +300,7 @@ pub fn spawn_full_hud(
                     }
                     rail.spawn((
                         *item,
-                        Text::new(rail_label(*item, &session, false)),
+                        Text::new(rail_label(*item, &session)),
                         Theme::hud_font(),
                         TextColor(theme.text_secondary),
                     ));
@@ -468,7 +453,6 @@ pub fn despawn_full_hud(
 pub fn full_hud_input(
     keys: Res<ButtonInput<KeyCode>>,
     mut selection: ResMut<RailSelection>,
-    mut exit_armed: ResMut<ExitArmed>,
     mut session: ResMut<PracticeSession>,
     timeline: Res<ChipTimeline>,
     clock: Res<GameplayClock>,
@@ -476,7 +460,6 @@ pub fn full_hud_input(
     mut chord_hits: Option<ResMut<crate::practice::wait::ChordHitTimes>>,
     mut next_pause: ResMut<NextState<PauseState>>,
     mut seeks: MessageWriter<SeekToChartTime>,
-    mut requests: MessageWriter<TransitionRequest>,
     mut practice_actions: MessageWriter<crate::practice::actions::PracticeAction>,
     mut rows: Query<(&RailItem, &mut Text, &mut TextColor)>,
     mut history: Query<&mut Text, (With<AttemptHistoryText>, Without<RailItem>)>,
@@ -492,11 +475,9 @@ pub fn full_hud_input(
     let count = RailItem::ORDER.len();
     if keys.just_pressed(KeyCode::ArrowDown) {
         selection.0 = (selection.0 + 1) % count;
-        exit_armed.0 = false;
     }
     if keys.just_pressed(KeyCode::ArrowUp) {
         selection.0 = (selection.0 + count - 1) % count;
-        exit_armed.0 = false;
     }
     let selected = RailItem::ORDER[selection.0];
 
@@ -627,20 +608,12 @@ pub fn full_hud_input(
             | RailItem::RampStep
             | RailItem::RampThreshold
             | RailItem::RampStreak => {}
-            RailItem::ExitPractice => {
-                if exit_armed.0 {
-                    next_pause.set(PauseState::Running);
-                    request_transition(&mut requests, AppState::SongSelect);
-                } else {
-                    exit_armed.0 = true;
-                }
-            }
         }
     }
 
     let theme = Theme::default();
     for (item, mut text, mut color) in &mut rows {
-        text.0 = rail_label(*item, &session, exit_armed.0);
+        text.0 = rail_label(*item, &session);
         color.0 = if *item == selected {
             theme.accent
         } else {
@@ -730,20 +703,17 @@ mod tests {
     #[test]
     fn wait_rail_label_reflects_toggle() {
         let mut s = PracticeSession::default();
-        assert_eq!(
-            rail_label(RailItem::WaitMode, &s, false),
-            "Wait  off  (Enter: on)"
-        );
+        assert_eq!(rail_label(RailItem::WaitMode, &s), "Wait  off  (Enter: on)");
         s.trainer.wait_enabled = true;
-        assert_eq!(rail_label(RailItem::WaitMode, &s, false), "Wait  ON");
+        assert_eq!(rail_label(RailItem::WaitMode, &s), "Wait  ON");
     }
 
     #[test]
     fn metronome_rail_label_reflects_toggle() {
         let mut s = PracticeSession::default();
-        assert_eq!(rail_label(RailItem::Metronome, &s, false), "Count-in  on");
+        assert_eq!(rail_label(RailItem::Metronome, &s), "Count-in  on");
         s.transport.metronome = false;
-        assert_eq!(rail_label(RailItem::Metronome, &s, false), "Count-in  off");
+        assert_eq!(rail_label(RailItem::Metronome, &s), "Count-in  off");
     }
 
     #[test]

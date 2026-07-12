@@ -3,6 +3,7 @@
 
 use bevy::prelude::*;
 use game_shell::{AppState, PauseState};
+use gameplay_drums::pause::PracticePauseSurface;
 use gameplay_drums::practice::hud::full_hud::{
     despawn_full_hud, spawn_full_hud, FullHudRoot, RailSelection,
 };
@@ -18,13 +19,19 @@ fn build_app() -> App {
         .init_resource::<GameplayClock>()
         .init_resource::<ChipTimeline>()
         .init_resource::<RailSelection>()
-        .init_resource::<gameplay_drums::practice::hud::full_hud::ExitArmed>()
+        .init_resource::<PracticePauseSurface>()
         .add_systems(
             OnEnter(PauseState::Paused),
-            spawn_full_hud.run_if(resource_exists::<PracticeSession>),
+            spawn_full_hud
+                .run_if(resource_exists::<PracticeSession>)
+                .run_if(gameplay_drums::practice::hud::rail_surface_active),
         )
         .add_systems(OnExit(PauseState::Paused), despawn_full_hud);
     app
+}
+
+fn set_rail_surface(app: &mut App) {
+    app.world_mut().insert_resource(PracticePauseSurface::Rail);
 }
 
 fn set_paused(app: &mut App, paused: bool) {
@@ -42,6 +49,7 @@ fn set_paused(app: &mut App, paused: bool) {
 fn full_hud_spawns_on_pause_and_despawns_on_resume() {
     let mut app = build_app();
     app.world_mut().insert_resource(PracticeSession::default());
+    set_rail_surface(&mut app);
     set_paused(&mut app, true);
     let count = app
         .world_mut()
@@ -71,8 +79,6 @@ fn full_hud_absent_without_practice_session() {
     assert_eq!(count, 0, "normal pause never spawns the practice HUD");
 }
 
-use gameplay_drums::pause::PracticePauseSurface;
-
 #[test]
 fn overlay_spawns_in_practice_on_overlay_surface() {
     let mut app = build_app();
@@ -89,7 +95,10 @@ fn overlay_spawns_in_practice_on_overlay_surface() {
         .query::<&gameplay_drums::pause::PauseOverlay>()
         .iter(app.world())
         .count();
-    assert_eq!(overlays, 1, "Esc surface shows the pause overlay in practice");
+    assert_eq!(
+        overlays, 1,
+        "Esc surface shows the pause overlay in practice"
+    );
 }
 
 #[test]
@@ -102,15 +111,17 @@ fn overlay_suppressed_on_rail_surface() {
             gameplay_drums::pause::spawn_overlay,
         );
     app.world_mut().insert_resource(PracticeSession::default());
-    app.world_mut()
-        .insert_resource(PracticePauseSurface::Rail);
+    app.world_mut().insert_resource(PracticePauseSurface::Rail);
     set_paused(&mut app, true);
     let overlays = app
         .world_mut()
         .query::<&gameplay_drums::pause::PauseOverlay>()
         .iter(app.world())
         .count();
-    assert_eq!(overlays, 0, "Tab surface suppresses the overlay; the rail owns it");
+    assert_eq!(
+        overlays, 0,
+        "Tab surface suppresses the overlay; the rail owns it"
+    );
 }
 
 // The top-level `gameplay_drums::plugin` also wires `orchestrator`, `autoplay`,
@@ -152,6 +163,9 @@ fn real_hud_plugin_schedule_builds_headlessly() {
         .resource_mut::<NextState<AppState>>()
         .set(AppState::Performance);
     app.update();
+    // Simulate the Tab opener: the rail owns this pause.
+    app.world_mut()
+        .insert_resource(gameplay_drums::pause::PracticePauseSurface::Rail);
     app.world_mut()
         .resource_mut::<NextState<PauseState>>()
         .set(PauseState::Paused);
@@ -164,6 +178,44 @@ fn real_hud_plugin_schedule_builds_headlessly() {
         .iter(app.world())
         .count();
     assert_eq!(huds, 1, "real plugin schedule spawned the full HUD");
+}
+
+#[test]
+fn hud_plugin_overlay_surface_spawns_no_rail() {
+    let mut app = App::new();
+    app.add_plugins((
+        MinimalPlugins,
+        bevy::state::app::StatesPlugin,
+        bevy::input::InputPlugin,
+    ))
+    .init_state::<AppState>()
+    .init_state::<PauseState>()
+    .add_message::<game_shell::TransitionRequest>()
+    .add_message::<gameplay_drums::seek::SeekToChartTime>()
+    .add_message::<gameplay_drums::practice::actions::PracticeAction>()
+    .init_resource::<GameplayClock>()
+    .init_resource::<ChipTimeline>()
+    .world_mut()
+    .insert_resource(PracticeSession::default());
+
+    gameplay_drums::practice::hud::plugin(&mut app);
+
+    // Esc path: surface stays at its Overlay default.
+    app.world_mut()
+        .resource_mut::<NextState<AppState>>()
+        .set(AppState::Performance);
+    app.update();
+    app.world_mut()
+        .resource_mut::<NextState<PauseState>>()
+        .set(PauseState::Paused);
+    app.update();
+
+    let huds = app
+        .world_mut()
+        .query::<&FullHudRoot>()
+        .iter(app.world())
+        .count();
+    assert_eq!(huds, 0, "Esc surface must not spawn the rail");
 }
 
 #[test]
@@ -213,7 +265,7 @@ fn quick_tier_entities_spawn_on_entering_performance() {
     assert_eq!(chips, 1, "status chip must spawn on entering Performance");
 }
 
-use gameplay_drums::practice::hud::full_hud::{full_hud_input, ExitArmed, RailItem};
+use gameplay_drums::practice::hud::full_hud::{full_hud_input, RailItem};
 use gameplay_drums::practice::session::{LoopRegion, PracticeTransport};
 
 #[test]
@@ -232,7 +284,6 @@ fn rail_clear_loop_disarms_the_ramp() {
         .init_resource::<GameplayClock>()
         .init_resource::<ChipTimeline>()
         .init_resource::<RailSelection>()
-        .init_resource::<ExitArmed>()
         .add_systems(Update, full_hud_input);
 
     let mut session = PracticeSession {
