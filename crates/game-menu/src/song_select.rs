@@ -513,8 +513,8 @@ impl Selection {
 }
 
 /// Mark the entity holding the album art image (ADR-0015 item e).
-/// Used by `update_album_art_image` to find the entity and swap its
-/// image on selection change.
+/// Used by `update_album_art_image` to find the entity and request an
+/// `AlbumArt` crossfade to the new jacket on selection change.
 #[derive(Component, Debug, Clone, Copy)]
 pub struct AlbumArtEntity;
 
@@ -875,7 +875,9 @@ fn spawn_song_select(
                     .with_children(|mid| {
                         mid.spawn((
                             BigAlbumArt,
-                            AlbumArt::default(),
+                            // 0.18 = faint placeholder wash when a song
+                            // has no #PREIMAGE: jacket.
+                            AlbumArt::with_placeholder_alpha(0.18),
                             AlbumArtEntity,
                             panel(
                                 &t,
@@ -1789,7 +1791,7 @@ fn update_album_art_image(
     selection_state: Res<SongSelectSelection>,
     db: Res<SongDb>,
     asset_server: Res<AssetServer>,
-    mut query: Query<(&AlbumArtEntity, &mut ImageNode, &mut BackgroundColor)>,
+    mut query: Query<&mut AlbumArt, With<AlbumArtEntity>>,
 ) {
     if !selection.is_changed() {
         return;
@@ -1800,18 +1802,16 @@ fn update_album_art_image(
     let Some(song) = db.songs.get(chart_idx) else {
         return;
     };
-    for (_, mut image, mut bg) in &mut query {
-        if let Some(path) = &song.preimage_path {
-            // Real #PREIMAGE: present: show the image, hide the placeholder.
-            image.image = load_jacket(&asset_server, path);
-            image.color = image.color.with_alpha(1.0);
-            bg.0 = bg.0.with_alpha(0.0);
-        } else {
-            // No image: show the placeholder, hide the image.
-            image.image = Handle::default();
-            image.color = image.color.with_alpha(0.0);
-            bg.0 = bg.0.with_alpha(0.18);
-        }
+    // Resolve the #PREIMAGE: jacket (None = fade to placeholder) and
+    // hand it to the AlbumArt crossfade, which owns the entity's
+    // ImageNode + BackgroundColor. No direct alpha writes here — a
+    // second writer would race the 150/220ms tween.
+    let image = song
+        .preimage_path
+        .as_ref()
+        .map(|path| load_jacket(&asset_server, path));
+    for mut art in &mut query {
+        art.request_swap(image.clone());
     }
 }
 
