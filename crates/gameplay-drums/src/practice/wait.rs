@@ -135,6 +135,19 @@ fn discard_deferred_judgments(deferred: &mut Vec<JudgmentEvent>, chips: &[usize]
     deferred.retain(|event| !chips.contains(&event.chip_idx));
 }
 
+fn reset_wait_set_for_retry(
+    set: &WaitSet,
+    judged: &mut HashSet<usize>,
+    chord_hits: &mut HashMap<usize, Instant>,
+    deferred: &mut Vec<JudgmentEvent>,
+) {
+    for chip in &set.chips {
+        judged.remove(chip);
+        chord_hits.remove(chip);
+    }
+    discard_deferred_judgments(deferred, &set.chips);
+}
+
 fn write_deferred_judgments(
     deferred: &mut Vec<JudgmentEvent>,
     chips: &[usize],
@@ -192,16 +205,17 @@ pub fn wait_watcher(
                 .unwrap_or(session.current_attempt.start_ms)
                 .max(session.current_attempt.start_ms);
             if let Some(set) = check_halt(&timeline, &judged.0, clock.current_ms, span_start) {
+                reset_wait_set_for_retry(&set, &mut judged.0, &mut chord_hits.0, &mut deferred.0);
                 state.waited_chips.extend(set.chips.iter().copied());
                 crate::pause::pause_all_chart_audio(&bgm, &polyphony, &active, &mut instances);
                 state.phase = WaitPhase::Halted(set);
             } else if let Some(set) = flush_resolved_deferred_judgments(
-                    &timeline,
-                    &judged.0,
-                    &mut chord_hits,
-                    &mut deferred.0,
-                    &mut events,
-                ) {
+                &timeline,
+                &judged.0,
+                &mut chord_hits,
+                &mut deferred.0,
+                &mut events,
+            ) {
                 for chip in &set.chips {
                     judged.0.remove(chip);
                     chord_hits.0.remove(chip);
@@ -392,6 +406,28 @@ mod tests {
     }
 
     #[test]
+    fn halting_partial_chord_resets_every_member_for_visible_retry() {
+        let set = WaitSet {
+            target_ms: 2_000,
+            chips: vec![2, 3],
+        };
+        let mut judged = HashSet::from([1, 2]);
+        let mut hit_times = HashMap::from([(2, Instant::now())]);
+        let mut deferred = vec![JudgmentEvent {
+            lane: 1,
+            kind: dtx_scoring::JudgmentKind::Perfect,
+            delta_ms: -10,
+            chip_idx: 2,
+        }];
+
+        reset_wait_set_for_retry(&set, &mut judged, &mut hit_times, &mut deferred);
+
+        assert_eq!(judged, HashSet::from([1]));
+        assert!(hit_times.is_empty());
+        assert!(deferred.is_empty());
+    }
+
+    #[test]
     fn reenabled_wait_starts_after_the_previous_free_play_segment() {
         let tl = timeline();
         let mut state = WaitState::default();
@@ -509,10 +545,19 @@ mod tests {
         let released = take_deferred_judgments(&mut deferred, &[2, 3]);
 
         assert_eq!(
-            released.iter().map(|event| event.chip_idx).collect::<Vec<_>>(),
+            released
+                .iter()
+                .map(|event| event.chip_idx)
+                .collect::<Vec<_>>(),
             vec![2, 3]
         );
-        assert_eq!(deferred.iter().map(|event| event.chip_idx).collect::<Vec<_>>(), vec![4]);
+        assert_eq!(
+            deferred
+                .iter()
+                .map(|event| event.chip_idx)
+                .collect::<Vec<_>>(),
+            vec![4]
+        );
     }
 
     fn wait_watcher_test_app(chord_hit_times: HashMap<usize, Instant>) -> App {
@@ -597,10 +642,7 @@ mod tests {
             "reject should surface one feedback toast"
         );
         assert!(
-            app.world()
-                .resource::<DeferredWaitJudgments>()
-                .0
-                .is_empty(),
+            app.world().resource::<DeferredWaitJudgments>().0.is_empty(),
             "rejected chord messages must never reach score or stats"
         );
     }
