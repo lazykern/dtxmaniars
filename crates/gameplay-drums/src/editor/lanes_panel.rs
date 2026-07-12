@@ -190,6 +190,7 @@ pub fn reduce_lanes_nav(
 pub(super) fn lanes_nav_consumer(
     mut actions: MessageReader<game_shell::NavAction>,
     keys: Res<ButtonInput<KeyCode>>,
+    open: Res<super::EditorOpen>,
     active: Res<super::tabs::ActiveTab>,
     layouts: Res<WidgetLayouts>,
     mut focus: ResMut<LanesFocus>,
@@ -200,8 +201,19 @@ pub(super) fn lanes_nav_consumer(
 ) {
     use game_shell::{NavSource, NavVerb};
 
+    // A Customize session that ended mid-edit in Detail (Esc, or the song
+    // ending) leaves BOTH the focus level and the once-per-visit width snapshot
+    // flag set: the next session would then start focused on a detail card it
+    // never entered, and its first width adjust would push no undo snapshot.
+    // Re-arm on open.
+    if open.is_changed() {
+        *focus = LanesFocus::TabBar;
+    }
     if active.is_changed() && *focus != LanesFocus::TabBar {
         *focus = LanesFocus::TabBar;
+    }
+    // Not in Detail ⇒ the next Detail visit is a fresh gesture.
+    if *focus != LanesFocus::Detail {
         *width_undo_pushed = false;
     }
     let mut pending: Vec<(NavVerb, bool)> = actions
@@ -339,7 +351,7 @@ pub fn spawn_lane_block(
 ) {
     let body = panel_kit::spawn_card(p, "Lanes");
     // Reorder: drag pads in the preview (Task 9) for mouse; reduce_lanes_nav
-    // for keyboard (not yet driven). Rows here are select-only.
+    // for keyboard. Rows here are select-only.
     p.commands_mut().entity(body).with_children(|card| {
         for (i, lane) in lanes.0.lanes.iter().enumerate() {
             let is_selected = selected == Some(i);
@@ -973,6 +985,7 @@ mod tests {
             .init_resource::<Lanes>()
             .init_resource::<WidgetLayouts>()
             .init_resource::<UndoStack>()
+            .insert_resource(crate::editor::EditorOpen(true))
             .insert_resource(crate::editor::tabs::ActiveTab(
                 game_shell::CustomizeTab::Lanes,
             ))
@@ -1049,6 +1062,100 @@ mod tests {
         assert_eq!(
             stack_pops, 4,
             "per-press reorder undo + once-per-visit width undo"
+        );
+    }
+
+    /// A session that ended while the Detail card was focused must not leak its
+    /// focus level OR its once-per-visit width-undo flag into the next one: the
+    /// reopened surface starts on the tab bar, and the first width adjust of the
+    /// next Detail visit still snapshots.
+    #[test]
+    fn reopening_rearms_detail_focus_and_width_undo() {
+        use bevy::prelude::*;
+        use game_shell::{NavAction, NavSource};
+
+        use crate::editor::undo::{Snapshot, UndoStack};
+        use crate::widget_layout::WidgetLayouts;
+
+        let mut app = App::new();
+        app.init_resource::<ButtonInput<KeyCode>>()
+            .init_resource::<LanesFocus>()
+            .init_resource::<SelectedLane>()
+            .init_resource::<Lanes>()
+            .init_resource::<WidgetLayouts>()
+            .init_resource::<UndoStack>()
+            .insert_resource(crate::editor::EditorOpen(true))
+            .insert_resource(crate::editor::tabs::ActiveTab(
+                game_shell::CustomizeTab::Lanes,
+            ))
+            .add_message::<NavAction>()
+            .add_systems(Update, lanes_nav_consumer);
+        app.update(); // flush insertion change ticks
+
+        let nav = |app: &mut App, verb: NavVerb, coarse: bool| {
+            app.world_mut()
+                .resource_mut::<Messages<NavAction>>()
+                .write(NavAction {
+                    verb,
+                    source: NavSource::Keyboard,
+                    coarse,
+                });
+            app.update();
+        };
+        let width = |app: &App| app.world().resource::<Lanes>().0.lanes[0].width;
+
+        // Session one: descend into Detail and adjust width (arms the flag).
+        nav(&mut app, NavVerb::Down, false); // TabBar → Rows
+        nav(&mut app, NavVerb::Confirm, false); // Rows → Detail
+        nav(&mut app, NavVerb::Inc, false);
+        assert_eq!(*app.world().resource::<LanesFocus>(), LanesFocus::Detail);
+        let w_session_one = width(&app);
+
+        // Song ends mid-edit / Esc closes: nothing resets the focus level or the
+        // Local flag. Reopen (the only signal the consumer gets).
+        app.world_mut()
+            .resource_mut::<crate::editor::EditorOpen>()
+            .0 = false;
+        app.update();
+        app.world_mut()
+            .resource_mut::<crate::editor::EditorOpen>()
+            .0 = true;
+        app.update();
+        assert_eq!(
+            *app.world().resource::<LanesFocus>(),
+            LanesFocus::TabBar,
+            "a reopened surface starts on the tab bar, not a stale detail card"
+        );
+
+        // Stale focus would have let this ← adjust width with no snapshot.
+        nav(&mut app, NavVerb::Dec, false);
+        assert_eq!(
+            width(&app),
+            w_session_one,
+            "←/→ on the tab bar must not touch lane width"
+        );
+
+        // Fresh Detail visit: its first adjust snapshots again.
+        let before = Snapshot {
+            layouts: app.world().resource::<WidgetLayouts>().clone(),
+            lanes: app.world().resource::<Lanes>().clone(),
+        };
+        nav(&mut app, NavVerb::Down, false);
+        nav(&mut app, NavVerb::Confirm, false);
+        nav(&mut app, NavVerb::Inc, false);
+        assert_ne!(width(&app), w_session_one, "the visit's adjust applied");
+        let current = Snapshot {
+            layouts: app.world().resource::<WidgetLayouts>().clone(),
+            lanes: app.world().resource::<Lanes>().clone(),
+        };
+        let undone = app
+            .world_mut()
+            .resource_mut::<UndoStack>()
+            .undo(current)
+            .expect("the first width adjust of a new visit pushes a snapshot");
+        assert_eq!(
+            undone.lanes.0.lanes[0].width, before.lanes.0.lanes[0].width,
+            "undo restores the width from before this visit"
         );
     }
 

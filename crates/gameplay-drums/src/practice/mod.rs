@@ -24,7 +24,11 @@ pub use session::PracticeSession;
 
 use crate::gauge::StageGauge;
 
-pub(super) fn plugin(app: &mut App) {
+/// The practice action chain and its full gating. Split out of `plugin` so the
+/// test can register the PRODUCTION wiring (notably the `editor_closed` gate)
+/// without booting the rest of practice mode, which needs the whole game's
+/// audio/asset/theme resources.
+fn add_action_systems(app: &mut App) {
     app.init_resource::<actions::PracticeBindings>()
         .add_message::<actions::PracticeAction>()
         .add_systems(
@@ -39,6 +43,10 @@ pub(super) fn plugin(app: &mut App) {
                 .run_if(resource_exists::<PracticeSession>)
                 .run_if(crate::editor::editor_closed),
         );
+}
+
+pub(super) fn plugin(app: &mut App) {
+    add_action_systems(app);
     app.init_resource::<toast::ToastQueue>().add_systems(
         Update,
         toast::toast_ui
@@ -126,17 +134,25 @@ mod tests {
         assert!(!app.world().contains_resource::<PracticeSession>());
     }
 
+    /// Registers the PRODUCTION chain (`add_action_systems`, called by
+    /// `plugin`), not a re-stated gate: dropping `.run_if(editor_closed)` from
+    /// it fails this test.
     #[test]
     fn practice_actions_are_dead_while_editor_is_open() {
         let mut app = App::new();
-        app.init_resource::<ButtonInput<KeyCode>>()
-            .init_resource::<actions::PracticeBindings>()
-            .insert_resource(crate::editor::EditorOpen(true))
-            .add_message::<actions::PracticeAction>()
-            .add_systems(
-                Update,
-                actions::emit_practice_actions.run_if(crate::editor::editor_closed),
-            );
+        app.add_plugins(bevy::state::app::StatesPlugin)
+            .insert_state(AppState::Performance)
+            .insert_state(game_shell::PauseState::Running)
+            .init_resource::<ButtonInput<KeyCode>>()
+            // What `apply_practice_actions` (the chain's second half) reads.
+            .init_resource::<crate::timeline::ChipTimeline>()
+            .init_resource::<crate::resources::GameplayClock>()
+            .init_resource::<toast::ToastQueue>()
+            .init_resource::<crate::pause::PracticePauseSurface>()
+            .add_message::<crate::seek::SeekToChartTime>()
+            .insert_resource(PracticeSession::default())
+            .insert_resource(crate::editor::EditorOpen(true));
+        add_action_systems(&mut app);
         app.world_mut()
             .resource_mut::<ButtonInput<KeyCode>>()
             .press(KeyCode::Tab);

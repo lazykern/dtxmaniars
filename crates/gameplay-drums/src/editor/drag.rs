@@ -336,7 +336,7 @@ fn nudge_selected_widget(
 /// A Tab press released within this window is a "tap" (cycle selection);
 /// anything longer was the existing hold-to-peek (`update_preview_state`)
 /// and must not move the selection.
-const TAB_TAP_MAX_SECS: f32 = 0.25;
+pub(super) const TAB_TAP_MAX_SECS: f32 = 0.25;
 
 /// Next/previous widget in the sidebar list order (`WidgetKind::ALL` — the
 /// exact order `panel::spawn_widget_list` renders). Wraps; `None` starts at
