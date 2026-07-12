@@ -116,16 +116,19 @@ pub fn plugin(app: &mut App) {
             // Left content rebuilds on tab/content change only (NOT selection),
             // so picking a widget no longer respawns the whole left list. The
             // Local guard inside still debounces width-only Lanes changes.
-            rebuild_left_content.run_if(
-                resource_changed::<super::tabs::ActiveTab>
-                    .or_else(resource_changed::<EditorOpen>)
-                    .or_else(resource_changed::<Lanes>)
-                    .or_else(resource_changed::<super::bindings_panel::BindingsRev>)
-                    .or_else(resource_changed::<super::controls_panel::ControlsSegment>)
-                    .or_else(resource_changed::<super::controls_panel::ControlsFocus>)
-                    .or_else(resource_changed::<super::lanes_panel::SelectedLane>)
-                    .or_else(resource_changed::<super::lanes_panel::AddChannelPopupOpen>),
-            ),
+            rebuild_left_content
+                .after(super::profile_bar_ui::ProfileBarInteractionSet)
+                .run_if(
+                    resource_changed::<super::tabs::ActiveTab>
+                        .or_else(resource_changed::<EditorOpen>)
+                        .or_else(resource_changed::<Lanes>)
+                        .or_else(resource_changed::<super::bindings_panel::BindingsRev>)
+                        .or_else(resource_changed::<super::controls_panel::ControlsSegment>)
+                        .or_else(resource_changed::<super::controls_panel::ControlsFocus>)
+                        .or_else(resource_changed::<super::lanes_panel::SelectedLane>)
+                        .or_else(resource_changed::<super::lanes_panel::AddChannelPopupOpen>)
+                        .or_else(profile_popup_changed),
+                ),
             // Right inspector rebuilds on selection change (+ tab/open) — this
             // is the only panel that reacts to Selection.
             rebuild_right_inspector.run_if(
@@ -152,6 +155,10 @@ pub fn plugin(app: &mut App) {
             .run_if(in_state(game_shell::AppState::Performance)),
     )
     .add_systems(OnExit(game_shell::AppState::Performance), despawn_panel);
+}
+
+fn profile_popup_changed(popup: Res<super::profile_bar_ui::ProfileBarPopup>) -> bool {
+    popup.is_changed()
 }
 
 fn despawn_panel(
@@ -854,6 +861,38 @@ fn update_hovered_desc(
         if *interaction == Interaction::Hovered {
             hovered.0 = row_desc.0.to_string();
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[derive(Resource, Default)]
+    struct RebuildCount(u32);
+
+    fn count_rebuild(mut count: ResMut<RebuildCount>) {
+        count.0 += 1;
+    }
+
+    #[test]
+    fn profile_popup_change_requests_left_panel_rebuild() {
+        let mut app = App::new();
+        app.init_resource::<super::super::profile_bar_ui::ProfileBarPopup>()
+            .init_resource::<RebuildCount>()
+            .add_systems(Update, count_rebuild.run_if(profile_popup_changed));
+
+        app.update();
+        app.world_mut().resource_mut::<RebuildCount>().0 = 0;
+        app.update();
+        assert_eq!(app.world().resource::<RebuildCount>().0, 0);
+
+        *app.world_mut()
+            .resource_mut::<super::super::profile_bar_ui::ProfileBarPopup>() =
+            super::super::profile_bar_ui::ProfileBarPopup::Selector;
+        app.update();
+
+        assert_eq!(app.world().resource::<RebuildCount>().0, 1);
     }
 }
 
