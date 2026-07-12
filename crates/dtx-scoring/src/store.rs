@@ -41,7 +41,7 @@ impl Default for ScoreStore {
 }
 
 /// One persisted play/result.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct ScoreEntry {
     /// Stable entry identifier.
     pub id: String,
@@ -52,7 +52,16 @@ pub struct ScoreEntry {
     /// Song artist at time of play/import.
     pub artist: String,
     /// Score value.
-    pub score: u32,
+    pub score: i64,
+    /// Chart level used to calculate `song_skill`.
+    #[serde(default)]
+    pub chart_level: f64,
+    /// NX performance skill / completion rate (0..100).
+    #[serde(default)]
+    pub performance_skill: f64,
+    /// NX per-song skill contribution.
+    #[serde(default)]
+    pub song_skill: f64,
     /// Maximum combo.
     pub max_combo: u32,
     /// Judgment totals.
@@ -98,6 +107,37 @@ impl ScoreEntry {
             weighted / total as f32
         }
     }
+
+    /// NX performance skill, derived from recorded judgments for legacy entries.
+    pub fn effective_performance_skill(&self) -> f64 {
+        if self.performance_skill != 0.0 {
+            self.performance_skill
+        } else {
+            crate::skill::drum_performance_skill(
+                self.total(),
+                self.judgments.perfect,
+                self.judgments.great,
+                self.judgments.good,
+                self.judgments.poor,
+                self.judgments.miss,
+                self.max_combo,
+                crate::skill::DrumAutoPlay::default(),
+            )
+        }
+    }
+
+    /// NX per-song skill, derived when a legacy entry carries its chart level.
+    pub fn effective_song_skill(&self) -> f64 {
+        if self.song_skill != 0.0 {
+            self.song_skill
+        } else {
+            crate::skill::drum_song_skill(
+                self.chart_level,
+                self.effective_performance_skill(),
+                false,
+            )
+        }
+    }
 }
 
 /// Judgment count bundle.
@@ -129,6 +169,8 @@ pub enum ScoreSource {
     Native,
     /// Imported DTXManiaNX best score.
     ImportedNxHiScore,
+    /// Imported DTXManiaNX high-skill record.
+    ImportedNxHiSkill,
     /// Imported DTXManiaNX last play.
     ImportedNxLastPlay,
 }
@@ -244,6 +286,43 @@ impl ScoreStore {
             .max_by_key(|entry| entry.score)
     }
 
+    /// Highest-performance result for a canonical chart hash.
+    pub fn best_skill_for_chart(&self, canonical_hash: &str) -> Option<&ScoreEntry> {
+        self.entries
+            .iter()
+            .filter(|entry| entry.chart.canonical_hash == canonical_hash)
+            .max_by(|a, b| {
+                a.effective_performance_skill()
+                    .total_cmp(&b.effective_performance_skill())
+            })
+    }
+
+    /// NX player skill: highest chart contribution per song folder, then top 50.
+    ///
+    /// DTXManiaNX's `SongNode` holds every difficulty for one song. Our song
+    /// selector uses the chart's parent directory as the corresponding node;
+    /// legacy entries without a source path remain independent.
+    pub fn player_skill(&self) -> f64 {
+        let mut by_song = std::collections::HashMap::<String, f64>::new();
+        for entry in &self.entries {
+            let skill = entry.effective_song_skill();
+            let song_key = entry
+                .chart
+                .source_path_hint
+                .as_deref()
+                .and_then(Path::parent)
+                .map(|parent| parent.to_string_lossy().into_owned())
+                .unwrap_or_else(|| entry.chart.canonical_hash.clone());
+            by_song
+                .entry(song_key)
+                .and_modify(|best| *best = best.max(skill))
+                .or_insert(skill);
+        }
+        let mut skills: Vec<f64> = by_song.into_values().filter(|skill| *skill > 0.0).collect();
+        skills.sort_by(|a, b| b.total_cmp(a));
+        skills.into_iter().take(50).sum()
+    }
+
     /// Backward-compatible alias for best score lookup.
     pub fn best_for(&self, canonical_hash: &str) -> Option<&ScoreEntry> {
         self.best_for_chart(canonical_hash)
@@ -353,7 +432,10 @@ impl LegacyScoreEntry {
             chart: ChartIdentity::legacy_raw(self.chart_hash),
             title: self.title,
             artist: self.artist,
-            score: self.score,
+            score: i64::from(self.score),
+            chart_level: 0.0,
+            performance_skill: 0.0,
+            song_skill: 0.0,
             max_combo: self.max_combo,
             judgments: JudgmentTotals {
                 perfect: self.perfect,
@@ -367,5 +449,67 @@ impl LegacyScoreEntry {
             source: ScoreSource::Native,
             replay_ref: None,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::identity::ChartIdentity;
+
+    #[test]
+    fn player_skill_sums_the_top_fifty_distinct_charts() {
+        let mut store = ScoreStore::default();
+        for value in 1..=51_i64 {
+            store.add(ScoreEntry {
+                id: value.to_string(),
+                chart: ChartIdentity::new(format!("dtx1:{value}"), None, None),
+                title: String::new(),
+                artist: String::new(),
+                score: value,
+                chart_level: 0.0,
+                performance_skill: 0.0,
+                song_skill: value as f64,
+                max_combo: 0,
+                judgments: JudgmentTotals::default(),
+                rank: Rank::Unknown,
+                played_at: 0,
+                source: ScoreSource::Native,
+                replay_ref: None,
+            });
+        }
+        assert_eq!(store.player_skill(), 1325.0);
+    }
+
+    #[test]
+    fn player_skill_counts_one_best_chart_per_song_folder() {
+        let mut store = ScoreStore::default();
+        for (name, folder, skill) in [
+            ("basic", "/songs/a", 10.0),
+            ("master", "/songs/a", 20.0),
+            ("other", "/songs/b", 30.0),
+        ] {
+            store.add(ScoreEntry {
+                id: name.to_string(),
+                chart: ChartIdentity::new(
+                    format!("dtx1:{name}"),
+                    None,
+                    Some(PathBuf::from(folder).join(format!("{name}.dtx"))),
+                ),
+                title: String::new(),
+                artist: String::new(),
+                score: 0,
+                chart_level: 0.0,
+                performance_skill: 0.0,
+                song_skill: skill,
+                max_combo: 0,
+                judgments: JudgmentTotals::default(),
+                rank: Rank::Unknown,
+                played_at: 0,
+                source: ScoreSource::Native,
+                replay_ref: None,
+            });
+        }
+        assert_eq!(store.player_skill(), 50.0);
     }
 }

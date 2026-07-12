@@ -21,11 +21,11 @@ pub fn bar_fill_pct(achievement: f32) -> f32 {
     achievement.clamp(0.0, 100.0)
 }
 
-/// Display skill: level × achievement% / 100 × 20.
+/// NX per-song skill: level × performance-skill% / 100 × 20.
 /// 100% on a 9.80 chart = 196.0 skill points. Display-only.
-pub fn skill_points(dlevel: Option<u32>, achievement_pct: f32) -> f32 {
+pub fn skill_points(dlevel: Option<u32>, performance_skill: f32) -> f32 {
     let level = dlevel.map(dtx_core::display_dlevel).unwrap_or(0.0);
-    level * (achievement_pct / 100.0) * 20.0
+    level * (performance_skill / 100.0) * 20.0
 }
 
 /// Map a drum channel to its density-graph display lane

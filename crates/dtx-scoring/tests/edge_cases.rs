@@ -3,14 +3,14 @@
 //! Covers score entry, rank thresholds, hit range boundary values,
 //! and gauge state transitions.
 
+use dtx_scoring::JudgmentKind;
 use dtx_scoring::gauge::{
-    gauge_delta, ComboState, GaugeState, GAUGE_EXCELLENT, GAUGE_GOOD, GAUGE_START,
+    ComboState, GAUGE_EXCELLENT, GAUGE_GOOD, GAUGE_START, GaugeState, gauge_delta,
 };
 use dtx_scoring::hit_ranges::{
-    classify_with_difficulty, classify_with_ranges, Difficulty, HitRanges,
+    Difficulty, HitRanges, classify_with_difficulty, classify_with_ranges,
 };
 use dtx_scoring::identity::ChartIdentity;
-use dtx_scoring::JudgmentKind;
 use dtx_scoring::{JudgmentTotals, Rank, ScoreEntry, ScoreSource, ScoreStore};
 
 #[test]
@@ -158,7 +158,10 @@ fn make_entry(hash: &str, score: u32) -> ScoreEntry {
         chart: ChartIdentity::new(hash.into(), None, None),
         title: "T".into(),
         artist: "A".into(),
-        score,
+        score: i64::from(score),
+        chart_level: 0.0,
+        performance_skill: 0.0,
+        song_skill: 0.0,
         max_combo: 0,
         judgments: JudgmentTotals::default(),
         rank: Rank::S,

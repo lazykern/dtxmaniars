@@ -46,5 +46,5 @@ pub fn compute_from_chart(
         .map(|v| dtx_core::display_dlevel(v) as f64)
         .unwrap_or(0.0);
     derived.total_drum_chips = drum_chip_count;
-    derived.max_skill = crate::skill::game_skill(100.0, derived.chart_level, false);
+    derived.max_skill = dtx_scoring::skill::drum_song_skill(derived.chart_level, 100.0, false);
 }

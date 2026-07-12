@@ -18,6 +18,7 @@ pub mod identity;
 pub mod nx_import;
 pub mod replay;
 pub mod score_ini;
+pub mod skill;
 pub mod store;
 pub mod xg_score;
 
@@ -247,7 +248,10 @@ mod tests {
             chart: identity::ChartIdentity::new(chart_hash.to_string(), None, None),
             title: "T".into(),
             artist: "A".into(),
-            score,
+            score: i64::from(score),
+            chart_level: 0.0,
+            performance_skill: 0.0,
+            song_skill: 0.0,
             max_combo: 100,
             judgments: JudgmentTotals {
                 perfect: 50,
@@ -360,7 +364,7 @@ mod tests {
         let p = PathBuf::from("/nonexistent/never/read.txt");
         let h = compute_chart_hash(&p);
         assert_eq!(h.len(), 64); // SHA-256 hex
-                                 // Same path → same hash (deterministic).
+        // Same path → same hash (deterministic).
         assert_eq!(h, compute_chart_hash(&p));
     }
 

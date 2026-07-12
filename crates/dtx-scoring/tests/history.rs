@@ -11,7 +11,10 @@ fn entry(path: &str, score: u32, played_at: u64) -> ScoreEntry {
         chart: ChartIdentity::new(format!("dtx1:{path}"), None, Some(PathBuf::from(path))),
         title: "Title".into(),
         artist: "Artist".into(),
-        score,
+        score: i64::from(score),
+        chart_level: 0.0,
+        performance_skill: 0.0,
+        song_skill: 0.0,
         max_combo: 0,
         judgments: JudgmentTotals::default(),
         rank: Rank::A,
@@ -36,7 +39,7 @@ fn orders_by_score_descending() {
         entry("a.dtx", 300, 2),
         entry("a.dtx", 200, 3),
     ]);
-    let scores: Vec<u32> = store
+    let scores: Vec<i64> = store
         .history_for_path(Path::new("a.dtx"), 8)
         .iter()
         .map(|e| e.score)

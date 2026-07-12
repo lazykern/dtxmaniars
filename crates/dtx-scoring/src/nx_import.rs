@@ -6,10 +6,10 @@ use std::path::{Path, PathBuf};
 
 use thiserror::Error;
 
-use crate::identity::{canonical_chart_hash, raw_file_sha256, ChartIdentity};
-use crate::score_ini::{parse_score_ini_text, DrumScoreIni};
-use crate::store::{JudgmentTotals, NxImportRecord, ScoreEntry, ScoreSource, ScoreStore};
 use crate::Rank;
+use crate::identity::{ChartIdentity, canonical_chart_hash, raw_file_sha256};
+use crate::score_ini::{DrumScoreIni, parse_score_ini_text};
+use crate::store::{JudgmentTotals, NxImportRecord, ScoreEntry, ScoreSource, ScoreStore};
 
 /// Import options.
 #[derive(Debug, Clone)]
@@ -78,6 +78,12 @@ pub fn import_nx_scores(
             .clone()
             .unwrap_or_else(|| parsed.file.title.clone());
         let artist = chart.metadata.artist.clone().unwrap_or_default();
+        let chart_level = chart
+            .metadata
+            .dlevel
+            .map(dtx_core::display_dlevel)
+            .map(f64::from)
+            .unwrap_or(0.0);
 
         let before = store.entries.len();
         if let Some(best) = parsed.hi_score_drums.clone() {
@@ -86,7 +92,18 @@ pub fn import_nx_scores(
                 &title,
                 &artist,
                 &best,
+                chart_level,
                 ScoreSource::ImportedNxHiScore,
+            ));
+        }
+        if let Some(best_skill) = parsed.hi_skill_drums.clone() {
+            store.add_if_new(entry_from_ini(
+                &identity,
+                &title,
+                &artist,
+                &best_skill,
+                chart_level,
+                ScoreSource::ImportedNxHiSkill,
             ));
         }
         if let Some(last) = parsed.last_play_drums.clone() {
@@ -95,6 +112,7 @@ pub fn import_nx_scores(
                 &title,
                 &artist,
                 &last,
+                chart_level,
                 ScoreSource::ImportedNxLastPlay,
             ));
         }
@@ -142,8 +160,10 @@ fn entry_from_ini(
     title: &str,
     artist: &str,
     ini: &DrumScoreIni,
+    chart_level: f64,
     source: ScoreSource,
 ) -> ScoreEntry {
+    let performance_skill = ini.performance_skill();
     ScoreEntry {
         id: format!(
             "{}:{source:?}:{}:{}",
@@ -153,6 +173,13 @@ fn entry_from_ini(
         title: title.to_string(),
         artist: artist.to_string(),
         score: ini.score,
+        chart_level,
+        performance_skill,
+        song_skill: if ini.song_skill != 0.0 {
+            ini.song_skill
+        } else {
+            crate::skill::drum_song_skill(chart_level, performance_skill, false)
+        },
         max_combo: ini.max_combo,
         judgments: JudgmentTotals {
             perfect: ini.perfect,

@@ -1132,10 +1132,13 @@ fn spawn_wheel_rows(
                     let (skill, ach) = display
                         .map(|s| {
                             let ini = dtx_scoring::score_ini::score_ini_path(&s.path);
-                            let acc = dtx_scoring::score_ini::read_best(&ini)
-                                .map(|b| b.accuracy())
+                            let skill_rate = dtx_scoring::score_ini::read_best_skill(&ini)
+                                .map(|b| b.performance_skill() as f32)
                                 .unwrap_or(0.0);
-                            (crate::chart_stats::skill_points(s.dlevel, acc), acc)
+                            (
+                                crate::chart_stats::skill_points(s.dlevel, skill_rate),
+                                skill_rate,
+                            )
                         })
                         .unwrap_or((0.0, 0.0));
                     // Skill number + progress bar on one line.
@@ -1317,11 +1320,11 @@ fn update_left_cluster(
         .and_then(|i| db.songs.get(i))
         .map(|song| {
             let ini = dtx_scoring::score_ini::score_ini_path(&song.path);
-            let acc = dtx_scoring::score_ini::read_best(&ini)
-                .map(|b| b.accuracy())
+            let skill_rate = dtx_scoring::score_ini::read_best_skill(&ini)
+                .map(|b| b.performance_skill() as f32)
                 .unwrap_or(0.0);
             (
-                crate::chart_stats::skill_points(song.dlevel, acc),
+                crate::chart_stats::skill_points(song.dlevel, skill_rate),
                 song.bpm.unwrap_or(0.0),
             )
         })

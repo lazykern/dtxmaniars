@@ -16,8 +16,9 @@ use crate::components::LastJudgment;
 use crate::derived::ChartDerived;
 use crate::events::{JudgmentEvent, NoteMissed};
 use crate::resources::{Combo, DrumScoring, FastSlowCount, JudgmentCounts, Score, SkillValue};
-use dtx_scoring::xg_score::xg_drum_score_delta;
 use dtx_scoring::JudgmentKind;
+use dtx_scoring::skill::{DrumAutoPlay, drum_performance_skill, drum_song_skill};
+use dtx_scoring::xg_score::xg_drum_score_delta;
 
 pub(super) fn plugin(app: &mut App) {
     app.init_resource::<LastJudgment>().add_systems(
@@ -72,7 +73,7 @@ pub(crate) fn update_score_system(
             scoring.accum,
         );
         scoring.accum += delta;
-        score.0 = scoring.accum.round().max(0.0) as u64;
+        score.0 = scoring.accum;
 
         update_skill_value(
             &mut skill,
@@ -129,24 +130,24 @@ fn update_skill_value(
     max_combo: u32,
     chart_level: f64,
 ) {
-    let skill_pct = crate::skill::calculate_skill_new(
+    let skill_pct = drum_performance_skill(
+        total_notes,
         counts.perfect,
         counts.great,
         counts.good,
         counts.ok,
         counts.miss,
-        total_notes,
         max_combo,
-        false,
+        DrumAutoPlay::default(),
     );
-    skill.current = crate::skill::game_skill(skill_pct, chart_level, false);
+    skill.current = drum_song_skill(chart_level, skill_pct, false);
 }
 
 #[cfg(test)]
 mod tests {
     #![allow(unused)]
     use super::*;
-    use crate::lane_map::{lane_of, LaneId, LANE_ORDER};
+    use crate::lane_map::{LANE_ORDER, LaneId, lane_of};
 
     #[test]
     fn poor_breaks_combo() {
@@ -164,16 +165,16 @@ mod tests {
         let mut scoring = DrumScoring::default();
         scoring.reset(100);
         let mut score = Score::default();
-        let mut acc = 0.0f64;
+        let mut acc = 0i64;
         for i in 1..=3u32 {
             let d = xg_drum_score_delta(JudgmentKind::Perfect, i, i, 100, 0, acc);
             acc += d;
         }
         scoring.accum = acc;
-        score.0 = scoring.accum.round() as u64;
+        score.0 = scoring.accum;
         // base ≈ 264.9; combos 1+2+3 = 6 units → ~1589.
         assert!(score.0 > 0);
-        assert_eq!(score.0, acc.round() as u64);
+        assert_eq!(score.0, acc);
     }
 
     #[test]

@@ -5,7 +5,7 @@ use std::path::PathBuf;
 
 use bevy::prelude::*;
 use bevy_kira_audio::prelude::*;
-use dtx_core::{beat_lines::TimingLine, Chart, Metadata};
+use dtx_core::{Chart, Metadata, beat_lines::TimingLine};
 
 /// Expanded bar/beat timing lines for the active chart.
 ///
@@ -48,20 +48,18 @@ impl ActiveChart {
     }
 }
 
-/// Cumulative (rounded) score shown in the HUD / results.
+/// Cumulative score shown in the HUD / results.
 /// Updated by [`crate::score::update_score_system`].
 #[derive(Resource, Default, Debug, Clone, Copy)]
-pub struct Score(pub u64);
+pub struct Score(pub i64);
 
-/// DTXManiaNX XG scoring state (fractional accumulator + chart constants).
+/// DTXManiaNX XG scoring state (integer accumulator + chart constants).
 ///
-/// The XG formula produces non-integer per-hit deltas, so we accumulate in f64
-/// and round into [`Score`] for display. `total_notes` is `nComboMax`
-/// (`CStagePerfCommonScreen.cs:1619`), `bonus_chips` is `nボーナスチップ数`
-/// (unmodeled → 0).
+/// NX truncates every floating-point hit delta before adding it. `total_notes` is `nComboMax`
+/// (`CStagePerfCommonScreen.cs:1619`), `bonus_chips` is `nボーナスチップ数`.
 #[derive(Resource, Default, Debug, Clone, Copy)]
 pub struct DrumScoring {
-    pub accum: f64,
+    pub accum: i64,
     pub total_notes: u32,
     pub bonus_chips: u32,
     /// Guards against applying the end-of-song FC/EXC bonus more than once.
@@ -71,7 +69,7 @@ pub struct DrumScoring {
 impl DrumScoring {
     /// Reset for a fresh play of `total_notes` judgeable drum chips.
     pub fn reset(&mut self, total_notes: u32) {
-        self.accum = 0.0;
+        self.accum = 0;
         self.total_notes = total_notes;
         self.bonus_chips = 0;
         self.end_bonus_applied = false;
@@ -190,7 +188,7 @@ impl JudgmentCounts {
 
 /// Running "Skills by Song" + max possible skill. Updated as judgments land.
 ///
-/// Computed via [`crate::skill::calculate_skill_new`] × chart_level × 0.20.
+/// Computed via [`crate::skill::drum_performance_skill`] × chart_level × 0.20.
 #[derive(Resource, Default, Debug, Clone, Copy)]
 pub struct SkillValue {
     pub current: f64,

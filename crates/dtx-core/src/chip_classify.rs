@@ -162,6 +162,10 @@ pub const fn classify(ch: EChannel) -> ChipClass {
         }
 
         // Bar / beat
+        EChannel::BonusEffect1
+        | EChannel::BonusEffect2
+        | EChannel::BonusEffect3
+        | EChannel::BonusEffect4 => ChipClass::System,
         EChannel::BarLine => ChipClass::BarLine,
         EChannel::BeatLine => ChipClass::BarLine,
         EChannel::BeatLineShift => ChipClass::BeatLineShift,

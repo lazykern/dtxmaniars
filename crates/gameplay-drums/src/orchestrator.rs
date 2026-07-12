@@ -45,7 +45,7 @@ use bevy::prelude::*;
 use bevy_kira_audio::prelude::*;
 use dtx_audio::{BgmHandle, DrumPolyphony};
 use dtx_core::chart::Chart;
-use game_shell::{request_transition, AppState, TransitionRequest};
+use game_shell::{AppState, TransitionRequest, request_transition};
 
 use crate::components::LastJudgment;
 use crate::derived::ChartDerived;
@@ -193,8 +193,15 @@ pub fn enter_reset_run_state(
     mut drum_settings: ResMut<DrumGameplaySettings>,
 ) {
     let drum_chip_count = chart.chart.drum_chips().count();
+    let bonus_chip_count = chart
+        .chart
+        .chips
+        .iter()
+        .filter(|chip| chip.channel.is_bonus_effect())
+        .count();
     score.0 = 0;
     scoring.reset(drum_chip_count as u32);
+    scoring.bonus_chips = bonus_chip_count as u32;
     combo.current = 0;
     combo.max = 0;
     counts.reset();
@@ -426,8 +433,8 @@ pub fn detect_end_of_stage(
                 scoring.total_notes,
             );
             if bonus != 0 {
-                scoring.accum += bonus as f64;
-                score.0 = scoring.accum.round().max(0.0) as u64;
+                scoring.accum += bonus;
+                score.0 = scoring.accum;
             }
             scoring.end_bonus_applied = true;
         }

@@ -18,7 +18,7 @@ pub struct HistoryRow {
     /// Rank label ("SS".."E", "--" for unknown).
     pub rank: String,
     /// Score value.
-    pub score: u32,
+    pub score: i64,
     /// Weighted achievement percentage (0..100).
     pub achievement_pct: f32,
     /// Pre-formatted local play time, `YYYY-MM-DD HH:MM`.

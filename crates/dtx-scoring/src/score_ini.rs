@@ -23,10 +23,14 @@ use std::path::{Path, PathBuf};
 use crate::Rank;
 
 /// A drums score record backing one `.score.ini` file.
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq)]
 pub struct DrumScoreIni {
     /// Best (or current) score value.
-    pub score: u32,
+    pub score: i64,
+    /// NX `PlaySkill`: performance skill / completion rate (0..100).
+    pub play_skill: f64,
+    /// NX `Skill`: per-song skill contribution.
+    pub song_skill: f64,
     /// Judgment tallies.
     pub perfect: u32,
     /// Judgment tallies.
@@ -77,18 +81,20 @@ pub struct ScoreIniFileSection {
 }
 
 /// Parsed drums-focused `.score.ini`.
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq)]
 pub struct ParsedScoreIni {
     /// File section.
     pub file: ScoreIniFileSection,
     /// HiScore.Drums section.
     pub hi_score_drums: Option<DrumScoreIni>,
+    /// HiSkill.Drums section.
+    pub hi_skill_drums: Option<DrumScoreIni>,
     /// LastPlay.Drums section.
     pub last_play_drums: Option<DrumScoreIni>,
 }
 
 impl DrumScoreIni {
-    /// Perfect+Great accuracy (0..100).
+    /// Perfect+Great accuracy (0..100), retained for the achievement display.
     pub fn accuracy(&self) -> f32 {
         let total = self.perfect + self.great + self.good + self.poor + self.miss;
         if total == 0 {
@@ -112,17 +118,27 @@ impl DrumScoreIni {
         }
     }
 
-    /// True when `self` is a better result than `other` (score, then accuracy,
-    /// then combo). Mirrors BocuD's hi-score replacement rule.
+    /// True when `self` is a better result than `other` by score.
     fn beats(&self, other: &DrumScoreIni) -> bool {
-        if self.score != other.score {
-            return self.score > other.score;
+        self.score > other.score
+    }
+
+    /// NX performance skill, deriving it for legacy records without PlaySkill.
+    pub fn performance_skill(&self) -> f64 {
+        if self.play_skill != 0.0 {
+            self.play_skill
+        } else {
+            crate::skill::drum_performance_skill(
+                self.total_chips,
+                self.perfect,
+                self.great,
+                self.good,
+                self.poor,
+                self.miss,
+                self.max_combo,
+                crate::skill::DrumAutoPlay::default(),
+            )
         }
-        let (a, b) = (self.accuracy(), other.accuracy());
-        if (a - b).abs() > f32::EPSILON {
-            return a > b;
-        }
-        self.max_combo > other.max_combo
     }
 }
 
@@ -278,6 +294,13 @@ pub fn read_best(path: impl AsRef<Path>) -> Option<DrumScoreIni> {
     parse_best(&text)
 }
 
+/// Read the best drums performance-skill record from a `.score.ini`.
+pub fn read_best_skill(path: impl AsRef<Path>) -> Option<DrumScoreIni> {
+    let bytes = std::fs::read(path.as_ref()).ok()?;
+    let text = String::from_utf8_lossy(&bytes);
+    parse_score_ini_text(&text)?.hi_skill_drums
+}
+
 /// Parse drums-focused DTXManiaNX score.ini text.
 pub fn parse_score_ini_text(text: &str) -> Option<ParsedScoreIni> {
     let sections = parse_sections(text);
@@ -285,12 +308,16 @@ pub fn parse_score_ini_text(text: &str) -> Option<ParsedScoreIni> {
     let hi_score_drums = sections
         .get("HiScore.Drums")
         .map(|section| parse_drum_section(section, &file));
+    let hi_skill_drums = sections
+        .get("HiSkill.Drums")
+        .map(|section| parse_drum_section(section, &file));
     let last_play_drums = sections
         .get("LastPlay.Drums")
         .map(|section| parse_drum_section(section, &file));
     Some(ParsedScoreIni {
         file,
         hi_score_drums,
+        hi_skill_drums,
         last_play_drums,
     })
 }
@@ -303,50 +330,71 @@ pub fn write_result(
     cleared: bool,
 ) -> std::io::Result<()> {
     let path = path.as_ref();
-    let existing = read_best(path);
+    let existing = std::fs::read(path)
+        .ok()
+        .and_then(|bytes| parse_score_ini_text(&String::from_utf8_lossy(&bytes)));
 
-    let (play_count, clear_count, best) = match existing {
+    let (play_count, clear_count, best_score, best_skill, best_rank) = match existing {
         Some(prev) => {
-            let play = prev.play_count.saturating_add(1);
-            let clear = prev.clear_count + u32::from(cleared);
-            let best = if result.beats(&prev) {
-                result.clone()
-            } else {
-                prev
+            let play = prev.file.play_count_drums.saturating_add(1);
+            let clear = prev.file.clear_count_drums + u32::from(cleared);
+            let best_score = match prev.hi_score_drums {
+                Some(current) if !result.beats(&current) => current,
+                _ => result.clone(),
             };
-            (play, clear, best)
+            let best_skill = match prev.hi_skill_drums {
+                Some(current) if result.performance_skill() <= current.performance_skill() => {
+                    current
+                }
+                _ => result.clone(),
+            };
+            let best_rank = rank_code(&result.rank).min(prev.file.best_rank_drums);
+            (play, clear, best_score, best_skill, best_rank)
         }
-        None => (1, u32::from(cleared), result.clone()),
+        None => (
+            1,
+            u32::from(cleared),
+            result.clone(),
+            result.clone(),
+            rank_code(&result.rank),
+        ),
     };
 
-    let mut best = best;
-    best.play_count = play_count;
-    best.clear_count = clear_count;
+    let mut best_score = best_score;
+    best_score.play_count = play_count;
+    best_score.clear_count = clear_count;
+    let mut best_skill = best_skill;
+    best_skill.play_count = play_count;
+    best_skill.clear_count = clear_count;
 
-    let text = render(&best, result);
+    let text = render_internal(&best_score, &best_skill, result, &[], best_rank);
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)?;
     }
     std::fs::write(path, text.into_bytes())
 }
 
-/// Render `[File]` + drums hi-score/last-play sections. Non-drums sections are
-/// emitted empty for BocuD compatibility.
-fn render(best: &DrumScoreIni, last: &DrumScoreIni) -> String {
-    render_internal(best, last, &[])
-}
-
 /// Render `[File]` + drums sections with preserved history lines.
 pub fn render_with_history(best: &DrumScoreIni, last: &DrumScoreIni, history: &[String]) -> String {
-    render_internal(best, last, history)
+    render_internal(best, best, last, history, rank_code(&best.rank))
 }
 
-fn render_internal(best: &DrumScoreIni, last: &DrumScoreIni, history: &[String]) -> String {
-    let rank = rank_code(&best.rank);
+#[cfg(test)]
+fn render(best: &DrumScoreIni, last: &DrumScoreIni) -> String {
+    render_internal(best, best, last, &[], rank_code(&best.rank))
+}
+
+fn render_internal(
+    best_score: &DrumScoreIni,
+    best_skill: &DrumScoreIni,
+    last: &DrumScoreIni,
+    history: &[String],
+    rank: i32,
+) -> String {
     let mut text = format!(
         "[File]\nTitle=\nName=\nPlayCountDrums={play}\nPlayCountGuitars=0\nPlayCountBass=0\nClearCountDrums={clear}\nClearCountGuitars=0\nClearCountBass=0\nBestRankDrums={rank}\nBestRankGuitar=99\nBestRankBass=99\nHistoryCount={history_count}\n",
-        play = best.play_count,
-        clear = best.clear_count,
+        play = best_score.play_count,
+        clear = best_score.clear_count,
         rank = rank,
         history_count = history.len().min(5),
     );
@@ -354,17 +402,19 @@ fn render_internal(best: &DrumScoreIni, last: &DrumScoreIni, history: &[String])
         let value = history.get(idx).map(String::as_str).unwrap_or("");
         text.push_str(&format!("History{idx}={value}\n"));
     }
-    text.push_str(&format!("BGMAdjust={}\n\n", best.bgm_adjust));
-    render_section(&mut text, "HiScore.Drums", best);
-    render_section(&mut text, "HiSkill.Drums", best);
+    text.push_str(&format!("BGMAdjust={}\n\n", best_score.bgm_adjust));
+    render_section(&mut text, "HiScore.Drums", best_score);
+    render_section(&mut text, "HiSkill.Drums", best_skill);
     render_section(&mut text, "LastPlay.Drums", last);
     text
 }
 
 fn render_section(text: &mut String, section: &str, s: &DrumScoreIni) {
     text.push_str(&format!(
-        "[{section}]\nScore={score}\nPerfect={perfect}\nGreat={great}\nGood={good}\nPoor={poor}\nMiss={miss}\nMaxCombo={max_combo}\nTotalChips={total_chips}\nDrums=1\nDateTime={date_time}\n\n",
+        "[{section}]\nScore={score}\nPlaySkill={play_skill}\nSkill={song_skill}\nPerfect={perfect}\nGreat={great}\nGood={good}\nPoor={poor}\nMiss={miss}\nMaxCombo={max_combo}\nTotalChips={total_chips}\nDrums=1\nDateTime={date_time}\n\n",
         score = s.score,
+        play_skill = s.performance_skill(),
+        song_skill = s.song_skill,
         perfect = s.perfect,
         great = s.great,
         good = s.good,
@@ -409,7 +459,9 @@ fn parse_file_section(section: Option<&HashMap<String, String>>) -> ScoreIniFile
 
 fn parse_drum_section(drums: &HashMap<String, String>, file: &ScoreIniFileSection) -> DrumScoreIni {
     DrumScoreIni {
-        score: get_u32(drums, "Score"),
+        score: get_i64(drums, "Score"),
+        play_skill: get_f64(drums, "PlaySkill"),
+        song_skill: get_f64(drums, "Skill"),
         perfect: get_u32(drums, "Perfect"),
         great: get_u32(drums, "Great"),
         good: get_u32(drums, "Good"),
@@ -459,6 +511,14 @@ fn get_i32(section: &HashMap<String, String>, key: &str, default: i32) -> i32 {
         .unwrap_or(default)
 }
 
+fn get_i64(section: &HashMap<String, String>, key: &str) -> i64 {
+    section.get(key).and_then(|v| v.parse().ok()).unwrap_or(0)
+}
+
+fn get_f64(section: &HashMap<String, String>, key: &str) -> f64 {
+    section.get(key).and_then(|v| v.parse().ok()).unwrap_or(0.0)
+}
+
 /// Format a `YYYY/M/D H:M:S` timestamp from Unix seconds (UTC), matching
 /// BocuD's `DateTime` field style. Uses Howard Hinnant's civil-from-days
 /// algorithm so we avoid a chrono dependency in this Pure crate.
@@ -493,6 +553,8 @@ mod tests {
     fn sample() -> DrumScoreIni {
         DrumScoreIni {
             score: 987_654,
+            play_skill: 0.0,
+            song_skill: 0.0,
             perfect: 100,
             great: 20,
             good: 3,
@@ -574,6 +636,36 @@ mod tests {
         assert_eq!(best.score, 500, "best score must be retained");
         assert_eq!(best.play_count, 2, "play count increments each write");
         assert_eq!(best.clear_count, 1, "only the cleared play counts");
+
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn write_result_keeps_high_score_and_high_skill_independently() {
+        let dir = std::env::temp_dir().join(format!("dtx_scoreini_skill_{}", std::process::id()));
+        let _ = std::fs::create_dir_all(&dir);
+        let path = dir.join("chart.dtx.score.ini");
+        let _ = std::fs::remove_file(&path);
+
+        let mut high_score = sample();
+        high_score.score = 900_000;
+        high_score.play_skill = 70.0;
+        high_score.song_skill = 98.0;
+        write_result(&path, &high_score, true).unwrap();
+
+        let mut high_skill = sample();
+        high_skill.score = 800_000;
+        high_skill.play_skill = 90.0;
+        high_skill.song_skill = 126.0;
+        write_result(&path, &high_skill, true).unwrap();
+
+        let text = std::fs::read_to_string(&path).unwrap();
+        let parsed = parse_score_ini_text(&text).unwrap();
+        assert_eq!(parsed.hi_score_drums.unwrap().score, 900_000);
+        let skill = parsed.hi_skill_drums.unwrap();
+        assert_eq!(skill.score, 800_000);
+        assert_eq!(skill.play_skill, 90.0);
+        assert_eq!(skill.song_skill, 126.0);
 
         let _ = std::fs::remove_file(&path);
     }

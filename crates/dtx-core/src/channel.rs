@@ -54,6 +54,12 @@ pub enum EChannel {
     BGALayer8 = 0x60,
 
     // Bar / Beat lines
+    // Bonus-effect markers. These mark matching drum chips and reduce the XG
+    // base-score pool by 500 each (BocuD EChannel.cs:56-59).
+    BonusEffect1 = 0x4C,
+    BonusEffect2 = 0x4D,
+    BonusEffect3 = 0x4E,
+    BonusEffect4 = 0x4F,
     BarLine = 0x50,
     BeatLine = 0x51,
     BeatLineShift = 0xC1,
@@ -116,6 +122,10 @@ impl EChannel {
             0x58 => Self::BGALayer6,
             0x59 => Self::BGALayer7,
             0x60 => Self::BGALayer8,
+            0x4C => Self::BonusEffect1,
+            0x4D => Self::BonusEffect2,
+            0x4E => Self::BonusEffect3,
+            0x4F => Self::BonusEffect4,
             0x50 => Self::BarLine,
             0x51 => Self::BeatLine,
             0xC1 => Self::BeatLineShift,
@@ -190,6 +200,14 @@ impl EChannel {
         )
     }
 
+    /// True for DTXManiaNX bonus-effect marker channels 0x4C..=0x4F.
+    pub const fn is_bonus_effect(self) -> bool {
+        matches!(
+            self,
+            Self::BonusEffect1 | Self::BonusEffect2 | Self::BonusEffect3 | Self::BonusEffect4
+        )
+    }
+
     pub const fn is_guitar(self) -> bool {
         matches!(
             self,
@@ -231,7 +249,15 @@ mod tests {
     fn round_trip_known_channels() {
         assert_eq!(EChannel::from_byte(0x13), Some(EChannel::BassDrum));
         assert_eq!(EChannel::from_byte(0x11), Some(EChannel::HiHatClose));
+        assert_eq!(EChannel::from_byte(0x4C), Some(EChannel::BonusEffect1));
         assert_eq!(EChannel::from_byte(0xFF), None);
+    }
+
+    #[test]
+    fn bonus_effect_channels_are_recognized_without_becoming_drum_notes() {
+        assert!(EChannel::BonusEffect1.is_bonus_effect());
+        assert!(EChannel::BonusEffect4.is_bonus_effect());
+        assert!(!EChannel::BonusEffect1.is_drum());
     }
 
     #[test]

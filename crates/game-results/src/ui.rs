@@ -4,8 +4,8 @@ use bevy::prelude::*;
 use dtx_scoring::Rank;
 use dtx_ui::easing::EaseFunction;
 use dtx_ui::motion::EnterChoreo;
-use dtx_ui::{theme::Theme, ThemeResource};
-use game_shell::{despawn_stage, SelectedDifficulty};
+use dtx_ui::{ThemeResource, theme::Theme};
+use game_shell::{SelectedDifficulty, despawn_stage};
 use gameplay_drums::resources::{ActiveChart, Combo, DrumScoring, JudgmentCounts, Score};
 use gameplay_drums::stage_end::LastStageOutcome;
 
@@ -157,9 +157,12 @@ pub(crate) fn rank_label(rank: Rank) -> String {
 }
 
 /// `912340` → `"912,340"` (comma thousands separator).
-pub(crate) fn format_thousands(v: u64) -> String {
-    let digits = v.to_string();
-    let mut out = String::with_capacity(digits.len() + digits.len() / 3);
+pub(crate) fn format_thousands(v: i64) -> String {
+    let digits = v.unsigned_abs().to_string();
+    let mut out = String::with_capacity(digits.len() + digits.len() / 3 + usize::from(v < 0));
+    if v < 0 {
+        out.push('-');
+    }
     for (i, c) in digits.chars().enumerate() {
         if i > 0 && (digits.len() - i).is_multiple_of(3) {
             out.push(',');
@@ -334,7 +337,7 @@ fn spawn_stats_panel(
     counts: &JudgmentCounts,
     total: u32,
     max_combo: u32,
-    score: u64,
+    score: i64,
     status: SaveStatus,
 ) {
     body.spawn(Node {
@@ -731,7 +734,8 @@ mod tests {
         assert_eq!(format_thousands(999), "999");
         assert_eq!(format_thousands(1_000), "1,000");
         assert_eq!(format_thousands(912_340), "912,340");
-        assert_eq!(format_thousands(u64::MAX), "18,446,744,073,709,551,615");
+        assert_eq!(format_thousands(i64::MAX), "9,223,372,036,854,775,807");
+        assert_eq!(format_thousands(-1_000), "-1,000");
     }
 
     #[test]

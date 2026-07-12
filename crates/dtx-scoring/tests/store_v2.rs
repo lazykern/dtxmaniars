@@ -1,8 +1,8 @@
+use dtx_scoring::Rank;
 use dtx_scoring::identity::ChartIdentity;
 use dtx_scoring::store::{
-    JudgmentTotals, ScoreEntry, ScoreSource, ScoreStore, ScoreStoreError, STORE_VERSION,
+    JudgmentTotals, STORE_VERSION, ScoreEntry, ScoreSource, ScoreStore, ScoreStoreError,
 };
-use dtx_scoring::Rank;
 
 fn entry(hash: &str, score: u32, source: ScoreSource) -> ScoreEntry {
     ScoreEntry {
@@ -10,7 +10,10 @@ fn entry(hash: &str, score: u32, source: ScoreSource) -> ScoreEntry {
         chart: ChartIdentity::new(hash.to_string(), None, None),
         title: "Title".to_string(),
         artist: "Artist".to_string(),
-        score,
+        score: i64::from(score),
+        chart_level: 0.0,
+        performance_skill: 0.0,
+        song_skill: 0.0,
         max_combo: 10,
         judgments: JudgmentTotals {
             perfect: 8,

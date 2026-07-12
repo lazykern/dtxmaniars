@@ -9,7 +9,8 @@ mod input;
 mod ui;
 
 use bevy::prelude::*;
-use dtx_scoring::identity::{canonical_chart_hash, raw_file_sha256, ChartIdentity};
+use dtx_scoring::identity::{ChartIdentity, canonical_chart_hash, raw_file_sha256};
+use dtx_scoring::skill::{DrumAutoPlay, drum_performance_skill, drum_song_skill};
 use dtx_scoring::{JudgmentTotals, Rank, ScoreEntry, ScoreSource};
 use game_shell::{AppState, ScoreStoreResource};
 use gameplay_drums::resources::{ActiveChart, Combo, DrumScoring, JudgmentCounts, Score};
@@ -80,18 +81,33 @@ fn native_score_entry(
     chart: ChartIdentity,
     title: String,
     artist: String,
-    score: u32,
+    score: i64,
+    total: u32,
+    chart_level: f64,
     max_combo: u32,
     counts: &JudgmentCounts,
     rank: Rank,
     played_at: u64,
 ) -> ScoreEntry {
+    let performance_skill = drum_performance_skill(
+        total,
+        counts.perfect,
+        counts.great,
+        counts.good,
+        counts.ok,
+        counts.miss,
+        max_combo,
+        DrumAutoPlay::default(),
+    );
     ScoreEntry {
         id: format!("native:{}:{score}:{played_at}", chart.canonical_hash),
         chart,
         title,
         artist,
         score,
+        chart_level,
+        performance_skill,
+        song_skill: drum_song_skill(chart_level, performance_skill, false),
         max_combo,
         judgments: JudgmentTotals {
             perfect: counts.perfect,
@@ -138,6 +154,23 @@ fn save_result(
         .unwrap_or_else(|| "Unknown".into());
     let total = scoring.total_notes;
     let rank = result_rank(&counts, combo.max, total);
+    let chart_level = chart
+        .chart
+        .metadata
+        .dlevel
+        .map(dtx_core::display_dlevel)
+        .map(f64::from)
+        .unwrap_or(0.0);
+    let performance_skill = drum_performance_skill(
+        total,
+        counts.perfect,
+        counts.great,
+        counts.good,
+        counts.ok,
+        counts.miss,
+        combo.max,
+        DrumAutoPlay::default(),
+    );
     let played_at = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_secs())
@@ -147,7 +180,9 @@ fn save_result(
         chart_identity(&chart),
         title,
         artist,
-        score.0 as u32,
+        score.0,
+        total,
+        chart_level,
         combo.max,
         &counts,
         rank,
@@ -168,7 +203,9 @@ fn save_result(
         let ini_path = dtx_scoring::score_ini::score_ini_path(chart_path);
         let bgm_adjust = dtx_scoring::score_ini::read_bgm_adjust(&ini_path);
         let record = dtx_scoring::score_ini::DrumScoreIni {
-            score: score.0 as u32,
+            score: score.0,
+            play_skill: performance_skill,
+            song_skill: drum_song_skill(chart_level, performance_skill, false),
             perfect: counts.perfect,
             great: counts.great,
             good: counts.good,
@@ -223,6 +260,8 @@ mod tests {
             "Title".into(),
             "Artist".into(),
             12345,
+            15,
+            8.2,
             9,
             &counts,
             Rank::A,
