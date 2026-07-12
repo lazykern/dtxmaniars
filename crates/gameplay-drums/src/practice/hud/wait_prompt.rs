@@ -37,7 +37,7 @@ pub fn wait_prompt_text(set: &WaitSet, chart: &dtx_core::Chart, judged: &HashSet
             }
         })
         .collect();
-    format!("WAIT: {}", parts.join(" + "))
+    format!("WAIT — HIT TOGETHER: {}", parts.join(" + "))
 }
 
 fn spawn_prompt(mut commands: Commands) {
@@ -90,24 +90,21 @@ fn update_prompt(
 }
 
 pub(crate) fn plugin(app: &mut App) {
-    app.add_systems(
-        OnEnter(AppState::Performance),
-        spawn_prompt.run_if(resource_exists::<crate::practice::PracticeSession>),
-    )
-    .add_systems(OnExit(AppState::Performance), despawn_prompt)
-    .add_systems(
-        Update,
-        update_prompt
-            .run_if(in_state(AppState::Performance))
-            .run_if(in_state(game_shell::PauseState::Running))
-            .run_if(resource_exists::<crate::practice::PracticeSession>),
-    );
+    app.add_systems(OnEnter(AppState::Performance), spawn_prompt)
+        .add_systems(OnExit(AppState::Performance), despawn_prompt)
+        .add_systems(
+            Update,
+            update_prompt
+                .run_if(in_state(AppState::Performance))
+                .run_if(resource_exists::<crate::practice::PracticeSession>),
+        );
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use dtx_core::{Chart, Chip, EChannel};
+    use game_shell::AppState;
 
     #[test]
     fn wait_prompt_marks_hit_members_and_keeps_lane_order() {
@@ -124,7 +121,26 @@ mod tests {
         };
         assert_eq!(
             wait_prompt_text(&set, &chart, &HashSet::from([1])),
-            "WAIT: SD ✓ + FT"
+            "WAIT — HIT TOGETHER: SD ✓ + FT"
         );
+    }
+
+    #[test]
+    fn prompt_entity_spawns_before_practice_session_is_inserted() {
+        let mut app = App::new();
+        app.add_plugins(bevy::state::app::StatesPlugin);
+        app.init_state::<AppState>();
+        plugin(&mut app);
+        app.world_mut()
+            .resource_mut::<NextState<AppState>>()
+            .set(AppState::Performance);
+        app.update();
+
+        let count = app
+            .world_mut()
+            .query_filtered::<Entity, With<WaitPrompt>>()
+            .iter(app.world())
+            .count();
+        assert_eq!(count, 1);
     }
 }
