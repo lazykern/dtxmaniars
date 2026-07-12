@@ -165,7 +165,7 @@ fn source_label(src: &BindSource) -> String {
 /// Bindings are shown in the active display arrangement, delegating to the
 /// shared display-order contract; bindable channels missing from the
 /// arrangement still get a row at the end.
-fn bindable_channels_in_order(arrangement: &LaneArrangement) -> Vec<dtx_core::EChannel> {
+pub(super) fn bindable_channels_in_order(arrangement: &LaneArrangement) -> Vec<dtx_core::EChannel> {
     let mut channels: Vec<_> = super::controls_panel::channels_in_display_order(arrangement)
         .into_iter()
         .filter(|channel| BINDABLE_CHANNELS.contains(channel))
@@ -201,6 +201,20 @@ fn segment_matches(segment: ControlsSegment, source: &BindSource) -> bool {
         (segment, source),
         (ControlsSegment::Keyboard, BindSource::Key(_)) | (ControlsSegment::Midi, BindSource::Midi { .. })
     )
+}
+
+/// Index (into the channel's FULL, unfiltered source list) of the LAST
+/// source belonging to `segment` — the target of a keyboard Backspace on the
+/// Controls rows. `None` = nothing to delete (Backspace no-ops).
+pub(super) fn last_segment_source_index(
+    b: &InputBindings,
+    channel: dtx_core::EChannel,
+    segment: ControlsSegment,
+) -> Option<usize> {
+    b.map
+        .get(&channel)?
+        .iter()
+        .rposition(|source| segment_matches(segment, source))
 }
 
 /// Rows for the active segment: only that segment's sources; `shared` = the
@@ -1172,6 +1186,44 @@ mod tests {
                 assert!(live.0.map.get(ch).is_some_and(|v| v.contains(s)));
             }
         }
+    }
+
+    #[test]
+    fn last_segment_source_index_picks_last_matching_segment() {
+        use dtx_core::EChannel;
+        use dtx_input::{BindSource, InputBindings};
+
+        let mut b = InputBindings::default();
+        b.map.insert(
+            EChannel::Snare,
+            vec![
+                BindSource::Key(KeyCode::KeyA),
+                BindSource::Midi { note: 60 },
+                BindSource::Key(KeyCode::KeyB),
+                BindSource::Midi { note: 61 },
+            ],
+        );
+        assert_eq!(
+            last_segment_source_index(&b, EChannel::Snare, ControlsSegment::Keyboard),
+            Some(2),
+            "last KEY source, full-list index"
+        );
+        assert_eq!(
+            last_segment_source_index(&b, EChannel::Snare, ControlsSegment::Midi),
+            Some(3)
+        );
+        // No source in the segment → None (Backspace no-ops).
+        b.map.insert(EChannel::HighTom, vec![BindSource::Midi { note: 48 }]);
+        assert_eq!(
+            last_segment_source_index(&b, EChannel::HighTom, ControlsSegment::Keyboard),
+            None
+        );
+        // Unknown channel → None.
+        b.map.remove(&EChannel::LowTom);
+        assert_eq!(
+            last_segment_source_index(&b, EChannel::LowTom, ControlsSegment::Keyboard),
+            None
+        );
     }
 
     #[test]

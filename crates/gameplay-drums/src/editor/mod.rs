@@ -137,6 +137,7 @@ pub fn plugin(app: &mut App) {
             (
                 bindings_panel::plugin,
                 bindings_capture::plugin,
+                controls_panel::plugin,
                 bindings_spatial::plugin,
                 capture_modal::plugin,
                 drag::plugin,
