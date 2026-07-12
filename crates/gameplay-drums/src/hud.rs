@@ -5,8 +5,9 @@ use dtx_scoring::JudgmentKind;
 use dtx_ui::{
     theme::REF_WIDTH,
     widget::{
-        combo_display::ComboDisplay, frame_chrome, hud_ref::HudRefRect, judgment_popup, live_graph,
-        now_playing, perf_combo, phrase_meter, playfield_speed, score_detailed, song_progress,
+        combo_display::ComboDisplay, frame_chrome, gauge_bar, hud_ref::HudRefRect, judgment_popup,
+        live_graph, now_playing, perf_combo, phrase_meter, playfield_speed, score_detailed,
+        song_progress,
     },
     ThemeResource,
 };
@@ -83,6 +84,7 @@ pub fn plugin(app: &mut App) {
             (
                 apply_backboard_layout,
                 apply_hit_line_layout,
+                apply_gauge_layout,
                 apply_progress_layout,
                 apply_speed_layout,
                 apply_hud_ref_layout,
@@ -98,6 +100,7 @@ pub fn plugin(app: &mut App) {
             (
                 apply_backboard_layout,
                 apply_hit_line_layout,
+                apply_gauge_layout,
                 apply_progress_layout,
                 apply_speed_layout,
                 apply_hud_ref_layout,
@@ -114,6 +117,7 @@ pub fn plugin(app: &mut App) {
             sync_perf_combo,
             sync_now_playing,
             sync_song_progress,
+            sync_stage_gauge,
             sync_phrase_meter,
             sync_phrase_playhead,
             sync_hud_judgment,
@@ -201,7 +205,7 @@ fn spawn_hud(
                 left: Val::Px(layout.strip_left()),
                 top: Val::Px(layout.judge_y()),
                 width: Val::Px(layout.strip_width()),
-                height: Val::Px(4.0 * layout.scale),
+                height: Val::Px(3.0 * layout.scale),
                 ..default()
             },
             BackgroundColor(Color::srgb(0.95, 0.85, 0.1)),
@@ -216,6 +220,15 @@ fn spawn_hud(
         s,
         layout.ref_strip_left(),
         layout.ref_strip_left() + layout.ref_strip_width(),
+    );
+    let c_gauge = spawn_widget_container(&mut commands, root, WidgetKind::Gauge);
+    gauge_bar::spawn_stage_gauge(
+        &mut commands,
+        c_gauge,
+        &t,
+        s,
+        layout.ref_strip_left(),
+        layout.ref_strip_width(),
     );
     let c_score = spawn_widget_container(&mut commands, root, WidgetKind::ScorePanel);
     score_detailed::spawn_score_detailed_panel(&mut commands, c_score, &t, s);
@@ -296,6 +309,50 @@ fn apply_hit_line_layout(
     }
 }
 
+fn apply_gauge_layout(
+    layout: Res<PlayfieldLayout>,
+    mut tracks: Query<(&mut Node, &mut gauge_bar::GaugeBarWidget)>,
+    mut ticks: Query<
+        &mut Node,
+        (
+            With<gauge_bar::GaugeThresholdTick>,
+            Without<gauge_bar::GaugeBarWidget>,
+        ),
+    >,
+) {
+    let s = layout.scale;
+    for (mut node, mut bar) in &mut tracks {
+        node.left = Val::Px(layout.strip_left());
+        node.top = Val::Px(64.0 * s + layout.origin.y);
+        node.width = Val::Px(layout.strip_width());
+        node.height = Val::Px(10.0 * s);
+        bar.track_width = layout.strip_width();
+    }
+    for mut node in &mut ticks {
+        node.top = Val::Px(-2.0 * s);
+        node.width = Val::Px(2.0 * s);
+        node.height = Val::Px(14.0 * s);
+    }
+}
+
+fn sync_stage_gauge(
+    gauge: Res<crate::gauge::StageGauge>,
+    time: Res<Time>,
+    mut bars: Query<&mut gauge_bar::GaugeBarWidget>,
+    mut fills: Query<(&mut Node, &mut BackgroundColor), With<gauge_bar::GaugeFill>>,
+) {
+    // One stage gauge per HUD.
+    let Some(mut bar) = bars.iter_mut().next() else {
+        return;
+    };
+    bar.set_pct(gauge.pct());
+    bar.tick(time.delta_secs() * 1000.0);
+    for (mut node, mut color) in &mut fills {
+        node.width = Val::Px(bar.fill_width());
+        color.0 = crate::gauge::gauge_fill_color(gauge.value, gauge.failed);
+    }
+}
+
 fn apply_progress_layout(
     layout: Res<PlayfieldLayout>,
     mut track: Query<
@@ -372,6 +429,7 @@ fn sync_hud_judgment(
         &mut Text,
         &mut TextColor,
         &mut Visibility,
+        &mut UiTransform,
     )>,
 ) {
     if let Some(ev) = last.0 {
@@ -379,7 +437,7 @@ fn sync_hud_judgment(
         if prev.as_ref() != Some(&key) {
             *prev = Some(key);
             let label = kind_label(ev.kind);
-            for (mut popup, mut text, mut color, mut vis) in &mut q {
+            for (mut popup, mut text, mut color, mut vis, _) in &mut q {
                 let c = popup.trigger(label, &theme.0);
                 *text = Text::new(if ev.delta_ms != 0 {
                     format!("{label} {:+}ms", ev.delta_ms)
@@ -392,9 +450,10 @@ fn sync_hud_judgment(
         }
     }
     let delta = time.delta_secs() * 1000.0;
-    for (mut popup, _, mut color, mut vis) in &mut q {
-        let (alpha, _scale) = popup.tick(delta);
+    for (mut popup, _, mut color, mut vis, mut transform) in &mut q {
+        let (alpha, scale) = popup.tick(delta);
         color.0 = color.0.with_alpha(alpha);
+        transform.scale = Vec2::splat(scale);
         if !popup.is_active() && alpha <= 0.01 {
             *vis = Visibility::Hidden;
         }
@@ -527,15 +586,16 @@ fn sync_playfield_speed(
 fn sync_perf_combo(
     combo: Res<Combo>,
     time: Res<Time>,
-    mut q: Query<(&mut ComboDisplay, &mut Text), With<perf_combo::PerfComboNumber>>,
+    mut q: Query<
+        (&mut ComboDisplay, &mut Text, &mut UiTransform),
+        With<perf_combo::PerfComboNumber>,
+    >,
 ) {
-    if !combo.is_changed() && !time.is_changed() {
-        return;
-    }
     let delta = time.delta_secs() * 1000.0;
-    for (mut display, mut text) in &mut q {
+    for (mut display, mut text, mut transform) in &mut q {
         display.set_combo(combo.current);
         display.tick(delta);
+        transform.scale = Vec2::splat(display.scale());
         *text = Text::new(format!("{}", display.last_combo));
     }
 }

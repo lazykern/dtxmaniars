@@ -304,13 +304,20 @@ fn spawn_segment_selector(
             }
         });
 
-        spawn_reset_controls(row, t, reset);
+        spawn_reset_controls(row, t, reset, segment);
     });
 }
 
-/// Small reset-tab button (Idle) / confirm-cancel pair (Confirming), docked
-/// at the right edge of the segment-selector row.
-fn spawn_reset_controls(p: &mut ChildSpawnerCommands, t: &dtx_ui::theme::Theme, reset: BindingsResetState) {
+/// Small segment-scoped reset button (Idle) / scope text + confirm-cancel pair
+/// (Confirming), docked at the right edge of the segment-selector row.
+/// Rebuilt on segment change (the left panel repaints on `ControlsSegment`),
+/// so the label always names the active segment.
+fn spawn_reset_controls(
+    p: &mut ChildSpawnerCommands,
+    t: &dtx_ui::theme::Theme,
+    reset: BindingsResetState,
+    segment: ControlsSegment,
+) {
     p.spawn(Node {
         flex_direction: FlexDirection::Row,
         column_gap: Val::Px(4.0),
@@ -329,13 +336,24 @@ fn spawn_reset_controls(p: &mut ChildSpawnerCommands, t: &dtx_ui::theme::Theme, 
                 },
                 BackgroundColor(Color::srgb(0.3, 0.14, 0.14)),
                 children![(
-                    Text::new("Reset tab"),
+                    Text::new(match segment {
+                        ControlsSegment::Keyboard => "Reset keyboard",
+                        ControlsSegment::Midi => "Reset MIDI",
+                    }),
                     dtx_ui::theme::Theme::font(9.0),
                     TextColor(t.text_primary),
                 )],
             ));
         }
         BindingsResetState::Confirming => {
+            actions.spawn((
+                Text::new(match segment {
+                    ControlsSegment::Keyboard => "Reset keyboard bindings to defaults?",
+                    ControlsSegment::Midi => "Reset MIDI bindings, port and threshold to defaults?",
+                }),
+                dtx_ui::theme::Theme::font(9.0),
+                TextColor(chrome::TEXT_MUTED),
+            ));
             actions.spawn((
                 ConfirmResetBindingsButton,
                 Button,
@@ -677,8 +695,41 @@ fn handle_velocity_adjust(
     }
 }
 
-fn reset_bindings(live: &mut LiveBindings, rev: &mut BindingsRev) {
-    live.0 = dtx_input::InputBindings::default();
+/// Reset only the active segment: that segment's sources return to defaults,
+/// the other segment's sources are untouched. MIDI reset also restores the
+/// device fields (port, velocity threshold).
+fn reset_segment(live: &mut LiveBindings, rev: &mut BindingsRev, segment: ControlsSegment) {
+    let defaults = dtx_input::InputBindings::default();
+    let channels: std::collections::HashSet<_> =
+        live.0.map.keys().chain(defaults.map.keys()).copied().collect();
+    let mut map = std::collections::HashMap::new();
+    for ch in channels {
+        let mut sources: Vec<_> = live
+            .0
+            .map
+            .get(&ch)
+            .into_iter()
+            .flatten()
+            .filter(|s| !segment_matches(segment, s))
+            .cloned()
+            .collect();
+        sources.extend(
+            defaults
+                .map
+                .get(&ch)
+                .into_iter()
+                .flatten()
+                .filter(|s| segment_matches(segment, s))
+                .cloned(),
+        );
+        if !sources.is_empty() {
+            map.insert(ch, sources);
+        }
+    }
+    live.0.map = map;
+    if segment == ControlsSegment::Midi {
+        live.0.midi = defaults.midi;
+    }
     rev.0 = rev.0.wrapping_add(1);
 }
 
@@ -690,6 +741,7 @@ fn handle_bindings_reset(
     reset: Query<&Interaction, (With<ResetBindingsButton>, Changed<Interaction>)>,
     confirm: Query<&Interaction, (With<ConfirmResetBindingsButton>, Changed<Interaction>)>,
     cancel: Query<&Interaction, (With<CancelResetBindingsButton>, Changed<Interaction>)>,
+    segment: Res<ControlsSegment>,
     mut state: ResMut<BindingsResetState>,
     mut live: ResMut<LiveBindings>,
     mut rev: ResMut<BindingsRev>,
@@ -706,7 +758,7 @@ fn handle_bindings_reset(
         .iter()
         .any(|interaction| *interaction == Interaction::Pressed)
     {
-        reset_bindings(&mut live, &mut rev);
+        reset_segment(&mut live, &mut rev, *segment);
         *state = BindingsResetState::Idle;
         return;
     }
@@ -1054,20 +1106,72 @@ mod tests {
     }
 
     #[test]
-    fn reset_bindings_restores_all_defaults() {
-        use dtx_core::EChannel;
-
+    fn keyboard_reset_keeps_midi_map_and_device() {
         let mut live = LiveBindings(dtx_input::InputBindings::default());
-        live.0.midi.port = Some("test-port".into());
+        let mut rev = BindingsRev(0);
         live.0.midi.velocity_threshold = 64;
-        live.0.bind(EChannel::Snare, BindSource::Key(KeyCode::KeyQ));
-        let mut rev = BindingsRev(7);
+        for sources in live.0.map.values_mut() {
+            sources.retain(|s| !matches!(s, dtx_input::BindSource::Key(_)));
+        }
+        reset_segment(&mut live, &mut rev, ControlsSegment::Keyboard);
+        let defaults = dtx_input::InputBindings::default();
+        for (ch, def_sources) in &defaults.map {
+            for s in def_sources
+                .iter()
+                .filter(|s| matches!(s, dtx_input::BindSource::Key(_)))
+            {
+                assert!(
+                    live.0.map.get(ch).is_some_and(|v| v.contains(s)),
+                    "{ch:?} missing {s:?}"
+                );
+            }
+        }
+        // MIDI sources untouched by a keyboard reset.
+        assert!(live
+            .0
+            .map
+            .get(&dtx_core::EChannel::Snare)
+            .is_some_and(|v| v.contains(&BindSource::Midi { note: 38 })));
+        assert_eq!(live.0.midi.velocity_threshold, 64);
+        assert_eq!(rev.0, 1);
+    }
 
-        assert_ne!(live.0, dtx_input::InputBindings::default());
-        reset_bindings(&mut live, &mut rev);
-
-        assert_eq!(live.0, dtx_input::InputBindings::default());
-        assert_eq!(rev.0, 8);
+    #[test]
+    fn midi_reset_keeps_keyboard_map_and_resets_device() {
+        let mut live = LiveBindings(dtx_input::InputBindings::default());
+        let mut rev = BindingsRev(0);
+        live.0.midi.velocity_threshold = 64;
+        live.0.midi.port = Some("test-port".into());
+        // Custom (non-default) keyboard bind: a regression back to whole-state
+        // reset would restore defaults and wipe it.
+        let custom = dtx_input::BindSource::Key(KeyCode::KeyQ);
+        live.0
+            .map
+            .entry(dtx_core::EChannel::Snare)
+            .or_default()
+            .push(custom);
+        reset_segment(&mut live, &mut rev, ControlsSegment::Midi);
+        assert_eq!(
+            live.0.midi.velocity_threshold,
+            dtx_input::InputBindings::default().midi.velocity_threshold
+        );
+        assert_eq!(live.0.midi.port, None, "MIDI reset restores default port");
+        assert!(
+            live.0
+                .map
+                .get(&dtx_core::EChannel::Snare)
+                .is_some_and(|v| v.contains(&custom)),
+            "custom keyboard bind survives MIDI reset"
+        );
+        let defaults = dtx_input::InputBindings::default();
+        for (ch, def_sources) in &defaults.map {
+            for s in def_sources
+                .iter()
+                .filter(|s| matches!(s, dtx_input::BindSource::Key(_)))
+            {
+                assert!(live.0.map.get(ch).is_some_and(|v| v.contains(s)));
+            }
+        }
     }
 
     #[test]

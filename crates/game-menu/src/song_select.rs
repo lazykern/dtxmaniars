@@ -465,6 +465,9 @@ struct WheelRowBar;
 /// Left-cluster dynamic texts.
 #[derive(Component)]
 struct SearchText;
+/// Bordered search field wrapping `SearchText` in the top bar.
+#[derive(Component)]
+struct SearchBox;
 #[derive(Component)]
 struct SortChipText;
 /// Big art panel in the left column.
@@ -513,8 +516,8 @@ impl Selection {
 }
 
 /// Mark the entity holding the album art image (ADR-0015 item e).
-/// Used by `update_album_art_image` to find the entity and swap its
-/// image on selection change.
+/// Used by `update_album_art_image` to find the entity and request an
+/// `AlbumArt` crossfade to the new jacket on selection change.
 #[derive(Component, Debug, Clone, Copy)]
 pub struct AlbumArtEntity;
 
@@ -533,6 +536,12 @@ pub fn apply_search_char(query: &mut String, c: char) {
 
 pub fn apply_search_backspace(query: &mut String) {
     query.pop();
+}
+
+/// Esc on song select: a non-empty search clears first; only an empty
+/// search backs out to the title.
+fn esc_clears_search_first(query: &str) -> bool {
+    !query.is_empty()
 }
 
 // ===== Plugin =====
@@ -577,7 +586,7 @@ pub fn plugin(app: &mut App) {
                 )
                     .chain(),
                 update_song_select_legend,
-                search_input,
+                (search_input, render_search_on_change).chain(),
                 respawn_wheel_on_change,
                 wheel_layout_system,
                 update_left_cluster,
@@ -783,12 +792,32 @@ fn spawn_song_select(
                             ..default()
                         })
                         .with_children(|chips| {
-                            chips.spawn((
-                                SearchText,
-                                Text::new("type to search…"),
-                                Theme::font(13.0),
-                                TextColor(t.text_secondary),
-                            ));
+                            chips
+                                .spawn((
+                                    SearchBox,
+                                    Node {
+                                        flex_direction: FlexDirection::Row,
+                                        align_items: AlignItems::Center,
+                                        padding: UiRect::axes(Val::Px(10.0), Val::Px(4.0)),
+                                        border: UiRect::all(Val::Px(1.0)),
+                                        min_width: Val::Px(200.0),
+                                        ..default()
+                                    },
+                                    BackgroundColor(t.stage_panel_bg),
+                                    BorderColor::all(t.stage_panel_border),
+                                ))
+                                .with_children(|field| {
+                                    // No icon glyph: ⌕/🔍 have spotty font
+                                    // coverage (tofu risk); the bordered
+                                    // field + placeholder carries the
+                                    // affordance.
+                                    field.spawn((
+                                        SearchText,
+                                        Text::new("type to search…"),
+                                        Theme::font(13.0),
+                                        TextColor(t.text_secondary),
+                                    ));
+                                });
                             chips
                                 .spawn((
                                     Node {
@@ -875,7 +904,9 @@ fn spawn_song_select(
                     .with_children(|mid| {
                         mid.spawn((
                             BigAlbumArt,
-                            AlbumArt::default(),
+                            // 0.18 = faint placeholder wash when a song
+                            // has no #PREIMAGE: jacket.
+                            AlbumArt::with_placeholder_alpha(0.18),
                             AlbumArtEntity,
                             panel(
                                 &t,
@@ -1075,7 +1106,7 @@ fn spawn_wheel_rows(
                 let display = folder_display_chart(folder, db).and_then(|i| db.songs.get(i));
                 let jacket_image = display
                     .and_then(|s| s.preimage_path.as_ref())
-                    .map(|p| load_jacket(&assets, p))
+                    .map(|p| load_jacket(assets, p))
                     .unwrap_or_default();
                 row.spawn((
                     WheelRowJacket,
@@ -1625,7 +1656,13 @@ fn song_select_hotkeys(
 }
 
 /// Keyboard → `NavAction`. Shift+Enter is Practice, plain Enter is Confirm.
-fn song_select_kb_emit(keys: Res<ButtonInput<KeyCode>>, mut out: MessageWriter<NavAction>) {
+/// Esc clears a non-empty search instead of backing out (pads unaffected:
+/// pad Back still emits regardless of the query).
+fn song_select_kb_emit(
+    keys: Res<ButtonInput<KeyCode>>,
+    mut out: MessageWriter<NavAction>,
+    mut selection_state: ResMut<SongSelectSelection>,
+) {
     use game_shell::{NavSource, NavVerb};
     let shift = keys.pressed(KeyCode::ShiftLeft) || keys.pressed(KeyCode::ShiftRight);
     let verb = if keys.just_pressed(KeyCode::ArrowDown) {
@@ -1643,6 +1680,13 @@ fn song_select_kb_emit(keys: Res<ButtonInput<KeyCode>>, mut out: MessageWriter<N
             NavVerb::Confirm
         }
     } else if keys.just_pressed(KeyCode::Escape) {
+        // Immutable reborrow for the read: `ResMut` change detection is
+        // write-triggered, so this doesn't dirty the resource each frame.
+        if esc_clears_search_first(&selection_state.search_query) {
+            selection_state.search_query.clear();
+            selection_state.dirty = true;
+            return;
+        }
         NavVerb::Back
     } else {
         return;
@@ -1745,7 +1789,6 @@ fn song_select_nav_consumer(
 fn search_input(
     mut chars: MessageReader<bevy::input::keyboard::KeyboardInput>,
     mut selection_state: ResMut<SongSelectSelection>,
-    mut search_text: Query<&mut Text, With<SearchText>>,
 ) {
     use bevy::input::keyboard::Key;
     let mut changed = false;
@@ -1773,15 +1816,58 @@ fn search_input(
     }
     if changed {
         selection_state.dirty = true;
-        let q = selection_state.search_query.clone();
-        for mut text in &mut search_text {
-            *text = Text::new(if q.is_empty() {
-                "type to search…".to_string()
-            } else {
-                format!("search: {q}")
-            });
-        }
     }
+}
+
+/// Write the search field's visual state (text, caret, colors, border).
+fn render_search(
+    query: &str,
+    theme: &Theme,
+    text_q: &mut Query<(&mut Text, &mut TextColor), With<SearchText>>,
+    box_q: &mut Query<&mut BorderColor, With<SearchBox>>,
+) {
+    let active = !query.is_empty();
+    for (mut text, mut color) in text_q.iter_mut() {
+        *text = Text::new(if active {
+            format!("{query}█")
+        } else {
+            "type to search…".to_string()
+        });
+        color.0 = if active {
+            theme.text_primary
+        } else {
+            theme.text_secondary
+        };
+    }
+    for mut border in box_q.iter_mut() {
+        *border = BorderColor::all(if active {
+            theme.accent
+        } else {
+            theme.stage_panel_border
+        });
+    }
+}
+
+/// Single writer of the search field visuals: re-renders whenever the
+/// query differs from what was last drawn, whatever mutated it (typing,
+/// Esc-clear, screen-enter reset).
+fn render_search_on_change(
+    selection_state: Res<SongSelectSelection>,
+    theme: Res<ThemeResource>,
+    mut last: Local<Option<String>>,
+    mut text_q: Query<(&mut Text, &mut TextColor), With<SearchText>>,
+    mut box_q: Query<&mut BorderColor, With<SearchBox>>,
+) {
+    if last.as_deref() == Some(selection_state.search_query.as_str()) {
+        return;
+    }
+    *last = Some(selection_state.search_query.clone());
+    render_search(
+        &selection_state.search_query,
+        &theme.0,
+        &mut text_q,
+        &mut box_q,
+    );
 }
 
 fn update_album_art_image(
@@ -1789,7 +1875,7 @@ fn update_album_art_image(
     selection_state: Res<SongSelectSelection>,
     db: Res<SongDb>,
     asset_server: Res<AssetServer>,
-    mut query: Query<(&AlbumArtEntity, &mut ImageNode, &mut BackgroundColor)>,
+    mut query: Query<&mut AlbumArt, With<AlbumArtEntity>>,
 ) {
     if !selection.is_changed() {
         return;
@@ -1800,18 +1886,16 @@ fn update_album_art_image(
     let Some(song) = db.songs.get(chart_idx) else {
         return;
     };
-    for (_, mut image, mut bg) in &mut query {
-        if let Some(path) = &song.preimage_path {
-            // Real #PREIMAGE: present: show the image, hide the placeholder.
-            image.image = load_jacket(&asset_server, path);
-            image.color = image.color.with_alpha(1.0);
-            bg.0 = bg.0.with_alpha(0.0);
-        } else {
-            // No image: show the placeholder, hide the image.
-            image.image = Handle::default();
-            image.color = image.color.with_alpha(0.0);
-            bg.0 = bg.0.with_alpha(0.18);
-        }
+    // Resolve the #PREIMAGE: jacket (None = fade to placeholder) and
+    // hand it to the AlbumArt crossfade, which owns the entity's
+    // ImageNode + BackgroundColor. No direct alpha writes here — a
+    // second writer would race the 150/220ms tween.
+    let image = song
+        .preimage_path
+        .as_ref()
+        .map(|path| load_jacket(&asset_server, path));
+    for mut art in &mut query {
+        art.request_swap(image.clone());
     }
 }
 
@@ -2494,5 +2578,11 @@ mod tests {
         let mut q = "x".repeat(64);
         apply_search_char(&mut q, 'y');
         assert_eq!(q.len(), 64);
+    }
+
+    #[test]
+    fn esc_clears_before_backing_out() {
+        assert!(esc_clears_search_first("abc"));
+        assert!(!esc_clears_search_first(""));
     }
 }

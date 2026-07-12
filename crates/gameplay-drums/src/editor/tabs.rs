@@ -59,6 +59,8 @@ fn save_draft_on_close(
     open: Res<super::EditorOpen>,
     draft: Res<ConfigDraft>,
     state: Res<State<game_shell::AppState>>,
+    time: Res<Time>,
+    mut err: ResMut<super::footer::EditorSaveError>,
     mut was_open: Local<bool>,
 ) {
     if !super::should_persist_close(
@@ -71,6 +73,7 @@ fn save_draft_on_close(
     let path = dtx_config::default_path();
     if let Err(e) = dtx_config::save(&path, &draft.0) {
         error!("customize: failed to save config {}: {e}", path.display());
+        err.set(time.elapsed_secs_f64(), format!("save failed: {e}"));
     }
 }
 

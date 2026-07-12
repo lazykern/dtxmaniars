@@ -19,7 +19,8 @@ pub fn default_instance(kind: WidgetKind) -> WidgetInstance {
         WidgetKind::ScorePanel
         | WidgetKind::PhraseMeter
         | WidgetKind::LiveGraph
-        | WidgetKind::SongProgress => (true, false),
+        | WidgetKind::SongProgress
+        | WidgetKind::Gauge => (true, false),
         _ => (true, true),
     };
     WidgetInstance {

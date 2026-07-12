@@ -11,6 +11,20 @@ use super::EditorOpen;
 #[derive(Resource, Default)]
 pub struct HoveredDesc(pub String);
 
+/// Transient save-failure banner shown in the footer's description slot.
+#[derive(Resource, Default)]
+pub struct EditorSaveError {
+    pub message: Option<String>,
+    pub until_secs: f64,
+}
+
+impl EditorSaveError {
+    pub fn set(&mut self, now: f64, message: impl Into<String>) {
+        self.message = Some(message.into());
+        self.until_secs = now + 4.0;
+    }
+}
+
 #[derive(Component)]
 struct FooterRoot;
 
@@ -26,6 +40,7 @@ const LEGEND: &str =
 
 pub(super) fn plugin(app: &mut App) {
     app.init_resource::<HoveredDesc>()
+        .init_resource::<EditorSaveError>()
         .add_systems(
             Update,
             (
@@ -126,18 +141,38 @@ pub fn capture_footer_text(state: &super::bindings_capture::CaptureState) -> Opt
     }
 }
 
-/// Refresh the left-hand description when the hovered row or capture state
-/// changes. An armed capture overrides the hover description.
+/// Refresh the left-hand description when the hovered row, capture state or
+/// save-error banner changes. Priority: armed capture > save-error banner >
+/// hover description. The banner shows in `chrome::ERR` red until it expires,
+/// then the normal description (and color) is restored.
 fn update_footer_desc(
     desc: Res<HoveredDesc>,
     capture: Res<super::bindings_capture::CaptureState>,
-    mut q: Query<&mut Text, With<FooterDescText>>,
+    time: Res<Time>,
+    theme: Res<dtx_ui::ThemeResource>,
+    mut err: ResMut<EditorSaveError>,
+    mut q: Query<(&mut Text, &mut TextColor), With<FooterDescText>>,
 ) {
-    if !desc.is_changed() && !capture.is_changed() {
+    if !desc.is_changed() && !capture.is_changed() && err.message.is_none() {
         return;
     }
-    for mut text in &mut q {
-        text.0 = capture_footer_text(&capture).unwrap_or_else(|| desc_text(&desc));
+    if err.message.is_some() && time.elapsed_secs_f64() >= err.until_secs {
+        err.message = None;
+    }
+    let (line, color) = if let Some(cap) = capture_footer_text(&capture) {
+        (cap, theme.0.text_primary)
+    } else if let Some(msg) = &err.message {
+        (msg.clone(), super::chrome::ERR)
+    } else {
+        (desc_text(&desc), theme.0.text_primary)
+    };
+    for (mut text, mut text_color) in &mut q {
+        if text.0 != line {
+            text.0 = line.clone();
+        }
+        if text_color.0 != color {
+            text_color.0 = color;
+        }
     }
 }
 

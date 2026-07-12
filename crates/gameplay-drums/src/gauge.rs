@@ -13,7 +13,7 @@ use dtx_core::constants::DamageLevel;
 use dtx_scoring::JudgmentKind;
 use game_shell::AppState;
 
-use crate::events::JudgmentEvent;
+use crate::events::{JudgmentEvent, NoteMissed};
 
 /// Full gauge.
 pub const GAUGE_MAX: f32 = 1.0;
@@ -146,10 +146,18 @@ fn reset_gauge_on_enter(mut gauge: ResMut<StageGauge>) {
 
 fn apply_gauge_on_judgment(
     mut events: MessageReader<JudgmentEvent>,
+    mut missed: MessageReader<NoteMissed>,
     mut gauge: ResMut<StageGauge>,
 ) {
     for ev in events.read() {
         gauge.apply_judgment(ev.kind);
+    }
+    // Unplayed chips arrive as `NoteMissed`, not `JudgmentEvent` — they drain
+    // the gauge like any other Miss (`CActPerfCommonGauge.cs` applies the Miss
+    // delta to every missed chip). Without this the gauge only reacted to
+    // hit-time judgments and pure neglect could never fail the stage.
+    for _ in missed.read() {
+        gauge.apply_judgment(JudgmentKind::Miss);
     }
 }
 
@@ -204,6 +212,25 @@ mod tests {
         g.apply_judgment(JudgmentKind::Miss);
         assert!(g.failed);
         assert!(g.value <= GAUGE_MIN);
+    }
+
+    #[test]
+    fn unplayed_note_missed_drains_gauge() {
+        use bevy::ecs::system::RunSystemOnce;
+        let mut world = World::new();
+        world.init_resource::<bevy::ecs::message::Messages<JudgmentEvent>>();
+        world.init_resource::<bevy::ecs::message::Messages<NoteMissed>>();
+        world.insert_resource(StageGauge::default());
+        let before = world.resource::<StageGauge>().value;
+        world.write_message(NoteMissed {
+            lane: 0,
+            audio_ms: 0,
+            chip_idx: 0,
+        });
+        world
+            .run_system_once(apply_gauge_on_judgment)
+            .expect("system runs");
+        assert!(world.resource::<StageGauge>().value < before);
     }
 
     #[test]

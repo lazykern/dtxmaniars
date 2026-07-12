@@ -9,6 +9,9 @@
 //! - `references/DTXmaniaNX-BocuD/DTXMania/Stage/06.Performance/CActPerfVideo.cs` (520 lines)
 
 #![warn(missing_docs)]
+// Bevy systems take many params; a Bevy-idiomatic false-positive, allowed
+// crate-wide (same as game-results).
+#![allow(clippy::too_many_arguments)]
 
 use std::collections::HashSet;
 

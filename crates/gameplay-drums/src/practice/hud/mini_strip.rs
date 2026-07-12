@@ -60,6 +60,31 @@ pub fn spawn_mini_strip(mut commands: Commands) {
                 },
                 BackgroundColor(theme.accent),
             ));
+            // Keyboard legend for the quick tier — the bindings live in actions.rs and
+            // were previously discoverable only by reading the source.
+            strip
+                .spawn(Node {
+                    position_type: PositionType::Absolute,
+                    left: Val::Px(0.0),
+                    right: Val::Px(0.0),
+                    bottom: Val::Px(16.0),
+                    justify_content: JustifyContent::Center,
+                    ..default()
+                })
+                .with_children(|row| {
+                    dtx_ui::widget::nav_legend::spawn_nav_legend(
+                        row,
+                        &theme,
+                        &[
+                            ("[ ]", "loop A/B"),
+                            ("Bksp", "clear"),
+                            ("-/=", "tempo"),
+                            ("R", "restart"),
+                            ("T", "ramp"),
+                            ("Tab", "menu"),
+                        ],
+                    );
+                });
         });
 }
 

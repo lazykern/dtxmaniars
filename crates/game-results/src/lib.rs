@@ -32,6 +32,15 @@ struct ResultReveal {
     elapsed_ms: f32,
 }
 
+/// Outcome of the on-entry persistence attempt, shown as the last stat row.
+#[derive(Resource, Default, Clone, Copy, PartialEq, Eq, Debug)]
+enum SaveStatus {
+    #[default]
+    Practice, // nothing to save
+    Saved,
+    Failed,
+}
+
 pub struct GameResultsPlugin;
 
 impl Plugin for GameResultsPlugin {
@@ -41,8 +50,9 @@ impl Plugin for GameResultsPlugin {
 }
 
 pub fn plugin(app: &mut App) {
-    app.add_systems(OnEnter(AppState::Result), spawn_result)
-        .add_systems(OnExit(AppState::Result), save_result_then_despawn)
+    app.init_resource::<SaveStatus>()
+        .add_systems(OnEnter(AppState::Result), (save_result, spawn_result).chain())
+        .add_systems(OnExit(AppState::Result), despawn_result)
         .add_systems(
             Update,
             (result_input, animate_staggered_reveal).run_if(in_state(AppState::Result)),
@@ -122,6 +132,7 @@ fn spawn_result(
     chart: Res<ActiveChart>,
     scoring: Res<DrumScoring>,
     midi: Option<Res<game_shell::MidiConnected>>,
+    status: Res<SaveStatus>,
 ) {
     commands.insert_resource(ResultReveal { elapsed_ms: 0.0 });
 
@@ -255,6 +266,25 @@ fn spawn_result(
         }
     }
 
+    let (label, color) = match *status {
+        SaveStatus::Saved => ("saved ✓", t.clear_green),
+        SaveStatus::Failed => ("save failed — score kept this session only", t.judgment_miss),
+        SaveStatus::Practice => ("", Color::NONE),
+    };
+    if !label.is_empty() {
+        let row = commands
+            .spawn((
+                StatRow {
+                    reveal_at_ms: STAGGER_MS * 15.0,
+                },
+                Text::new(label),
+                Theme::label_font(),
+                TextColor(color.with_alpha(0.0)),
+            ))
+            .id();
+        commands.entity(inner).add_child(row);
+    }
+
     if midi.is_some_and(|m| m.0) {
         commands.entity(inner).with_children(|p| {
             dtx_ui::widget::nav_legend::spawn_nav_legend(p, &t, &[("BD", "continue")]);
@@ -294,8 +324,7 @@ fn result_input(
     }
 }
 
-fn save_result_then_despawn(
-    commands: Commands,
+fn save_result(
     practice: Option<Res<gameplay_drums::practice::PracticeSession>>,
     score: Res<Score>,
     combo: Res<Combo>,
@@ -304,12 +333,12 @@ fn save_result_then_despawn(
     scoring: Res<DrumScoring>,
     outcome: Res<LastStageOutcome>,
     mut store: ResMut<ScoreStoreResource>,
-    query: Query<Entity, With<ResultEntity>>,
+    mut status: ResMut<SaveStatus>,
 ) {
     // Practice runs are never persisted (no ScoreStore entry, no
-    // score.ini update) — only the UI teardown happens.
+    // score.ini update).
     if practice.is_some() {
-        despawn_stage::<ResultEntity>(commands, query);
+        *status = SaveStatus::Practice;
         return;
     }
     let title = chart
@@ -343,9 +372,12 @@ fn save_result_then_despawn(
     );
 
     store.add(entry);
-    if let Err(e) = store.save() {
+    *status = if let Err(e) = store.save() {
         warn!("game-results: save failed: {e}");
-    }
+        SaveStatus::Failed
+    } else {
+        SaveStatus::Saved
+    };
 
     // Also write a BocuD-compatible <chart>.score.ini next to the chart so
     // song select (and DTXManiaNX itself) can read the best score.
@@ -370,9 +402,12 @@ fn save_result_then_despawn(
         let cleared = outcome.cleared && total > 0;
         if let Err(e) = dtx_scoring::score_ini::write_result(&ini_path, &record, cleared) {
             warn!("game-results: score.ini write failed: {e}");
+            *status = SaveStatus::Failed;
         }
     }
+}
 
+fn despawn_result(commands: Commands, query: Query<Entity, With<ResultEntity>>) {
     despawn_stage::<ResultEntity>(commands, query);
 }
 
@@ -424,5 +459,46 @@ mod tests {
         assert_eq!(entry.chart.raw_sha256.as_deref(), Some("raw"));
         assert_eq!(entry.judgments.poor, 4);
         assert_eq!(entry.source, dtx_scoring::ScoreSource::Native);
+    }
+
+    #[test]
+    fn save_status_defaults_to_practice() {
+        assert_eq!(SaveStatus::default(), SaveStatus::Practice);
+    }
+
+    #[test]
+    fn save_result_persists_entry_and_sets_saved() {
+        use bevy::ecs::system::RunSystemOnce;
+
+        let mut world = World::new();
+        world.init_resource::<SaveStatus>();
+        world.insert_resource(Score(1234));
+        world.insert_resource(Combo { current: 0, max: 9 });
+        world.insert_resource(JudgmentCounts {
+            perfect: 1,
+            great: 0,
+            good: 0,
+            ok: 0,
+            miss: 0,
+        });
+        // No source_path: skips raw hashing and the score.ini write.
+        world.insert_resource(ActiveChart {
+            chart: dtx_core::Chart::default(),
+            source_path: None,
+        });
+        world.insert_resource(DrumScoring {
+            total_notes: 1,
+            ..Default::default()
+        });
+        world.insert_resource(LastStageOutcome { cleared: true });
+        // Path-less store: save() succeeds without touching the filesystem.
+        world.insert_resource(ScoreStoreResource::default());
+
+        world
+            .run_system_once(save_result)
+            .expect("save_result runs");
+
+        assert_eq!(world.resource::<ScoreStoreResource>().entries.len(), 1);
+        assert_eq!(*world.resource::<SaveStatus>(), SaveStatus::Saved);
     }
 }

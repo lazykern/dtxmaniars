@@ -87,10 +87,11 @@ pub enum WidgetKind {
     SpeedReadout,
     FrameChrome,
     Playfield,
+    Gauge,
 }
 
 impl WidgetKind {
-    pub const ALL: [WidgetKind; 10] = [
+    pub const ALL: [WidgetKind; 11] = [
         WidgetKind::ScorePanel,
         WidgetKind::Combo,
         WidgetKind::JudgmentPopup,
@@ -101,6 +102,7 @@ impl WidgetKind {
         WidgetKind::SpeedReadout,
         WidgetKind::FrameChrome,
         WidgetKind::Playfield,
+        WidgetKind::Gauge,
     ];
 
     /// Human-readable name for the editor sidebar.
@@ -116,6 +118,7 @@ impl WidgetKind {
             WidgetKind::SpeedReadout => "Speed Readout",
             WidgetKind::FrameChrome => "Frame Chrome",
             WidgetKind::Playfield => "Playfield",
+            WidgetKind::Gauge => "Gauge",
         }
     }
 }
@@ -326,5 +329,16 @@ mod tests {
         )]))
         .unwrap();
         assert_eq!(s.trim(), r#"k = "score-panel""#);
+    }
+
+    #[test]
+    fn gauge_kind_serializes_kebab_and_is_listed() {
+        assert!(WidgetKind::ALL.contains(&WidgetKind::Gauge));
+        let s = toml::to_string(&std::collections::BTreeMap::from([(
+            "k",
+            WidgetKind::Gauge,
+        )]))
+        .unwrap();
+        assert_eq!(s.trim(), r#"k = "gauge""#);
     }
 }

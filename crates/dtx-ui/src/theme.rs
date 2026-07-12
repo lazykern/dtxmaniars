@@ -22,6 +22,7 @@ pub struct Theme {
     pub judgment_perfect: Color,
     pub judgment_great: Color,
     pub judgment_good: Color,
+    pub judgment_ok: Color,
     pub judgment_miss: Color,
     pub gauge_fill: Color,
     pub gauge_track: Color,
@@ -46,6 +47,7 @@ impl Default for Theme {
             judgment_perfect: Color::srgb(1.0, 0.843, 0.0), // gold
             judgment_great: Color::srgb(0.298, 0.851, 0.392),
             judgment_good: Color::srgb(0.392, 0.584, 0.929),
+            judgment_ok: Color::srgb(0.75, 0.45, 0.95), // Ok/Poor purple (was score-panel local)
             judgment_miss: Color::srgb(0.937, 0.267, 0.267),
             gauge_fill: Color::srgb(0.298, 0.851, 0.392),
             gauge_track: Color::srgba(0.0, 0.0, 0.0, 0.5),
@@ -70,6 +72,7 @@ impl Theme {
             "PERFECT" | "PG" => self.judgment_perfect,
             "GREAT" | "GR" => self.judgment_great,
             "GOOD" | "GO" => self.judgment_good,
+            "POOR" | "OK" | "PO" => self.judgment_ok,
             "MISS" => self.judgment_miss,
             _ => self.text_primary,
         }
@@ -145,6 +148,14 @@ mod tests {
     fn theme_default_has_accent() {
         let t = Theme::default();
         assert!(t.accent.to_srgba().green > 0.5);
+    }
+
+    #[test]
+    fn judgment_color_maps_ok_and_poor() {
+        let t = Theme::default();
+        assert_eq!(t.judgment_color("POOR"), t.judgment_ok);
+        assert_eq!(t.judgment_color("OK"), t.judgment_ok);
+        assert_ne!(t.judgment_ok, t.text_primary);
     }
 
     #[test]

@@ -9,13 +9,57 @@ use game_shell::{AppState, TransitionRequest, despawn_stage, request_transition}
 #[derive(Component)]
 pub struct TitleEntity;
 
-pub fn plugin(app: &mut App) {
-    app.add_systems(OnEnter(AppState::Title), spawn_title)
-        .add_systems(OnExit(AppState::Title), despawn_stage::<TitleEntity>)
-        .add_systems(Update, title_input.run_if(in_state(AppState::Title)));
+/// Marks the footer quit hint so the armed state can rewrite it.
+#[derive(Component)]
+pub struct QuitHintText;
+
+/// Esc-twice quit guard: first press arms a 2s window, second quits.
+#[derive(Resource, Default)]
+pub struct QuitArm {
+    armed_at: Option<f64>,
 }
 
-fn spawn_title(mut commands: Commands, theme: Res<ThemeResource>) {
+const QUIT_ARM_SECS: f64 = 2.0;
+
+impl QuitArm {
+    /// Returns true when this press should quit.
+    fn press(&mut self, now: f64) -> bool {
+        match self.armed_at {
+            Some(t) if now - t <= QUIT_ARM_SECS => true,
+            _ => {
+                self.armed_at = Some(now);
+                false
+            }
+        }
+    }
+
+    fn disarm(&mut self) {
+        self.armed_at = None;
+    }
+
+    fn is_armed(&self, now: f64) -> bool {
+        self.armed_at.is_some_and(|t| now - t <= QUIT_ARM_SECS)
+    }
+}
+
+pub fn plugin(app: &mut App) {
+    app.init_resource::<QuitArm>()
+        .add_systems(
+            OnEnter(AppState::Title),
+            (spawn_title, |mut arm: ResMut<QuitArm>| arm.disarm()),
+        )
+        .add_systems(OnExit(AppState::Title), despawn_stage::<TitleEntity>)
+        .add_systems(
+            Update,
+            (title_input, update_quit_hint).run_if(in_state(AppState::Title)),
+        );
+}
+
+fn spawn_title(
+    mut commands: Commands,
+    theme: Res<ThemeResource>,
+    midi: Option<Res<game_shell::MidiConnected>>,
+) {
     let t = theme.0;
     commands
         .spawn((
@@ -81,6 +125,15 @@ fn spawn_title(mut commands: Commands, theme: Res<ThemeResource>) {
                     TextColor(Color::BLACK),
                 ));
             });
+            if midi.is_some_and(|m| m.0) {
+                root.spawn(Node {
+                    margin: UiRect::top(Val::Px(8.0)),
+                    ..default()
+                })
+                .with_children(|row| {
+                    dtx_ui::widget::nav_legend::spawn_nav_legend(row, &t, &[("BD", "start")]);
+                });
+            }
             root.spawn((Node {
                 position_type: PositionType::Absolute,
                 bottom: Val::Px(12.0),
@@ -103,6 +156,7 @@ fn spawn_title(mut commands: Commands, theme: Res<ThemeResource>) {
                         TextColor(t.text_secondary),
                     ));
                     bar.spawn((
+                        QuitHintText,
                         Text::new("ESC QUIT"),
                         Theme::font(12.0),
                         TextColor(t.text_secondary),
@@ -119,14 +173,18 @@ fn title_input(
     mut selected: ResMut<crate::song_select::SelectedSong>,
     mut db: ResMut<dtx_library::SongDb>,
     mut pending: ResMut<game_shell::PendingCustomizeTab>,
+    time: Res<Time>,
+    mut arm: ResMut<QuitArm>,
 ) {
     // BD confirms from the kit, so a pads-only player is never stranded here.
     let pad_confirm = actions
         .read()
         .any(|a| a.verb == game_shell::NavVerb::Confirm);
     if pad_confirm || keys.just_pressed(KeyCode::Enter) {
+        arm.disarm();
         request_transition(&mut requests, AppState::SongSelect);
     } else if keys.just_pressed(KeyCode::F1) {
+        arm.disarm();
         match pick_editor_song(&mut db) {
             Some(path) => {
                 pending.0 = Some(game_shell::CustomizeTab::Gameplay);
@@ -137,6 +195,7 @@ fn title_input(
             None => warn!("customize: no songs available (empty SongDb)"),
         }
     } else if keys.just_pressed(KeyCode::F2) {
+        arm.disarm();
         match pick_editor_song(&mut db) {
             Some(path) => {
                 session.0 = true;
@@ -145,8 +204,35 @@ fn title_input(
             }
             None => warn!("layout editor: no songs available (empty SongDb)"),
         }
-    } else if keys.just_pressed(KeyCode::Escape) {
+    } else if keys.just_pressed(KeyCode::Escape)
+        && arm.press(time.elapsed_secs_f64())
+    {
         request_transition(&mut requests, AppState::End);
+    }
+}
+
+/// Rewrites the footer hint when the quit-arm state flips (incl. window expiry).
+fn update_quit_hint(
+    time: Res<Time>,
+    arm: Res<QuitArm>,
+    theme: Res<ThemeResource>,
+    mut last_armed: Local<bool>,
+    mut hint: Query<(&mut Text, &mut TextColor), With<QuitHintText>>,
+) {
+    let armed = arm.is_armed(time.elapsed_secs_f64());
+    if armed == *last_armed {
+        return;
+    }
+    *last_armed = armed;
+    let t = theme.0;
+    for (mut text, mut color) in &mut hint {
+        if armed {
+            text.0 = "PRESS ESC AGAIN TO QUIT".into();
+            color.0 = t.select_yellow;
+        } else {
+            text.0 = "ESC QUIT".into();
+            color.0 = t.text_secondary;
+        }
     }
 }
 
@@ -181,5 +267,16 @@ mod tests {
     #[test]
     fn title_entity_marker_exists() {
         let _ = TitleEntity;
+    }
+
+    #[test]
+    fn quit_arm_fires_only_within_window() {
+        let mut arm = QuitArm::default();
+        assert!(!arm.press(0.0)); // first press arms
+        assert!(arm.press(1.0)); // second press within 2s quits
+        let mut arm2 = QuitArm::default();
+        assert!(!arm2.press(0.0));
+        assert!(!arm2.press(3.0)); // expired → re-arms instead of quitting
+        assert!(arm2.press(3.5));
     }
 }
