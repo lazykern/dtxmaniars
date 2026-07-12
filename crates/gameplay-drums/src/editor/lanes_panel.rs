@@ -319,12 +319,23 @@ fn addable_channels(arr: &LaneArrangement, index: usize) -> Vec<EChannel> {
         .collect()
 }
 
+/// Row FOCUS_RING predicate: keyboard focus at Rows on the selected row.
+pub(super) fn lane_row_ring(focus: LanesFocus, is_selected: bool) -> bool {
+    focus == LanesFocus::Rows && is_selected
+}
+
+/// Detail-card FOCUS_RING (and accent width value) predicate.
+pub(super) fn lane_detail_ring(focus: LanesFocus) -> bool {
+    focus == LanesFocus::Detail
+}
+
 pub fn spawn_lane_block(
     p: &mut ChildSpawnerCommands,
     t: &dtx_ui::theme::Theme,
     lanes: &Lanes,
     selected: Option<usize>,
     add_popup_open: bool,
+    focus: LanesFocus,
 ) {
     let body = panel_kit::spawn_card(p, "Lanes");
     // Reorder: drag pads in the preview (Task 9) for mouse; reduce_lanes_nav
@@ -365,6 +376,19 @@ pub fn spawn_lane_block(
                 } else {
                     Color::NONE
                 }),
+                Outline::new(
+                    if lane_row_ring(focus, is_selected) {
+                        Val::Px(2.0)
+                    } else {
+                        Val::Px(0.0)
+                    },
+                    Val::Px(1.0),
+                    if lane_row_ring(focus, is_selected) {
+                        super::panel::FOCUS_RING
+                    } else {
+                        Color::NONE
+                    },
+                ),
             ))
             .with_children(|r| {
                 // No drag-handle glyph: the row is select-only. Reorder is by
@@ -392,7 +416,7 @@ pub fn spawn_lane_block(
     });
 
     if let Some(i) = selected.filter(|&i| i < lanes.0.lanes.len()) {
-        spawn_lane_detail_card(p, t, lanes, i, add_popup_open);
+        spawn_lane_detail_card(p, t, lanes, i, add_popup_open, focus);
     }
 
     let hidden = dtx_layout::unassigned_channels(&lanes.0);
@@ -407,10 +431,23 @@ fn spawn_lane_detail_card(
     lanes: &Lanes,
     index: usize,
     add_popup_open: bool,
+    focus: LanesFocus,
 ) {
     let lane = &lanes.0.lanes[index];
     let title = format!("{} lane", lane.id);
     let body = panel_kit::spawn_card(p, &title);
+    if lane_detail_ring(focus) {
+        p.commands_mut().entity(body).insert(Outline::new(
+            Val::Px(2.0),
+            Val::Px(2.0),
+            super::panel::FOCUS_RING,
+        ));
+    }
+    let width_color = if lane_detail_ring(focus) {
+        chrome::ACCENT
+    } else {
+        t.text_primary
+    };
     let width = lane.width;
     let chips = dtx_layout::lane_chips(&lanes.0, index);
     let primary = lane.primary;
@@ -450,7 +487,7 @@ fn spawn_lane_detail_card(
                     LaneWidthValueText(index),
                     Text::new(format!("{width:.0}px")),
                     dtx_ui::theme::Theme::font(11.0),
-                    TextColor(t.text_primary),
+                    TextColor(width_color),
                     Node {
                         min_width: Val::Px(36.0),
                         ..default()
@@ -1013,6 +1050,19 @@ mod tests {
             stack_pops, 4,
             "per-press reorder undo + once-per-visit width undo"
         );
+    }
+
+    #[test]
+    fn lane_focus_rings_follow_focus_level() {
+        // Row ring only while Rows is focused AND the row is the selection.
+        assert!(lane_row_ring(LanesFocus::Rows, true));
+        assert!(!lane_row_ring(LanesFocus::Rows, false));
+        assert!(!lane_row_ring(LanesFocus::TabBar, true));
+        assert!(!lane_row_ring(LanesFocus::Detail, true));
+        // Detail-card ring (and accent width value) only at Detail.
+        assert!(lane_detail_ring(LanesFocus::Detail));
+        assert!(!lane_detail_ring(LanesFocus::Rows));
+        assert!(!lane_detail_ring(LanesFocus::TabBar));
     }
 
     #[test]

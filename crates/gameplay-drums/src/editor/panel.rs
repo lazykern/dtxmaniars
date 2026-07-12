@@ -126,6 +126,7 @@ pub fn plugin(app: &mut App) {
                         .or_else(resource_changed::<super::controls_panel::ControlsSegment>)
                         .or_else(resource_changed::<super::controls_panel::ControlsFocus>)
                         .or_else(resource_changed::<super::lanes_panel::SelectedLane>)
+                        .or_else(resource_changed::<super::lanes_panel::LanesFocus>)
                         .or_else(resource_changed::<super::lanes_panel::AddChannelPopupOpen>)
                         .or_else(profile_popup_changed),
                 ),
@@ -186,6 +187,7 @@ struct LeftPanelSig {
     error: Option<super::profile_bar::ProfileUiError>,
     lane_selected: Option<usize>,
     lane_add_popup: bool,
+    lanes_focus: super::lanes_panel::LanesFocus,
 }
 
 /// Controls-tab inputs bundled to stay under the system-param ceiling
@@ -216,6 +218,7 @@ struct ProfileBarInputs<'w> {
 struct LanesInputs<'w> {
     selected: Res<'w, super::lanes_panel::SelectedLane>,
     add_popup: Res<'w, super::lanes_panel::AddChannelPopupOpen>,
+    focus: Res<'w, super::lanes_panel::LanesFocus>,
 }
 
 /// Left content panel: renders the profile bar (Controls/Lanes only) above
@@ -261,6 +264,7 @@ fn rebuild_left_content(
         error: bar_error.0.clone(),
         lane_selected: lanes_ui.selected.0,
         lane_add_popup: lanes_ui.add_popup.0,
+        lanes_focus: *lanes_ui.focus,
     };
     if last_sig.as_ref() == Some(&sig) {
         return;
@@ -350,6 +354,7 @@ fn rebuild_left_content(
             &lanes,
             lanes_ui.selected.0,
             lanes_ui.add_popup.0,
+            *lanes_ui.focus,
         ),
         game_shell::CustomizeTab::Widgets => spawn_widget_list(p, &t, &selection),
         _ => {}
