@@ -147,6 +147,7 @@ pub fn plugin(app: &mut App) {
     .add_message::<events::JudgmentEvent>()
     .add_message::<events::NoteMissed>()
     .add_message::<events::EmptyHit>()
+    .add_message::<events::SystemVerbHit>()
     .add_message::<seek::SeekToChartTime>()
     .init_resource::<perf_common::PerformanceStageState>()
     .configure_sets(
@@ -538,6 +539,7 @@ mod midi_consumer {
         clock: Res<GameplayClock>,
         mut hits: MessageWriter<InputHit>,
         mut nav_hits: MessageWriter<PadNavHit>,
+        mut verb_hits: MessageWriter<super::events::SystemVerbHit>,
         mut last: ResMut<LastMidiHit>,
     ) {
         if source.is_empty() {
@@ -554,6 +556,9 @@ mod midi_consumer {
         for lane in consumed.nav_lanes {
             nav_hits.write(PadNavHit { lane });
         }
+        for verb in consumed.verbs {
+            verb_hits.write(super::events::SystemVerbHit { verb });
+        }
     }
 
     struct ConsumedMidi {
@@ -561,6 +566,9 @@ mod midi_consumer {
         /// Lanes for `PadNavHit`; emitted even when gameplay is not ready so
         /// pads can steer menus outside a run.
         nav_lanes: Vec<u8>,
+        /// System verbs fired by this batch. Emitted on the same unconditional
+        /// path as `nav_lanes` — the verb must work mid-song.
+        verbs: Vec<dtx_input::SystemVerb>,
     }
 
     fn consume_midi_events(
@@ -572,6 +580,7 @@ mod midi_consumer {
     ) -> ConsumedMidi {
         let mut hits = Vec::new();
         let mut nav_lanes = Vec::new();
+        let mut verbs = Vec::new();
         for ev in events {
             let dtx_input::midi::MidiEvent::NoteOn {
                 note,
@@ -591,6 +600,9 @@ mod midi_consumer {
             if velocity == 0 || velocity <= resolver.velocity_threshold {
                 continue;
             }
+            // Before the gameplay_ready gate, exactly like nav_lanes: the verb
+            // must fire mid-song, and a system note was never gameplay input.
+            verbs.extend(resolver.system_for_note(note));
             let lanes: Vec<_> = resolver.lanes_for_note(note).collect();
             if let Some(&lane) = lanes.first() {
                 nav_lanes.push(lane);
@@ -603,7 +615,11 @@ mod midi_consumer {
                 }
             }
         }
-        ConsumedMidi { hits, nav_lanes }
+        ConsumedMidi {
+            hits,
+            nav_lanes,
+            verbs,
+        }
     }
 
     #[cfg(test)]
@@ -681,6 +697,84 @@ mod midi_consumer {
 
             assert!(gated.hits.is_empty());
             assert!(next.hits.is_empty());
+        }
+
+        #[test]
+        fn system_verb_fires_while_gameplay_is_not_ready() {
+            use dtx_input::{BindSource, InputBindings, SystemVerb};
+            let mut b = InputBindings::default();
+            b.bind_system(SystemVerb::Pause, BindSource::Midi { note: 37 });
+            let resolver = crate::bindings::BindResolver::from_bindings(&b);
+            let mut last = LastMidiHit::default();
+
+            // gameplay_ready = false — the live-play/menu case, and the whole feature.
+            let out = consume_midi_events(
+                [dtx_input::midi::MidiEvent::NoteOn {
+                    note: 37,
+                    velocity: 90,
+                    audio_ms: 0,
+                    captured_at: std::time::Instant::now(),
+                }],
+                &resolver,
+                false,
+                0,
+                &mut last,
+            );
+
+            assert_eq!(out.verbs, vec![SystemVerb::Pause]);
+            assert!(out.hits.is_empty());
+            assert!(out.nav_lanes.is_empty(), "a system note is not a lane");
+        }
+
+        #[test]
+        fn sub_threshold_system_note_emits_nothing() {
+            use dtx_input::{BindSource, InputBindings, SystemVerb};
+            let mut b = InputBindings::default();
+            b.midi.velocity_threshold = 20;
+            b.bind_system(SystemVerb::Pause, BindSource::Midi { note: 37 });
+            let resolver = crate::bindings::BindResolver::from_bindings(&b);
+            let mut last = LastMidiHit::default();
+
+            let out = consume_midi_events(
+                [dtx_input::midi::MidiEvent::NoteOn {
+                    note: 37,
+                    velocity: 15,
+                    audio_ms: 0,
+                    captured_at: std::time::Instant::now(),
+                }],
+                &resolver,
+                true,
+                0,
+                &mut last,
+            );
+
+            assert!(out.verbs.is_empty(), "noise must not pause the song");
+        }
+
+        #[test]
+        fn a_lane_note_never_emits_a_system_verb() {
+            use dtx_input::{BindSource, InputBindings, SystemVerb};
+            let mut b = InputBindings::default();
+            // The footgun: 38 is the Snare's note, also hand-bound to Pause.
+            b.bind_system(SystemVerb::Pause, BindSource::Midi { note: 38 });
+            let resolver = crate::bindings::BindResolver::from_bindings(&b);
+            let mut last = LastMidiHit::default();
+
+            let out = consume_midi_events(
+                [dtx_input::midi::MidiEvent::NoteOn {
+                    note: 38,
+                    velocity: 90,
+                    audio_ms: 0,
+                    captured_at: std::time::Instant::now(),
+                }],
+                &resolver,
+                true,
+                0,
+                &mut last,
+            );
+
+            assert!(out.verbs.is_empty(), "a lane hit must never pause");
+            assert_eq!(out.hits.len(), 1, "it still judges");
         }
     }
 }
