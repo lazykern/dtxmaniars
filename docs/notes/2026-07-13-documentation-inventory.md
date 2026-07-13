@@ -1,7 +1,7 @@
 # Documentation Truth Inventory
 
 Date: 2026-07-13
-Status: In progress until the Cycle 8 final truth gate
+Status: Complete — Cycle 8 final truth gate passed
 Scope: Non-reference repository files; `references/` is read-only
 
 ## Baseline
@@ -168,6 +168,69 @@ original binding with a value copied through assignment.
 
 ## Final evidence
 
-Pending the Cycle 8 closeout. This section will record checker, command,
-formatting, workspace, scope, and manual-device results without declaring the
-program complete early.
+Recorded 2026-07-13 from the `feat/cycles-6-8` worktree with the shared Cargo
+target at `/home/lazykern/lab/dtxmaniars/target`.
+
+### Documentation and documented commands
+
+- `cargo test -p docs-check`: 3 passed, 0 failed.
+- `cargo run -p docs-check`: 391 repository files checked, 0 failures.
+- `cargo run -p dtx-cli -- validate crates/dtx-core/tests/fixtures/minimal.dtx`:
+  validated the fixture and reported its metadata and two chips.
+- Every safe package/check/test command named by the eleven refreshed crate
+  handbooks passed. This included the core compatibility matrix, MP3 decode,
+  BGA pan/swap/movie integration, MIDI feature compilation, archive import,
+  timing compatibility, Result/Shell/Guitar targets, all focused Drums targets,
+  and `cargo test -p gameplay-drums --tests`.
+- `cargo check -p dtxmaniars-desktop --features bevy/dynamic_linking` passed
+  after the previously uncached optional `bevy_dylib` package was fetched.
+- The README install command passed with `--root
+  /tmp/dtxmaniars-doc-install`; the installed `dtxmaniars` binary is
+  executable.
+- `cargo build --release -p dtxmaniars-desktop` passed on the final source.
+
+### Test quality and workspace gates
+
+- The repeated suspect scan contains no ignored tests or behaviorless
+  assertion. Remaining `placeholder` matches are the classified functional
+  no-art/no-device states listed above.
+- `cargo test -p dtx-core --test comprehensive`,
+  `cargo test -p dtx-scoring --tests`, and `cargo test -p dtx-ui` passed after
+  the test-quality repairs.
+- `cargo fmt --all -- --check` passed.
+- `cargo check --workspace` passed.
+- `cargo clippy --workspace --all-targets -- -D warnings` passed.
+- `cargo test --workspace --lib` passed every library test binary with zero
+  failures or ignored tests.
+- `git diff --check` passed.
+
+### Cross-cycle acceptance and scope
+
+Focused and workspace evidence covers one-rate chart/audio/visual/seek/end
+behavior; non-qualifying modified/Practice/No Fail results; case-insensitive
+DTX/GDA/G2D discovery and deterministic conditionals; media diagnostics/XA
+recovery; confidence-gated calibration; normal-play analysis and recommended
+Practice loops; composable library discovery; and non-color, scalable,
+reduced-effect accessibility behavior. The maintained guides and ADR map pass
+the executable documentation checker.
+
+`git diff --name-only main...HEAD` contained 189 program files. A mechanical
+path audit found zero CI/CD paths and zero `references/` paths. The main
+checkout also reported a clean `git status --short references`. No CI/CD or
+vendored reference change is part of this program.
+
+### Manual release-device checks
+
+Commands requiring a window, audible output, or physical hardware were not
+misreported as automated evidence. The following remain release-device QA:
+
+- enumerate and play a real MIDI kit, including disconnect/rescan and velocity
+  threshold behavior;
+- confirm audible output, device/output latency, and guided-calibration feel;
+- inspect movie/image presentation, reduced effects, ultrawide layout, and
+  2.5–3.5 m drum-kit readability on target displays.
+
+The default and MIDI-feature desktop builds, dynamic-link development build,
+release build, installer, synthetic calibration reducers, decoder fixtures,
+and geometry/accessibility tests passed mechanically. The manual checks are
+environment-dependent validation, not unfinished product implementation.

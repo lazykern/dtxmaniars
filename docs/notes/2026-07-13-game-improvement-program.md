@@ -1,7 +1,7 @@
 # DTXManiaRS End-to-End Improvement Program
 
 Date: 2026-07-13
-Status: Program direction approved; individual written designs require review
+Status: Complete — all eight cycles implemented and locally verified
 Owner: Codex, executing autonomously between written-spec gates
 Product scope: drums and electronic drums
 Explicit exclusion: CI/CD configuration and workflows
@@ -39,7 +39,7 @@ ledger is the durable inventory; completing one cycle never removes later work.
 | 5 | Large-library discovery and measured scan performance | Implemented |
 | 6 | Accessibility and design-system consolidation | Implemented |
 | 7 | Extended format/media compatibility | Implemented |
-| 8 | Documentation and repository-maintenance repair | In progress |
+| 8 | Documentation and repository-maintenance repair | Implemented |
 
 ## Cycle 0 — Truthful local quality baseline
 
@@ -234,8 +234,7 @@ Completed 2026-07-13:
 ## Cycle 8 — Documentation and repository maintenance
 
 Current status and the approved source documents are indexed by the stable
-[roadmap](../roadmap.md). Cycle 8 remains In progress until its final truth
-gates pass.
+[roadmap](../roadmap.md).
 
 Repair all stale `DTXmaniaNX` links to the actual reference root, restore
 the stable roadmap entry point, reconcile conflicting transition rules,
@@ -246,6 +245,27 @@ behavior.
 
 Remove tautological or placeholder tests when replacing them with
 behavior-bearing tests. No CI/CD workflow work is included.
+
+Completed 2026-07-13:
+
+- Added a deterministic local documentation checker for Markdown targets,
+  canonical maps, reference paths, stale roots, and known false-missing claims.
+- Repaired the 81-file obsolete reference-root baseline, established maintained
+  roadmap/player/persistence/contributor guides, reconstructed binding ADRs,
+  and reconciled the 300 ms product transition with the 1500 ms reference
+  comparison.
+- Published verified install, library/import, controls/MIDI, calibration,
+  Practice/Results, compatibility, score qualification, persistence, backup,
+  recovery, architecture, and local-gate guidance.
+- Refreshed every documented crate handbook against current manifests, source,
+  reference evidence, ownership, and executable package commands.
+- Removed behaviorless assertions and added observable CDTX cache and 120 ms
+  accessibility-aware pad-feedback contracts.
+- Passed the documentation, documented-command, release-build, formatting,
+  workspace check, warnings-as-errors Clippy, workspace library-test, scope,
+  reference, and CI/CD exclusion gates. The full evidence and manual hardware
+  limitations are in the
+  [documentation inventory](2026-07-13-documentation-inventory.md).
 
 ## Cross-cycle acceptance
 
