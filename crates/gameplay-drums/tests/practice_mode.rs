@@ -43,6 +43,7 @@ fn build_app() -> App {
     .init_resource::<DrumsStageCompletion>()
     .init_resource::<GameplayClock>()
     .init_resource::<EffectivePlaybackRate>()
+    .init_resource::<game_shell::CompletedRunContext>()
     .init_resource::<ActiveChart>()
     .init_resource::<Score>()
     .init_resource::<gameplay_drums::resources::DrumScoring>()

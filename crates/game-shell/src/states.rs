@@ -100,6 +100,37 @@ pub fn despawn_stage<T: Component>(mut commands: Commands, query: Query<Entity, 
 #[derive(Resource, Debug, Clone, Copy, Default)]
 pub struct PracticeIntent(pub bool);
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum RunKind {
+    #[default]
+    Practice,
+    Normal,
+}
+
+#[derive(Resource, Debug, Clone, Copy, PartialEq)]
+pub struct CompletedRunContext {
+    pub kind: RunKind,
+    pub playback_rate: f64,
+}
+
+impl CompletedRunContext {
+    pub fn normal(playback_rate: f64) -> Self {
+        Self {
+            kind: RunKind::Normal,
+            playback_rate,
+        }
+    }
+}
+
+impl Default for CompletedRunContext {
+    fn default() -> Self {
+        Self {
+            kind: RunKind::Practice,
+            playback_rate: 1.0,
+        }
+    }
+}
+
 /// Difficulty index (0 = BASIC) of the chart being played — the same value
 /// the song wheel uses. Written by song loading on every SongLoading enter;
 /// read by game-results to color the Lv chip. Lives in game-shell so
@@ -190,6 +221,20 @@ pub struct PendingCustomizeTab(pub Option<CustomizeTab>);
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn completed_run_defaults_to_safe_non_saving_practice() {
+        let run = CompletedRunContext::default();
+        assert_eq!(run.kind, RunKind::Practice);
+        assert!((run.playback_rate - 1.0).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn normal_run_records_its_rate() {
+        let run = CompletedRunContext::normal(0.75);
+        assert_eq!(run.kind, RunKind::Normal);
+        assert!((run.playback_rate - 0.75).abs() < f64::EPSILON);
+    }
 
     #[test]
     fn customize_tab_groups_partition_all_variants() {

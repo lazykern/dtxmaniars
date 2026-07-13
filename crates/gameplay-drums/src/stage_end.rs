@@ -14,6 +14,7 @@ use game_shell::{request_transition, AppState, TransitionRequest};
 
 use crate::gauge::StageGauge;
 use crate::orchestrator::DrumsStageCompletion;
+use crate::resources::EffectivePlaybackRate;
 
 /// How long the clear/fail banner stays up before auto-advancing to Result.
 const BANNER_MS: f32 = 1600.0;
@@ -67,6 +68,8 @@ fn detect_stage_failure(
     mut requests: MessageWriter<TransitionRequest>,
     practice: Option<Res<crate::practice::PracticeSession>>,
     session: Res<game_shell::EditorSession>,
+    rate: Res<EffectivePlaybackRate>,
+    mut completed_run: ResMut<game_shell::CompletedRunContext>,
 ) {
     if practice.is_some() {
         return;
@@ -81,6 +84,7 @@ fn detect_stage_failure(
         completion.end_requested = true;
         completion.gauge_failed = true;
         info!("DrumsStage: gauge failed, routing to StageFailed");
+        *completed_run = game_shell::CompletedRunContext::normal(rate.value);
         request_transition(&mut requests, AppState::StageFailed);
     }
 }
@@ -150,5 +154,31 @@ fn advance_banner(
     let skip = keys.just_pressed(KeyCode::Enter) || keys.just_pressed(KeyCode::Space);
     if timer.0 <= 0.0 || skip {
         request_transition(&mut requests, AppState::Result);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn gauge_failure_snapshots_modified_rate() {
+        let mut app = App::new();
+        app.init_resource::<StageGauge>()
+            .init_resource::<DrumsStageCompletion>()
+            .init_resource::<game_shell::EditorSession>()
+            .init_resource::<EffectivePlaybackRate>()
+            .init_resource::<game_shell::CompletedRunContext>()
+            .add_message::<TransitionRequest>()
+            .add_systems(Update, detect_stage_failure);
+        app.world_mut().resource_mut::<StageGauge>().failed = true;
+        *app.world_mut().resource_mut::<EffectivePlaybackRate>() =
+            EffectivePlaybackRate::normal(0.75);
+
+        app.update();
+
+        let run = app.world().resource::<game_shell::CompletedRunContext>();
+        assert_eq!(run.kind, game_shell::RunKind::Normal);
+        assert!((run.playback_rate - 0.75).abs() < f64::EPSILON);
     }
 }

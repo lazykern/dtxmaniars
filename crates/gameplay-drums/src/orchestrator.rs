@@ -53,7 +53,8 @@ use crate::drums_perf::{DrumsDangerState, DrumsFillingEffect, DrumsPadState};
 use crate::judge::{BarLengthChangeList, BpmChangeList, JudgedChips};
 use crate::resources::{
     ActiveChart, ActiveDrumSounds, BgmAdjustState, Combo, DrumAudioSettings, DrumGameplaySettings,
-    DrumScoring, FastSlowCount, GameStartMs, GameplayClock, JudgmentCounts, Score, SkillValue,
+    DrumScoring, EffectivePlaybackRate, FastSlowCount, GameStartMs, GameplayClock, JudgmentCounts,
+    Score, SkillValue,
 };
 use dtx_timing::math::ChartTiming;
 
@@ -403,6 +404,8 @@ pub fn detect_end_of_stage(
     _combo: Res<Combo>,
     practice: Option<Res<crate::practice::PracticeSession>>,
     session: Res<game_shell::EditorSession>,
+    rate: Res<EffectivePlaybackRate>,
+    mut completed_run: ResMut<game_shell::CompletedRunContext>,
     mut requests: MessageWriter<TransitionRequest>,
 ) {
     if completion.end_requested {
@@ -445,6 +448,7 @@ pub fn detect_end_of_stage(
         completion.end_requested = true;
         // Survived to the end → clear banner. The gauge-fail path (handled in
         // `stage_end::detect_stage_failure`) routes to `StageFailed` instead.
+        *completed_run = game_shell::CompletedRunContext::normal(rate.value);
         request_transition(&mut requests, AppState::StageClear);
     }
 }

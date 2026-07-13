@@ -19,7 +19,8 @@ use gameplay_drums::orchestrator::{
     on_exit_performance, DrumsStageCompletion,
 };
 use gameplay_drums::resources::{
-    ActiveChart, BgmAdjustState, Combo, GameStartMs, GameplayClock, JudgmentCounts, Score,
+    ActiveChart, BgmAdjustState, Combo, EffectivePlaybackRate, GameStartMs, GameplayClock,
+    JudgmentCounts, Score,
 };
 
 fn chart_with_measures(n: u32) -> Chart {
@@ -44,6 +45,8 @@ fn build_app() -> App {
     .init_state::<AppState>()
     .init_resource::<DrumsStageCompletion>()
     .init_resource::<GameplayClock>()
+    .init_resource::<EffectivePlaybackRate>()
+    .init_resource::<game_shell::CompletedRunContext>()
     .init_resource::<ActiveChart>()
     .init_resource::<Score>()
     .init_resource::<gameplay_drums::resources::DrumScoring>()
@@ -120,6 +123,26 @@ fn end_to_end_detect_end_triggers_result_transition() {
     app.update();
     let completion = app.world().resource::<DrumsStageCompletion>();
     assert!(completion.end_requested, "end_requested should be set");
+}
+
+#[test]
+fn completed_run_snapshots_modified_rate_before_clear() {
+    let mut app = build_app();
+    app.world_mut().resource_mut::<ActiveChart>().chart = chart_with_measures(2);
+    *app.world_mut().resource_mut::<EffectivePlaybackRate>() = EffectivePlaybackRate::normal(0.75);
+    app.world_mut()
+        .resource_mut::<NextState<AppState>>()
+        .set(AppState::Performance);
+    app.update();
+    let end_ms = app.world().resource::<DrumsStageCompletion>().chart_end_ms;
+    let mut clock = app.world_mut().resource_mut::<GameplayClock>();
+    clock.start();
+    clock.sync(Some(end_ms));
+    app.update();
+
+    let run = app.world().resource::<game_shell::CompletedRunContext>();
+    assert_eq!(run.kind, game_shell::RunKind::Normal);
+    assert!((run.playback_rate - 0.75).abs() < f64::EPSILON);
 }
 
 #[test]
