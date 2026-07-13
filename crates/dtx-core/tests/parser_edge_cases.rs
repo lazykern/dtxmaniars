@@ -3,8 +3,52 @@
 //! Covers parse error paths, malformed input, and corner cases that
 //! aren't exercised by the main parser_tests.rs.
 
-use dtx_core::parse;
-use dtx_core::EChannel;
+use dtx_core::{parse, parse_with_options, EChannel, ParseOptions, ParseWarningKind};
+
+fn conditional_report(input: &[u8]) -> dtx_core::ParseReport {
+    parse_with_options(input, ParseOptions { random_seed: 0 }).expect("conditional input parses")
+}
+
+#[test]
+fn conditional_unmatched_endif_warns_and_recovers() {
+    let report = conditional_report(b"#ENDIF\n#TITLE: Recovered\n");
+    assert_eq!(report.chart.metadata.title.as_deref(), Some("Recovered"));
+    assert!(report
+        .warnings
+        .iter()
+        .any(|warning| warning.kind == ParseWarningKind::UnmatchedEndIf));
+}
+
+#[test]
+fn conditional_unclosed_if_warns_and_keeps_active_metadata() {
+    let report = conditional_report(b"#RANDOM 1\n#IF 1\n#TITLE: Active\n");
+    assert_eq!(report.chart.metadata.title.as_deref(), Some("Active"));
+    assert!(report
+        .warnings
+        .iter()
+        .any(|warning| { matches!(warning.kind, ParseWarningKind::UnclosedIf { depth: 1 }) }));
+}
+
+#[test]
+fn conditional_invalid_arguments_warn_and_default_to_one() {
+    let report = conditional_report(b"#RANDOM nope\n#IF nope\n#TITLE: Defaulted\n#ENDIF\n");
+    assert_eq!(report.chart.metadata.title.as_deref(), Some("Defaulted"));
+    assert!(report
+        .warnings
+        .iter()
+        .any(|warning| warning.kind == ParseWarningKind::InvalidRandom));
+    assert!(report
+        .warnings
+        .iter()
+        .any(|warning| warning.kind == ParseWarningKind::InvalidIf));
+}
+
+#[test]
+fn conditional_lowercase_attached_directives_are_supported() {
+    let report = conditional_report(b"#random2\n#if1\n#TITLE: Lowercase\n#endif\n");
+    assert_eq!(report.chart.metadata.title.as_deref(), Some("Lowercase"));
+    assert!(report.warnings.is_empty());
+}
 
 #[test]
 fn parse_empty_input() {

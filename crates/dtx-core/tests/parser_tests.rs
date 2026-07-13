@@ -1,5 +1,4 @@
-use dtx_core::parse;
-use dtx_core::EChannel;
+use dtx_core::{parse, parse_with_options, EChannel, ParseOptions};
 use std::fs::File;
 use std::io::BufReader;
 use std::path::PathBuf;
@@ -72,4 +71,52 @@ fn visual_sequences_preserve_asset_id_and_fraction() {
     assert_eq!(events[0].bmp_index, 1);
     assert_eq!(events[1].bmp_index, 2);
     assert_eq!(events[1].fraction, 0.5);
+}
+
+#[test]
+fn conditional_fixture_selects_reproducible_branches() {
+    let parse_seed = |seed| {
+        parse_with_options(
+            BufReader::new(File::open(fixture("conditional_branches.dtx")).unwrap()),
+            ParseOptions { random_seed: seed },
+        )
+        .expect("conditional fixture parses")
+        .chart
+    };
+
+    let one = parse_seed(0);
+    assert!(one
+        .chips
+        .iter()
+        .any(|chip| chip.channel == EChannel::HiHatClose));
+    assert!(!one
+        .chips
+        .iter()
+        .any(|chip| chip.channel == EChannel::BassDrum));
+    assert_eq!(one.assets.wav.get(1), Some("branch-one.wav"));
+    assert_eq!(one.assets.wav.get(2), None);
+
+    let two = parse_seed(1);
+    assert!(two
+        .chips
+        .iter()
+        .any(|chip| chip.channel == EChannel::BassDrum));
+    assert!(!two
+        .chips
+        .iter()
+        .any(|chip| chip.channel == EChannel::HiHatClose));
+    assert_eq!(two.assets.wav.get(1), None);
+    assert_eq!(two.assets.wav.get(2), Some("branch-two.wav"));
+}
+
+#[test]
+fn conditional_nested_fixture_keeps_one_inner_branch() {
+    let report = parse_with_options(
+        BufReader::new(File::open(fixture("conditional_nested.dtx")).unwrap()),
+        ParseOptions { random_seed: 1 },
+    )
+    .expect("nested conditional fixture parses");
+
+    assert!(report.warnings.is_empty());
+    assert_eq!(report.chart.drum_chips().count(), 1);
 }
