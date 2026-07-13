@@ -37,7 +37,7 @@ ledger is the durable inventory; completing one cycle never removes later work.
 | 3 | Reliable guided calibration | Implemented |
 | 4 | Results analysis and weakest-section practice handoff | Implemented |
 | 5 | Large-library discovery and measured scan performance | Implemented |
-| 6 | Accessibility and design-system consolidation | Queued |
+| 6 | Accessibility and design-system consolidation | Implemented |
 | 7 | Extended format/media compatibility | Queued |
 | 8 | Documentation and repository-maintenance repair | Queued |
 
@@ -170,6 +170,26 @@ finish remaining drag/selection affordances.
 This cycle protects existing strengths: the spring song wheel, BPM glow,
 OutQuint entrances, velocity meter, profile transaction model, lane direct
 manipulation, and widget anchor/origin visualization.
+
+Completed 2026-07-13:
+
+- Independent Text Scale, Reduce Motion, Reduce Flashes, and Background Motion
+  settings persist, preview live, and retain unsaved drafts after a failed save.
+- No Fail is a canonical run modifier with an always-visible text/shape badge;
+  No Fail results are explicitly non-qualifying and never mutate native history
+  or compatible `score.ini` records.
+- Semantic typography, interaction tones, shape markers, action reduction,
+  modal focus rules, and bounded durable notifications are shared in `dtx-ui`.
+- Reduced effects preserve visible feedback while removing entrance travel,
+  pulsing/scaling flashes, parallax, beat pulses, and movie/background motion.
+- Runtime safe areas repair off-screen widgets without rewriting persistence.
+  XL practice controls use a focus-following scroll rail, and overflowing
+  Results remain scrollable with their action row initially reachable.
+- Pure geometry fixtures cover 1280×720, 1920×1080, and 2560×1080 safe areas,
+  Standard/XL layout selection, and runtime recovery. Format, focused package,
+  workspace check, warnings-as-errors Clippy, and all workspace library tests
+  passed. A physical 2.5–3.5 m readability check remains release-device QA
+  because it cannot be established by headless automation.
 
 ## Cycle 7 — Extended format/media compatibility
 
