@@ -12,7 +12,7 @@ use dtx_input::profiles::{
     keyboard_builtins, keyboard_registry, load_keyboard_registry, load_midi_registry,
     midi_builtins, midi_registry, KeyboardProfile, MidiProfile, ProfileRegistry, RegistryStartup,
 };
-use dtx_input::{BindSource, InputBindings, BINDABLE_CHANNELS};
+use dtx_input::{BindSource, InputBindings, BINDABLE_CHANNELS, SYSTEM_VERBS};
 
 use crate::lane_map::{lane_of, LaneId};
 
@@ -208,7 +208,6 @@ pub(crate) fn compose_bindings(keyboard: &KeyboardProfile, midi: &MidiProfile) -
             velocity_threshold: midi.velocity_threshold,
         },
         map: HashMap::new(),
-        // Filled in by Task 3, when the profiles learn to carry system binds.
         system: HashMap::new(),
     };
     for ch in BINDABLE_CHANNELS {
@@ -221,6 +220,20 @@ pub(crate) fn compose_bindings(keyboard: &KeyboardProfile, midi: &MidiProfile) -
         }
         if !sources.is_empty() {
             bindings.map.insert(ch, sources);
+        }
+    }
+    // Without this the profiles' system binds would be wiped on every
+    // `reload_profiles` — i.e. the moment a song starts.
+    for verb in SYSTEM_VERBS {
+        let mut sources = Vec::new();
+        for key in keyboard.system.get(&verb).into_iter().flatten() {
+            sources.push(BindSource::Key(*key));
+        }
+        for note in midi.system.get(&verb).into_iter().flatten() {
+            sources.push(BindSource::Midi { note: *note });
+        }
+        if !sources.is_empty() {
+            bindings.system.insert(verb, sources);
         }
     }
     bindings
@@ -320,6 +333,30 @@ mod tests {
             resolver.lane_for_key(KeyCode::KeyP),
             crate::lane_map::lane_of(sd)
         );
+    }
+
+    /// The reload path (`reload_profiles`) rebuilds `LiveBindings` from the
+    /// profiles alone. A system bind that does not survive split → compose is a
+    /// bind wiped the moment the drummer starts a song.
+    #[test]
+    fn system_binds_survive_split_and_compose() {
+        use dtx_input::{profiles::split_bindings, SystemVerb};
+
+        let mut b = InputBindings::default();
+        b.bind_system(SystemVerb::Pause, BindSource::Midi { note: 37 });
+        b.bind_system(SystemVerb::Restart, BindSource::Key(KeyCode::F9));
+        let (keyboard, midi) = split_bindings(&b);
+
+        let composed = compose_bindings(&keyboard, &midi);
+        assert_eq!(
+            composed.system_sources(SystemVerb::Pause),
+            [BindSource::Midi { note: 37 }]
+        );
+        assert_eq!(
+            composed.system_sources(SystemVerb::Restart),
+            [BindSource::Key(KeyCode::F9)]
+        );
+        assert_eq!(composed.map, b.map, "lane map survives the round trip");
     }
 
     #[test]
