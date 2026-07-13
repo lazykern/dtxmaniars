@@ -39,7 +39,7 @@ ledger is the durable inventory; completing one cycle never removes later work.
 | 5 | Large-library discovery and measured scan performance | Implemented |
 | 6 | Accessibility and design-system consolidation | Implemented |
 | 7 | Extended format/media compatibility | Implemented |
-| 8 | Documentation and repository-maintenance repair | Queued |
+| 8 | Documentation and repository-maintenance repair | In progress |
 
 ## Cycle 0 — Truthful local quality baseline
 
@@ -233,8 +233,12 @@ Completed 2026-07-13:
 
 ## Cycle 8 — Documentation and repository maintenance
 
+Current status and the approved source documents are indexed by the stable
+[roadmap](../roadmap.md). Cycle 8 remains In progress until its final truth
+gates pass.
+
 Repair all stale `DTXmaniaNX` links to the actual reference root, restore
-or replace the missing roadmap link, reconcile conflicting transition rules,
+the stable roadmap entry point, reconcile conflicting transition rules,
 and reconstruct binding ADRs that are currently described as lost. Expand the
 README with installation dependencies, song location/import, supported media,
 controls, MIDI setup, troubleshooting, data locations, and score-modifier

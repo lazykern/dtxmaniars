@@ -79,8 +79,9 @@ Tool order:
 
 | Need | File |
 |---|---|
-| What are we building? Phase status | `docs/superpowers/specs/2026-07-11-game-improvement-roadmap-design.md` |
+| What are we building? Phase status | `docs/roadmap.md` |
 | Why we chose X over Y | `docs/decisions/` |
+| How to contribute and verify | `docs/contributing.md` |
 | Scratch / session logs / research | `docs/notes/` |
 | Per-crate scope, tests, ref files | `crates/<name>/AGENTS.md` |
 | Reference implementations | `references/` (read-only, never edit) |
@@ -145,7 +146,7 @@ A Pure crate **must not** depend on any Engine or Game crate. Engine crates may 
 ## Continuing work in a new session
 
 1. Read this `AGENTS.md` first.
-2. Read `docs/superpowers/specs/2026-07-11-game-improvement-roadmap-design.md` for current milestone status.
+2. Read `docs/roadmap.md` for current program status.
 3. Read `docs/decisions/` for accepted constraints.
 4. Read the `AGENTS.md` of the crate you'll touch.
 5. (Re)index reference files via `ctx_index` (cheap, pays back fast).
