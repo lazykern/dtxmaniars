@@ -19,7 +19,7 @@ use std::io;
 use std::path::{Path, PathBuf};
 
 use bevy::prelude::*;
-use dtx_core::{Chart, DtxError, parse};
+use dtx_core::{Chart, DtxError, ParseOptions, ParseReport, parse_with_options};
 
 /// Load a DTX file from disk and parse it into a [`Chart`].
 ///
@@ -27,11 +27,16 @@ use dtx_core::{Chart, DtxError, parse};
 /// - I/O errors (file not found, permission denied, etc.)
 /// - Parse errors (malformed DTX) — see [`DtxError`]
 pub fn load_dtx(path: &Path) -> Result<Chart, LoadError> {
+    load_dtx_report(path).map(|report| report.chart)
+}
+
+/// Load a DTX file while retaining recoverable parser warnings.
+pub fn load_dtx_report(path: &Path) -> Result<ParseReport, LoadError> {
     let file = fs::File::open(path).map_err(|source| LoadError::Io {
         path: path.to_path_buf(),
         source,
     })?;
-    parse(file).map_err(|source| LoadError::Parse {
+    parse_with_options(file, ParseOptions::default()).map_err(|source| LoadError::Parse {
         path: path.to_path_buf(),
         source,
     })
@@ -121,6 +126,24 @@ mod tests {
         let chart = load_dtx(&fixture_path()).expect("fixture must load");
         assert!(!chart.chips.is_empty(), "fixture should have chips");
         assert!(chart.metadata.bpm.is_some(), "fixture should have BPM");
+    }
+
+    #[test]
+    fn load_dtx_report_preserves_parser_warnings() {
+        let dir = std::env::temp_dir().join(format!(
+            "dtx-assets-report-{}-{}",
+            std::process::id(),
+            std::thread::current().name().unwrap_or("test")
+        ));
+        std::fs::create_dir_all(&dir).expect("create fixture dir");
+        let path = dir.join("warning.dtx");
+        std::fs::write(&path, b"#RANDOM: nope\n#00013: 01\n").expect("write chart");
+
+        let report = load_dtx_report(&path).expect("chart must load");
+        assert_eq!(report.chart.drum_chips().count(), 1);
+        assert!(!report.warnings.is_empty());
+
+        std::fs::remove_dir_all(dir).expect("remove fixture dir");
     }
 
     #[test]

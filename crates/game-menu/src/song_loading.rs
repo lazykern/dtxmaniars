@@ -22,10 +22,10 @@ use bevy::input::ButtonInput;
 use bevy::input::keyboard::KeyCode;
 use bevy::prelude::*;
 use bevy::tasks::{AsyncComputeTaskPool, Task, block_on, futures_lite::future};
-use bevy_kira_audio::prelude::{Audio, AudioInstance, AudioSource as KiraAudioSource};
+use bevy_kira_audio::prelude::{Audio, AudioInstance};
 use dtx_audio::BgmHandle;
 use dtx_bga::{ActiveChartRes, BgaPlayer};
-use dtx_core::{Chart, resolve_bgm_path};
+use dtx_core::{Chart, ParseReport, resolve_bgm_path};
 use dtx_ui::motion::EnterChoreo;
 use dtx_ui::widget::stage_background::spawn_stage_background;
 use dtx_ui::widget::stage_panel::panel;
@@ -86,13 +86,62 @@ struct LoadingAdvanceGate(bool);
 /// Background chart-parse task. Keeps the parse off the main thread so the
 /// loading screen stays smooth (mirrors `dtxpt`'s `ChartLoad` background task).
 #[derive(Resource, Default)]
-struct ChartParseTask(Option<Task<Result<Chart, String>>>);
+struct ChartParseTask(Option<Task<Result<ParseReport, String>>>);
 
 /// Chart WAV handles the loader blocks on before starting gameplay.
 /// BocuD loads every used WAV before entering Performance
 /// (`CStageSongLoading.cs:700-708`).
 #[derive(Resource, Default)]
-struct RequiredAudio(Vec<Handle<KiraAudioSource>>);
+struct RequiredAudio(Vec<gameplay_drums::sound_bank::PreloadedAudio>);
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum LoadProblemKind {
+    ParserWarning,
+    MissingAudio,
+    UnsupportedAudio,
+    DecoderFailure,
+    MissingVisual,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct LoadProblem {
+    kind: LoadProblemKind,
+    path: Option<std::path::PathBuf>,
+    detail: String,
+}
+
+impl LoadProblem {
+    fn parser_warning(line: usize, detail: impl Into<String>) -> Self {
+        Self {
+            kind: LoadProblemKind::ParserWarning,
+            path: None,
+            detail: format!("line {line}: {}", detail.into()),
+        }
+    }
+}
+
+#[derive(Resource, Debug, Default)]
+struct LoadDiagnostics {
+    fatal: Option<String>,
+    warnings: Vec<LoadProblem>,
+    advance_not_before: Option<std::time::Instant>,
+}
+
+fn load_failure_for(chart: &Chart) -> Option<String> {
+    chart
+        .drum_chips()
+        .next()
+        .is_none()
+        .then(|| "selected conditional branch contains no playable drum chips".to_string())
+}
+
+const fn failure_hold_seconds() -> f64 {
+    2.5
+}
+
+fn warning_hold_seconds(warnings: &[LoadProblem]) -> f64 {
+    if warnings.is_empty() { 0.0 } else { 0.75 }
+}
 
 fn required_audio_slots(chart: &Chart) -> std::collections::BTreeSet<u32> {
     gameplay_drums::sound_bank::collect_preload_wav_slots(chart)
@@ -106,6 +155,7 @@ pub fn plugin(app: &mut App) {
         .init_resource::<GhostLag>()
         .init_resource::<ChartParseTask>()
         .init_resource::<RequiredAudio>()
+        .init_resource::<LoadDiagnostics>()
         .add_systems(
             OnEnter(AppState::SongLoading),
             (reset_advance_gate, start_load, spawn_loading).chain(),
@@ -140,9 +190,13 @@ fn start_load(
     mut bank: ResMut<dtx_audio::ChartSoundBank>,
     mut progress: ResMut<LoadingProgress>,
     mut cancel: ResMut<CancelRequested>,
+    mut diagnostics: ResMut<LoadDiagnostics>,
 ) {
     progress.0 = 0.0;
     cancel.0 = false;
+    diagnostics.fatal = None;
+    diagnostics.warnings.clear();
+    diagnostics.advance_not_before = None;
     bank.clear();
     if let Some(path) = selected.0.as_ref() {
         *phase = LoadPhase::Parsing;
@@ -151,10 +205,9 @@ fn start_load(
         // done — fall back to "Loading…" if the chart doesn't ship one.
         let path_clone = path.clone();
         let pool = AsyncComputeTaskPool::get();
-        task.0 =
-            Some(pool.spawn(async move {
-                dtx_assets::load_dtx(&path_clone).map_err(|e| e.to_string())
-            }));
+        task.0 = Some(pool.spawn(async move {
+            dtx_assets::load_dtx_report(&path_clone).map_err(|e| e.to_string())
+        }));
     } else {
         warn!("SongLoading entered with no SelectedSong; using empty chart");
         task.0 = None;
@@ -183,6 +236,7 @@ fn poll_chart_parse(
     mut bgm: ResMut<BgmHandle>,
     mut instances: ResMut<Assets<AudioInstance>>,
     mut ghost: ResMut<GhostLag>,
+    mut diagnostics: ResMut<LoadDiagnostics>,
     mut commands: Commands,
 ) {
     let Some(active) = task.0.as_mut() else {
@@ -195,8 +249,25 @@ fn poll_chart_parse(
 
     let path = selected.0.clone();
     match result {
-        Ok(chart) => {
+        Ok(report) => {
             if cancel.0 {
+                *phase = LoadPhase::Failed;
+                return;
+            }
+            for warning in report.warnings {
+                diagnostics.warnings.push(LoadProblem::parser_warning(
+                    warning.line,
+                    format!("{:?}", warning.kind),
+                ));
+            }
+            let chart = report.chart;
+            if let Some(fatal) = load_failure_for(&chart) {
+                error!("SongLoading: {fatal}");
+                diagnostics.fatal = Some(fatal);
+                diagnostics.advance_not_before = Some(
+                    std::time::Instant::now()
+                        + std::time::Duration::from_secs_f64(failure_hold_seconds()),
+                );
                 *phase = LoadPhase::Failed;
                 return;
             }
@@ -213,6 +284,7 @@ fn poll_chart_parse(
             guitar_chart.source_path = path.clone();
             // M7.1: publish prepared visual events + resolved asset paths.
             let active_visuals = ActiveChartRes::from_chart(&chart, path.as_deref());
+            record_missing_visuals(&chart, &active_visuals, &mut diagnostics);
             bga_player.reset();
             bga_player.event_count = active_visuals.events.len();
             commands.insert_resource(active_visuals);
@@ -221,7 +293,20 @@ fn poll_chart_parse(
             // play commands from releasing together as an audible burst.
             use gameplay_drums::sound_bank;
             let slots = required_audio_slots(&chart);
-            required.0 = sound_bank::preload_slots(&drums_chart, &asset_server, &mut bank, &slots);
+            let batch =
+                sound_bank::preload_slots_report(&drums_chart, &asset_server, &mut bank, &slots);
+            for issue in batch.issues {
+                let kind = match issue.kind {
+                    sound_bank::PreloadIssueKind::Missing => LoadProblemKind::MissingAudio,
+                    sound_bank::PreloadIssueKind::Unsupported => LoadProblemKind::UnsupportedAudio,
+                };
+                diagnostics.warnings.push(LoadProblem {
+                    kind,
+                    path: Some(issue.path),
+                    detail: format!("chart audio slot {}", issue.slot),
+                });
+            }
+            required.0 = batch.assets;
             info!("SongLoading: waiting on {} chart WAVs", required.0.len());
             // Read the perfect-drums ghost (BocuD CStageSongLoading.cs:535-580).
             // Stored for later replay-lane wiring; reverse-score computation is
@@ -255,7 +340,44 @@ fn poll_chart_parse(
         }
         Err(e) => {
             error!("Failed to load DTX: {e}");
+            diagnostics.fatal = Some(e);
+            diagnostics.advance_not_before = Some(
+                std::time::Instant::now()
+                    + std::time::Duration::from_secs_f64(failure_hold_seconds()),
+            );
             *phase = LoadPhase::Failed;
+        }
+    }
+}
+
+fn record_missing_visuals(
+    chart: &Chart,
+    active_visuals: &ActiveChartRes,
+    diagnostics: &mut LoadDiagnostics,
+) {
+    let source_dir = active_visuals.source_dir.as_deref();
+    for (&id, filename) in chart
+        .assets
+        .bmp
+        .by_id
+        .iter()
+        .chain(chart.assets.bga.by_id.iter())
+    {
+        if !active_visuals.bmp_paths.contains_key(&id) {
+            diagnostics.warnings.push(LoadProblem {
+                kind: LoadProblemKind::MissingVisual,
+                path: source_dir.map(|dir| dir.join(filename.replace('\\', "/"))),
+                detail: format!("image asset {id:02X} ({filename})"),
+            });
+        }
+    }
+    for (&id, filename) in &chart.assets.avi.by_id {
+        if !active_visuals.avi_paths.contains_key(&id) {
+            diagnostics.warnings.push(LoadProblem {
+                kind: LoadProblemKind::MissingVisual,
+                path: source_dir.map(|dir| dir.join(filename.replace('\\', "/"))),
+                detail: format!("movie asset {id:02X} ({filename})"),
+            });
         }
     }
 }
@@ -267,6 +389,7 @@ fn wait_for_audio(
     required: Res<RequiredAudio>,
     asset_server: Res<AssetServer>,
     mut progress: ResMut<LoadingProgress>,
+    mut diagnostics: ResMut<LoadDiagnostics>,
 ) {
     if *phase != LoadPhase::LoadingAudio {
         return;
@@ -275,21 +398,44 @@ fn wait_for_audio(
     if total == 0 {
         progress.0 = 1.0;
         *phase = LoadPhase::Ready;
+        diagnostics.advance_not_before = (!diagnostics.warnings.is_empty()).then(|| {
+            std::time::Instant::now()
+                + std::time::Duration::from_secs_f64(warning_hold_seconds(&diagnostics.warnings))
+        });
         return;
     }
     let done = required
         .0
         .iter()
-        .filter(|handle| match asset_server.get_load_state(handle.id()) {
-            Some(state) => state.is_loaded() || state.is_failed(),
-            // No load state yet means the handle hasn't been registered; treat
-            // as pending.
-            None => false,
+        .filter(|asset| {
+            matches!(
+                asset_server.get_load_state(asset.handle.id()),
+                Some(state) if state.is_loaded() || state.is_failed()
+            )
         })
         .count();
+    for asset in &required.0 {
+        if let Some(state) = asset_server.get_load_state(asset.handle.id())
+            && state.is_failed()
+            && !diagnostics.warnings.iter().any(|problem| {
+                problem.kind == LoadProblemKind::DecoderFailure
+                    && problem.path.as_ref() == Some(&asset.path)
+            })
+        {
+            diagnostics.warnings.push(LoadProblem {
+                kind: LoadProblemKind::DecoderFailure,
+                path: Some(asset.path.clone()),
+                detail: "audio decoder rejected this file".into(),
+            });
+        }
+    }
     progress.0 = done as f32 / total as f32;
     if done >= total {
         *phase = LoadPhase::Ready;
+        diagnostics.advance_not_before = (!diagnostics.warnings.is_empty()).then(|| {
+            std::time::Instant::now()
+                + std::time::Duration::from_secs_f64(warning_hold_seconds(&diagnostics.warnings))
+        });
     }
 }
 
@@ -577,6 +723,7 @@ fn update_status_text(
     phase: Res<LoadPhase>,
     progress: Res<LoadingProgress>,
     required: Res<RequiredAudio>,
+    diagnostics: Res<LoadDiagnostics>,
     mut status_query: Query<&mut Text, With<LoadingStatusText>>,
     mut bar: Query<&mut Node, With<LoadingBarFill>>,
 ) {
@@ -603,8 +750,15 @@ fn update_status_text(
             ((progress.0 * total as f32).round() as usize).min(total),
             total
         ),
-        LoadPhase::Ready => "ready".to_string(),
-        LoadPhase::Failed => "failed — returning to song select".to_string(),
+        LoadPhase::Ready if diagnostics.warnings.is_empty() => "ready".to_string(),
+        LoadPhase::Ready => format!(
+            "ready — {} media warnings; continuing…",
+            diagnostics.warnings.len()
+        ),
+        LoadPhase::Failed => diagnostics
+            .fatal
+            .clone()
+            .unwrap_or_else(|| "failed — returning to song select".to_string()),
     };
     for mut text in &mut status_query {
         *text = Text::new(status.clone());
@@ -616,11 +770,18 @@ fn advance_when_loaded(
     cancel: Res<CancelRequested>,
     mut requests: MessageWriter<TransitionRequest>,
     mut gate: ResMut<LoadingAdvanceGate>,
+    diagnostics: Res<LoadDiagnostics>,
 ) {
     if gate.0 {
         return;
     }
     if cancel.0 && !matches!(*phase, LoadPhase::Ready | LoadPhase::Failed) {
+        return;
+    }
+    if diagnostics
+        .advance_not_before
+        .is_some_and(|deadline| std::time::Instant::now() < deadline)
+    {
         return;
     }
     match *phase {
@@ -671,6 +832,31 @@ mod tests {
     #[test]
     fn loading_progress_default_is_zero() {
         assert_eq!(LoadingProgress::default().0, 0.0);
+    }
+
+    #[test]
+    fn load_policy_rejects_empty_chart_and_accepts_playable_drums() {
+        assert!(load_failure_for(&Chart::default()).is_some());
+        let playable = Chart {
+            chips: vec![dtx_core::Chip::with_wav(
+                0,
+                dtx_core::EChannel::Snare,
+                0.0,
+                1,
+            )],
+            ..default()
+        };
+        assert_eq!(load_failure_for(&playable), None);
+    }
+
+    #[test]
+    fn load_policy_uses_readable_failure_and_warning_holds() {
+        assert_eq!(failure_hold_seconds(), 2.5);
+        assert_eq!(
+            warning_hold_seconds(&[LoadProblem::parser_warning(1, "x")]),
+            0.75
+        );
+        assert_eq!(warning_hold_seconds(&[]), 0.0);
     }
 
     #[test]
