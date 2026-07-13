@@ -59,15 +59,24 @@ fn resolve_bpm_ex_chips(chart: &mut Chart) {
     });
 }
 
-/// Decode DTX text bytes. Tries UTF-8 first (covers ASCII-only and modern
-/// exports), falls back to Shift-JIS for legacy DTXManiaNX files.
+/// Decode DTX text bytes. A BOM, if present, picks the encoding outright —
+/// some authoring tools export UTF-16, whose bytes are not valid UTF-8 and
+/// would otherwise be mangled into garbage by the Shift-JIS fallback, yielding
+/// a chart with zero chips. Without a BOM: UTF-8 first (ASCII-only and modern
+/// exports), then Shift-JIS for legacy DTXManiaNX files.
+///
+/// The BOM is stripped rather than decoded. `str::lines` does not treat U+FEFF
+/// as whitespace, so a surviving BOM would glue itself to the first directive
+/// and silently drop it.
 fn decode_dtx_text(bytes: &[u8]) -> String {
-    match std::str::from_utf8(bytes) {
-        Ok(s) => s.to_string(),
-        Err(_) => {
-            let (cow, _, _had_errors) = encoding_rs::SHIFT_JIS.decode(bytes);
-            cow.into_owned()
-        }
+    match bytes {
+        [0xFF, 0xFE, rest @ ..] => encoding_rs::UTF_16LE.decode(rest).0.into_owned(),
+        [0xFE, 0xFF, rest @ ..] => encoding_rs::UTF_16BE.decode(rest).0.into_owned(),
+        [0xEF, 0xBB, 0xBF, rest @ ..] => String::from_utf8_lossy(rest).into_owned(),
+        _ => match std::str::from_utf8(bytes) {
+            Ok(s) => s.to_string(),
+            Err(_) => encoding_rs::SHIFT_JIS.decode(bytes).0.into_owned(),
+        },
     }
 }
 
@@ -451,6 +460,59 @@ fn binary_pairs_reference_defined_wav(data: &str, wav: &crate::assets::WavRegist
 mod tests {
     use super::*;
     use std::io::Cursor;
+
+    /// Real charts ship as UTF-16LE (the `546 - TOGENASHI TOGEARI` set does).
+    /// Their bytes are not valid UTF-8, so before the BOM sniff they fell into
+    /// the Shift-JIS fallback, decoded to mojibake, and produced *zero* chips —
+    /// a chart that loaded silently empty.
+    #[test]
+    fn parses_utf16le_with_bom() {
+        let src = "#TITLE: Test Song\n#WAV01: snare.ogg\n#00112: 0101\n";
+        let mut bytes = vec![0xFF, 0xFE];
+        bytes.extend(src.encode_utf16().flat_map(u16::to_le_bytes));
+
+        let chart = parse(Cursor::new(bytes)).unwrap();
+
+        assert_eq!(chart.metadata.title.as_deref(), Some("Test Song"));
+        assert_eq!(chart.chips.len(), 2);
+    }
+
+    #[test]
+    fn parses_utf16be_with_bom() {
+        let src = "#TITLE: Test Song\n#WAV01: snare.ogg\n#00112: 0101\n";
+        let mut bytes = vec![0xFE, 0xFF];
+        bytes.extend(src.encode_utf16().flat_map(u16::to_be_bytes));
+
+        let chart = parse(Cursor::new(bytes)).unwrap();
+
+        assert_eq!(chart.metadata.title.as_deref(), Some("Test Song"));
+        assert_eq!(chart.chips.len(), 2);
+    }
+
+    /// A UTF-8 BOM decodes cleanly via `from_utf8`, so it used to survive into
+    /// the text as U+FEFF. `str::trim` does not strip it, so `#TITLE` on line 1
+    /// failed its `strip_prefix('#')` and was dropped without a word.
+    #[test]
+    fn utf8_bom_does_not_swallow_the_first_directive() {
+        let mut bytes = vec![0xEF, 0xBB, 0xBF];
+        bytes.extend_from_slice(b"#TITLE: Test Song\n#WAV01: snare.ogg\n");
+
+        let chart = parse(Cursor::new(bytes)).unwrap();
+
+        assert_eq!(chart.metadata.title.as_deref(), Some("Test Song"));
+    }
+
+    #[test]
+    fn bomless_shift_jis_still_decodes() {
+        // "#TITLE: 曲" in Shift-JIS — invalid UTF-8, must hit the fallback.
+        let mut bytes = b"#TITLE: ".to_vec();
+        bytes.extend_from_slice(&[0x8B, 0xC8]);
+        bytes.push(b'\n');
+
+        let chart = parse(Cursor::new(bytes)).unwrap();
+
+        assert_eq!(chart.metadata.title.as_deref(), Some("曲"));
+    }
 
     #[test]
     fn binary_looking_pairs_keep_base36_wav_id() {
