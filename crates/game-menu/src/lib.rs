@@ -3,7 +3,7 @@
 //! One plugin per stage, registered in [`GameMenuPlugin`].
 //!
 //! ADR-0010: Mechanics-only port — UI/skin files stripped. Song selection
-//! logic kept; visual layer (Title, Config tabs, etc.) is osu-style placeholder.
+//! logic kept; visual layer (Title, Config tabs, etc.) follows the product UI.
 
 // Bevy systems take many params and queries use deeply nested generic tuples;
 // both trip these lints across this crate's systems. Bevy-idiomatic

@@ -60,7 +60,6 @@ fn rank_display_all() {
 
 #[test]
 fn rank_equality_and_hash() {
-    assert_eq!(Rank::S, Rank::S);
     assert_ne!(Rank::S, Rank::A);
     let mut set = std::collections::HashSet::new();
     set.insert(Rank::S);

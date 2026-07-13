@@ -92,7 +92,7 @@ fn parse_invalid_chip_header_rejected() {
     // Either it errors or it produces a chart with no chips; both are
     // acceptable for malformed input.
     if let Ok(chart) = result {
-        assert!(chart.chips.is_empty() || chart.chips.len() <= 1);
+        assert!(chart.chips.len() <= 1);
     }
 }
 

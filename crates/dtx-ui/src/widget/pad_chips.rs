@@ -9,6 +9,59 @@
 use crate::theme::Theme;
 use bevy::prelude::*;
 
+use crate::accessibility::FlashDecision;
+
+/// Duration of one pad-hit acknowledgement.
+pub const PAD_FLASH_DURATION_MS: u32 = 120;
+
+/// Render intent derived from one pad's feedback state.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum PadFlashPresentation {
+    /// No active hit acknowledgement.
+    #[default]
+    Idle,
+    /// Full-strength brightness feedback.
+    FullFlash,
+    /// Stable outline used when flashes are reduced.
+    StableOutline,
+}
+
+/// Pure, frame-rate-independent pad feedback reducer.
+#[derive(Component, Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct PadFlashState {
+    remaining_ms: u32,
+    reduced: bool,
+}
+
+impl PadFlashState {
+    /// Start or restart feedback under the active accessibility policy.
+    pub fn trigger(&mut self, decision: FlashDecision) {
+        self.remaining_ms = PAD_FLASH_DURATION_MS;
+        self.reduced = decision == FlashDecision::Reduced;
+    }
+
+    /// Advance feedback by elapsed wall time.
+    pub fn tick(&mut self, elapsed_ms: u32) {
+        self.remaining_ms = self.remaining_ms.saturating_sub(elapsed_ms);
+    }
+
+    /// Milliseconds left in the current acknowledgement.
+    pub const fn remaining_ms(self) -> u32 {
+        self.remaining_ms
+    }
+
+    /// Presentation the renderer should use now.
+    pub const fn presentation(self) -> PadFlashPresentation {
+        if self.remaining_ms == 0 {
+            PadFlashPresentation::Idle
+        } else if self.reduced {
+            PadFlashPresentation::StableOutline
+        } else {
+            PadFlashPresentation::FullFlash
+        }
+    }
+}
+
 /// Marker for one pad chip. `lane_index` 0..=4.
 #[derive(Component)]
 pub struct PadChip {
@@ -40,6 +93,7 @@ pub fn spawn_pad_chips(commands: &mut Commands, parent: Entity, _theme: &Theme) 
                 PadChip {
                     lane_index: i as u8,
                 },
+                PadFlashState::default(),
                 Node {
                     position_type: PositionType::Absolute,
                     left: Val::Px(x),
@@ -69,22 +123,37 @@ pub fn spawn_pad_chips(commands: &mut Commands, parent: Entity, _theme: &Theme) 
     });
 }
 
-/// Pad flash on hit: brighten the BG color for ~100ms.
-pub fn flash_pad_on_hit(
-    commands: Commands,
-    time: Res<Time>,
-    flashes: Query<(Entity, &mut BackgroundColor, &PadChip)>,
-) {
-    // Placeholder: in real impl, listen for PadHit events and tween alpha.
-    // The hit detection is owned by gameplay-drums; this module just provides
-    // the visual primitive. The flash effect is driven from `hud.rs`.
-    let _ = (commands, time, flashes);
-}
-
 #[cfg(test)]
 mod tests {
+    use super::*;
+    use crate::accessibility::FlashDecision;
+
     #[test]
-    fn five_pads() {
-        assert_eq!(5, 5);
+    fn pad_flash_triggers_for_exactly_120_ms() {
+        let mut state = PadFlashState::default();
+
+        state.trigger(FlashDecision::Full);
+        assert_eq!(state.presentation(), PadFlashPresentation::FullFlash);
+        assert_eq!(state.remaining_ms(), 120);
+
+        state.tick(119);
+        assert_eq!(state.presentation(), PadFlashPresentation::FullFlash);
+        assert_eq!(state.remaining_ms(), 1);
+
+        state.tick(1);
+        assert_eq!(state.presentation(), PadFlashPresentation::Idle);
+        assert_eq!(state.remaining_ms(), 0);
+    }
+
+    #[test]
+    fn reduced_flash_uses_stable_outline_for_the_same_decay() {
+        let mut state = PadFlashState::default();
+
+        state.trigger(FlashDecision::Reduced);
+        assert_eq!(state.presentation(), PadFlashPresentation::StableOutline);
+        assert_eq!(state.remaining_ms(), 120);
+
+        state.tick(120);
+        assert_eq!(state.presentation(), PadFlashPresentation::Idle);
     }
 }

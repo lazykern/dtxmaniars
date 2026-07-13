@@ -128,8 +128,43 @@ the vendored tree. Two occurrences are intentional checker evidence: the Cycle
 
 ## Test-quality suspect inventory
 
-Pending Task 7 classification. Every retained match will name the public
-contract it protects; behaviorless assertions will be replaced or removed.
+The exact suspect scan is:
+
+```sh
+rg -n --pcre2 'assert_eq!\(([^,;]+),\s*\1\s*\)|assert!\([^)]*\|\|[^)]*\)|#\[ignore|placeholder' crates app tools --glob '*.rs'
+```
+
+Behaviorless findings and dispositions:
+
+- `crates/dtx-core/tests/comprehensive.rs`: replaced the always-true
+  `wav_cache` disjunction with an observable BGM chip → measure-keyed
+  `"7.wav"` cache mapping.
+- `crates/dtx-core/tests/parser_edge_cases.rs`: simplified the redundant
+  `is_empty() || len() <= 1` assertion to the actual `len() <= 1` contract.
+- `crates/dtx-scoring/tests/comprehensive.rs`: removed self-equality assertions
+  for `JudgmentKind::Perfect` and `Rank::S`; boundary classification remains.
+- `crates/dtx-scoring/tests/edge_cases.rs`: removed `Rank::S == Rank::S`; the
+  same test still protects variant distinction and Hash de-duplication.
+- `crates/dtx-ui/src/widget/pad_chips.rs`: replaced `assert_eq!(5, 5)` and the
+  no-op flash function with a pure `PadFlashState` reducer. Tests protect an
+  exact 120 ms lifetime and reduced-flash `StableOutline` presentation.
+
+Retained matches after repair are behavior-bearing terminology, not tests:
+
+- `crates/dtx-bga/src/lib.rs` describes the colored placeholders that real
+  image layers replaced; it is historical implementation context.
+- `crates/gameplay-drums/src/editor/bindings_panel.rs` names the actual
+  no-device placeholder label shown by the MIDI port row.
+- `crates/dtx-ui/src/widget/album_art.rs` owns the public no-art placeholder
+  state (`placeholder_alpha`, `with_placeholder_alpha`) and tests its crossfade
+  behavior.
+- `crates/game-menu/src/song_select.rs` consumes that album-art placeholder for
+  songs without `#PREIMAGE` media.
+
+There are no ignored Rust tests and no behaviorless assertion remains in the
+repeat scan. `rank_clone_copy` is retained as a compile-surface contract for
+the public `Rank: Copy` API; unlike the removed self-comparison it compares the
+original binding with a value copied through assignment.
 
 ## Final evidence
 

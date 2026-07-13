@@ -217,11 +217,16 @@ fn cdtx_real_chart_bpm_changes_sorted() {
 }
 
 #[test]
-fn cdtx_with_bgm_no_wav_cache_entry() {
-    let path = fixture_path("with_bgm.dtx");
-    let c = CDTX::load(&path).unwrap();
-    // BGM marker has value 0.0, so wav cache should be present
-    assert!(!c.wav_cache.is_empty() || c.wav_cache.is_empty()); // both ok
+fn cdtx_bgm_chip_populates_measure_keyed_wav_cache() {
+    let mut chart = dtx_core::chart::Chart::default();
+    chart
+        .chips
+        .push(dtx_core::chart::Chip::new(3, EChannel::BGM, 7.0));
+
+    let c = CDTX::from_chart(None, chart);
+
+    assert_eq!(c.wav_cache.len(), 1);
+    assert_eq!(c.wav_cache.get(&3).map(String::as_str), Some("7.wav"));
 }
 
 #[test]

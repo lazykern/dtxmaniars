@@ -57,12 +57,6 @@ fn classify_large_positive_is_miss() {
 }
 
 #[test]
-fn judgment_kind_equality() {
-    assert_eq!(JudgmentKind::Perfect, JudgmentKind::Perfect);
-    assert_ne!(JudgmentKind::Perfect, JudgmentKind::Miss);
-}
-
-#[test]
 fn rank_from_perfect_pct_perfect() {
     assert_eq!(Rank::from_perfect_pct(100.0), Rank::S);
     assert_eq!(Rank::from_perfect_pct(99.0), Rank::S);
@@ -70,12 +64,6 @@ fn rank_from_perfect_pct_perfect() {
     assert_eq!(Rank::from_perfect_pct(70.0), Rank::B);
     assert_eq!(Rank::from_perfect_pct(50.0), Rank::C);
     assert_eq!(Rank::from_perfect_pct(0.0), Rank::E);
-}
-
-#[test]
-fn rank_equality_and_ordering() {
-    assert_eq!(Rank::S, Rank::S);
-    assert_ne!(Rank::S, Rank::E);
 }
 
 #[test]

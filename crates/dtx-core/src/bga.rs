@@ -105,7 +105,7 @@ impl BgaLayer {
 /// One BGA event in the chart timeline.
 ///
 /// `bmp_index` is the BMP/AVI number referenced by the chip's value field.
-/// For M7 we use this to render a placeholder overlay keyed to the layer.
+/// Used by `dtx-bga` to route rendered image state to the authored layer.
 /// M7.1 will resolve to actual file paths via `#BMPxx:` / `#AVIxx:` directives.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct BgaEvent {
