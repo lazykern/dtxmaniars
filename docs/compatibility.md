@@ -1,5 +1,17 @@
 # Compatibility
 
+Purpose: the maintained executable support contract for discovered chart
+formats, media, and recovery behavior.
+
+Audience: players diagnosing a chart and contributors changing parsers,
+loading, audio, visuals, or import.
+
+Status: Maintained and backed by the executable tests listed below.
+
+Neighboring guides: [player guide](player-guide.md),
+[data and persistence](data-and-persistence.md), and
+[contributing](contributing.md).
+
 This page describes what the drums player actually discovers, parses, loads,
 and plays. A filename extension by itself is not a support guarantee.
 
@@ -7,10 +19,10 @@ and plays. A filename extension by itself is not a support guarantee.
 
 - **Supported** — the tested drums contract is preserved through discovery,
   parsing, loading, gameplay, seeking/restart, and applicable rendering.
-- **Degraded (warning)** — the drum timeline remains playable, but optional
+- **Degraded with Warning** — the drum timeline remains playable, but optional
   audio or visual media is missing, unsupported, or substituted. Song Loading
   shows the problem before play.
-- **Rejected (recovery required)** — faithful drums play is not possible. Song
+- **Rejected with Recovery** — faithful drums play is not possible. Song
   Loading returns to selection after showing the reason and recovery action.
 
 ## Chart formats
@@ -20,7 +32,7 @@ and plays. A filename extension by itself is not a support guarantee.
 | DTX (`.dtx`, any extension case) | Supported | Drums, timing, supported system channels, registered media, and supported BGA operations use the contract below. |
 | GDA (`.gda`, any extension case) | Supported | Dedicated GDA channel aliases normalize to the same drums/timing model as equivalent DTX. Unknown aliases produce line diagnostics. |
 | G2D (`.g2d`, any extension case) | Supported | Uses the same dedicated legacy alias normalization and executable equivalence contract as GDA. |
-| BMS / BME | Rejected | Keyboard-oriented BMS/BME gameplay is not implemented. Convert the chart to DTX, GDA, or G2D. |
+| BMS / BME | Rejected with Recovery | Keyboard-oriented BMS/BME gameplay is not implemented. Convert the chart to DTX, GDA, or G2D. |
 | Other extensions | Not discovered | Rename only when the file really contains a supported format; otherwise convert it. |
 
 Supported text encodings are UTF-8, Shift-JIS, UTF-16LE with BOM, and UTF-16BE
@@ -60,10 +72,10 @@ static end state and does not start movies.
 | Media | State | Behavior |
 |---|---|---|
 | OGG, WAV, MP3 chart audio | Supported | Extensions and chart-relative filenames are matched case-insensitively. Decoder failures are diagnosed during Song Loading. |
-| XA with same-stem OGG/WAV/MP3 | Degraded (warning) | XA is not decoded. The player substitutes, in order, same-stem OGG, then WAV, then MP3, with case-insensitive matching. |
-| XA required by BGM, no fallback | Rejected | Provide a same-directory, same-stem OGG, WAV, or MP3 file. The game and archive importer never run an XA converter. |
-| XA used only by optional SE, no fallback | Degraded (warning) | The chart remains playable without that optional sound; provide a supported same-stem file to restore it. |
-| Missing optional audio/image/movie | Degraded (warning) | The drum timeline remains playable and the missing path is reported. |
+| XA with same-stem OGG/WAV/MP3 | Degraded with Warning | XA is not decoded. The player substitutes, in order, same-stem OGG, then WAV, then MP3, with case-insensitive matching. |
+| XA required by BGM, no fallback | Rejected with Recovery | Provide a same-directory, same-stem OGG, WAV, or MP3 file. The game and archive importer never run an XA converter. |
+| XA used only by optional SE, no fallback | Degraded with Warning | The chart remains playable without that optional sound; provide a supported same-stem file to restore it. |
+| Missing optional audio/image/movie | Degraded with Warning | The drum timeline remains playable and the missing path is reported. |
 | Registered BGA images | Supported when the image decoder accepts the file | Image replacement, layers, swaps, pan geometry, seek reconstruction, alpha, and accessibility motion settings are applied. |
 | Registered AVI/movie media | Supported when FFmpeg accepts the file | Decode runs off the main thread and follows chart time. Decoder errors are logged and gameplay continues without the movie. |
 

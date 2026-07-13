@@ -30,4 +30,16 @@ Avoid interfaces that expose every capability at once, rely on unexplained contr
 
 ## Accessibility & Inclusion
 
-No additional accessibility requirements are committed for the current phase. The architecture should avoid preventing later accessibility work.
+Player-facing text supports Standard, Large, and Extra Large scales without
+changing gameplay geometry. Reduce Motion, Reduce Flashes, and Background
+Motion are independent controls: nonessential motion can be shortened or
+suppressed, authored background motion and movies can be disabled, and bright
+pad feedback can use a lower-contrast outlined treatment.
+
+Critical focus, selection, assisted-run status, and save qualification must not
+depend on color alone. Controls and state labels are designed for distance
+readability at an electronic drum kit. Practice, No Fail, and modified-speed
+runs remain usable but are identified transparently and never presented or
+saved as ordinary qualifying records. These commitments describe implemented
+game behavior; they do not claim unverified platform screen-reader, remapping,
+or hardware-driver support.
