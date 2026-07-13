@@ -393,6 +393,14 @@ fn spawn_stats_panel(
                 ));
             }
             SaveStatus::Practice => {}
+            SaveStatus::ModifiedSpeed { rate } => {
+                right.spawn(reveal_text(
+                    format!("{rate:.2}× play speed — result not saved as a normal record"),
+                    Theme::font(14.0),
+                    t.text_secondary,
+                    SLOT_SAVE,
+                ));
+            }
         }
     });
 }
@@ -667,6 +675,21 @@ mod tests {
         // Column layout, not space padding: count is its own text node.
         assert!(texts.iter().any(|s| s == "412"));
         assert!(texts.iter().any(|s| s == "82.4%"));
+    }
+
+    #[test]
+    fn spawn_result_explains_modified_speed_is_not_saved() {
+        use bevy::ecs::system::RunSystemOnce;
+        let mut world = spawn_world();
+        world.insert_resource(SaveStatus::ModifiedSpeed { rate: 0.75 });
+        world
+            .run_system_once(spawn_result)
+            .expect("spawn_result runs");
+
+        let texts = all_texts(&mut world);
+        assert!(texts
+            .iter()
+            .any(|s| { s == "0.75× play speed — result not saved as a normal record" }));
     }
 
     #[test]

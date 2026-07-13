@@ -20,12 +20,15 @@ use gameplay_drums::stage_end::LastStageOutcome;
 pub struct ResultEntity;
 
 /// Outcome of the on-entry persistence attempt, shown as the save-status line.
-#[derive(Resource, Default, Clone, Copy, PartialEq, Eq, Debug)]
+#[derive(Resource, Default, Clone, Copy, PartialEq, Debug)]
 pub(crate) enum SaveStatus {
     #[default]
     Practice, // nothing to save
     Saved,
     Failed,
+    ModifiedSpeed {
+        rate: f64,
+    },
 }
 
 pub struct GameResultsPlugin;
@@ -124,7 +127,7 @@ fn native_score_entry(
 }
 
 fn save_result(
-    practice: Option<Res<gameplay_drums::practice::PracticeSession>>,
+    run: Res<game_shell::CompletedRunContext>,
     score: Res<Score>,
     combo: Res<Combo>,
     counts: Res<JudgmentCounts>,
@@ -134,10 +137,14 @@ fn save_result(
     mut store: ResMut<ScoreStoreResource>,
     mut status: ResMut<SaveStatus>,
 ) {
-    // Practice runs are never persisted (no ScoreStore entry, no
-    // score.ini update).
-    if practice.is_some() {
+    if run.kind == game_shell::RunKind::Practice {
         *status = SaveStatus::Practice;
+        return;
+    }
+    if (run.playback_rate - 1.0).abs() >= 1e-9 {
+        *status = SaveStatus::ModifiedSpeed {
+            rate: run.playback_rate,
+        };
         return;
     }
     let title = chart
@@ -231,6 +238,32 @@ fn save_result(
 mod tests {
     use super::*;
 
+    fn result_world(source_path: Option<std::path::PathBuf>, rate: f64) -> World {
+        let mut world = World::new();
+        world.init_resource::<SaveStatus>();
+        world.insert_resource(game_shell::CompletedRunContext::normal(rate));
+        world.insert_resource(Score(1234));
+        world.insert_resource(Combo { current: 0, max: 9 });
+        world.insert_resource(JudgmentCounts {
+            perfect: 1,
+            great: 0,
+            good: 0,
+            ok: 0,
+            miss: 0,
+        });
+        world.insert_resource(ActiveChart {
+            chart: dtx_core::Chart::default(),
+            source_path,
+        });
+        world.insert_resource(DrumScoring {
+            total_notes: 1,
+            ..Default::default()
+        });
+        world.insert_resource(LastStageOutcome { cleared: true });
+        world.insert_resource(ScoreStoreResource::default());
+        world
+    }
+
     #[test]
     fn result_rank_uses_bocud_xg_formula() {
         let counts = JudgmentCounts {
@@ -283,29 +316,9 @@ mod tests {
     fn save_result_persists_entry_and_sets_saved() {
         use bevy::ecs::system::RunSystemOnce;
 
-        let mut world = World::new();
-        world.init_resource::<SaveStatus>();
-        world.insert_resource(Score(1234));
-        world.insert_resource(Combo { current: 0, max: 9 });
-        world.insert_resource(JudgmentCounts {
-            perfect: 1,
-            great: 0,
-            good: 0,
-            ok: 0,
-            miss: 0,
-        });
-        // No source_path: skips raw hashing and the score.ini write.
-        world.insert_resource(ActiveChart {
-            chart: dtx_core::Chart::default(),
-            source_path: None,
-        });
-        world.insert_resource(DrumScoring {
-            total_notes: 1,
-            ..Default::default()
-        });
-        world.insert_resource(LastStageOutcome { cleared: true });
-        // Path-less store: save() succeeds without touching the filesystem.
-        world.insert_resource(ScoreStoreResource::default());
+        // No source_path: skips raw hashing and the score.ini write. The
+        // path-less store succeeds without touching the filesystem.
+        let mut world = result_world(None, 1.0);
 
         world
             .run_system_once(save_result)
@@ -313,5 +326,36 @@ mod tests {
 
         assert_eq!(world.resource::<ScoreStoreResource>().entries.len(), 1);
         assert_eq!(*world.resource::<SaveStatus>(), SaveStatus::Saved);
+    }
+
+    #[test]
+    fn save_result_skips_modified_speed_native_and_score_ini_writes() {
+        use bevy::ecs::system::RunSystemOnce;
+
+        let dir = std::env::temp_dir().join(format!(
+            "dtxmaniars-modified-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .expect("clock after epoch")
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&dir).expect("create fixture directory");
+        let chart_path = dir.join("chart.dtx");
+        std::fs::write(&chart_path, b"#TITLE: Modified\n#00113: 01\n")
+            .expect("write chart fixture");
+        let mut world = result_world(Some(chart_path.clone()), 0.75);
+
+        world
+            .run_system_once(save_result)
+            .expect("save_result runs");
+
+        assert!(world.resource::<ScoreStoreResource>().entries.is_empty());
+        assert_eq!(
+            *world.resource::<SaveStatus>(),
+            SaveStatus::ModifiedSpeed { rate: 0.75 }
+        );
+        assert!(!dtx_scoring::score_ini::score_ini_path(&chart_path).exists());
+        std::fs::remove_dir_all(dir).expect("remove fixture directory");
     }
 }
