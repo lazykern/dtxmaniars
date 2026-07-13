@@ -231,7 +231,7 @@ Practice loops; composable library discovery; and non-color, scalable,
 reduced-effect accessibility behavior. The maintained guides and ADR map pass
 the executable documentation checker.
 
-`git diff --name-only main...HEAD` contained 194 program files at final
+`git diff --name-only main...HEAD` contained 195 program files at final
 closeout. A mechanical
 path audit found zero CI/CD paths and zero `references/` paths. The main
 checkout also reported a clean `git status --short references`. No CI/CD or
