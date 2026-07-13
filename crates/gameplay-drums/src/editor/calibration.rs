@@ -35,6 +35,80 @@ pub fn suggested_offset(median_err: i32, clamp: i32) -> i32 {
     median_err.clamp(-clamp, clamp)
 }
 
+/// Number of stable taps required before calibration may change the setting.
+pub const TARGET_ACCEPTED_SAMPLES: usize = 12;
+/// Samples beyond this distance from the first median are accidental taps.
+pub const OUTLIER_DISTANCE_MS: i32 = 100;
+/// Largest accepted median absolute deviation that is safe to apply.
+pub const MAX_MAD_MS: i32 = 20;
+/// One 60 Hz display frame: larger click-scheduling delay weakens confidence.
+pub const MAX_SCHEDULER_DELAY_MS: i32 = 34;
+
+/// Whether calibration evidence is sufficiently stable to replace manual input
+/// timing adjustment.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Confidence {
+    High,
+    Low,
+}
+
+/// Robust summary of raw calibration tap errors.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CalibrationReport {
+    pub proposed_offset_ms: i32,
+    pub accepted_samples: usize,
+    pub rejected_samples: usize,
+    pub spread_mad_ms: i32,
+    pub max_scheduler_delay_ms: i32,
+    pub confidence: Confidence,
+}
+
+impl CalibrationReport {
+    /// Reject remote samples around the raw median, then calculate the proposal
+    /// and MAD from the remaining evidence.
+    pub fn from_errors(errors: &[i32], scheduler_delays: &[i32]) -> Self {
+        let center = median(errors);
+        let accepted: Vec<_> = errors
+            .iter()
+            .copied()
+            .filter(|error| {
+                (i64::from(*error) - i64::from(center)).abs()
+                    <= i64::from(OUTLIER_DISTANCE_MS)
+            })
+            .collect();
+        let proposed_offset_ms = median(&accepted);
+        let deviations: Vec<_> = accepted
+            .iter()
+            .map(|value| (i64::from(*value) - i64::from(proposed_offset_ms)).abs() as i32)
+            .collect();
+        let spread_mad_ms = median(&deviations);
+        let max_scheduler_delay_ms = scheduler_delays.iter().copied().max().unwrap_or(0).max(0);
+        let rejected_samples = errors.len().saturating_sub(accepted.len());
+        let confidence = if accepted.len() >= TARGET_ACCEPTED_SAMPLES
+            && rejected_samples.saturating_mul(4) <= errors.len()
+            && spread_mad_ms <= MAX_MAD_MS
+            && max_scheduler_delay_ms <= MAX_SCHEDULER_DELAY_MS
+        {
+            Confidence::High
+        } else {
+            Confidence::Low
+        };
+
+        Self {
+            proposed_offset_ms,
+            accepted_samples: accepted.len(),
+            rejected_samples,
+            spread_mad_ms,
+            max_scheduler_delay_ms,
+            confidence,
+        }
+    }
+
+    pub fn can_apply(&self) -> bool {
+        self.confidence == Confidence::High
+    }
+}
+
 /// Tap-test lifecycle. Idle by default.
 #[derive(Resource, Default)]
 pub enum CalibrationState {
@@ -250,5 +324,19 @@ mod tests {
         // because the judge subtracts input_offset from the hit time.
         assert_eq!(suggested_offset(40, 300), 40);
         assert_eq!(suggested_offset(-500, 300), -300);
+    }
+
+    #[test]
+    fn report_uses_median_and_rejects_distant_outlier() {
+        let report = CalibrationReport::from_errors(&[39, 40, 41, 40, 400], &[2, 3]);
+        assert_eq!(report.proposed_offset_ms, 40);
+        assert_eq!(report.accepted_samples, 4);
+        assert_eq!(report.rejected_samples, 1);
+    }
+
+    #[test]
+    fn unstable_or_sparse_evidence_cannot_apply() {
+        assert!(!CalibrationReport::from_errors(&[10; 11], &[0]).can_apply());
+        assert!(!CalibrationReport::from_errors(&[10; 12], &[35]).can_apply());
     }
 }
