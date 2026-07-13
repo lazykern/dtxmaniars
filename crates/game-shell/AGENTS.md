@@ -1,7 +1,7 @@
 # crates/game-shell
 
-Game-layer crate. Owns the AppState machine and the DTXManiaNX fade transition
-(per ADR-0010 port-first rule, matched verbatim from `references/DTXmaniaNX/`).
+Game-layer crate. Owns the AppState machine and the product screen-transition
+director.
 
 ## Reference files (READ BEFORE IMPLEMENTING per ADR-0008)
 
@@ -30,33 +30,29 @@ AppState::Result         ← CStageResult
 AppState::End            ← CStageEnd
 ```
 
-## Fade transition (verbatim from StageManager.cs:29)
+## Fade transition
 
-- **Duration**: 1500 ms (constant)
-- **Curve**: linear (NOT OutQuint or any easing) — `_fadeAlpha = clamp(1 - elapsed/1500, 0, 1)`
-- **Direction**: fade-out only (the new stage's first frame is what we're
-  revealing; we fade the OLD visual to transparent)
-- **Spike handling**: fade starts AFTER new stage's first frame completes,
-  so the new stage's initialization spike doesn't show through. In bevy
-  this is naturally handled by the black overlay being at full alpha on
-  the first frame.
-- **Snapshot approximation**: M3 uses a fullscreen black overlay instead
-  of capturing the actual framebuffer. From the user's perspective the
-  result is identical (cover spike, fade to reveal). True framebuffer
-  snapshot is M3.1 (ADR-0011).
+- **Reference comparison:** DTXManiaNX uses a 1500 ms linear snapshot
+  transition.
+- **Product decision:** DTXManiaRS uses a 300 ms OutQuint black overlay through
+  `TransitionRequest` and `dtx_ui::ScreenFade`.
+- **Boundary:** Stage mechanics remain reference-first; transition UX follows
+  [ADR-0014](../../docs/decisions/0014-outquint-screen-transitions.md).
+- Reduced Motion may shorten the product transition through
+  `AccessibilityPolicy`; it does not switch back to the NX transition.
 
 ## Rules
 
 - One `Plugin` per stage file, aggregated in `lib::plugin`.
 - Stages register their `OnEnter` / `OnExit` systems via the per-stage plugin.
-- State transitions go through `NextState<AppState>` — never mutate
-  `Res<State<AppState>>` directly.
+- Stage systems emit `TransitionRequest`; the transition director alone writes
+  `NextState<AppState>` after fade-out.
 - Per-stage UI entities tagged with a marker component (e.g.
   `TitleEntity`, `LoadingEntity`) so `OnExit` can despawn them via a
   generic `despawn_stage::<T>` system.
 
 ## Layer
 
-Game. May depend on `dtx-ui` (Engine) and any other Engine/Game crate.
+Game. May depend on `dtx-ui` (Game) and any Engine/Game crate.
 Must NOT depend on `dtx-core` directly — game crates use `dtx-scoring`/`dtx-timing`
 through Engine crates.
