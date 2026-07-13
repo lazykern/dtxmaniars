@@ -88,15 +88,45 @@ fn enter_practice_session(
     wait_state.enabled_from_ms = None;
     chord_hits.0.clear();
     deferred.0.clear();
-    if intent.0 {
-        commands.insert_resource(PracticeSession::default());
+    if let Some(session) = session_from_intent(&intent) {
+        commands.insert_resource(session);
     } else {
         commands.remove_resource::<PracticeSession>();
     }
 }
 
-fn remove_practice_session(mut commands: Commands) {
+fn session_from_intent(intent: &PracticeIntent) -> Option<PracticeSession> {
+    let mut session = match *intent {
+        PracticeIntent::None => return None,
+        PracticeIntent::Manual => PracticeSession::default(),
+        PracticeIntent::Recommended(recommendation) => {
+            if !recommendation.has_valid_loop() {
+                return Some(PracticeSession::default());
+            }
+            let mut session = PracticeSession::default();
+            session.transport.loop_region = Some(session::LoopRegion {
+                start_ms: recommendation.loop_start_ms,
+                end_ms: recommendation.loop_end_ms,
+            });
+            session.transport.preroll = match recommendation.pre_roll {
+                game_shell::PracticePreRoll::OneBar => session::PrerollSetting::OneBar,
+            };
+            session.transport.user_tempo = recommendation
+                .initial_tempo
+                .clamp(session::RATE_MIN, session::RATE_MAX);
+            session
+        }
+    };
+    session.transport.user_tempo = session
+        .transport
+        .user_tempo
+        .clamp(session::RATE_MIN, session::RATE_MAX);
+    Some(session)
+}
+
+fn remove_practice_session(mut commands: Commands, mut intent: ResMut<PracticeIntent>) {
     commands.remove_resource::<PracticeSession>();
+    *intent = PracticeIntent::None;
 }
 
 /// Gauge is meaningless in practice: pin it full so it can never fail
@@ -114,7 +144,7 @@ mod tests {
     #[test]
     fn entering_normal_play_clears_wait_halt() {
         let mut app = App::new();
-        app.insert_resource(PracticeIntent(false));
+        app.insert_resource(PracticeIntent::None);
         app.insert_resource(WaitState {
             phase: wait::WaitPhase::Halted(WaitSet {
                 target_ms: 1_000,
@@ -132,6 +162,24 @@ mod tests {
         assert!(!state.halted());
         assert!(state.waited_chips.is_empty());
         assert!(!app.world().contains_resource::<PracticeSession>());
+    }
+
+    #[test]
+    fn recommended_intent_seeds_the_existing_transport() {
+        let session = session_from_intent(&PracticeIntent::Recommended(
+            game_shell::PracticeRecommendation::weak_section(1_000, 5_000, Some(3)),
+        ))
+        .expect("recommendation requests practice");
+
+        assert_eq!(
+            session.transport.loop_region,
+            Some(session::LoopRegion {
+                start_ms: 1_000,
+                end_ms: 5_000,
+            })
+        );
+        assert_eq!(session.transport.preroll, session::PrerollSetting::OneBar);
+        assert_eq!(session.transport.user_tempo, 1.0);
     }
 
     /// Registers the PRODUCTION chain (`add_action_systems`, called by

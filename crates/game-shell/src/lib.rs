@@ -15,7 +15,8 @@ pub use nav::{MidiConnected, NavAction, NavSource, NavVerb};
 pub use score_store::ScoreStoreResource;
 pub use states::{
     AppState, CompletedRunContext, CustomizeTab, EGameMode, EditorSession, PauseState,
-    PendingCustomizeTab, PracticeIntent, RunKind, SelectedDifficulty, StageEntity, despawn_stage,
+    PendingCustomizeTab, PracticeIntent, PracticePreRoll, PracticeReason, PracticeRecommendation,
+    RunKind, SelectedDifficulty, StageEntity, despawn_stage,
 };
 pub use transition::{TransitionRequest, request_transition};
 

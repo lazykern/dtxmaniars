@@ -50,7 +50,7 @@ fn configure_playback_rate(
     let cfg = dtx_config::load(&dtx_config::default_path());
     let next = initial_playback_rate(
         f64::from(dtx_config::play_speed_multiplier(cfg.gameplay.play_speed)),
-        intent.0,
+        intent.is_requested(),
     );
     apply_playback_rate(next, &mut rate, &audio, &bgm, &mut instances);
 }

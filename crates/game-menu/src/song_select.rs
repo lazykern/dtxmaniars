@@ -1815,7 +1815,11 @@ fn song_select_nav_consumer(
             && let Some(chart_idx) = selection.chart_index(&selection_state)
             && let Some(song) = db.songs.get(chart_idx)
         {
-            practice_intent.0 = practice;
+            *practice_intent = if practice {
+                PracticeIntent::Manual
+            } else {
+                PracticeIntent::None
+            };
             info!(
                 "SongSelect: selected {} ({}){}",
                 song.title,

@@ -93,12 +93,89 @@ pub fn despawn_stage<T: Component>(mut commands: Commands, query: Query<Entity, 
     }
 }
 
-/// Set by song select when the player chooses Practice instead of a
-/// normal play; read on Performance enter to insert the practice
-/// session. Lives in game-shell so game-menu doesn't need gameplay
-/// internals to request practice.
-#[derive(Resource, Debug, Clone, Copy, Default)]
-pub struct PracticeIntent(pub bool);
+/// Why a practice session was requested. Kept primitive so game-shell does
+/// not depend on gameplay-drums.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PracticeReason {
+    /// The player chose the ordinary practice action.
+    Manual,
+    /// Results identified a weak chart section, optionally tied to a lane.
+    WeakSection {
+        lane: Option<u8>,
+        section_start_ms: i64,
+    },
+}
+
+impl PracticeReason {
+    pub fn lane(self) -> Option<u8> {
+        match self {
+            Self::Manual => None,
+            Self::WeakSection { lane, .. } => lane,
+        }
+    }
+}
+
+/// Pre-roll expressed without depending on the gameplay practice transport.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum PracticePreRoll {
+    #[default]
+    OneBar,
+}
+
+/// A preconfigured practice transport request originating outside gameplay.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct PracticeRecommendation {
+    pub loop_start_ms: i64,
+    pub loop_end_ms: i64,
+    pub pre_roll: PracticePreRoll,
+    pub initial_tempo: f32,
+    pub reason: PracticeReason,
+}
+
+impl PracticeRecommendation {
+    pub fn weak_section(loop_start_ms: i64, loop_end_ms: i64, lane: Option<u8>) -> Self {
+        Self {
+            loop_start_ms,
+            loop_end_ms,
+            pre_roll: PracticePreRoll::OneBar,
+            initial_tempo: 1.0,
+            reason: PracticeReason::WeakSection {
+                lane,
+                section_start_ms: loop_start_ms,
+            },
+        }
+    }
+
+    pub fn has_valid_loop(self) -> bool {
+        self.loop_start_ms >= 0 && self.loop_end_ms > self.loop_start_ms
+    }
+}
+
+/// Set by song select or Results and read on Performance enter to insert a
+/// practice session. Lives in game-shell so callers need no gameplay internals.
+#[derive(Resource, Debug, Clone, Copy, Default, PartialEq)]
+pub enum PracticeIntent {
+    /// Normal play.
+    #[default]
+    None,
+    /// The player explicitly entered practice with default transport settings.
+    Manual,
+    /// Results supplied an immediately usable practice transport.
+    Recommended(PracticeRecommendation),
+}
+
+impl PracticeIntent {
+    pub fn is_requested(self) -> bool {
+        !matches!(self, Self::None)
+    }
+
+    pub fn recommendation(self) -> Option<PracticeRecommendation> {
+        match self {
+            Self::Recommended(recommendation) => Some(recommendation),
+            Self::None | Self::Manual => None,
+        }
+    }
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum RunKind {
@@ -277,5 +354,20 @@ mod tests {
     #[test]
     fn selected_difficulty_defaults_to_basic() {
         assert_eq!(SelectedDifficulty::default().0, 0);
+    }
+
+    #[test]
+    fn recommended_practice_intent_carries_its_loop() {
+        let intent = PracticeIntent::Recommended(PracticeRecommendation::weak_section(
+            1_000,
+            5_000,
+            Some(3),
+        ));
+
+        assert!(intent.is_requested());
+        let recommendation = intent.recommendation().expect("recommendation retained");
+        assert_eq!(recommendation.loop_start_ms, 1_000);
+        assert_eq!(recommendation.loop_end_ms, 5_000);
+        assert_eq!(recommendation.reason.lane(), Some(3));
     }
 }
