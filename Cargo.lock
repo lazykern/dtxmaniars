@@ -2849,6 +2849,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "docs-check"
+version = "0.0.0"
+dependencies = [
+ "regex",
+ "walkdir",
+]
+
+[[package]]
 name = "document-features"
 version = "0.2.12"
 source = "registry+https://github.com/rust-lang/crates.io-index"
