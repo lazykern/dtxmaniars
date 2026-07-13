@@ -1,11 +1,11 @@
-//! `CConstants` — port of `references/DTXmaniaNX/DTXMania/Core/CConstants.cs` (780 LoC).
+//! `CConstants` — port of `references/DTXmaniaNX/DTXMania/Core/CConstants.cs` (772 LoC).
 //!
 //! Strict-port-first (ADR-0010). 1:1 file mapping.
 //!
 //! Central enums for game configuration: lane type, dark mode, damage
 //! level, random mode, instrument part, pad, lane, judgement, etc.
 //!
-//! Reference: `references/DTXmaniaNX/DTXMania/Core/CConstants.cs:1-780`
+//! Reference: `references/DTXmaniaNX/DTXMania/Core/CConstants.cs:1-772`
 
 #![allow(non_camel_case_types)] // Verbatim port of C# PascalCase enum variants.
 

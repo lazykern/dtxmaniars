@@ -22,6 +22,7 @@ pub enum FailureReason {
     MissingCanonicalDocument,
     CanonicalDocumentNotLinked,
     FalseMissingCanonicalClaim,
+    InvalidReferenceLineRange,
 }
 
 impl fmt::Display for FailureReason {
@@ -33,6 +34,7 @@ impl fmt::Display for FailureReason {
             Self::MissingCanonicalDocument => "missing canonical document",
             Self::CanonicalDocumentNotLinked => "canonical document not linked",
             Self::FalseMissingCanonicalClaim => "false missing-canonical claim",
+            Self::InvalidReferenceLineRange => "invalid reference line range",
         };
         formatter.write_str(name)
     }
@@ -147,20 +149,24 @@ fn reference_repository_root(root: &Path) -> &Path {
         .unwrap_or(root)
 }
 
-fn trim_reference_location(token: &str) -> &str {
-    let token = token.trim_end_matches(['.', ',', ';', ':', ')', ']']);
+fn parse_reference_location(token: &str) -> (&str, Option<(usize, usize)>) {
+    let token = token.trim_end_matches(['.', ',', ';', ')', ']']);
     if let Some((path, suffix)) = token.rsplit_once(':') {
         if Path::new(path).extension().is_some() && !suffix.contains('/') {
-            return path;
-        }
-        let location = suffix.strip_prefix('L').unwrap_or(suffix);
-        if location.split('-').all(|part| {
-            !part.is_empty() && part.chars().all(|character| character.is_ascii_digit())
-        }) {
-            return path;
+            let location = suffix.strip_prefix('L').unwrap_or(suffix);
+            let mut bounds = location.split('-');
+            if let (Some(start), end, None) = (bounds.next(), bounds.next(), bounds.next()) {
+                if let Ok(start) = start.parse::<usize>() {
+                    let end = end
+                        .and_then(|value| value.parse::<usize>().ok())
+                        .unwrap_or(start);
+                    return (path, Some((start, end)));
+                }
+            }
+            return (path, None);
         }
     }
-    token
+    (token, None)
 }
 
 fn check_file(root: &Path, file: &Path, failures: &mut Vec<CheckFailure>) -> io::Result<()> {
@@ -209,7 +215,7 @@ fn check_file(root: &Path, file: &Path, failures: &mut Vec<CheckFailure>) -> io:
 
         if !line.contains(&obsolete) {
             for found in reference_path.find_iter(line) {
-                let token = trim_reference_location(found.as_str());
+                let (token, line_range) = parse_reference_location(found.as_str());
                 if token
                     .chars()
                     .any(|character| matches!(character, '[' | ']' | '*'))
@@ -237,15 +243,27 @@ fn check_file(root: &Path, file: &Path, failures: &mut Vec<CheckFailure>) -> io:
                     .next()
                     .unwrap_or(token)
                     .trim_end_matches('/');
-                if !check_token.is_empty()
-                    && !reference_repository_root(root).join(check_token).exists()
-                {
+                let reference_file = reference_repository_root(root).join(check_token);
+                if !check_token.is_empty() && !reference_file.exists() {
                     failures.push(CheckFailure {
                         file: relative.clone(),
                         line: line_number,
                         target: token.to_owned(),
                         reason: FailureReason::MissingLocalTarget,
                     });
+                } else if let Some((start, end)) = line_range {
+                    let line_count = fs::read_to_string(&reference_file)?.lines().count();
+                    if start == 0 || start > end || end > line_count {
+                        failures.push(CheckFailure {
+                            file: relative.clone(),
+                            line: line_number,
+                            target: found
+                                .as_str()
+                                .trim_end_matches(['.', ',', ';', ')', ']'])
+                                .to_owned(),
+                            reason: FailureReason::InvalidReferenceLineRange,
+                        });
+                    }
                 }
             }
         }
@@ -383,5 +401,15 @@ mod tests {
         assert!(false_claim
             .iter()
             .any(|failure| failure.reason == FailureReason::FalseMissingCanonicalClaim));
+    }
+
+    #[test]
+    fn reference_ranges_must_be_ordered_and_within_file() {
+        let failures =
+            check_repository(&fixture("invalid-range"), CheckOptions::fixture()).unwrap();
+        assert_eq!(failures.len(), 2);
+        assert!(failures
+            .iter()
+            .all(|failure| failure.reason == FailureReason::InvalidReferenceLineRange));
     }
 }

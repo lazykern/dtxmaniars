@@ -47,13 +47,7 @@ fn add_action_systems(app: &mut App) {
 
 pub(super) fn plugin(app: &mut App) {
     add_action_systems(app);
-    app.init_resource::<toast::ToastQueue>().add_systems(
-        Update,
-        toast::toast_ui
-            .run_if(in_state(AppState::Performance))
-            .run_if(in_state(game_shell::PauseState::Running))
-            .run_if(resource_exists::<PracticeSession>),
-    );
+    app.init_resource::<toast::ToastQueue>();
     app.add_systems(
         OnEnter(AppState::Performance),
         enter_practice_session.before(crate::orchestrator::DrumsEnterSet),

@@ -440,15 +440,15 @@ fn apply_visual_geometry(
 }
 
 fn clamped_source_rect(source: chart::RectF32, media_size: Option<Vec2>) -> bevy::math::Rect {
-    let min = Vec2::new(source.x.max(0.0), source.y.max(0.0));
-    let mut max = Vec2::new(
-        min.x + source.width.max(0.0),
-        min.y + source.height.max(0.0),
-    );
+    let authored_min = Vec2::new(source.x, source.y);
+    let authored_max = authored_min + Vec2::new(source.width.max(0.0), source.height.max(0.0));
+    let mut min = authored_min.max(Vec2::ZERO);
+    let mut max = authored_max.max(Vec2::ZERO);
     if let Some(media_size) = media_size {
+        min = min.min(media_size);
         max = max.min(media_size);
     }
-    bevy::math::Rect::from_corners(min.min(max), max)
+    bevy::math::Rect::from_corners(min.min(max), max.max(min))
 }
 
 fn apply_destination(node: &mut Node, destination: chart::RectF32) {
@@ -892,5 +892,33 @@ mod tests {
         let (images, movie) = rebuild_state(&events, 350);
         assert_eq!(images.get(&BgaLayer::Layer3), Some(&2));
         assert_eq!(movie, Some((8, 300)));
+    }
+
+    #[test]
+    fn pan_source_rect_is_clamped_to_decoded_media_bounds() {
+        let rect = clamped_source_rect(
+            chart::RectF32 {
+                x: 90.0,
+                y: 70.0,
+                width: 80.0,
+                height: 60.0,
+            },
+            Some(Vec2::new(100.0, 80.0)),
+        );
+
+        assert_eq!(rect.min, Vec2::new(90.0, 70.0));
+        assert_eq!(rect.max, Vec2::new(100.0, 80.0));
+
+        let negative = clamped_source_rect(
+            chart::RectF32 {
+                x: -10.0,
+                y: -5.0,
+                width: 20.0,
+                height: 15.0,
+            },
+            Some(Vec2::new(100.0, 80.0)),
+        );
+        assert_eq!(negative.min, Vec2::ZERO);
+        assert_eq!(negative.max, Vec2::new(10.0, 10.0));
     }
 }

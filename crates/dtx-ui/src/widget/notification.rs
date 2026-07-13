@@ -1,6 +1,10 @@
 use std::collections::VecDeque;
 
-use bevy::prelude::Resource;
+use bevy::prelude::{Component, Resource};
+
+/// Marker for the screen-independent notification text entities.
+#[derive(Component, Debug, Clone, Copy)]
+pub struct GlobalNotificationRoot;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum NotificationTone {

@@ -69,7 +69,7 @@ fn capture_empty_hit_templates(
             bgm_shift,
         );
         if target_ms <= now {
-            templates.set(event.lane, *event);
+            templates.set_at(event.lane, *event, target_ms);
         }
     }
 }

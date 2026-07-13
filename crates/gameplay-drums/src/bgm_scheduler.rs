@@ -35,64 +35,6 @@ pub struct BgmRecoveryState {
 const BGM_RECOVERY_COOLDOWN_MS: i64 = 1000;
 const BGM_RECOVERY_MAX_ATTEMPTS: u8 = 3;
 
-pub fn bootstrap_primary_bgm_chip(
-    chart: &ActiveChart,
-    _bpm_changes: &BpmChangeList,
-    primary: &PrimaryBgmChip,
-    played: &mut PlayedBgmChips,
-    audio: &Audio,
-    asset_server: &AssetServer,
-    bgm: &mut dtx_audio::BgmHandle,
-    instances: &mut Assets<AudioInstance>,
-    sound_bank: &dtx_audio::ChartSoundBank,
-    settings: DrumAudioSettings,
-) -> bool {
-    if !settings.bgm_enabled {
-        return false;
-    }
-    if bgm.instance.is_some() {
-        return true;
-    }
-    let Some(idx) = primary.0 else {
-        return false;
-    };
-    if played.0.contains(&idx) {
-        return true;
-    }
-    let source_dir = chart.source_path.as_ref().and_then(|p| p.parent());
-    let Some(path) = chip_wav_path(&chart.chart, idx, source_dir) else {
-        return false;
-    };
-    info!("Performance: bootstrap BGM chip {idx} ({path})");
-    if let Some(sound) = sound_bank.get(chart.chart.chips[idx].wav_slot) {
-        dtx_audio::play_bgm_handle_with_mix(
-            audio,
-            bgm,
-            instances,
-            sound.handle.clone(),
-            &sound.path.to_string_lossy(),
-            sound.volume,
-            sound.pan,
-            settings.bgm_gain(),
-            // Bootstrap is called from OnEnter(Performance) → start_bgm_on_enter;
-            // pass the screen-fade duration so the BGM fades in aligned
-            // with the visual fade-in (matches osu's seamless feel).
-            dtx_ui::SCREEN_TRANSITION_MS as u32,
-        );
-    } else {
-        dtx_audio::play_bgm_with_volume(
-            audio,
-            asset_server,
-            bgm,
-            instances,
-            &path,
-            settings.bgm_gain(),
-            dtx_ui::SCREEN_TRANSITION_MS as u32,
-        );
-    }
-    true
-}
-
 pub(super) fn plugin(app: &mut App) {
     app.init_resource::<PlayedBgmChips>()
         .init_resource::<PrimaryBgmChip>()
@@ -200,7 +142,7 @@ fn schedule_bgm_chips(
         if now < target_ms {
             continue;
         }
-        if !mixer.is_slot_eligible(chip.wav_slot) {
+        if !bgm_chip_should_schedule(&mixer, chip.wav_slot) {
             played.0.insert(idx);
             continue;
         }
@@ -270,6 +212,10 @@ fn schedule_bgm_chips(
             played.0.insert(idx);
         }
     }
+}
+
+fn bgm_chip_should_schedule(mixer: &crate::mixer_events::MixerEligibility, wav_slot: u32) -> bool {
+    mixer.is_slot_eligible(wav_slot)
 }
 
 fn recover_primary_bgm(
@@ -414,5 +360,24 @@ mod tests {
         assert!(!bgm_chip_is_confirmed_played(true, false, true));
         assert!(bgm_chip_is_confirmed_played(true, true, true));
         assert!(bgm_chip_is_confirmed_played(false, false, true));
+    }
+
+    #[test]
+    fn primary_bgm_waits_for_mixer_add() {
+        use crate::mixer_events::{
+            apply_mixer_event, MixerEligibility, MixerEvent, MixerEventKind,
+        };
+
+        let mut mixer = MixerEligibility::restricted();
+        assert!(!bgm_chip_should_schedule(&mixer, 7));
+        apply_mixer_event(
+            &mut mixer,
+            MixerEvent {
+                at_ms: 500,
+                slot: 7,
+                kind: MixerEventKind::Add,
+            },
+        );
+        assert!(bgm_chip_should_schedule(&mixer, 7));
     }
 }

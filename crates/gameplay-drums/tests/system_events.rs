@@ -1,4 +1,6 @@
 use dtx_core::{Chart, Chip, EChannel};
+use gameplay_drums::drums_perf::DrumsFillingEffect;
+use gameplay_drums::resources::CurrentEmptyHitTemplates;
 use gameplay_drums::system_events::{SystemEventCursor, SystemEventKind, SystemEventSchedule};
 use gameplay_drums::timeline::ChipTimeline;
 
@@ -7,7 +9,7 @@ fn chart_and_timeline() -> (Chart, ChipTimeline) {
         chips: vec![
             Chip::with_wav(0, EChannel::HiHatCloseHidden, 0.25, 1),
             Chip::with_wav(0, EChannel::MIDIChorus, 0.50, 2),
-            Chip::with_wav(0, EChannel::FillIn, 0.75, 3),
+            Chip::with_wav(0, EChannel::FillIn, 0.75, 1),
             Chip::with_wav(1, EChannel::Click, 0.00, 4),
             Chip::with_wav(1, EChannel::FirstSoundChip, 0.25, 5),
             Chip::with_wav(1, EChannel::Snare, 0.50, 6),
@@ -73,4 +75,50 @@ fn system_events_are_absent_from_note_density() {
             .count(),
         1
     );
+}
+
+#[test]
+fn system_event_effects_rebuild_hidden_templates_and_fillin_state_at_seek_target() {
+    let (mut chart, mut timeline) = chart_and_timeline();
+    chart
+        .chips
+        .push(Chip::with_wav(0, EChannel::FillIn, 0.90, 2));
+    timeline.judge_ms_by_idx.push(400);
+    let schedule = SystemEventSchedule::from_chart(&chart, &timeline);
+    let mut templates = CurrentEmptyHitTemplates::default();
+    let mut fillin = DrumsFillingEffect::default();
+
+    gameplay_drums::system_events::rebuild_effects_at(
+        &schedule,
+        &chart,
+        350,
+        true,
+        &mut templates,
+        &mut fillin,
+    );
+
+    assert_eq!(templates.get(0).map(|event| event.wav_slot), Some(1));
+    assert!(fillin.active);
+
+    gameplay_drums::system_events::rebuild_effects_at(
+        &schedule,
+        &chart,
+        450,
+        true,
+        &mut templates,
+        &mut fillin,
+    );
+    assert!(!fillin.active);
+
+    gameplay_drums::system_events::rebuild_effects_at(
+        &schedule,
+        &chart,
+        150,
+        true,
+        &mut templates,
+        &mut fillin,
+    );
+
+    assert_eq!(templates.get(0).map(|event| event.wav_slot), Some(1));
+    assert!(!fillin.active);
 }

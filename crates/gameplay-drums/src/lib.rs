@@ -393,6 +393,7 @@ fn load_drum_audio_settings(
         drum_volume: cfg.audio.drum_volume,
     };
     drum_cfg.config = cfg.drums.clone();
+    drum_cfg.fillin_enabled = cfg.gameplay.fillin_enabled;
     polyphony.set_voices(cfg.drums.polyphonic_sounds);
 }
 

@@ -131,6 +131,7 @@ pub fn plugin(app: &mut App) {
             (
                 typography::apply_semantic_typography,
                 age_notifications,
+                present_notifications,
                 widget::album_art::album_art_tween_system,
                 widget::album_art::apply_album_art_opacity,
                 parallax::parallax_info_tween_system,
@@ -160,6 +161,45 @@ fn enqueue_startup_config_warning(
     }
 }
 
+fn present_notifications(
+    notifications: Res<NotificationQueue>,
+    mut commands: Commands,
+    visible: Query<Entity, With<widget::notification::GlobalNotificationRoot>>,
+) {
+    for entity in &visible {
+        commands.entity(entity).despawn();
+    }
+
+    let theme = Theme::default();
+    for (index, notification) in notifications.iter().enumerate() {
+        let accent = match notification.tone {
+            NotificationTone::Info => theme.accent,
+            NotificationTone::Success => theme.clear_green,
+            NotificationTone::Warning => theme.select_yellow,
+            NotificationTone::Error => theme.judgment_miss,
+        };
+        commands.spawn((
+            widget::notification::GlobalNotificationRoot,
+            Text::new(notification.message.clone()),
+            Theme::label_font(),
+            TextColor(theme.text_primary),
+            BackgroundColor(Color::srgba(0.02, 0.02, 0.02, 0.94)),
+            BorderColor::all(accent),
+            Node {
+                position_type: PositionType::Absolute,
+                left: Val::Percent(20.0),
+                right: Val::Percent(20.0),
+                top: Val::Px(56.0 + index as f32 * 44.0),
+                min_height: Val::Px(36.0),
+                padding: UiRect::axes(Val::Px(12.0), Val::Px(7.0)),
+                border: UiRect::left(Val::Px(3.0)),
+                ..default()
+            },
+            GlobalZIndex(10_000),
+        ));
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -183,5 +223,26 @@ mod tests {
     #[test]
     fn pt_to_px_18pt() {
         assert!((pt_to_px(18.0) - 24.0).abs() < 0.01);
+    }
+
+    #[test]
+    fn startup_warning_is_presented_by_global_notification_ui() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .init_resource::<ButtonInput<KeyCode>>()
+            .init_resource::<ButtonInput<MouseButton>>()
+            .insert_resource(StartupConfigWarning(Some(
+                "Recovered invalid config".into(),
+            )))
+            .add_plugins(plugin);
+
+        app.update();
+
+        let visible = app
+            .world_mut()
+            .query_filtered::<&Text, With<widget::notification::GlobalNotificationRoot>>()
+            .iter(app.world())
+            .any(|text| text.0.contains("Recovered invalid config"));
+        assert!(visible);
     }
 }

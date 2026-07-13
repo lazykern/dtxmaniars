@@ -328,17 +328,44 @@ impl Default for DrumAudioSettings {
 }
 
 /// Latest NoChip template per lane (updated as chart scrolls past each template).
-#[derive(Resource, Debug, Clone, Default)]
+#[derive(Resource, Debug, Clone)]
 pub struct CurrentEmptyHitTemplates {
     pub by_lane: [Option<dtx_core::EmptyHitEvent>; crate::lane_map::LANE_COUNT],
+    at_ms_by_lane: [i64; crate::lane_map::LANE_COUNT],
+}
+
+impl Default for CurrentEmptyHitTemplates {
+    fn default() -> Self {
+        Self {
+            by_lane: [None; crate::lane_map::LANE_COUNT],
+            at_ms_by_lane: [i64::MIN; crate::lane_map::LANE_COUNT],
+        }
+    }
 }
 
 impl CurrentEmptyHitTemplates {
     pub fn reset(&mut self) {
         self.by_lane = [None; crate::lane_map::LANE_COUNT];
+        self.at_ms_by_lane = [i64::MIN; crate::lane_map::LANE_COUNT];
     }
 
     pub fn set(&mut self, lane: u8, event: dtx_core::EmptyHitEvent) {
+        if let Some(slot) = self.by_lane.get_mut(lane as usize) {
+            *slot = Some(event);
+        }
+    }
+
+    /// Keep the chronologically latest sound template for a lane. Hidden
+    /// chips and NoChip events share this state, so system ordering cannot
+    /// let an older event overwrite a newer one.
+    pub fn set_at(&mut self, lane: u8, event: dtx_core::EmptyHitEvent, at_ms: i64) {
+        let Some(current_at_ms) = self.at_ms_by_lane.get_mut(lane as usize) else {
+            return;
+        };
+        if at_ms < *current_at_ms {
+            return;
+        }
+        *current_at_ms = at_ms;
         if let Some(slot) = self.by_lane.get_mut(lane as usize) {
             *slot = Some(event);
         }
@@ -416,6 +443,7 @@ impl ActiveDrumSounds {
 #[derive(Resource, Debug, Clone)]
 pub struct DrumGameplaySettings {
     pub config: dtx_config::DrumsConfig,
+    pub fillin_enabled: bool,
     pub presence: crate::drum_groups::ChartChipPresence,
     pub groups: crate::drum_groups::EffectiveGroups,
 }
@@ -427,6 +455,7 @@ impl Default for DrumGameplaySettings {
         Self {
             groups: crate::drum_groups::EffectiveGroups::from_config(&config, &presence),
             config,
+            fillin_enabled: true,
             presence,
         }
     }
