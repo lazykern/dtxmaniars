@@ -36,7 +36,7 @@ ledger is the durable inventory; completing one cycle never removes later work.
 | 2 | Core DTX and audio compatibility | Implemented |
 | 3 | Reliable guided calibration | Implemented |
 | 4 | Results analysis and weakest-section practice handoff | Implemented |
-| 5 | Large-library discovery and measured scan performance | Queued |
+| 5 | Large-library discovery and measured scan performance | Implemented |
 | 6 | Accessibility and design-system consolidation | Queued |
 | 7 | Extended format/media compatibility | Queued |
 | 8 | Documentation and repository-maintenance repair | Queued |
@@ -139,6 +139,24 @@ name the active constraint and offer a clear reset. Measure startup scan time,
 rescan time, parsed chart count, skipped count, and on-demand chart-stat cost
 before adding a cache or database. A cache is allowed only after representative
 libraries demonstrate a player-visible need.
+
+Completed 2026-07-13:
+
+- A separate versioned `library-preferences.json` persists favorites by
+  normalized chart path and safely falls back to empty favorites when it cannot
+  be read.
+- Song Select now combines Favorites, Unplayed, Recent, and Near My Level with
+  search and sorting. Recent uses score history; Near My Level uses the median
+  completed chart level (±1 display level); imported history still counts as a
+  play.
+- F7 toggles the highlighted favorite; Ctrl+1 through Ctrl+4 toggle discovery
+  filters; Ctrl+R chooses deterministically from visible filtered rows; Ctrl+0
+  resets filters. Recompute restores the selected chart by path when possible.
+- Empty results state their active filters and provide the reset command.
+- Startup and F5 rescan report elapsed time, directories, parsed charts, and
+  skips. The existing asynchronous selected-chart stat parse now publishes its
+  completion cost. No cache or database was introduced: measurement comes
+  first.
 
 ## Cycle 6 — Accessibility and design-system consolidation
 

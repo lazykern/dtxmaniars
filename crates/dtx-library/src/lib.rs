@@ -22,6 +22,9 @@
 //! machinery until we have 1000s of charts.
 
 pub mod import;
+pub mod preferences;
+
+pub use preferences::LibraryPreferences;
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -162,12 +165,19 @@ pub struct ScanProblem {
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct ScanReport {
     pub elapsed: std::time::Duration,
+    /// Directories visited while discovering charts.
+    pub directories: usize,
     pub discovered: usize,
     pub loaded: usize,
     pub problems: Vec<ScanProblem>,
 }
 
 impl ScanReport {
+    /// Successfully parsed chart count (named for player-facing diagnostics).
+    pub fn parsed(&self) -> usize {
+        self.loaded
+    }
+
     pub fn skipped(&self) -> usize {
         self.discovered.saturating_sub(self.loaded)
     }
@@ -198,6 +208,7 @@ fn walk_dtx(
     songs: &mut Vec<SongInfo>,
     report: &mut ScanReport,
 ) -> Result<(), ScanError> {
+    report.directories += 1;
     let entries = fs::read_dir(dir).map_err(|source| ScanError::Io {
         path: dir.to_path_buf(),
         source,
@@ -448,7 +459,17 @@ pub fn startup_scan_system(mut db: ResMut<SongDb>) {
         );
     }
     match db.rescan(&dir) {
-        Ok(()) => info!("dtx-library: found {} song(s)", db.len()),
+        Ok(()) => {
+            let report = &db.latest_scan;
+            info!(
+                "dtx-library: startup scan found {} chart(s): {} directories, {} parsed, {} skipped in {:.2?}",
+                db.len(),
+                report.directories,
+                report.parsed(),
+                report.skipped(),
+                report.elapsed
+            );
+        }
         Err(e) => warn!("dtx-library: startup scan failed: {}", e),
     }
 }
@@ -459,6 +480,8 @@ pub struct SongDbPlugin;
 impl Plugin for SongDbPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<SongDb>()
+            .init_resource::<preferences::LibraryPreferences>()
+            .add_systems(Startup, preferences::load_preferences_system)
             .add_systems(Startup, startup_scan_system);
     }
 }
@@ -466,6 +489,35 @@ impl Plugin for SongDbPlugin {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn library_preferences_round_trip_favorites_by_chart_path() {
+        let path = std::env::temp_dir().join(format!(
+            "dtx-library-preferences-{}-{}.json",
+            std::process::id(),
+            std::thread::current().name().unwrap_or("test")
+        ));
+        let chart = PathBuf::from("/songs/example/basic.dtx");
+        let mut preferences = crate::preferences::LibraryPreferences::with_path(path.clone());
+
+        assert!(preferences.toggle_favorite(&chart));
+        preferences.save().expect("save preferences");
+
+        let mut reloaded = crate::preferences::LibraryPreferences::with_path(path.clone());
+        reloaded.load().expect("load preferences");
+        assert!(reloaded.is_favorite(&chart));
+
+        std::fs::remove_file(path).expect("remove preference fixture");
+    }
+
+    #[test]
+    fn scan_report_counts_visited_directories_and_parsed_charts() {
+        let (_, report) = scan_directory(&fixture_dir()).expect("scan fixtures");
+
+        assert!(report.directories >= 1);
+        assert_eq!(report.parsed(), report.loaded);
+        assert_eq!(report.skipped(), report.discovered - report.loaded);
+    }
 
     fn fixture_dir() -> PathBuf {
         PathBuf::from(env!("CARGO_MANIFEST_DIR"))

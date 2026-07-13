@@ -34,7 +34,7 @@ use dtx_audio::{
     BgmHandle, PreviewPlayer, PreviewSwapDirection, PreviewSwapEvent, get_or_load_audio_handle,
     stop_bgm_system,
 };
-use dtx_library::{SongDb, SongInfo, SortMode};
+use dtx_library::{LibraryPreferences, SongDb, SongInfo, SortMode};
 use dtx_ui::ThemeResource;
 use dtx_ui::motion::EnterChoreo;
 use dtx_ui::theme::{REF_HEIGHT, REF_WIDTH, Theme};
@@ -56,6 +56,9 @@ use game_shell::{
     AppState, NavAction, PracticeIntent, ScoreStoreResource, TransitionRequest, despawn_stage,
     request_transition,
 };
+
+use crate::chart_stats::ChartStatsMeasurement;
+use crate::discovery::{DiscoveryFilters, filtered_indices, random_candidate};
 
 // ===== Layout constants =====
 
@@ -179,9 +182,17 @@ impl SongSelectSelection {
     /// chart order; otherwise sort within folder by display level.
     /// Top-level sort mode applies to the folder list.
     pub fn recompute(&mut self, all: &[SongInfo]) {
+        self.recompute_filtered(all, None);
+    }
+
+    /// Recompute using source-chart indices already admitted by discovery.
+    pub fn recompute_filtered(&mut self, all: &[SongInfo], allowed: Option<&[usize]>) {
         use std::collections::BTreeMap;
         let mut by_folder: BTreeMap<PathBuf, Vec<usize>> = BTreeMap::new();
         for (idx, song) in all.iter().enumerate() {
+            if allowed.is_some_and(|indices| !indices.contains(&idx)) {
+                continue;
+            }
             if !self.matches_search(song) {
                 continue;
             }
@@ -226,6 +237,16 @@ impl SongSelectSelection {
             SortMode::ByArtist => v.sort_by(|a, b| a.artist.cmp(&b.artist)),
         }
         self.visible = v;
+    }
+}
+
+/// Deterministic session state for Random Within Results.
+#[derive(Resource, Debug, Clone, Copy)]
+struct DiscoveryRandom(u64);
+
+impl Default for DiscoveryRandom {
+    fn default() -> Self {
+        Self(0x4d54_584d_414e_4941)
     }
 }
 
@@ -473,6 +494,9 @@ struct SortChipText;
 /// Compact, nonblocking summary of the last song-directory scan.
 #[derive(Component)]
 struct ScanProblemSummary;
+/// Compact state of discovery filters and measured library work.
+#[derive(Component)]
+struct DiscoverySummary;
 /// Big art panel in the left column.
 #[derive(Component)]
 struct BigAlbumArt;
@@ -568,6 +592,8 @@ pub fn plugin(app: &mut App) {
         .init_resource::<CommandHistory>()
         .init_resource::<Selection>()
         .init_resource::<PadWheelLevel>()
+        .init_resource::<DiscoveryFilters>()
+        .init_resource::<DiscoveryRandom>()
         .add_systems(
             OnEnter(AppState::SongSelect),
             (
@@ -603,6 +629,7 @@ pub fn plugin(app: &mut App) {
                     .chain(),
                 update_song_select_legend,
                 update_scan_problem_summary,
+                update_discovery_summary,
                 (search_input, render_search_on_change).chain(),
                 respawn_wheel_on_change,
                 wheel_layout_system,
@@ -675,6 +702,41 @@ fn update_scan_problem_summary(
         } else {
             Display::None
         };
+    }
+}
+
+fn library_status_text(
+    filters: &DiscoveryFilters,
+    report: &dtx_library::ScanReport,
+    chart_stats: &ChartStatsMeasurement,
+) -> String {
+    let chart_cost = chart_stats
+        .elapsed
+        .map(|elapsed| format!(" • chart stats {:.1?}", elapsed))
+        .unwrap_or_default();
+    format!(
+        "{} • scan {:.1?}: {} parsed, {} skipped, {} dirs{}",
+        filters.active_description(),
+        report.elapsed,
+        report.parsed(),
+        report.skipped(),
+        report.directories,
+        chart_cost,
+    )
+}
+
+fn update_discovery_summary(
+    filters: Res<DiscoveryFilters>,
+    db: Res<SongDb>,
+    chart_stats: Res<ChartStatsMeasurement>,
+    mut summaries: Query<&mut Text, With<DiscoverySummary>>,
+) {
+    if !filters.is_changed() && !db.is_changed() && !chart_stats.is_changed() {
+        return;
+    }
+    let text = library_status_text(&filters, &db.latest_scan, &chart_stats);
+    for mut summary in &mut summaries {
+        *summary = Text::new(text.clone());
     }
 }
 
@@ -770,6 +832,8 @@ fn spawn_song_select(
     db: Res<SongDb>,
     assets: Res<AssetServer>,
     theme: Res<ThemeResource>,
+    filters: Res<DiscoveryFilters>,
+    chart_stats: Res<ChartStatsMeasurement>,
 ) {
     let t = theme.0;
     commands
@@ -890,6 +954,19 @@ fn spawn_song_select(
                         Text::new(summary.unwrap_or_default()),
                         Theme::font(11.0),
                         TextColor(t.select_yellow),
+                    ));
+
+                    root.spawn((
+                        DiscoverySummary,
+                        Node {
+                            position_type: PositionType::Absolute,
+                            top: Val::Px(53.0),
+                            left: Val::Px(20.0),
+                            ..default()
+                        },
+                        Text::new(library_status_text(&filters, &db.latest_scan, &chart_stats)),
+                        Theme::font(11.0),
+                        TextColor(t.text_secondary),
                     ));
 
                     // ---- far-left column: skill + bpm
@@ -1038,7 +1115,7 @@ fn spawn_song_select(
                         },
                     ))
                     .with_children(|wheel| {
-                        spawn_wheel_rows(wheel, &selection_state, &db, &assets, &t);
+                        spawn_wheel_rows(wheel, &selection_state, &db, &assets, &t, &filters);
                     });
 
                     // ---- bottom hint bar
@@ -1066,6 +1143,9 @@ fn spawn_song_select(
                             ("SHIFT+ENTER PRACTICE", false),
                             ("TAB SORT", false),
                             ("F5 RESCAN", false),
+                            ("F7 FAVORITE", false),
+                            ("CTRL+1..4 FILTER", false),
+                            ("CTRL+R RANDOM", false),
                             ("F6 IMPORT", false),
                             ("F1 SETTINGS", false),
                             ("ESC BACK", false),
@@ -1106,6 +1186,7 @@ fn spawn_wheel_rows(
     db: &SongDb,
     assets: &AssetServer,
     t: &Theme,
+    filters: &DiscoveryFilters,
 ) {
     if selection_state.visible.is_empty() {
         wheel.spawn((
@@ -1118,10 +1199,7 @@ fn spawn_wheel_rows(
                 ..default()
             },
             BackgroundColor(t.stage_panel_bg),
-            Text::new(format!(
-                "no songs found — put song folders in {}\npress F5 to rescan, F6 to import an archive, or drop a .zip here",
-                dtx_library::default_song_dir().display()
-            )),
+            Text::new(empty_result_text(filters)),
             Theme::font(16.0),
             TextColor(t.text_secondary),
         ));
@@ -1241,6 +1319,20 @@ fn spawn_wheel_rows(
                     ));
                 });
             });
+    }
+}
+
+fn empty_result_text(filters: &DiscoveryFilters) -> String {
+    if filters == &DiscoveryFilters::default() {
+        format!(
+            "no songs found — put song folders in {}\npress F5 to rescan, F6 to import an archive, or drop a .zip here",
+            dtx_library::default_song_dir().display()
+        )
+    } else {
+        format!(
+            "no results for {}\npress Ctrl+0 to reset filters, or adjust search",
+            filters.active_description()
+        )
     }
 }
 
@@ -1547,6 +1639,7 @@ fn respawn_wheel_on_change(
     db: Res<SongDb>,
     assets: Res<AssetServer>,
     theme: Res<ThemeResource>,
+    filters: Res<DiscoveryFilters>,
     wheel: Query<Entity, With<SongWheel>>,
     content: Query<Entity, With<SongWheelContent>>,
 ) {
@@ -1561,7 +1654,7 @@ fn respawn_wheel_on_change(
     }
     let t = theme.0;
     commands.entity(wheel_entity).with_children(|w| {
-        spawn_wheel_rows(w, &selection_state, &db, &assets, &t);
+        spawn_wheel_rows(w, &selection_state, &db, &assets, &t, &filters);
     });
 }
 
@@ -1680,16 +1773,80 @@ fn update_song_select_legend(
 fn song_select_hotkeys(
     keys: Res<ButtonInput<KeyCode>>,
     mut db: ResMut<SongDb>,
-    selection: Res<Selection>,
+    mut selection: ResMut<Selection>,
     mut selection_state: ResMut<SongSelectSelection>,
     mut selected_song: ResMut<SelectedSong>,
     mut requests: MessageWriter<TransitionRequest>,
     mut pending: ResMut<game_shell::PendingCustomizeTab>,
     mut session: ResMut<game_shell::EditorSession>,
+    mut filters: ResMut<DiscoveryFilters>,
+    mut preferences: ResMut<LibraryPreferences>,
+    mut random: ResMut<DiscoveryRandom>,
 ) {
+    let ctrl = keys.pressed(KeyCode::ControlLeft) || keys.pressed(KeyCode::ControlRight);
     if keys.just_pressed(KeyCode::F5) {
         if let Err(e) = db.rescan(&default_song_dir()) {
             warn!("SongSelect: refresh failed: {}", e);
+        } else {
+            let report = &db.latest_scan;
+            info!(
+                "SongSelect: rescan {:.2?}: {} parsed, {} skipped, {} directories",
+                report.elapsed,
+                report.parsed(),
+                report.skipped(),
+                report.directories
+            );
+        }
+        return;
+    }
+    if ctrl && keys.just_pressed(KeyCode::Digit0) {
+        filters.reset();
+        selection_state.dirty = true;
+        return;
+    }
+    if ctrl && keys.just_pressed(KeyCode::Digit1) {
+        filters.favorites_only = !filters.favorites_only;
+        selection_state.dirty = true;
+        return;
+    }
+    if ctrl && keys.just_pressed(KeyCode::Digit2) {
+        filters.unplayed_only = !filters.unplayed_only;
+        selection_state.dirty = true;
+        return;
+    }
+    if ctrl && keys.just_pressed(KeyCode::Digit3) {
+        filters.recent_only = !filters.recent_only;
+        selection_state.dirty = true;
+        return;
+    }
+    if ctrl && keys.just_pressed(KeyCode::Digit4) {
+        filters.near_level_only = !filters.near_level_only;
+        selection_state.dirty = true;
+        return;
+    }
+    if keys.just_pressed(KeyCode::F7)
+        && let Some(chart_index) = selection.chart_index(&selection_state)
+        && let Some(song) = db.songs.get(chart_index)
+    {
+        let favorite = preferences.toggle_favorite(&song.path);
+        if let Err(error) = preferences.save() {
+            warn!("SongSelect: could not save favorites: {error}");
+        }
+        info!(
+            "SongSelect: {} {}",
+            if favorite { "favorited" } else { "unfavorited" },
+            song.path.display()
+        );
+        selection_state.dirty = true;
+        return;
+    }
+    if ctrl && keys.just_pressed(KeyCode::KeyR) {
+        let folders: Vec<usize> = (0..selection_state.visible.len()).collect();
+        if let Some(folder) = random_candidate(&folders, &mut random.0) {
+            // This chooses only among currently filtered, searched results.
+            // Start on the easiest chart to make the random choice predictable.
+            selection.folder = folder;
+            selection.difficulty = 0;
         }
         return;
     }
@@ -2075,9 +2232,18 @@ fn recompute_visible(
     mut sel: ResMut<SongSelectSelection>,
     db: Res<SongDb>,
     mut selection: ResMut<Selection>,
+    preferences: Res<LibraryPreferences>,
+    scores: Res<ScoreStoreResource>,
+    filters: Res<DiscoveryFilters>,
 ) {
-    sel.recompute(&db.songs);
-    selection.clamp_to_visible(&sel);
+    recompute_with_discovery(
+        &mut sel,
+        &db,
+        &mut selection,
+        &preferences,
+        &scores,
+        &filters,
+    );
 }
 
 /// On Update: re-run recompute when the dirty flag is set (Tab cycles
@@ -2087,12 +2253,50 @@ fn maybe_recompute_visible(
     mut sel: ResMut<SongSelectSelection>,
     db: Res<SongDb>,
     mut selection: ResMut<Selection>,
+    preferences: Res<LibraryPreferences>,
+    scores: Res<ScoreStoreResource>,
+    filters: Res<DiscoveryFilters>,
 ) {
-    if sel.dirty || db.is_changed() {
-        sel.recompute(&db.songs);
+    if sel.dirty || db.is_changed() || filters.is_changed() || preferences.is_changed() {
+        recompute_with_discovery(
+            &mut sel,
+            &db,
+            &mut selection,
+            &preferences,
+            &scores,
+            &filters,
+        );
         sel.dirty = false;
-        selection.clamp_to_visible(&sel);
     }
+}
+
+fn recompute_with_discovery(
+    sel: &mut SongSelectSelection,
+    db: &SongDb,
+    selection: &mut Selection,
+    preferences: &LibraryPreferences,
+    scores: &ScoreStoreResource,
+    filters: &DiscoveryFilters,
+) {
+    let previous = selection
+        .chart_index(sel)
+        .and_then(|index| db.songs.get(index))
+        .map(|song| song.path.clone());
+    let allowed = filtered_indices(&db.songs, preferences, scores, filters);
+    sel.recompute_filtered(&db.songs, Some(&allowed));
+    if let Some(path) = previous
+        && let Some((folder, difficulty)) =
+            sel.visible.iter().enumerate().find_map(|(folder, view)| {
+                view.chart_indices
+                    .iter()
+                    .position(|&index| db.songs[index].path == path)
+                    .map(|difficulty| (folder, difficulty as u8))
+            })
+    {
+        selection.folder = folder;
+        selection.difficulty = difficulty;
+    }
+    selection.clamp_to_visible(sel);
 }
 
 #[cfg(test)]
@@ -2137,6 +2341,17 @@ mod tests {
             scan_problem_summary(&report),
             Some("1 chart warnings — see log".into())
         );
+    }
+
+    #[test]
+    fn empty_results_name_filters_and_offer_reset() {
+        let filters = DiscoveryFilters {
+            favorites_only: true,
+            ..default()
+        };
+        let text = empty_result_text(&filters);
+        assert!(text.contains("Favorites"));
+        assert!(text.contains("Ctrl+0"));
     }
 
     #[test]

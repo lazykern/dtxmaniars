@@ -2968,6 +2968,8 @@ dependencies = [
  "dtx-audio",
  "dtx-core",
  "encoding_rs",
+ "serde",
+ "serde_json",
  "sevenz-rust2",
  "thiserror 1.0.69",
  "zip",

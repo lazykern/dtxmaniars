@@ -8,6 +8,7 @@ use dtx_core::channel::EChannel;
 use dtx_ui::widget::density_graph::{DensityData, LANE_COUNT};
 use game_shell::AppState;
 use std::path::PathBuf;
+use std::time::{Duration, Instant};
 
 use crate::song_select::{Selection, SongSelectSelection};
 
@@ -61,15 +62,33 @@ pub fn lane_counts(chart: &dtx_core::Chart) -> ([u32; LANE_COUNT], u32) {
 /// In-flight stats parse for the currently selected chart path.
 #[derive(Resource, Default)]
 pub struct ChartStatsTask {
-    pub task: Option<Task<Option<(PathBuf, [u32; LANE_COUNT], u32)>>>,
+    pub task: Option<Task<Option<(PathBuf, [u32; LANE_COUNT], u32, Duration)>>>,
     pub for_path: Option<PathBuf>,
 }
 
+/// Latest completed selected-chart parse. The parse remains asynchronous.
+#[derive(Resource, Default, Debug, Clone, PartialEq, Eq)]
+pub struct ChartStatsMeasurement {
+    pub path: Option<PathBuf>,
+    pub elapsed: Option<Duration>,
+}
+
+impl ChartStatsMeasurement {
+    pub fn completed(path: PathBuf, elapsed: Duration) -> Self {
+        Self {
+            path: Some(path),
+            elapsed: Some(elapsed),
+        }
+    }
+}
+
 pub fn plugin(app: &mut App) {
-    app.init_resource::<ChartStatsTask>().add_systems(
-        Update,
-        (start_stats_task, poll_stats_task).run_if(in_state(AppState::SongSelect)),
-    );
+    app.init_resource::<ChartStatsTask>()
+        .init_resource::<ChartStatsMeasurement>()
+        .add_systems(
+            Update,
+            (start_stats_task, poll_stats_task).run_if(in_state(AppState::SongSelect)),
+        );
 }
 
 /// Kick a background parse when the selected chart path changes.
@@ -98,15 +117,20 @@ fn start_stats_task(
     };
     let pool = AsyncComputeTaskPool::get();
     task.task = Some(pool.spawn(async move {
+        let started = Instant::now();
         let bytes = std::fs::read(&path).ok()?;
         let chart = dtx_core::parse(bytes.as_slice()).ok()?;
         let (lanes, total) = lane_counts(&chart);
-        Some((path, lanes, total))
+        Some((path, lanes, total, started.elapsed()))
     }));
 }
 
 /// Publish finished stats (discard if the selection moved on).
-fn poll_stats_task(mut task: ResMut<ChartStatsTask>, mut data: ResMut<DensityData>) {
+fn poll_stats_task(
+    mut task: ResMut<ChartStatsTask>,
+    mut data: ResMut<DensityData>,
+    mut measurement: ResMut<ChartStatsMeasurement>,
+) {
     let Some(active) = task.task.as_mut() else {
         return;
     };
@@ -114,9 +138,10 @@ fn poll_stats_task(mut task: ResMut<ChartStatsTask>, mut data: ResMut<DensityDat
         return;
     };
     task.task = None;
-    if let Some((path, lanes, total)) = result {
+    if let Some((path, lanes, total, elapsed)) = result {
         if task.for_path.as_ref() == Some(&path) {
             *data = DensityData { lanes, total };
+            *measurement = ChartStatsMeasurement::completed(path, elapsed);
         }
     } else {
         *data = DensityData::default();
@@ -126,6 +151,19 @@ fn poll_stats_task(mut task: ResMut<ChartStatsTask>, mut data: ResMut<DensityDat
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn chart_stat_measurement_records_path_and_elapsed_cost() {
+        let measurement = ChartStatsMeasurement::completed(
+            PathBuf::from("example.dtx"),
+            std::time::Duration::from_millis(12),
+        );
+        assert_eq!(measurement.path, Some(PathBuf::from("example.dtx")));
+        assert_eq!(
+            measurement.elapsed,
+            Some(std::time::Duration::from_millis(12))
+        );
+    }
 
     #[test]
     fn row_skill_text_two_decimals() {
