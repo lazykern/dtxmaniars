@@ -208,6 +208,8 @@ pub(crate) fn compose_bindings(keyboard: &KeyboardProfile, midi: &MidiProfile) -
             velocity_threshold: midi.velocity_threshold,
         },
         map: HashMap::new(),
+        // Filled in by Task 3, when the profiles learn to carry system binds.
+        system: HashMap::new(),
     };
     for ch in BINDABLE_CHANNELS {
         let mut sources = Vec::new();

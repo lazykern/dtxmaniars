@@ -36,8 +36,8 @@ pub use events::{LaneHit, LaneHitKind, LaneId};
 /// Key/MIDI binding schema (moved here from dtx-config: it serializes bevy's
 /// `KeyCode`, so it belongs in the Engine layer, not Pure config).
 pub use bindings::{
-    default_bindings_path, load_bindings, save_bindings, BindSource, BindingsFile, InputBindings,
-    MidiDeviceConfig, BINDABLE_CHANNELS,
+    default_bindings_path, lane_owner, load_bindings, save_bindings, BindSource, BindingsFile,
+    InputBindings, MidiDeviceConfig, SystemVerb, BINDABLE_CHANNELS, SYSTEM_VERBS,
 };
 
 /// Re-export so binding/profile code (and external callers) name `KeyCode`
