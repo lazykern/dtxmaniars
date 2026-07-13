@@ -1219,6 +1219,7 @@ fn handle_calibrate_button(
     mut metronome_on: ResMut<crate::resources::MetronomeEnabled>,
     mut timing_lines: ResMut<crate::resources::ShowTimingLines>,
     mut autoplay: ResMut<crate::autoplay::AutoplayEnabled>,
+    midi: Option<Res<game_shell::MidiConnected>>,
 ) {
     if q.iter().any(|i| *i == Interaction::Pressed) {
         super::calibration::start_calibration(
@@ -1226,6 +1227,7 @@ fn handle_calibrate_button(
             &mut metronome_on,
             &mut timing_lines,
             &mut autoplay,
+            midi.as_deref(),
         );
     }
 }

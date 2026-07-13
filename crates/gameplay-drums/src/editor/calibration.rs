@@ -1,5 +1,7 @@
 //! Input-offset tap-test calibration overlay for the Customize surface.
 
+use std::time::{Duration, Instant};
+
 use bevy::prelude::*;
 
 /// Signed error (ms) of `now_ms` to the nearest beat on a grid of `beat_ms`
@@ -33,6 +35,30 @@ pub fn median(samples: &[i32]) -> i32 {
 /// (`audio_ms - target`) IS the offset that zeroes delta — apply it directly.
 pub fn suggested_offset(median_err: i32, clamp: i32) -> i32 {
     median_err.clamp(-clamp, clamp)
+}
+
+/// Replace a manual setting only when the collected evidence is stable.
+pub fn apply_report(current: &mut i32, report: &CalibrationReport) {
+    if report.can_apply() {
+        *current = suggested_offset(report.proposed_offset_ms, dtx_config::INPUT_OFFSET_CLAMP_MS);
+    }
+}
+
+fn midi_disconnect_detected(was_connected: bool, is_connected: bool) -> bool {
+    was_connected && !is_connected
+}
+
+fn restore_toggles(
+    metronome: &mut bool,
+    timing_lines: &mut bool,
+    autoplay: &mut bool,
+    prev_metronome: bool,
+    prev_timing_lines: bool,
+    prev_autoplay: bool,
+) {
+    *metronome = prev_metronome;
+    *timing_lines = prev_timing_lines;
+    *autoplay = prev_autoplay;
 }
 
 /// Number of stable taps required before calibration may change the setting.
@@ -72,8 +98,7 @@ impl CalibrationReport {
             .iter()
             .copied()
             .filter(|error| {
-                (i64::from(*error) - i64::from(center)).abs()
-                    <= i64::from(OUTLIER_DISTANCE_MS)
+                (i64::from(*error) - i64::from(center)).abs() <= i64::from(OUTLIER_DISTANCE_MS)
             })
             .collect();
         let proposed_offset_ms = median(&accepted);
@@ -109,57 +134,139 @@ impl CalibrationReport {
     }
 }
 
+/// Chart-independent 120 BPM sequence used by the guided calibration overlay.
+#[derive(Debug, Clone, Copy)]
+pub struct CalibrationSchedule {
+    started_at: Instant,
+    first_beat_at: Instant,
+}
+
+impl CalibrationSchedule {
+    const LEAD_IN: Duration = Duration::from_secs(1);
+    const BEAT_INTERVAL: Duration = Duration::from_millis(500);
+    pub const BEAT_COUNT: usize = 16;
+
+    pub fn new(started_at: Instant) -> Self {
+        Self {
+            started_at,
+            first_beat_at: started_at + Self::LEAD_IN,
+        }
+    }
+
+    pub fn started_at(&self) -> Instant {
+        self.started_at
+    }
+
+    pub fn first_beat_at(&self) -> Instant {
+        self.first_beat_at
+    }
+
+    pub fn beat_interval(&self) -> Duration {
+        Self::BEAT_INTERVAL
+    }
+
+    /// Number of scheduled clicks that should have fired by `now`.
+    pub fn due_beat_count(&self, now: Instant) -> usize {
+        if now < self.first_beat_at {
+            return 0;
+        }
+        let elapsed = now.duration_since(self.first_beat_at);
+        let due = elapsed.as_millis() / Self::BEAT_INTERVAL.as_millis() + 1;
+        (due as usize).min(Self::BEAT_COUNT)
+    }
+
+    /// Signed distance from `tap` to the nearest scheduled beat.
+    pub fn error_ms(&self, tap: Instant) -> i32 {
+        let interval_ms = Self::BEAT_INTERVAL.as_millis() as i128;
+        let elapsed_ms = if tap >= self.first_beat_at {
+            tap.duration_since(self.first_beat_at).as_millis() as i128
+        } else {
+            -(self.first_beat_at.duration_since(tap).as_millis() as i128)
+        };
+        let nearest_ms = (elapsed_ms + interval_ms / 2).div_euclid(interval_ms) * interval_ms;
+        (elapsed_ms - nearest_ms) as i32
+    }
+}
+
 /// Tap-test lifecycle. Idle by default.
 #[derive(Resource, Default)]
 pub enum CalibrationState {
     #[default]
     Idle,
     Collecting {
+        schedule: CalibrationSchedule,
         samples: Vec<i32>,
+        scheduler_delays: Vec<i32>,
+        fired_beats: usize,
+        midi_was_connected: bool,
+        midi_disconnected: bool,
         prev_metronome: bool,
         prev_timing_lines: bool,
         prev_autoplay: bool,
     },
     Done {
-        median: i32,
+        report: CalibrationReport,
+        midi_disconnected: bool,
         prev_metronome: bool,
         prev_timing_lines: bool,
         prev_autoplay: bool,
     },
 }
 
-/// How many taps before showing a suggestion.
-pub const TARGET_SAMPLES: usize = 12;
-
 #[derive(Component)]
 struct CalibrationOverlay;
 
+/// Reuses the chart-independent metronome sample for calibration clicks.
+#[derive(Resource, Default)]
+struct CalibrationClickSound(Option<Handle<bevy_kira_audio::prelude::AudioSource>>);
+
+const CALIBRATION_CLICK_PATH: &str = "sounds/metronome.wav";
+
 pub(super) fn plugin(app: &mut App) {
     app.init_resource::<CalibrationState>()
+        .init_resource::<CalibrationClickSound>()
         .add_systems(
             Update,
-            (collect_taps, confirm_or_cancel, render_overlay)
+            (
+                preload_click_sound,
+                fire_synthetic_clicks,
+                collect_taps,
+                confirm_or_cancel,
+                render_overlay,
+            )
+                .chain()
                 .run_if(in_state(game_shell::AppState::Performance))
                 .run_if(super::editor_open),
         )
-        .add_systems(OnExit(game_shell::AppState::Performance), despawn_overlay);
+        .add_systems(
+            Update,
+            restore_when_editor_closes.run_if(in_state(game_shell::AppState::Performance)),
+        )
+        .add_systems(
+            OnExit(game_shell::AppState::Performance),
+            (restore_on_performance_exit, despawn_overlay),
+        );
 }
 
-/// Called by the panel Calibrate button: enter Collecting, forcing metronome +
-/// timing lines on (the tick fires only on line crossings) and autoplay OFF
-/// (the editor session forces autoplay on; its perfect on-target LaneHits would
-/// otherwise auto-fill the tap test instead of the player's own taps).
+/// Called by the panel Calibrate button: enter the chart-independent sequence
+/// and disable autoplay so only physical keyboard or MIDI input is sampled.
 pub fn start_calibration(
     state: &mut CalibrationState,
     metronome_on: &mut crate::resources::MetronomeEnabled,
     timing_lines: &mut crate::resources::ShowTimingLines,
     autoplay: &mut crate::autoplay::AutoplayEnabled,
+    midi: Option<&game_shell::MidiConnected>,
 ) {
     if !matches!(state, CalibrationState::Idle) {
         return;
     }
     *state = CalibrationState::Collecting {
+        schedule: CalibrationSchedule::new(Instant::now()),
         samples: Vec::new(),
+        scheduler_delays: Vec::new(),
+        fired_beats: 0,
+        midi_was_connected: midi.is_some_and(|state| state.0),
+        midi_disconnected: false,
         prev_metronome: metronome_on.0,
         prev_timing_lines: timing_lines.0,
         prev_autoplay: autoplay.0,
@@ -169,46 +276,153 @@ pub fn start_calibration(
     autoplay.0 = false;
 }
 
-fn collect_taps(
+fn preload_click_sound(asset_server: Res<AssetServer>, mut click: ResMut<CalibrationClickSound>) {
+    if click.0.is_none() {
+        click.0 = Some(asset_server.load(CALIBRATION_CLICK_PATH));
+    }
+}
+
+/// Fire every missed beat individually and retain the scheduler delay as an
+/// observation. A laggy frame lowers confidence but cannot change the tap
+/// proposal itself.
+fn fire_synthetic_clicks(
     mut state: ResMut<CalibrationState>,
-    chart: Res<crate::resources::ActiveChart>,
-    mut hits: MessageReader<crate::events::LaneHit>,
+    click: Res<CalibrationClickSound>,
+    audio: Res<bevy_kira_audio::prelude::Audio>,
+    settings: Res<crate::resources::DrumAudioSettings>,
+    midi: Option<Res<game_shell::MidiConnected>>,
 ) {
-    let CalibrationState::Collecting { samples, .. } = &mut *state else {
+    let CalibrationState::Collecting {
+        schedule,
+        scheduler_delays,
+        fired_beats,
+        midi_was_connected,
+        midi_disconnected,
+        ..
+    } = &mut *state
+    else {
         return;
     };
-    let bpm = chart.chart.metadata.bpm.unwrap_or(120.0) as f64;
-    if bpm <= 0.0 {
-        return;
+    let now = Instant::now();
+    if let Some(midi) = midi {
+        *midi_disconnected |= midi_disconnect_detected(*midi_was_connected, midi.0);
     }
-    let beat_ms = 60_000.0 / bpm;
-    let mut got = false;
-    // Each hit's own raw timestamp (pre input-offset) vs the nearest beat is the
-    // latency to cancel; the frame clock would smear all hits in a frame together.
-    for hit in hits.read() {
-        let e = error_ms(hit.audio_ms as f64, beat_ms, 0.0);
-        if e.abs() <= beat_ms / 2.0 {
-            samples.push(e.round() as i32);
-            got = true;
+    let due = schedule.due_beat_count(now);
+    for beat in *fired_beats..due {
+        let scheduled = schedule.first_beat_at()
+            + Duration::from_millis(schedule.beat_interval().as_millis() as u64 * beat as u64);
+        let delay = now
+            .duration_since(scheduled)
+            .as_millis()
+            .min(i32::MAX as u128) as i32;
+        scheduler_delays.push(delay);
+        if let Some(source) = &click.0 {
+            dtx_audio::play_sfx_handle(&audio, source.clone(), 100, 0, settings.master_volume, 1.0);
         }
     }
-    if got && samples.len() >= TARGET_SAMPLES {
-        let m = median(samples);
-        if let CalibrationState::Collecting {
+    *fired_beats = due;
+}
+
+fn collect_taps(
+    mut state: ResMut<CalibrationState>,
+    mut hits: MessageReader<crate::events::InputHit>,
+) {
+    let CalibrationState::Collecting {
+        schedule,
+        samples,
+        scheduler_delays,
+        prev_metronome,
+        prev_timing_lines,
+        prev_autoplay,
+        midi_disconnected,
+        ..
+    } = &mut *state
+    else {
+        return;
+    };
+
+    // `InputHit` is written by both keyboard and MIDI paths before judgement;
+    // use its monotonic physical-input stamp rather than chart/audio time.
+    for hit in hits.read() {
+        if hit.captured_at >= schedule.first_beat_at()
+            && samples.len() < CalibrationSchedule::BEAT_COUNT
+        {
+            samples.push(schedule.error_ms(hit.captured_at));
+        }
+    }
+
+    let last_beat = schedule.first_beat_at()
+        + Duration::from_millis(
+            schedule.beat_interval().as_millis() as u64
+                * (CalibrationSchedule::BEAT_COUNT - 1) as u64,
+        );
+    let finished = samples.len() == CalibrationSchedule::BEAT_COUNT
+        || Instant::now() >= last_beat + Duration::from_secs(2);
+    if finished {
+        let report = CalibrationReport::from_errors(samples, scheduler_delays);
+        *state = CalibrationState::Done {
+            report,
+            midi_disconnected: *midi_disconnected,
+            prev_metronome: *prev_metronome,
+            prev_timing_lines: *prev_timing_lines,
+            prev_autoplay: *prev_autoplay,
+        };
+    }
+}
+
+fn restore_runtime_state(
+    state: &mut CalibrationState,
+    metronome: &mut crate::resources::MetronomeEnabled,
+    timing_lines: &mut crate::resources::ShowTimingLines,
+    autoplay: &mut crate::autoplay::AutoplayEnabled,
+) {
+    let snapshot = match state {
+        CalibrationState::Idle => None,
+        CalibrationState::Collecting {
             prev_metronome,
             prev_timing_lines,
             prev_autoplay,
             ..
-        } = *state
-        {
-            *state = CalibrationState::Done {
-                median: m,
-                prev_metronome,
-                prev_timing_lines,
-                prev_autoplay,
-            };
         }
+        | CalibrationState::Done {
+            prev_metronome,
+            prev_timing_lines,
+            prev_autoplay,
+            ..
+        } => Some((*prev_metronome, *prev_timing_lines, *prev_autoplay)),
+    };
+    if let Some((prev_metronome, prev_timing_lines, prev_autoplay)) = snapshot {
+        restore_toggles(
+            &mut metronome.0,
+            &mut timing_lines.0,
+            &mut autoplay.0,
+            prev_metronome,
+            prev_timing_lines,
+            prev_autoplay,
+        );
+        *state = CalibrationState::Idle;
     }
+}
+
+fn restore_when_editor_closes(
+    open: Res<super::EditorOpen>,
+    mut state: ResMut<CalibrationState>,
+    mut metronome: ResMut<crate::resources::MetronomeEnabled>,
+    mut timing_lines: ResMut<crate::resources::ShowTimingLines>,
+    mut autoplay: ResMut<crate::autoplay::AutoplayEnabled>,
+) {
+    if open.is_changed() && !open.0 {
+        restore_runtime_state(&mut state, &mut metronome, &mut timing_lines, &mut autoplay);
+    }
+}
+
+fn restore_on_performance_exit(
+    mut state: ResMut<CalibrationState>,
+    mut metronome: ResMut<crate::resources::MetronomeEnabled>,
+    mut timing_lines: ResMut<crate::resources::ShowTimingLines>,
+    mut autoplay: ResMut<crate::autoplay::AutoplayEnabled>,
+) {
+    restore_runtime_state(&mut state, &mut metronome, &mut timing_lines, &mut autoplay);
 }
 
 pub(super) fn confirm_or_cancel(
@@ -235,17 +449,17 @@ pub(super) fn confirm_or_cancel(
             }
         }
         CalibrationState::Done {
-            median,
+            report,
             prev_metronome,
             prev_timing_lines,
             prev_autoplay,
+            ..
         } => {
             let apply = keys.just_pressed(KeyCode::Enter);
             let cancel = keys.just_pressed(KeyCode::Escape);
             if apply || cancel {
                 if apply {
-                    let off = suggested_offset(*median, dtx_config::INPUT_OFFSET_CLAMP_MS);
-                    draft.0.gameplay.input_offset_ms = off;
+                    apply_report(&mut draft.0.gameplay.input_offset_ms, report);
                 }
                 metronome_on.0 = *prev_metronome;
                 timing_lines.0 = *prev_timing_lines;
@@ -268,14 +482,49 @@ fn render_overlay(
     for e in &existing {
         commands.entity(e).despawn();
     }
-    let msg = match &*state {
+    let (msg, pulse) = match &*state {
         CalibrationState::Idle => return,
-        CalibrationState::Collecting { samples, .. } => {
-            format!("Tap to the beat  ({}/{})", samples.len(), TARGET_SAMPLES)
-        }
-        CalibrationState::Done { median, .. } => {
-            let off = suggested_offset(*median, dtx_config::INPUT_OFFSET_CLAMP_MS);
-            format!("Suggested {off:+} ms   Enter apply · Esc cancel")
+        CalibrationState::Collecting {
+            samples,
+            fired_beats,
+            ..
+        } => (
+            format!(
+                "● 120 BPM calibration · tap any mapped key or pad\n{}/{} taps · beat {}/{}",
+                samples.len(),
+                CalibrationSchedule::BEAT_COUNT,
+                fired_beats,
+                CalibrationSchedule::BEAT_COUNT,
+            ),
+            fired_beats % 2 == 1,
+        ),
+        CalibrationState::Done {
+            report,
+            midi_disconnected,
+            ..
+        } => {
+            let off =
+                suggested_offset(report.proposed_offset_ms, dtx_config::INPUT_OFFSET_CLAMP_MS);
+            let action = if report.can_apply() {
+                "High confidence · Enter apply · Esc cancel"
+            } else {
+                "Low confidence · current offset retained · Enter/Esc close"
+            };
+            (
+                format!(
+                    "Suggested {off:+} ms · {} accepted, {} rejected · ±{} ms spread\nScheduler observation ≤ {} ms · {action}\n{}BGM adjustment is separate chart-audio alignment.",
+                    report.accepted_samples,
+                    report.rejected_samples,
+                    report.spread_mad_ms,
+                    report.max_scheduler_delay_ms,
+                    if *midi_disconnected {
+                        "MIDI disconnected; keyboard taps remain valid.\n"
+                    } else {
+                        ""
+                    },
+                ),
+                false,
+            )
         }
     };
     commands.spawn((
@@ -288,7 +537,11 @@ fn render_overlay(
             padding: UiRect::axes(Val::Px(16.0), Val::Px(10.0)),
             ..default()
         },
-        BackgroundColor(Color::srgba(0.05, 0.05, 0.07, 0.95)),
+        BackgroundColor(if pulse {
+            Color::srgba(0.10, 0.14, 0.20, 0.97)
+        } else {
+            Color::srgba(0.05, 0.05, 0.07, 0.95)
+        }),
         GlobalZIndex(crate::ui_z::EDITOR_CHROME + 1),
         children![(
             Text::new(msg),
@@ -338,5 +591,72 @@ mod tests {
     fn unstable_or_sparse_evidence_cannot_apply() {
         assert!(!CalibrationReport::from_errors(&[10; 11], &[0]).can_apply());
         assert!(!CalibrationReport::from_errors(&[10; 12], &[35]).can_apply());
+    }
+
+    #[test]
+    fn synthetic_schedule_has_a_lead_in_and_half_second_beats() {
+        let schedule = CalibrationSchedule::new(std::time::Instant::now());
+        assert_eq!(
+            schedule.beat_interval(),
+            std::time::Duration::from_millis(500)
+        );
+        assert!(schedule.first_beat_at() > schedule.started_at());
+    }
+
+    #[test]
+    fn tap_error_uses_the_physical_input_timestamp() {
+        let started = std::time::Instant::now();
+        let schedule = CalibrationSchedule::new(started);
+        assert_eq!(
+            schedule.error_ms(schedule.first_beat_at() + std::time::Duration::from_millis(37)),
+            37
+        );
+    }
+
+    #[test]
+    fn schedule_reports_every_beat_that_a_slow_frame_missed() {
+        let schedule = CalibrationSchedule::new(std::time::Instant::now());
+        let after_three_beats = schedule.first_beat_at() + std::time::Duration::from_millis(1_020);
+        assert_eq!(schedule.due_beat_count(after_three_beats), 3);
+    }
+
+    #[test]
+    fn weak_report_does_not_replace_manual_offset() {
+        let mut value = 17;
+        apply_report(&mut value, &CalibrationReport::from_errors(&[7; 11], &[0]));
+        assert_eq!(value, 17);
+    }
+
+    #[test]
+    fn strong_report_replaces_manual_offset_within_config_clamp() {
+        let mut value = 17;
+        apply_report(
+            &mut value,
+            &CalibrationReport::from_errors(&[450; 12], &[0]),
+        );
+        assert_eq!(value, 300);
+    }
+
+    #[test]
+    fn only_a_disconnect_after_a_midi_start_is_reported() {
+        assert!(!midi_disconnect_detected(false, false));
+        assert!(!midi_disconnect_detected(true, true));
+        assert!(midi_disconnect_detected(true, false));
+    }
+
+    #[test]
+    fn restoration_returns_every_runtime_toggle_to_its_snapshot() {
+        let mut metronome = true;
+        let mut timing_lines = true;
+        let mut autoplay = false;
+        restore_toggles(
+            &mut metronome,
+            &mut timing_lines,
+            &mut autoplay,
+            false,
+            false,
+            true,
+        );
+        assert_eq!((metronome, timing_lines, autoplay), (false, false, true));
     }
 }
