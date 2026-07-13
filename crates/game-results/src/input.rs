@@ -179,7 +179,7 @@ fn apply(
         }
         ResultAction::PracticeNow | ResultAction::Activate(ResultVerb::Practice) => {
             if chart.source_path.is_some() {
-                practice_intent.0 = true;
+                *practice_intent = PracticeIntent::Manual;
                 request_transition(requests, AppState::SongLoading);
             } else {
                 request_transition(requests, AppState::SongSelect);
@@ -314,7 +314,7 @@ mod tests {
         world.run_system_once(result_nav).expect("driver runs");
         assert_eq!(drain_requests(&mut world), vec![AppState::SongLoading]);
         assert!(
-            !world.resource::<PracticeIntent>().0,
+            *world.resource::<PracticeIntent>() == PracticeIntent::None,
             "plain retry keeps intent"
         );
     }
@@ -325,7 +325,7 @@ mod tests {
         world.write_message(pad(NavVerb::Practice));
         world.run_system_once(result_nav).expect("driver runs");
         assert_eq!(drain_requests(&mut world), vec![AppState::SongLoading]);
-        assert!(world.resource::<PracticeIntent>().0);
+        assert_eq!(*world.resource::<PracticeIntent>(), PracticeIntent::Manual);
     }
 
     #[test]
@@ -349,7 +349,7 @@ mod tests {
         world.write_message(pad(NavVerb::Confirm));
         world.run_system_once(result_nav).expect("driver runs");
         assert_eq!(drain_requests(&mut world), vec![AppState::SongSelect]);
-        assert!(!world.resource::<PracticeIntent>().0);
+        assert_eq!(*world.resource::<PracticeIntent>(), PracticeIntent::None);
     }
 
     #[test]
