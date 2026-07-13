@@ -80,7 +80,7 @@ fn enter(entry: &DirEntry) -> bool {
     }
     !matches!(
         entry.file_name().to_string_lossy().as_ref(),
-        ".git" | "target" | "references"
+        ".git" | ".worktrees" | "target" | "references"
     )
 }
 
