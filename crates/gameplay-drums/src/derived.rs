@@ -42,8 +42,8 @@ pub fn compute_from_chart(
     derived.phrase = PhraseMeter::from_chart(chart, base_bpm, timing);
     derived.chart_level = chart
         .metadata
-        .dlevel
-        .map(|v| dtx_core::display_dlevel(v) as f64)
+        .display_drum_level()
+        .map(f64::from)
         .unwrap_or(0.0);
     derived.total_drum_chips = drum_chip_count;
     derived.max_skill = dtx_scoring::skill::drum_song_skill(derived.chart_level, 100.0, false);

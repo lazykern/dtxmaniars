@@ -1,4 +1,6 @@
-use dtx_core::{parse, parse_with_options, EChannel, ParseOptions};
+use dtx_core::{
+    parse, parse_with_options, ChartFormat, ChartLevel, DiagnosticKind, EChannel, ParseOptions,
+};
 use std::fs::File;
 use std::io::BufReader;
 use std::path::PathBuf;
@@ -19,6 +21,59 @@ fn parse_minimal_fixture() {
     assert_eq!(chart.metadata.artist.as_deref(), Some("dtxmaniars"));
     assert_eq!(chart.metadata.bpm, Some(120.0));
     assert_eq!(chart.metadata.dlevel, Some(30));
+}
+
+#[test]
+fn playlevel_packed_level_and_dlvdec_follow_nx_order() {
+    let report = parse_with_options(
+        b"#PLAYLEVEL: 355\n#DLVDEC: 7\n#HIDDENLEVEL: ON\n#WALL: wall.png\n".as_slice(),
+        ParseOptions { random_seed: 0 },
+    )
+    .expect("level aliases parse");
+    assert_eq!(report.chart.format, ChartFormat::Dtx);
+    assert_eq!(
+        report.chart.metadata.drum_level,
+        Some(ChartLevel {
+            tenths: 35,
+            hundredths: 7,
+        })
+    );
+    assert!((report.chart.metadata.drum_level.unwrap().display() - 3.57).abs() < 0.001);
+    assert!(report.chart.metadata.hidden_level);
+    assert_eq!(
+        report.chart.metadata.background.as_deref(),
+        Some("wall.png")
+    );
+}
+
+#[test]
+fn packed_levels_clamp_exactly_like_nx() {
+    assert_eq!(
+        ChartLevel::from_raw(1_999),
+        ChartLevel {
+            tenths: 100,
+            hundredths: 0,
+        }
+    );
+    assert_eq!(
+        ChartLevel::from_raw(77),
+        ChartLevel {
+            tenths: 77,
+            hundredths: 0,
+        }
+    );
+}
+
+#[test]
+fn parse_report_has_structured_conditional_diagnostic() {
+    let report = parse_with_options(
+        b"#RANDOM: nope\n#IF: nope\n#TITLE: recovered\n".as_slice(),
+        ParseOptions { random_seed: 0 },
+    )
+    .expect("malformed conditionals recover");
+    assert!(report.diagnostics.iter().any(|diagnostic| {
+        diagnostic.line == Some(1) && diagnostic.kind == DiagnosticKind::Conditional
+    }));
 }
 
 #[test]

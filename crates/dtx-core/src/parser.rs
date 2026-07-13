@@ -16,6 +16,7 @@ use crate::channel::EChannel;
 use crate::chart::{Chart, Chip, EmptyHitEvent, Metadata};
 use crate::chip_classify::{is_bad_note_byte, nosound_byte_to_lane};
 use crate::error::{DtxError, Result};
+use crate::format::{ChartFormat, ChartLevel};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ParseOptions {
@@ -40,6 +41,7 @@ impl Default for ParseOptions {
 pub struct ParseReport {
     pub chart: Chart,
     pub warnings: Vec<crate::conditional::ParseWarning>,
+    pub diagnostics: Vec<crate::diagnostic::ChartDiagnostic>,
 }
 
 /// Parse a DTX stream.
@@ -53,19 +55,38 @@ pub fn parse<R: Read>(reader: R) -> Result<Chart> {
 }
 
 pub fn parse_with_options<R: Read>(mut reader: R, options: ParseOptions) -> Result<ParseReport> {
+    parse_source(&mut reader, ChartFormat::Dtx, options)
+}
+
+pub fn parse_source<R: Read>(
+    mut reader: R,
+    format: ChartFormat,
+    options: ParseOptions,
+) -> Result<ParseReport> {
     let mut bytes = Vec::new();
     reader.read_to_end(&mut bytes)?;
     let text = decode_dtx_text(&bytes);
     let (lines, warnings) = crate::conditional::select_active_lines(&text, options.random_seed);
-    let mut chart = Chart::default();
+    let mut chart = Chart {
+        format,
+        ..Chart::default()
+    };
+    let mut diagnostics = warnings
+        .iter()
+        .map(crate::diagnostic::ChartDiagnostic::conditional)
+        .collect::<Vec<_>>();
 
     for (line_no, line) in lines {
-        process_line(line, line_no, &mut chart)?;
+        process_line(line, line_no, &mut chart, &mut diagnostics)?;
     }
 
     resolve_bpm_ex_chips(&mut chart);
 
-    Ok(ParseReport { chart, warnings })
+    Ok(ParseReport {
+        chart,
+        warnings,
+        diagnostics,
+    })
 }
 
 /// Resolve BPMEx (channel 0x08) chips: fill `value` with the BPM from the
@@ -109,7 +130,12 @@ fn decode_dtx_text(bytes: &[u8]) -> String {
     }
 }
 
-fn process_line(line: &str, line_no: usize, chart: &mut Chart) -> Result<()> {
+fn process_line(
+    line: &str,
+    line_no: usize,
+    chart: &mut Chart,
+    diagnostics: &mut Vec<crate::diagnostic::ChartDiagnostic>,
+) -> Result<()> {
     let trimmed = line.trim();
     if trimmed.is_empty() || trimmed.starts_with("//") {
         return Ok(());
@@ -150,7 +176,22 @@ fn process_line(line: &str, line_no: usize, chart: &mut Chart) -> Result<()> {
         &mut chart.chips,
         &mut chart.empty_hit_events,
     )?;
+    if !is_chip_head(head) {
+        diagnostics.push(crate::diagnostic::ChartDiagnostic {
+            line: Some(line_no),
+            kind: crate::diagnostic::DiagnosticKind::UnknownOptional,
+            detail: format!("Unknown optional directive #{head}"),
+            recovery: Some("The directive was ignored.".into()),
+        });
+    }
     Ok(())
+}
+
+fn is_chip_head(head: &str) -> bool {
+    let bytes = head.as_bytes();
+    bytes.len() == 5
+        && bytes[..3].iter().all(u8::is_ascii_digit)
+        && bytes[3..].iter().all(u8::is_ascii_hexdigit)
 }
 
 /// Strip trailing DTX inline comment / tab-separated annotation.
@@ -169,8 +210,12 @@ enum MetadataField {
     SoundNowLoading,
     Bpm,
     DLevel,
+    DLevelDecimal,
     GLevel,
     BLevel,
+    HiddenLevel,
+    Background,
+    BackgroundGr,
 }
 
 fn parse_metadata_command(head: &str, _value: &str) -> Option<MetadataField> {
@@ -184,9 +229,13 @@ fn parse_metadata_command(head: &str, _value: &str) -> Option<MetadataField> {
         "PREIMAGE" => MetadataField::Preimage,
         "SOUND_NOWLOADING" => MetadataField::SoundNowLoading,
         "BPM" => MetadataField::Bpm,
-        "DLEVEL" => MetadataField::DLevel,
+        "DLEVEL" | "PLAYLEVEL" => MetadataField::DLevel,
+        "DLVDEC" => MetadataField::DLevelDecimal,
         "GLEVEL" => MetadataField::GLevel,
         "BLEVEL" => MetadataField::BLevel,
+        "HIDDENLEVEL" => MetadataField::HiddenLevel,
+        "BACKGROUND" | "WALL" => MetadataField::Background,
+        "BACKGROUND_GR" => MetadataField::BackgroundGr,
         _ => return None,
     })
 }
@@ -214,10 +263,22 @@ fn apply_metadata(
             })?);
         }
         MetadataField::DLevel => {
-            meta.dlevel = Some(value.parse().map_err(|_| DtxError::InvalidLine {
+            let raw = value.parse().map_err(|_| DtxError::InvalidLine {
                 line: line_no,
                 message: format!("#DLEVEL not an int: {value:?}"),
-            })?);
+            })?;
+            let level = ChartLevel::from_raw(raw);
+            meta.drum_level = Some(level);
+            meta.dlevel = Some(level.compatibility_raw());
+        }
+        MetadataField::DLevelDecimal => {
+            let decimal = value.parse::<i32>().map_err(|_| DtxError::InvalidLine {
+                line: line_no,
+                message: format!("#DLVDEC not an int: {value:?}"),
+            })?;
+            let level = meta.drum_level.unwrap_or_default().with_decimal(decimal);
+            meta.drum_level = Some(level);
+            meta.dlevel = Some(level.compatibility_raw());
         }
         MetadataField::GLevel => {
             meta.glevel = Some(value.parse().map_err(|_| DtxError::InvalidLine {
@@ -231,6 +292,9 @@ fn apply_metadata(
                 message: format!("#BLEVEL not an int: {value:?}"),
             })?);
         }
+        MetadataField::HiddenLevel => meta.hidden_level = value.eq_ignore_ascii_case("on"),
+        MetadataField::Background => meta.background = Some(value.to_string()),
+        MetadataField::BackgroundGr => meta.background_gr = Some(value.to_string()),
     }
     // head is unused for non-error paths, but kept for future header variants.
     let _ = head;

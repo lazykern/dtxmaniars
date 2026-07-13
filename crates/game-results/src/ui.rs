@@ -239,8 +239,8 @@ pub(crate) fn spawn_result(
         .unwrap_or_else(|| "Unknown".into());
     let dlevel = chart
         .metadata()
-        .dlevel
-        .map(|v| format!("{:.2}", dtx_core::display_dlevel(v)))
+        .display_drum_level()
+        .map(|v| format!("{v:.2}"))
         .unwrap_or_else(|| "--".into());
     let total = scoring.total_notes;
     let rank = crate::result_rank(&counts, combo.max, total);

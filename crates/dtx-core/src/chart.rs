@@ -1,5 +1,6 @@
 use crate::assets::DtxAssets;
 use crate::channel::EChannel;
+use crate::format::{ChartFormat, ChartLevel};
 
 /// Metadata parsed from DTX header commands.
 #[derive(Debug, Clone, Default, PartialEq)]
@@ -19,10 +20,24 @@ pub struct Metadata {
     /// Older charts use 0..100 (77 = 7.70); some modern exports use
     /// hundred-scale values (355 = 3.55, 980 = 9.80).
     pub dlevel: Option<u32>,
+    /// Normalized drums level. `dlevel` remains as a packed compatibility
+    /// value for downstream APIs and is updated from this field.
+    pub drum_level: Option<ChartLevel>,
     pub glevel: Option<u32>,
     pub blevel: Option<u32>,
+    pub hidden_level: bool,
+    pub background: Option<String>,
+    pub background_gr: Option<String>,
     /// WAV slot ids from `#BGMWAV:` directives (BocuD `listBGMWAV番号`).
     pub bgm_wav_slots: Vec<u32>,
+}
+
+impl Metadata {
+    pub fn display_drum_level(&self) -> Option<f32> {
+        self.drum_level
+            .map(ChartLevel::display)
+            .or_else(|| self.dlevel.map(display_dlevel))
+    }
 }
 
 /// One chip in the chart (note, BPM change, bar-length change, etc.).
@@ -95,6 +110,7 @@ impl Chip {
 /// Parsed DTX chart.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct Chart {
+    pub format: ChartFormat,
     pub metadata: Metadata,
     pub chips: Vec<Chip>,
     /// NoChip templates (`#B1`–`#BE`) for empty-hit sounds.

@@ -22,9 +22,11 @@ pub mod chip_transform;
 pub mod conditional;
 pub mod constants;
 pub mod cscore_ini;
+pub mod diagnostic;
 pub mod enum_converter;
 pub mod error;
 pub mod fdk_sub_acts;
+pub mod format;
 pub mod parser;
 pub mod random_mode;
 pub mod score_song;
@@ -37,8 +39,10 @@ pub use channel::EChannel;
 pub use chart::{display_dlevel, Chart, Chip, EmptyHitEvent, Metadata};
 pub use chip_transform::{apply_mirror, apply_random, RandomMode};
 pub use conditional::{ParseWarning, ParseWarningKind};
+pub use diagnostic::{ChartDiagnostic, DiagnosticKind};
 pub use error::DtxError;
-pub use parser::{parse, parse_with_options, ParseOptions, ParseReport};
+pub use format::{ChartFormat, ChartLevel};
+pub use parser::{parse, parse_source, parse_with_options, ParseOptions, ParseReport};
 
 /// Parse a DTX file from a string slice.
 ///

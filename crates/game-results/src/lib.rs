@@ -189,8 +189,7 @@ fn save_result(
     let chart_level = chart
         .chart
         .metadata
-        .dlevel
-        .map(dtx_core::display_dlevel)
+        .display_drum_level()
         .map(f64::from)
         .unwrap_or(0.0);
     let performance_skill = drum_performance_skill(
