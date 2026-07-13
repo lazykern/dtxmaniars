@@ -470,6 +470,9 @@ struct SearchText;
 struct SearchBox;
 #[derive(Component)]
 struct SortChipText;
+/// Compact, nonblocking summary of the last song-directory scan.
+#[derive(Component)]
+struct ScanProblemSummary;
 /// Big art panel in the left column.
 #[derive(Component)]
 struct BigAlbumArt;
@@ -544,6 +547,19 @@ fn esc_clears_search_first(query: &str) -> bool {
     !query.is_empty()
 }
 
+fn scan_problem_summary(report: &dtx_library::ScanReport) -> Option<String> {
+    if report.skipped() > 0 {
+        Some(format!("{} charts skipped — see log", report.skipped()))
+    } else if !report.problems.is_empty() {
+        Some(format!(
+            "{} chart warnings — see log",
+            report.problems.len()
+        ))
+    } else {
+        None
+    }
+}
+
 // ===== Plugin =====
 
 pub fn plugin(app: &mut App) {
@@ -586,6 +602,7 @@ pub fn plugin(app: &mut App) {
                 )
                     .chain(),
                 update_song_select_legend,
+                update_scan_problem_summary,
                 (search_input, render_search_on_change).chain(),
                 respawn_wheel_on_change,
                 wheel_layout_system,
@@ -639,6 +656,25 @@ fn ensure_song_db_loaded(mut db: ResMut<SongDb>) {
         if let Err(e) = db.rescan(&dir) {
             warn!("SongSelect: scan failed: {}", e);
         }
+    }
+}
+
+/// Keep the small scan status node current after startup, F5, or import scans.
+fn update_scan_problem_summary(
+    db: Res<SongDb>,
+    mut summaries: Query<(&mut Text, &mut Node), With<ScanProblemSummary>>,
+) {
+    if !db.is_changed() {
+        return;
+    }
+    let summary = scan_problem_summary(&db.latest_scan);
+    for (mut text, mut node) in &mut summaries {
+        *text = Text::new(summary.clone().unwrap_or_default());
+        node.display = if summary.is_some() {
+            Display::Flex
+        } else {
+            Display::None
+        };
     }
 }
 
@@ -836,6 +872,25 @@ fn spawn_song_select(
                                 });
                         });
                     });
+
+                    let summary = scan_problem_summary(&db.latest_scan);
+                    root.spawn((
+                        ScanProblemSummary,
+                        Node {
+                            position_type: PositionType::Absolute,
+                            top: Val::Px(52.0),
+                            right: Val::Px(20.0),
+                            display: if summary.is_some() {
+                                Display::Flex
+                            } else {
+                                Display::None
+                            },
+                            ..default()
+                        },
+                        Text::new(summary.unwrap_or_default()),
+                        Theme::font(11.0),
+                        TextColor(t.select_yellow),
+                    ));
 
                     // ---- far-left column: skill + bpm
                     root.spawn((
@@ -2039,6 +2094,46 @@ fn maybe_recompute_visible(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn scan_problem_summary_is_hidden_for_a_clean_scan() {
+        assert_eq!(
+            scan_problem_summary(&dtx_library::ScanReport::default()),
+            None
+        );
+    }
+
+    #[test]
+    fn scan_problem_summary_prefers_skipped_chart_count() {
+        let report = dtx_library::ScanReport {
+            discovered: 3,
+            loaded: 2,
+            ..default()
+        };
+        assert_eq!(
+            scan_problem_summary(&report),
+            Some("1 charts skipped — see log".into())
+        );
+    }
+
+    #[test]
+    fn scan_problem_summary_reports_warning_only_scan() {
+        let report = dtx_library::ScanReport {
+            discovered: 1,
+            loaded: 1,
+            problems: vec![dtx_library::ScanProblem {
+                path: "warning.dtx".into(),
+                line: Some(2),
+                kind: dtx_library::ScanProblemKind::ParserWarning,
+                detail: "InvalidRandom".into(),
+            }],
+            ..default()
+        };
+        assert_eq!(
+            scan_problem_summary(&report),
+            Some("1 chart warnings — see log".into())
+        );
+    }
 
     #[test]
     fn pad_wheel_levels() {

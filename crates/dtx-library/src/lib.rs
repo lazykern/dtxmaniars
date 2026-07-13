@@ -25,9 +25,10 @@ pub mod import;
 
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::time::Instant;
 
 use bevy::prelude::*;
-use dtx_core::{Chart, parse};
+use dtx_core::{Chart, ParseOptions, parse_with_options};
 use thiserror::Error;
 
 /// One chart (= one .dtx file in M5; M6+ supports multi-chart songs).
@@ -138,6 +139,40 @@ pub enum ScanError {
     },
 }
 
+/// A nonfatal chart issue encountered while scanning a song directory.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ScanProblemKind {
+    Open,
+    Parse,
+    ParserWarning,
+    MissingPreview,
+    UnsupportedPreview,
+}
+
+/// Detailed context for a nonfatal chart scan issue.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ScanProblem {
+    pub path: PathBuf,
+    pub line: Option<usize>,
+    pub kind: ScanProblemKind,
+    pub detail: String,
+}
+
+/// Aggregate result retained from the latest song-directory scan.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct ScanReport {
+    pub elapsed: std::time::Duration,
+    pub discovered: usize,
+    pub loaded: usize,
+    pub problems: Vec<ScanProblem>,
+}
+
+impl ScanReport {
+    pub fn skipped(&self) -> usize {
+        self.discovered.saturating_sub(self.loaded)
+    }
+}
+
 /// True if `path` names a DTX chart, regardless of extension letter case.
 pub fn is_dtx_path(path: &Path) -> bool {
     path.extension()
@@ -149,13 +184,20 @@ pub fn is_dtx_path(path: &Path) -> bool {
 ///
 /// Errors on individual files are logged and skipped (so one bad DTX
 /// doesn't kill the whole scan). Only a directory-level I/O error is fatal.
-pub fn scan_directory(root: &Path) -> Result<Vec<SongInfo>, ScanError> {
+pub fn scan_directory(root: &Path) -> Result<(Vec<SongInfo>, ScanReport), ScanError> {
+    let started = Instant::now();
     let mut songs = Vec::new();
-    walk_dtx(root, &mut songs)?;
-    Ok(songs)
+    let mut report = ScanReport::default();
+    walk_dtx(root, &mut songs, &mut report)?;
+    report.elapsed = started.elapsed();
+    Ok((songs, report))
 }
 
-fn walk_dtx(dir: &Path, songs: &mut Vec<SongInfo>) -> Result<(), ScanError> {
+fn walk_dtx(
+    dir: &Path,
+    songs: &mut Vec<SongInfo>,
+    report: &mut ScanReport,
+) -> Result<(), ScanError> {
     let entries = fs::read_dir(dir).map_err(|source| ScanError::Io {
         path: dir.to_path_buf(),
         source,
@@ -164,22 +206,92 @@ fn walk_dtx(dir: &Path, songs: &mut Vec<SongInfo>) -> Result<(), ScanError> {
     for entry in entries.flatten() {
         let path = entry.path();
         if path.is_dir() {
-            walk_dtx(&path, songs)?;
+            walk_dtx(&path, songs, report)?;
         } else if is_dtx_path(&path) {
+            report.discovered += 1;
             match fs::File::open(&path) {
-                Ok(file) => match parse(file) {
-                    Ok(chart) => songs.push(SongInfo::from_chart(&path, &chart)),
+                Ok(file) => match parse_with_options(file, ParseOptions::default()) {
+                    Ok(parse_report) => {
+                        for warning in parse_report.warnings {
+                            let problem = ScanProblem {
+                                path: path.clone(),
+                                line: Some(warning.line),
+                                kind: ScanProblemKind::ParserWarning,
+                                detail: format!("{:?}", warning.kind),
+                            };
+                            warn_scan_problem(&problem);
+                            report.problems.push(problem);
+                        }
+                        inspect_preview_problem(&path, &parse_report.chart, report);
+                        songs.push(SongInfo::from_chart(&path, &parse_report.chart));
+                        report.loaded += 1;
+                    }
                     Err(source) => {
-                        bevy::log::warn!("DTX parse failed for {}: {}", path.display(), source);
+                        let problem = ScanProblem {
+                            path: path.clone(),
+                            line: None,
+                            kind: ScanProblemKind::Parse,
+                            detail: source.to_string(),
+                        };
+                        warn_scan_problem(&problem);
+                        report.problems.push(problem);
                     }
                 },
                 Err(source) => {
-                    bevy::log::warn!("DTX open failed for {}: {}", path.display(), source);
+                    let problem = ScanProblem {
+                        path: path.clone(),
+                        line: None,
+                        kind: ScanProblemKind::Open,
+                        detail: source.to_string(),
+                    };
+                    warn_scan_problem(&problem);
+                    report.problems.push(problem);
                 }
             }
         }
     }
     Ok(())
+}
+
+fn inspect_preview_problem(path: &Path, chart: &Chart, report: &mut ScanReport) {
+    let Some(preview) = chart.metadata.preview_filename.as_deref() else {
+        return;
+    };
+    let Some(parent) = path.parent() else {
+        return;
+    };
+
+    let kind = if dtx_audio::supported_audio_format(Path::new(preview)).is_none() {
+        Some(ScanProblemKind::UnsupportedPreview)
+    } else if dtx_core::resolve_chart_asset_path(parent, preview).is_none() {
+        Some(ScanProblemKind::MissingPreview)
+    } else {
+        None
+    };
+    if let Some(kind) = kind {
+        let problem = ScanProblem {
+            path: path.to_path_buf(),
+            line: None,
+            kind,
+            detail: format!("#PREVIEW references {preview:?}"),
+        };
+        warn_scan_problem(&problem);
+        report.problems.push(problem);
+    }
+}
+
+fn warn_scan_problem(problem: &ScanProblem) {
+    let line = problem
+        .line
+        .map(|line| format!(":{line}"))
+        .unwrap_or_default();
+    bevy::log::warn!(
+        "DTX scan {:?} at {}{}: {}",
+        problem.kind,
+        problem.path.display(),
+        line,
+        problem.detail
+    );
 }
 
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Hash)]
@@ -219,6 +331,8 @@ pub struct SongDb {
     pub sort_mode: SortMode,
     /// Root directory that was scanned (for re-scan).
     pub scan_root: Option<PathBuf>,
+    /// Structured outcome from the most recent completed scan.
+    pub latest_scan: ScanReport,
 }
 
 impl SongDb {
@@ -228,10 +342,11 @@ impl SongDb {
 
     /// Re-scan the directory and update in place.
     pub fn rescan(&mut self, root: &Path) -> Result<(), ScanError> {
-        let mut songs = scan_directory(root)?;
+        let (mut songs, report) = scan_directory(root)?;
         sort_songs(&mut songs, self.sort_mode);
         self.songs = songs;
         self.scan_root = Some(root.to_path_buf());
+        self.latest_scan = report;
         Ok(())
     }
 
@@ -385,6 +500,14 @@ mod tests {
     fn from_chart_preview_path_prefers_explicit_preview() {
         // When the chart declares #PREVIEW:, the song-select preview
         // should be that file and `preview_is_loopable` should be true.
+        let dir = std::env::temp_dir().join(format!(
+            "dtx-library-preview-{}-{}",
+            std::process::id(),
+            std::thread::current().name().unwrap_or("test")
+        ));
+        fs::create_dir_all(&dir).expect("create preview directory");
+        let preview = dir.join("clip.ogg");
+        fs::write(&preview, b"test fixture").expect("write preview fixture");
         let chart = Chart {
             metadata: dtx_core::Metadata {
                 title: Some("X".into()),
@@ -395,14 +518,12 @@ mod tests {
             chips: vec![],
             ..Default::default()
         };
-        let path = PathBuf::from("/songs/x/x.dtx");
+        let path = dir.join("x.dtx");
         let info = SongInfo::from_chart(&path, &chart);
-        assert_eq!(info.preview_path, Some(PathBuf::from("/songs/x/clip.ogg")));
+        assert_eq!(info.preview_path, Some(preview));
         assert!(info.preview_is_loopable);
-        assert_eq!(
-            info.preimage_path,
-            Some(PathBuf::from("/songs/x/cover.jpg"))
-        );
+        assert_eq!(info.preimage_path, Some(dir.join("cover.jpg")));
+        fs::remove_dir_all(dir).expect("remove preview directory");
     }
 
     #[test]
@@ -460,7 +581,7 @@ mod tests {
 
     #[test]
     fn scan_directory_finds_drums_basic_fixture() {
-        let songs = scan_directory(&fixture_dir()).expect("scan must succeed");
+        let (songs, _) = scan_directory(&fixture_dir()).expect("scan must succeed");
         assert!(
             !songs.is_empty(),
             "fixture dir should have at least one .dtx"
@@ -481,10 +602,64 @@ mod tests {
         fs::create_dir_all(&dir).expect("create fixture directory");
         fs::write(dir.join("UPPER.DTX"), b"#TITLE: Uppercase\n").expect("write uppercase chart");
 
-        let songs = scan_directory(&dir).expect("scan uppercase chart");
+        let (songs, _) = scan_directory(&dir).expect("scan uppercase chart");
 
         assert_eq!(songs.len(), 1);
         assert_eq!(songs[0].title, "Uppercase");
+        fs::remove_dir_all(dir).expect("remove fixture directory");
+    }
+
+    #[test]
+    fn scan_report_keeps_parse_warning_and_preview_problems() {
+        let dir = std::env::temp_dir().join(format!(
+            "dtx-library-scan-report-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .expect("clock after epoch")
+                .as_nanos()
+        ));
+        fs::create_dir_all(&dir).expect("create fixture directory");
+        fs::write(
+            dir.join("VALID.DTX"),
+            b"#TITLE: Valid\n#BPM: 120\n#00013: 01\n",
+        )
+        .expect("write valid chart");
+        fs::write(dir.join("invalid.dtx"), b"#BPM: nope\n").expect("write invalid chart");
+        fs::write(
+            dir.join("warning.dtx"),
+            b"#RANDOM: nope\n#ENDRANDOM\n#PREVIEW: clip.xa\n#00013: 01\n",
+        )
+        .expect("write warning chart");
+
+        let (songs, report) = scan_directory(&dir).expect("scan report");
+        assert_eq!(songs.len(), 2);
+        assert_eq!(report.discovered, 3);
+        assert_eq!(report.loaded, 2);
+        assert_eq!(report.skipped(), 1);
+        assert!(report.elapsed <= std::time::Duration::from_secs(1));
+        assert!(
+            report
+                .problems
+                .iter()
+                .any(|problem| problem.kind == ScanProblemKind::Parse)
+        );
+        assert!(
+            report
+                .problems
+                .iter()
+                .any(|problem| problem.kind == ScanProblemKind::ParserWarning)
+        );
+        assert!(report.problems.iter().any(|problem| {
+            problem.kind == ScanProblemKind::UnsupportedPreview
+                && problem.path.ends_with("warning.dtx")
+        }));
+
+        let mut db = SongDb::new();
+        db.rescan(&dir).expect("rescan report");
+        assert_eq!(db.latest_scan.discovered, 3);
+        assert_eq!(db.latest_scan.loaded, 2);
+
         fs::remove_dir_all(dir).expect("remove fixture directory");
     }
 

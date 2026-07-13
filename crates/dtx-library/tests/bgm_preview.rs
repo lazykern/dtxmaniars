@@ -18,7 +18,7 @@ fn fixture_dir() -> PathBuf {
 
 #[test]
 fn scan_finds_with_bgm_dtx() {
-    let songs = scan_directory(&fixture_dir()).expect("scan must succeed");
+    let (songs, _) = scan_directory(&fixture_dir()).expect("scan must succeed");
     let bgm_song = songs
         .iter()
         .find(|s| s.title == "BGM Test")
@@ -30,7 +30,7 @@ fn scan_finds_with_bgm_dtx() {
 
 #[test]
 fn bgm_path_resolves_for_with_bgm() {
-    let songs = scan_directory(&fixture_dir()).expect("scan must succeed");
+    let (songs, _) = scan_directory(&fixture_dir()).expect("scan must succeed");
     let bgm_song = songs
         .iter()
         .find(|s| s.title == "BGM Test")
@@ -45,7 +45,7 @@ fn bgm_path_resolves_for_with_bgm() {
 
 #[test]
 fn other_dtx_have_no_bgm() {
-    let songs = scan_directory(&fixture_dir()).expect("scan must succeed");
+    let (songs, _) = scan_directory(&fixture_dir()).expect("scan must succeed");
     let minimal = songs
         .iter()
         .find(|s| s.title == "Minimal Test")
@@ -59,7 +59,7 @@ fn other_dtx_have_no_bgm() {
 #[test]
 fn song_info_clone_for_bgm_preview() {
     // Verifies SongInfo is Clone-able for the bgm_preview_on_change Local cache.
-    let songs = scan_directory(&fixture_dir()).unwrap();
+    let (songs, _) = scan_directory(&fixture_dir()).unwrap();
     let song: SongInfo = songs
         .iter()
         .find(|s| s.title == "BGM Test")
