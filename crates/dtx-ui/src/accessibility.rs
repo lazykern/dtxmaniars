@@ -1,5 +1,5 @@
 use bevy::prelude::Resource;
-use dtx_config::AccessibilityConfig;
+use dtx_config::{AccessibilityConfig, TextScale};
 
 /// Whether decorative motion should play at full strength.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -16,9 +16,9 @@ pub enum FlashDecision {
 }
 
 /// Runtime accessibility decisions derived once from persisted configuration.
-#[derive(Resource, Debug, Clone, PartialEq)]
+#[derive(Resource, Debug, Clone, Copy, PartialEq)]
 pub struct AccessibilityPolicy {
-    text_multiplier: f32,
+    text_scale: TextScale,
     reduce_motion: bool,
     reduce_flashes: bool,
     background_motion: bool,
@@ -33,7 +33,7 @@ impl Default for AccessibilityPolicy {
 impl From<&AccessibilityConfig> for AccessibilityPolicy {
     fn from(config: &AccessibilityConfig) -> Self {
         Self {
-            text_multiplier: config.text_scale.multiplier(),
+            text_scale: config.text_scale,
             reduce_motion: config.reduce_motion,
             reduce_flashes: config.reduce_flashes,
             background_motion: config.background_motion,
@@ -43,7 +43,11 @@ impl From<&AccessibilityConfig> for AccessibilityPolicy {
 
 impl AccessibilityPolicy {
     pub const fn text_multiplier(&self) -> f32 {
-        self.text_multiplier
+        self.text_scale.multiplier()
+    }
+
+    pub const fn text_scale(&self) -> TextScale {
+        self.text_scale
     }
 
     pub const fn screen_transition_ms(&self) -> u32 {

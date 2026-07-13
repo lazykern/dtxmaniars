@@ -11,6 +11,7 @@ pub mod perf_common;
 pub mod theme;
 pub mod transition;
 pub mod tween;
+pub mod typography;
 pub mod widget;
 
 use bevy::asset::Handle;
@@ -20,6 +21,7 @@ use bevy::text::Font;
 pub use accessibility::{AccessibilityPolicy, FlashDecision, MotionDecision, StartupConfigWarning};
 pub use theme::{Theme, ThemeResource, REF_HEIGHT, REF_WIDTH, SCREEN_TRANSITION_MS};
 pub use transition::{FadePhase, ScreenFade, TransitionOverlay};
+pub use typography::{InteractionTone, SpacingRole, StateMarker, Typography, TypographyRole};
 
 /// Legacy alias — ADR-0014 uses 300ms OutQuint (not 1500ms BocuD snapshot).
 pub const SCREEN_FADE_MS: u32 = 300;
@@ -97,6 +99,7 @@ pub fn absolute_label(
 pub fn plugin(app: &mut App) {
     app.init_resource::<AccessibilityPolicy>()
         .init_resource::<StartupConfigWarning>()
+        .init_resource::<Typography>()
         .init_resource::<ThemeResource>()
         .init_resource::<widget::density_graph::DensityData>()
         .init_resource::<widget::difficulty_grid::DifficultyGridData>()

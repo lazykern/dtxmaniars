@@ -3,6 +3,8 @@
 use bevy::prelude::*;
 use bevy::text::FontSource;
 
+use crate::typography::InteractionTone;
+
 /// Design resolution baseline.
 pub const REF_WIDTH: f32 = 1280.0;
 pub const REF_HEIGHT: f32 = 720.0;
@@ -67,6 +69,15 @@ impl Default for Theme {
 pub struct ThemeResource(pub Theme);
 
 impl Theme {
+    pub fn interaction_color(&self, tone: InteractionTone) -> Color {
+        match tone {
+            InteractionTone::Focus | InteractionTone::Selected => self.accent,
+            InteractionTone::Error | InteractionTone::Destructive => self.judgment_miss,
+            InteractionTone::Success => self.clear_green,
+            InteractionTone::Disabled => self.text_secondary,
+        }
+    }
+
     pub fn judgment_color(&self, label: &str) -> Color {
         match label.to_uppercase().as_str() {
             "PERFECT" | "PG" => self.judgment_perfect,
