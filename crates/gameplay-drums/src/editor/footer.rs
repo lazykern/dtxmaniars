@@ -130,14 +130,32 @@ pub fn capture_footer_text(state: &super::bindings_capture::CaptureState) -> Opt
             "Hit a pad for {} — Esc cancels",
             channel.short_name().unwrap_or("channel")
         )),
+        // Refusal first: it must win over the plain "press a key/hit a pad" line.
+        CaptureState::SystemKey {
+            refused: Some(owner),
+            ..
+        }
+        | CaptureState::SystemMidi {
+            refused: Some(owner),
+            ..
+        } => Some(format!(
+            "{} already drives that input — pick another",
+            owner.short_name().unwrap_or("a lane")
+        )),
+        CaptureState::SystemKey { verb, .. } => {
+            Some(format!("Press a key for {} — Esc cancels", verb.label()))
+        }
+        CaptureState::SystemMidi { verb, .. } => {
+            Some(format!("Hit a pad for {} — Esc cancels", verb.label()))
+        }
         CaptureState::KeyArrived { owners, .. } | CaptureState::MidiArrived { owners, .. }
             if owners.is_empty() =>
         {
             Some("Enter confirm · Esc cancel".to_string())
         }
-        CaptureState::KeyArrived { .. } | CaptureState::MidiArrived { .. } => Some(
-            "Enter confirm · ←→ shared/move · Esc cancel".to_string(),
-        ),
+        CaptureState::KeyArrived { .. } | CaptureState::MidiArrived { .. } => {
+            Some("Enter confirm · ←→ shared/move · Esc cancel".to_string())
+        }
     }
 }
 
@@ -229,11 +247,19 @@ mod tests {
     fn nav_hints_cover_controls_rows_and_lanes_levels() {
         // Controls: hint only at Rows.
         assert_eq!(
-            nav_hint_text(CustomizeTab::Controls, ControlsFocus::Rows, LanesFocus::TabBar),
+            nav_hint_text(
+                CustomizeTab::Controls,
+                ControlsFocus::Rows,
+                LanesFocus::TabBar
+            ),
             Some("Enter capture · Bksp remove")
         );
         assert_eq!(
-            nav_hint_text(CustomizeTab::Controls, ControlsFocus::SegmentSelector, LanesFocus::TabBar),
+            nav_hint_text(
+                CustomizeTab::Controls,
+                ControlsFocus::SegmentSelector,
+                LanesFocus::TabBar
+            ),
             None
         );
         // Lanes: per-level hints.
@@ -242,16 +268,28 @@ mod tests {
             Some("↑↓ select · Shift+↑↓ reorder · Enter detail")
         );
         assert_eq!(
-            nav_hint_text(CustomizeTab::Lanes, ControlsFocus::TabBar, LanesFocus::Detail),
+            nav_hint_text(
+                CustomizeTab::Lanes,
+                ControlsFocus::TabBar,
+                LanesFocus::Detail
+            ),
             Some("←→ width · Shift ×4 · Esc back")
         );
         assert_eq!(
-            nav_hint_text(CustomizeTab::Lanes, ControlsFocus::TabBar, LanesFocus::TabBar),
+            nav_hint_text(
+                CustomizeTab::Lanes,
+                ControlsFocus::TabBar,
+                LanesFocus::TabBar
+            ),
             None
         );
         // Other tabs: never.
         assert_eq!(
-            nav_hint_text(CustomizeTab::Gameplay, ControlsFocus::Rows, LanesFocus::Detail),
+            nav_hint_text(
+                CustomizeTab::Gameplay,
+                ControlsFocus::Rows,
+                LanesFocus::Detail
+            ),
             None
         );
     }

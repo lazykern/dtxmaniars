@@ -153,7 +153,31 @@ fn modal_lines(state: &CaptureState) -> Option<ModalLines> {
             owners_caption: (!owners.is_empty()).then(|| owners_caption(owners)),
             choice: Some(*choice),
         }),
+        // System captures have no Arrived stage (nothing to share or move); a
+        // lane-owned source is refused in place, named right here in the modal.
+        CaptureState::SystemKey { verb, refused } => Some(ModalLines {
+            title: format!("Press a key for {}", verb.label()),
+            subtitle: Some("Esc cancel".to_string()),
+            arrived: None,
+            owners_caption: refused.map(refusal_caption),
+            choice: None,
+        }),
+        CaptureState::SystemMidi { verb, refused } => Some(ModalLines {
+            title: format!("Hit a pad for {}", verb.label()),
+            subtitle: Some("Esc cancel".to_string()),
+            arrived: None,
+            owners_caption: refused.map(refusal_caption),
+            choice: None,
+        }),
     }
+}
+
+/// Why a system capture refused the source it just saw.
+fn refusal_caption(ch: dtx_core::EChannel) -> String {
+    format!(
+        "already bound to the {} lane — pick another",
+        channel_name(ch)
+    )
 }
 
 /// Live "note N · velocity V" line for the `Midi(ch)` listening state.
@@ -179,6 +203,15 @@ fn live_hit_line(hit: &crate::LastMidiHit) -> Option<(String, bool)> {
             false,
         ))
     }
+}
+
+/// Pad-listening states — lane learn AND system-verb capture — both show the
+/// live "note N · velocity V" line.
+fn listening_midi(state: &CaptureState) -> bool {
+    matches!(
+        state,
+        CaptureState::Midi(_) | CaptureState::SystemMidi { .. }
+    )
 }
 
 /// Click→`ArrivedInput` mapping for a choice button: clicking the choice
@@ -250,7 +283,7 @@ fn sync_capture_modal(
         return;
     };
     let t = theme.0;
-    let listening_midi = matches!(*capture, CaptureState::Midi(_));
+    let listening_midi = listening_midi(&capture);
     let live = live_hit_line(&last_midi);
 
     commands
@@ -322,22 +355,37 @@ fn sync_capture_modal(
                         ));
                     }
 
-                    if let Some(caption) = &lines.owners_caption {
-                        // Conflict: two-way choice + who else holds the source.
-                        let current = lines.choice.unwrap_or_default();
+                    // A caption WITH a choice is an Arrived conflict (shared vs.
+                    // move). A caption WITHOUT one is a system-capture refusal:
+                    // no choice to offer — the source is a lane's, full stop.
+                    if let Some(current) = lines.choice.filter(|_| lines.owners_caption.is_some()) {
                         card.spawn(Node {
                             flex_direction: FlexDirection::Row,
                             column_gap: Val::Px(8.0),
                             ..default()
                         })
                         .with_children(|row| {
-                            spawn_choice_btn(row, &t, ArrivedChoice::Shared, "Also accept here", current);
+                            spawn_choice_btn(
+                                row,
+                                &t,
+                                ArrivedChoice::Shared,
+                                "Also accept here",
+                                current,
+                            );
                             spawn_choice_btn(row, &t, ArrivedChoice::Move, "Move here", current);
                         });
+                    }
+
+                    if let Some(caption) = &lines.owners_caption {
+                        let refusal = lines.choice.is_none();
                         card.spawn((
                             Text::new(caption.clone()),
-                            dtx_ui::theme::Theme::font(11.0),
-                            TextColor(chrome::TEXT_MUTED),
+                            dtx_ui::theme::Theme::font(if refusal { 12.0 } else { 11.0 }),
+                            TextColor(if refusal {
+                                chrome::DIRTY
+                            } else {
+                                chrome::TEXT_MUTED
+                            }),
                         ));
                     } else if lines.arrived.is_some() {
                         card.spawn((
@@ -390,7 +438,7 @@ fn update_capture_live_text(
     theme: Res<dtx_ui::ThemeResource>,
     mut q: Query<(&mut Text, &mut TextColor), With<CaptureLiveText>>,
 ) {
-    if !matches!(*capture, CaptureState::Midi(_)) {
+    if !listening_midi(&capture) {
         return;
     }
     let Ok((mut text, mut color)) = q.single_mut() else {
