@@ -31,11 +31,11 @@ ledger is the durable inventory; completing one cycle never removes later work.
 
 | Cycle | Outcome | Status |
 |---|---|---|
-| 0 | Restore a truthful local quality baseline | Queued with first implementation plan |
-| 1 | Playback-rate and score integrity | Designed with Cycle 2 core |
-| 2 | Core DTX and audio compatibility | Designed with Cycle 1 |
-| 3 | Reliable guided calibration | Queued |
-| 4 | Results analysis and weakest-section practice handoff | Queued |
+| 0 | Restore a truthful local quality baseline | Implemented |
+| 1 | Playback-rate and score integrity | Implemented |
+| 2 | Core DTX and audio compatibility | Implemented |
+| 3 | Reliable guided calibration | Implemented |
+| 4 | Results analysis and weakest-section practice handoff | Implemented |
 | 5 | Large-library discovery and measured scan performance | Queued |
 | 6 | Accessibility and design-system consolidation | Queued |
 | 7 | Extended format/media compatibility | Queued |
@@ -111,6 +111,18 @@ intent with a structured intent carrying loop bounds, pre-roll, initial tempo,
 and recommendation reason. “Practice weakest section” opens the existing
 practice mode with that loop already selected. Practice results remain excluded
 from normal score persistence.
+
+Completed 2026-07-13:
+
+- Bounded, in-memory normal-play telemetry records lane, judgment, signed
+  timing error, chip index, and chart time; practice telemetry remains
+  excluded.
+- Results derives median early/late bias, MAD timing spread, weighted weakest
+  lane, and a bar-aligned weakest-section loop.
+- Results snapshots comparable PB deltas before persistence and keeps
+  diagnostics in a focused details surface.
+- Recommended practice uses a typed game-shell request and applies the loop,
+  one-bar pre-roll, and 1.0 tempo to the existing transport.
 
 ## Cycle 5 — Large-library discovery
 
