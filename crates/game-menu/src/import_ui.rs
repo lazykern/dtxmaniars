@@ -149,6 +149,7 @@ fn poll_imports(
     mut toast: ResMut<ImportToast>,
     mut jump: ResMut<PendingImportJump>,
     time: Res<Time>,
+    mut notifications: Option<ResMut<dtx_ui::NotificationQueue>>,
 ) {
     let rx = channel.rx.lock().expect("import channel poisoned");
     while let Ok(result) = rx.try_recv() {
@@ -190,6 +191,13 @@ fn poll_imports(
             Err(ImportError::Io(e)) => (format!("import failed: {e}"), ToastTone::Error),
         };
         info!("import: {text}");
+        if let Some(notifications) = &mut notifications {
+            notifications.push(match tone {
+                ToastTone::Success => dtx_ui::Notification::success(text.clone()),
+                ToastTone::Warn => dtx_ui::Notification::warning(text.clone()),
+                ToastTone::Error => dtx_ui::Notification::error(text.clone()),
+            });
+        }
         toast.lines.push((text, tone));
         if toast.lines.len() > TOAST_MAX_LINES {
             let drop = toast.lines.len() - TOAST_MAX_LINES;

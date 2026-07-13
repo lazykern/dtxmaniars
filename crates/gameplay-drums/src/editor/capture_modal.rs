@@ -294,6 +294,10 @@ fn sync_capture_modal(
     commands
         .spawn((
             CaptureModalRoot,
+            dtx_ui::ModalDialog::new(vec![
+                dtx_ui::DialogAction::Cancel,
+                dtx_ui::DialogAction::Confirm,
+            ]),
             Node {
                 position_type: PositionType::Absolute,
                 left: Val::Px(0.0),

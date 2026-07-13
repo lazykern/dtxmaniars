@@ -798,18 +798,17 @@ fn loop_wrap_pushes_a_micro_report_toast() {
         .world()
         .resource::<gameplay_drums::practice::toast::ToastQueue>();
     let report = toasts
-        .0
         .iter()
-        .find(|t| t.text.starts_with("pass "))
+        .find(|notification| notification.message.starts_with("pass "))
         .expect("wrap must push a micro-report toast");
     assert!(
-        report.text.contains('%'),
+        report.message.contains('%'),
         "report shows accuracy: {}",
-        report.text
+        report.message
     );
     assert!(
-        report.text.contains("ms"),
+        report.message.contains("ms"),
         "report shows mean error: {}",
-        report.text
+        report.message
     );
 }

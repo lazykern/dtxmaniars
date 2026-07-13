@@ -106,6 +106,7 @@ fn handle_config_draft_actions(
     mut policy: ResMut<dtx_ui::AccessibilityPolicy>,
     time: Res<Time>,
     mut err: ResMut<super::footer::EditorSaveError>,
+    mut notifications: Option<ResMut<dtx_ui::NotificationQueue>>,
 ) {
     for action in actions.read() {
         match action {
@@ -117,6 +118,11 @@ fn handle_config_draft_actions(
                         path.display()
                     );
                     err.set(time.elapsed_secs_f64(), format!("save failed: {error}"));
+                    if let Some(notifications) = &mut notifications {
+                        notifications.push(dtx_ui::Notification::error(format!(
+                            "Settings were not saved: {error}"
+                        )));
+                    }
                 }
             }
             ConfigDraftAction::Discard => {

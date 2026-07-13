@@ -1,5 +1,6 @@
 //! osu-style HUD widgets (ADR-0014) + classic DTXMania layout widgets.
 
+pub mod action_button;
 pub mod album_art;
 pub mod combo_display;
 pub mod controls;
@@ -12,7 +13,9 @@ pub mod hud_ref;
 pub mod judgment_popup;
 pub mod lane_flush;
 pub mod live_graph;
+pub mod modal_dialog;
 pub mod nav_legend;
+pub mod notification;
 pub mod now_playing;
 pub mod options_panel;
 pub mod pad_chips;

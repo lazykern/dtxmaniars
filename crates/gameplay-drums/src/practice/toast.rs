@@ -5,36 +5,7 @@ use bevy::prelude::*;
 use dtx_ui::theme::Theme;
 
 pub const TOAST_CAP: usize = 4;
-pub const TOAST_SECS: f32 = 1.5;
-
-#[derive(Debug, Clone)]
-pub struct Toast {
-    pub text: String,
-    pub age: f32,
-}
-
-#[derive(Resource, Debug, Default)]
-pub struct ToastQueue(pub Vec<Toast>);
-
-impl ToastQueue {
-    pub fn push(&mut self, text: impl Into<String>) {
-        self.0.push(Toast {
-            text: text.into(),
-            age: 0.0,
-        });
-        while self.0.len() > TOAST_CAP {
-            self.0.remove(0);
-        }
-    }
-
-    /// Age all toasts by `dt` seconds and drop expired ones.
-    pub fn tick(&mut self, dt: f32) {
-        for t in &mut self.0 {
-            t.age += dt;
-        }
-        self.0.retain(|t| t.age < TOAST_SECS);
-    }
-}
+pub type ToastQueue = dtx_ui::NotificationQueue;
 
 #[derive(Component)]
 pub struct ToastRoot;
@@ -42,16 +13,14 @@ pub struct ToastRoot;
 /// Rebuild the top-center toast column each frame (≤4 small texts, so a
 /// rebuild is cheaper than diffing).
 pub fn toast_ui(
-    time: Res<Time>,
-    mut queue: ResMut<ToastQueue>,
+    queue: Res<ToastQueue>,
     mut commands: Commands,
     roots: Query<Entity, With<ToastRoot>>,
 ) {
-    queue.tick(time.delta_secs());
     for e in &roots {
         commands.entity(e).despawn();
     }
-    if queue.0.is_empty() {
+    if queue.is_empty() {
         return;
     }
     let theme = Theme::default();
@@ -71,9 +40,9 @@ pub fn toast_ui(
             GlobalZIndex(crate::ui_z::TOAST),
         ))
         .with_children(|col| {
-            for t in &queue.0 {
+            for notification in queue.iter() {
                 col.spawn((
-                    Text::new(t.text.clone()),
+                    Text::new(notification.message.clone()),
                     Theme::label_font(),
                     TextColor(theme.text_primary),
                     BackgroundColor(Color::srgba(0.0, 0.0, 0.0, 0.65)),
@@ -96,19 +65,22 @@ mod tests {
         for i in 0..6 {
             q.push(format!("t{i}"));
         }
-        assert_eq!(q.0.len(), TOAST_CAP);
-        assert_eq!(q.0[0].text, "t2", "oldest dropped first");
-        assert_eq!(q.0[3].text, "t5");
+        assert_eq!(q.len(), TOAST_CAP);
+        let texts = q
+            .iter()
+            .map(|item| item.message.as_str())
+            .collect::<Vec<_>>();
+        assert_eq!(texts, ["t2", "t3", "t4", "t5"]);
     }
 
     #[test]
     fn tick_expires_old_toasts() {
         let mut q = ToastQueue::default();
         q.push("a");
-        q.tick(1.0);
+        q.tick(3_000);
         q.push("b");
-        q.tick(0.6); // a: 1.6s (dead), b: 0.6s (alive)
-        assert_eq!(q.0.len(), 1);
-        assert_eq!(q.0[0].text, "b");
+        q.tick(600); // a: 3.6s (dead), b: 0.6s (alive)
+        assert_eq!(q.len(), 1);
+        assert_eq!(q.iter().next().unwrap().message, "b");
     }
 }

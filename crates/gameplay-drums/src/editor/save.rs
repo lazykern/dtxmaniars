@@ -72,6 +72,7 @@ fn save_hotkey(
     time: Res<Time>,
     mut err: ResMut<super::footer::EditorSaveError>,
     mut config_actions: MessageWriter<super::tabs::ConfigDraftAction>,
+    mut notifications: Option<ResMut<dtx_ui::NotificationQueue>>,
 ) {
     let ctrl = keys.pressed(KeyCode::ControlLeft) || keys.pressed(KeyCode::ControlRight);
     if ctrl && keys.just_pressed(KeyCode::KeyS) {
@@ -82,6 +83,11 @@ fn save_hotkey(
             Err(e) => {
                 warn!("layout save failed: {e}");
                 err.set(time.elapsed_secs_f64(), format!("save failed: {e}"));
+                if let Some(notifications) = &mut notifications {
+                    notifications.push(dtx_ui::Notification::error(format!(
+                        "Layout was not saved: {e}"
+                    )));
+                }
             }
         }
     }

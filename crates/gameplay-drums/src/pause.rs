@@ -302,6 +302,11 @@ pub fn spawn_overlay(
     commands
         .spawn((
             PauseOverlay,
+            dtx_ui::ModalDialog::new(vec![
+                dtx_ui::DialogAction::Custom(0),
+                dtx_ui::DialogAction::Custom(1),
+                dtx_ui::DialogAction::Destructive,
+            ]),
             Node {
                 position_type: PositionType::Absolute,
                 width: Val::Percent(100.0),
@@ -325,9 +330,15 @@ pub fn spawn_overlay(
                     ..default()
                 },
             ));
-            for item in pause_items(practice.is_some()) {
+            for (index, item) in pause_items(practice.is_some()).iter().enumerate() {
+                let tone = if matches!(item, PauseItemKind::Quit | PauseItemKind::ExitPractice) {
+                    dtx_ui::InteractionTone::Destructive
+                } else {
+                    dtx_ui::InteractionTone::Focus
+                };
                 root.spawn((
                     *item,
+                    dtx_ui::ActionButton::new(dtx_ui::DialogAction::Custom(index as u16), tone),
                     Text::new(item.label()),
                     Theme::hud_font(),
                     TextColor(theme.text_secondary),

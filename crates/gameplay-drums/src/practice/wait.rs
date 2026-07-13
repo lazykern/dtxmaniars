@@ -636,7 +636,6 @@ mod tests {
         assert_eq!(
             app.world()
                 .resource::<crate::practice::toast::ToastQueue>()
-                .0
                 .len(),
             1,
             "reject should surface one feedback toast"

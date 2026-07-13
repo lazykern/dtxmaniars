@@ -22,6 +22,11 @@ pub use accessibility::{AccessibilityPolicy, FlashDecision, MotionDecision, Star
 pub use theme::{Theme, ThemeResource, REF_HEIGHT, REF_WIDTH, SCREEN_TRANSITION_MS};
 pub use transition::{FadePhase, ScreenFade, TransitionOverlay};
 pub use typography::{InteractionTone, SpacingRole, StateMarker, Typography, TypographyRole};
+pub use widget::action_button::{
+    reduce_activation, ActionButton, ActionButtonState, ActivationSource, DialogAction,
+};
+pub use widget::modal_dialog::ModalDialog;
+pub use widget::notification::{Notification, NotificationQueue, NotificationTone};
 
 /// Legacy alias — ADR-0014 uses 300ms OutQuint (not 1500ms BocuD snapshot).
 pub const SCREEN_FADE_MS: u32 = 300;
@@ -100,6 +105,7 @@ pub fn plugin(app: &mut App) {
     app.init_resource::<AccessibilityPolicy>()
         .init_resource::<StartupConfigWarning>()
         .init_resource::<Typography>()
+        .init_resource::<NotificationQueue>()
         .init_resource::<ThemeResource>()
         .init_resource::<widget::density_graph::DensityData>()
         .init_resource::<widget::difficulty_grid::DifficultyGridData>()
@@ -111,9 +117,11 @@ pub fn plugin(app: &mut App) {
             widget::controls::ControlsPlugin,
         ))
         .add_message::<dtx_audio::PreviewSwapEvent>()
+        .add_systems(Startup, enqueue_startup_config_warning)
         .add_systems(
             Update,
             (
+                age_notifications,
                 widget::album_art::album_art_tween_system,
                 widget::album_art::apply_album_art_opacity,
                 parallax::parallax_info_tween_system,
@@ -128,6 +136,19 @@ pub fn plugin(app: &mut App) {
                 widget::density_graph::density_graph_system,
             ),
         );
+}
+
+fn age_notifications(time: Res<Time>, mut notifications: ResMut<NotificationQueue>) {
+    notifications.tick(time.delta().as_millis().try_into().unwrap_or(u64::MAX));
+}
+
+fn enqueue_startup_config_warning(
+    mut warning: ResMut<StartupConfigWarning>,
+    mut notifications: ResMut<NotificationQueue>,
+) {
+    if let Some(message) = warning.0.take() {
+        notifications.push(Notification::warning(message));
+    }
 }
 
 #[cfg(test)]

@@ -122,6 +122,11 @@ fn sync_dialog(
     commands
         .spawn((
             CloseDialogRoot,
+            dtx_ui::ModalDialog::new(vec![
+                dtx_ui::DialogAction::Cancel,
+                dtx_ui::DialogAction::Destructive,
+                dtx_ui::DialogAction::Confirm,
+            ]),
             Node {
                 position_type: PositionType::Absolute,
                 left: Val::Px(0.0),
