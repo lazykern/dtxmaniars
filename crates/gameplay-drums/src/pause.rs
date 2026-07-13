@@ -89,7 +89,10 @@ pub(super) fn plugin(app: &mut App) {
         .add_systems(OnExit(AppState::Performance), force_running)
         .add_systems(
             Update,
-            toggle_pause
+            // Both write NextState<PauseState>, but they compute the same
+            // transition from the same current state, so a same-frame Escape +
+            // pad hit is idempotent — no ordering constraint needed.
+            (toggle_pause, system_verb_pause)
                 .run_if(in_state(AppState::Performance))
                 .run_if(crate::editor::editor_closed),
         )
@@ -120,13 +123,40 @@ fn toggle_pause(
     mut surface: ResMut<PracticePauseSurface>,
 ) {
     if keys.just_pressed(KeyCode::Escape) {
-        match state.get() {
-            PauseState::Running => {
-                *surface = PracticePauseSurface::Overlay;
-                next.set(PauseState::Paused);
-            }
-            PauseState::Paused => next.set(PauseState::Running),
+        toggle(state.get(), &mut next, &mut surface);
+    }
+}
+
+/// `SystemVerb::Pause` from a pad or a bound key — the distant-kit equivalent of
+/// Escape. Toggles both ways, so firing it while paused resumes. Gated to
+/// Performance with the editor closed (see `plugin`).
+fn system_verb_pause(
+    mut hits: MessageReader<crate::events::SystemVerbHit>,
+    state: Res<State<PauseState>>,
+    mut next: ResMut<NextState<PauseState>>,
+    mut surface: ResMut<PracticePauseSurface>,
+) {
+    if hits
+        .read()
+        .any(|hit| hit.verb == dtx_input::SystemVerb::Pause)
+    {
+        toggle(state.get(), &mut next, &mut surface);
+    }
+}
+
+/// Shared by Escape and `SystemVerb::Pause`. Claims the overlay surface before
+/// pausing, or the practice rail would keep it.
+fn toggle(
+    state: &PauseState,
+    next: &mut NextState<PauseState>,
+    surface: &mut PracticePauseSurface,
+) {
+    match state {
+        PauseState::Running => {
+            *surface = PracticePauseSurface::Overlay;
+            next.set(PauseState::Paused);
         }
+        PauseState::Paused => next.set(PauseState::Running),
     }
 }
 
@@ -504,6 +534,59 @@ mod tests {
                 .count(),
             0
         );
+    }
+
+    fn verb_world(state: PauseState, verb: dtx_input::SystemVerb) -> World {
+        use bevy::ecs::message::Messages;
+        let mut world = World::new();
+        world.init_resource::<Messages<crate::events::SystemVerbHit>>();
+        world.insert_resource(State::new(state));
+        world.init_resource::<NextState<PauseState>>();
+        // Stale value from a previous Tab-opened rail must be overwritten.
+        world.insert_resource(PracticePauseSurface::Rail);
+        world.write_message(crate::events::SystemVerbHit { verb });
+        world
+    }
+
+    #[test]
+    fn pause_verb_opens_the_overlay_surface() {
+        let mut world = verb_world(PauseState::Running, dtx_input::SystemVerb::Pause);
+        world
+            .run_system_once(system_verb_pause)
+            .expect("system_verb_pause runs");
+        assert_eq!(
+            *world.resource::<PracticePauseSurface>(),
+            PracticePauseSurface::Overlay,
+            "the practice rail must not steal the surface"
+        );
+        assert!(matches!(
+            world.resource::<NextState<PauseState>>(),
+            NextState::Pending(PauseState::Paused)
+        ));
+    }
+
+    #[test]
+    fn pause_verb_while_paused_resumes() {
+        let mut world = verb_world(PauseState::Paused, dtx_input::SystemVerb::Pause);
+        world
+            .run_system_once(system_verb_pause)
+            .expect("system_verb_pause runs");
+        assert!(matches!(
+            world.resource::<NextState<PauseState>>(),
+            NextState::Pending(PauseState::Running)
+        ));
+    }
+
+    #[test]
+    fn restart_verb_does_not_toggle_pause() {
+        let mut world = verb_world(PauseState::Running, dtx_input::SystemVerb::Restart);
+        world
+            .run_system_once(system_verb_pause)
+            .expect("system_verb_pause runs");
+        assert!(matches!(
+            world.resource::<NextState<PauseState>>(),
+            NextState::Unchanged
+        ));
     }
 
     #[test]
