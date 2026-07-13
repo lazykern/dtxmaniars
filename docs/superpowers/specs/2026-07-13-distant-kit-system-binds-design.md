@@ -68,6 +68,30 @@ pub struct InputBindings {
 source type. `BindingsFile` is `#[serde(default)]`, so an existing `bindings.toml` with no
 `[system]` table loads clean: **no schema version bump, no migration.**
 
+### Correction: the profiles are the source of truth, not `InputBindings`
+
+*(Found while planning. The design above is necessary but not sufficient, and shipping only the
+above would produce a dead feature.)*
+
+`bindings.toml` is now only a **legacy migration input**. The live path is the profile registry:
+`reload_profiles` (`gameplay-drums/src/bindings.rs:230-252`) runs at boot **and on every
+`Performance` enter**, and does `live.0 = compose_bindings(&keyboard, &midi)` — rebuilding
+`InputBindings` from the profiles' lane maps alone (`:204-225`). A `system` map that existed only
+in `InputBindings` would therefore be **overwritten at the exact moment the drummer starts a
+song**, and the pad would do nothing.
+
+So the system map must live in the profiles too:
+
+```rust
+pub struct KeyboardProfile { /* … */ pub system: HashMap<SystemVerb, Vec<KeyCode>> }
+pub struct MidiProfile     { /* … */ pub system: HashMap<SystemVerb, Vec<u8>> }
+```
+
+threaded through both `split_bindings` (`dtx-input/src/profiles.rs:310`) and `compose_bindings`.
+`InputBindings.system` and the `BindingsFile` `[system]` table stay exactly as specced — they
+remain the migration source and the `save_bindings` round-trip — but they are no longer the thing
+the resolver ultimately reads from. Both halves are required.
+
 ### Resolution
 
 `BindResolver` gains `note_to_system: HashMap<u8, Vec<SystemVerb>>` and
