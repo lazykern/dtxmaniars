@@ -92,7 +92,7 @@ pub(super) fn plugin(app: &mut App) {
             // Both write NextState<PauseState>, but they compute the same
             // transition from the same current state, so a same-frame Escape +
             // pad hit is idempotent — no ordering constraint needed.
-            (toggle_pause, system_verb_pause)
+            (toggle_pause, system_verb_pause, system_verb_restart)
                 .run_if(in_state(AppState::Performance))
                 .run_if(crate::editor::editor_closed),
         )
@@ -142,6 +142,24 @@ fn system_verb_pause(
     {
         toggle(state.get(), &mut next, &mut surface);
     }
+}
+
+/// `SystemVerb::Restart` — re-request `SongLoading`, exactly as the pause menu's
+/// Retry row does, preserving `SelectedSong` and `PracticeIntent`. Fires during
+/// Performance whether running or paused.
+fn system_verb_restart(
+    mut hits: MessageReader<crate::events::SystemVerbHit>,
+    mut next_pause: ResMut<NextState<PauseState>>,
+    mut requests: MessageWriter<TransitionRequest>,
+) {
+    if !hits
+        .read()
+        .any(|hit| hit.verb == dtx_input::SystemVerb::Restart)
+    {
+        return;
+    }
+    next_pause.set(PauseState::Running);
+    request_transition(&mut requests, AppState::SongLoading);
 }
 
 /// Shared by Escape and `SystemVerb::Pause`. Claims the overlay surface before
@@ -540,6 +558,7 @@ mod tests {
         use bevy::ecs::message::Messages;
         let mut world = World::new();
         world.init_resource::<Messages<crate::events::SystemVerbHit>>();
+        world.init_resource::<Messages<TransitionRequest>>();
         world.insert_resource(State::new(state));
         world.init_resource::<NextState<PauseState>>();
         // Stale value from a previous Tab-opened rail must be overwritten.
@@ -587,6 +606,56 @@ mod tests {
             world.resource::<NextState<PauseState>>(),
             NextState::Unchanged
         ));
+    }
+
+    #[test]
+    fn restart_verb_requests_song_loading_while_running() {
+        use bevy::ecs::message::Messages;
+        let mut world = verb_world(PauseState::Running, dtx_input::SystemVerb::Restart);
+        world
+            .run_system_once(system_verb_restart)
+            .expect("system_verb_restart runs");
+        let targets: Vec<AppState> = world
+            .resource::<Messages<TransitionRequest>>()
+            .iter_current_update_messages()
+            .map(|r| r.0)
+            .collect();
+        assert_eq!(targets, vec![AppState::SongLoading]);
+        assert!(matches!(
+            world.resource::<NextState<PauseState>>(),
+            NextState::Pending(PauseState::Running)
+        ));
+    }
+
+    #[test]
+    fn restart_verb_also_fires_while_paused() {
+        use bevy::ecs::message::Messages;
+        let mut world = verb_world(PauseState::Paused, dtx_input::SystemVerb::Restart);
+        world
+            .run_system_once(system_verb_restart)
+            .expect("system_verb_restart runs");
+        let targets: Vec<AppState> = world
+            .resource::<Messages<TransitionRequest>>()
+            .iter_current_update_messages()
+            .map(|r| r.0)
+            .collect();
+        assert_eq!(targets, vec![AppState::SongLoading]);
+    }
+
+    #[test]
+    fn pause_verb_does_not_restart() {
+        use bevy::ecs::message::Messages;
+        let mut world = verb_world(PauseState::Running, dtx_input::SystemVerb::Pause);
+        world
+            .run_system_once(system_verb_restart)
+            .expect("system_verb_restart runs");
+        assert_eq!(
+            world
+                .resource::<Messages<TransitionRequest>>()
+                .iter_current_update_messages()
+                .count(),
+            0
+        );
     }
 
     #[test]
