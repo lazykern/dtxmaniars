@@ -266,6 +266,57 @@ impl Default for AudioRate {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PlaybackRateSource {
+    Native,
+    NormalPlaySetting,
+    PracticeTempo,
+}
+
+#[derive(Resource, Debug, Clone, Copy, PartialEq)]
+pub struct EffectivePlaybackRate {
+    pub value: f64,
+    pub source: PlaybackRateSource,
+}
+
+impl EffectivePlaybackRate {
+    pub const fn native() -> Self {
+        Self {
+            value: 1.0,
+            source: PlaybackRateSource::Native,
+        }
+    }
+
+    pub fn normal(value: f64) -> Self {
+        let value = value.max(f64::EPSILON);
+        if (value - 1.0).abs() < 1e-9 {
+            Self::native()
+        } else {
+            Self {
+                value,
+                source: PlaybackRateSource::NormalPlaySetting,
+            }
+        }
+    }
+
+    pub fn practice(value: f64) -> Self {
+        Self {
+            value: value.max(f64::EPSILON),
+            source: PlaybackRateSource::PracticeTempo,
+        }
+    }
+
+    pub fn scaled_delta_secs(self, wall_delta_secs: f64) -> f64 {
+        wall_delta_secs * self.value
+    }
+}
+
+impl Default for EffectivePlaybackRate {
+    fn default() -> Self {
+        Self::native()
+    }
+}
+
 /// Runtime audio settings from `dtx-config`.
 #[derive(Resource, Debug, Clone, Copy, PartialEq)]
 pub struct DrumAudioSettings {
@@ -624,8 +675,8 @@ impl AccuracyHistory {
 #[cfg(test)]
 mod tests {
     use super::{
-        AccuracyHistory, AudioRate, DrumAudioSettings, GameplayClock, JudgmentCounts,
-        ScrollSettings,
+        AccuracyHistory, AudioRate, DrumAudioSettings, EffectivePlaybackRate, GameplayClock,
+        JudgmentCounts, PlaybackRateSource, ScrollSettings,
     };
 
     #[test]
@@ -853,5 +904,28 @@ mod tests {
     fn rate_default_is_native() {
         let r = AudioRate::default();
         assert!((r.0 - 1.0).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn effective_rate_defaults_to_native() {
+        let rate = EffectivePlaybackRate::default();
+        assert_eq!(rate.source, PlaybackRateSource::Native);
+        assert!((rate.value - 1.0).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn effective_rate_scales_only_wall_delta() {
+        let slow = EffectivePlaybackRate::normal(0.5);
+        let fast = EffectivePlaybackRate::normal(2.0);
+        assert!((slow.scaled_delta_secs(0.016) - 0.008).abs() < 1e-12);
+        assert!((fast.scaled_delta_secs(0.016) - 0.032).abs() < 1e-12);
+    }
+
+    #[test]
+    fn practice_rate_has_explicit_source() {
+        assert_eq!(
+            EffectivePlaybackRate::practice(0.75).source,
+            PlaybackRateSource::PracticeTempo
+        );
     }
 }

@@ -47,6 +47,7 @@ pub mod pause;
 pub mod perf_common;
 pub mod perf_hotkeys;
 pub mod phrase;
+pub(crate) mod playback_rate;
 pub mod practice;
 pub mod resources;
 pub mod score;
@@ -103,6 +104,7 @@ pub fn plugin(app: &mut App) {
     .init_resource::<resources::JudgmentCounts>()
     .init_resource::<resources::ScrollSettings>()
     .init_resource::<resources::AudioRate>()
+    .init_resource::<resources::EffectivePlaybackRate>()
     .init_resource::<resources::GameplayClock>()
     .init_resource::<resources::DrumGameplaySettings>()
     .init_resource::<resources::DrumAudioSettings>()
@@ -186,6 +188,7 @@ pub fn plugin(app: &mut App) {
             .run_if(in_state(game_shell::AppState::Performance))
             .run_if(in_state(game_shell::PauseState::Running)),
     )
+    .add_plugins(playback_rate::plugin)
     .add_plugins((
         layout::plugin,
         input::plugin,
