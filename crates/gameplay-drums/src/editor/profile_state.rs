@@ -65,6 +65,7 @@ pub enum ProfileKind {
     Keyboard,
     Midi,
     Lanes,
+    Settings,
 }
 
 /// All Customize profile drafts. Tab and segment navigation never touches
@@ -314,7 +315,18 @@ pub enum CloseRequestOutcome {
 /// Intercept a close/exit request BEFORE `EditorOpen` flips: any dirty draft
 /// raises the guard instead of closing.
 pub fn request_close(intent: CloseIntent, session: &ProfileSession) -> CloseRequestOutcome {
-    let dirty = dirty_profile_kinds(session);
+    request_close_with_settings(intent, session, false)
+}
+
+pub fn request_close_with_settings(
+    intent: CloseIntent,
+    session: &ProfileSession,
+    settings_dirty: bool,
+) -> CloseRequestOutcome {
+    let mut dirty = dirty_profile_kinds(session);
+    if settings_dirty {
+        dirty.push(ProfileKind::Settings);
+    }
     if dirty.is_empty() {
         CloseRequestOutcome::Proceed
     } else {
@@ -424,6 +436,7 @@ pub fn apply_save_all_results(
             ProfileKind::Keyboard => session.keyboard = session.keyboard.saved_now(),
             ProfileKind::Midi => session.midi = session.midi.saved_now(),
             ProfileKind::Lanes => session.lanes = session.lanes.saved_now(),
+            ProfileKind::Settings => {}
         }
     }
     failed
@@ -436,6 +449,18 @@ mod tests {
     use dtx_persistence::validate_profile_name;
 
     use super::*;
+
+    #[test]
+    fn dirty_settings_join_the_existing_close_guard() {
+        let outcome = request_close_with_settings(CloseIntent::Customize, &session(), true);
+        assert_eq!(
+            outcome,
+            CloseRequestOutcome::Guard(PendingClose {
+                intent: CloseIntent::Customize,
+                dirty: vec![ProfileKind::Settings],
+            })
+        );
+    }
 
     fn keyboard_draft(selected: &str) -> ProfileDraft<KeyboardProfile> {
         ProfileDraft::clean(selected, KeyboardProfile::default())

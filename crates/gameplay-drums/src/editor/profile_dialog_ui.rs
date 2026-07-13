@@ -310,6 +310,7 @@ fn kind_label(kind: ProfileKind) -> &'static str {
         ProfileKind::Keyboard => "keyboard",
         ProfileKind::Midi => "MIDI",
         ProfileKind::Lanes => "lane layout",
+        ProfileKind::Settings => "settings",
     }
 }
 
@@ -731,6 +732,7 @@ fn backup_and_reset(kind: ProfileKind) -> Result<(), String> {
         )
         .map(|_| ())
         .map_err(|error| error.to_string()),
+        ProfileKind::Settings => Err("settings do not use profile recovery".to_string()),
     }
 }
 

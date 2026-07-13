@@ -137,6 +137,73 @@ static SYSTEM_ITEMS: LazyLock<Vec<SettingItem>> = LazyLock::new(|| {
     ]
 });
 
+// --- Accessibility tab ---
+
+static ACCESSIBILITY_ITEMS: LazyLock<Vec<SettingItem>> = LazyLock::new(|| {
+    vec![
+        SettingItem {
+            label: "Text Scale",
+            value: |c| match c.accessibility.text_scale {
+                dtx_config::TextScale::Standard => "Standard".to_string(),
+                dtx_config::TextScale::Large => "Large".to_string(),
+                dtx_config::TextScale::XLarge => "Extra Large".to_string(),
+            },
+            adjust: |c, d| {
+                let scales = [
+                    dtx_config::TextScale::Standard,
+                    dtx_config::TextScale::Large,
+                    dtx_config::TextScale::XLarge,
+                ];
+                let current = scales
+                    .iter()
+                    .position(|scale| *scale == c.accessibility.text_scale)
+                    .unwrap_or_default() as i32;
+                c.accessibility.text_scale =
+                    scales[(current + d).rem_euclid(scales.len() as i32) as usize];
+            },
+            desc: "Scale player-facing labels and controls without changing gameplay geometry.",
+            group: "READABILITY",
+            control: SettingControl::Stepper,
+            raw: |_| 0.0,
+            set: |_, _| {},
+            reset: |c, d| c.accessibility.text_scale = d.accessibility.text_scale,
+        },
+        SettingItem {
+            label: "Reduce Motion",
+            value: |c| bool_label(c.accessibility.reduce_motion).to_string(),
+            adjust: |c, _| c.accessibility.reduce_motion ^= true,
+            desc: "Shorten transitions and suppress non-essential interface animation.",
+            group: "EFFECTS",
+            control: SettingControl::Stepper,
+            raw: |_| 0.0,
+            set: |_, _| {},
+            reset: |c, d| c.accessibility.reduce_motion = d.accessibility.reduce_motion,
+        },
+        SettingItem {
+            label: "Reduce Flashes",
+            value: |c| bool_label(c.accessibility.reduce_flashes).to_string(),
+            adjust: |c, _| c.accessibility.reduce_flashes ^= true,
+            desc: "Replace bright flashes with lower-contrast outlined feedback.",
+            group: "EFFECTS",
+            control: SettingControl::Stepper,
+            raw: |_| 0.0,
+            set: |_, _| {},
+            reset: |c, d| c.accessibility.reduce_flashes = d.accessibility.reduce_flashes,
+        },
+        SettingItem {
+            label: "Background Motion",
+            value: |c| bool_label(c.accessibility.background_motion).to_string(),
+            adjust: |c, _| c.accessibility.background_motion ^= true,
+            desc: "Allow decorative parallax, movies, and authored background panning.",
+            group: "EFFECTS",
+            control: SettingControl::Stepper,
+            raw: |_| 0.0,
+            set: |_, _| {},
+            reset: |c, d| c.accessibility.background_motion = d.accessibility.background_motion,
+        },
+    ]
+});
+
 // --- Gameplay tab ---
 
 static GAMEPLAY_ITEMS: LazyLock<Vec<SettingItem>> = LazyLock::new(|| {
@@ -604,6 +671,7 @@ fn hsp_label(v: dtx_config::HitSoundPriority) -> &'static str {
 pub fn settings_items(tab: CustomizeTab) -> &'static [SettingItem] {
     match tab {
         CustomizeTab::System => &SYSTEM_ITEMS,
+        CustomizeTab::Accessibility => &ACCESSIBILITY_ITEMS,
         CustomizeTab::Gameplay => &GAMEPLAY_ITEMS,
         CustomizeTab::Audio => &AUDIO_ITEMS,
         CustomizeTab::Drums => &DRUMS_ITEMS,
@@ -614,6 +682,25 @@ pub fn settings_items(tab: CustomizeTab) -> &'static [SettingItem] {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn accessibility_rows_are_independent() {
+        let items = settings_items(game_shell::CustomizeTab::Accessibility);
+        assert_eq!(
+            items.iter().map(|item| item.label).collect::<Vec<_>>(),
+            [
+                "Text Scale",
+                "Reduce Motion",
+                "Reduce Flashes",
+                "Background Motion"
+            ]
+        );
+        let mut cfg = dtx_config::Config::default();
+        (items[1].adjust)(&mut cfg, 1);
+        assert!(cfg.accessibility.reduce_motion);
+        assert!(!cfg.accessibility.reduce_flashes);
+        assert!(cfg.accessibility.background_motion);
+    }
 
     #[test]
     fn all_tabs_have_rows() {

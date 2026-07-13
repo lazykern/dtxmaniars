@@ -120,6 +120,7 @@ pub(super) fn bar_info(kind: ProfileKind, session: &CustomizeSession) -> BarInfo
             dirty: session.0.lanes.is_dirty(),
             builtin: dtx_layout::profiles::lane_builtins().contains_key(&session.0.lanes.selected),
         },
+        ProfileKind::Settings => unreachable!("settings are not a profile"),
     }
 }
 
@@ -165,6 +166,7 @@ pub(super) fn kind_names(kind: ProfileKind) -> (Vec<String>, Vec<String>) {
             };
             (builtins, users)
         }
+        ProfileKind::Settings => unreachable!("settings are not a profile"),
     }
 }
 
@@ -173,6 +175,7 @@ pub(super) fn registry_path(kind: ProfileKind) -> std::path::PathBuf {
         ProfileKind::Keyboard => crate::bindings::keyboard_registry_path(),
         ProfileKind::Midi => crate::bindings::midi_registry_path(),
         ProfileKind::Lanes => crate::lanes::lane_registry_path(),
+        ProfileKind::Settings => unreachable!("settings are not a profile"),
     }
 }
 
@@ -280,6 +283,7 @@ pub(super) fn select_kind(
             lane_draft.0 = draft.clone();
             session.0.lanes = draft;
         }
+        ProfileKind::Settings => unreachable!("settings are not a profile"),
     }
     Ok(())
 }
@@ -346,6 +350,7 @@ pub(super) fn saveas_kind(
             lane_draft.0 = draft.clone();
             session.0.lanes = draft;
         }
+        ProfileKind::Settings => unreachable!("settings are not a profile"),
     }
     Ok(())
 }
@@ -398,6 +403,7 @@ pub(super) fn rename_kind(
             lane_draft.0.selected = registry.active.clone();
             session.0.lanes.selected = registry.active;
         }
+        ProfileKind::Settings => unreachable!("settings are not a profile"),
     }
     Ok(())
 }
@@ -457,6 +463,7 @@ pub(super) fn delete_kind(
             lane_draft.0 = draft.clone();
             session.0.lanes = draft;
         }
+        ProfileKind::Settings => unreachable!("settings are not a profile"),
     }
     Ok(())
 }
@@ -643,6 +650,7 @@ pub(super) fn resolve_dirty(
             }
             Ok(false)
         }
+        ProfileKind::Settings => unreachable!("settings are not a profile"),
     }
 }
 
@@ -1006,6 +1014,7 @@ fn handle_bar_action_buttons(
                             lane_draft.0 = lane_draft.0.saved_now();
                             session.0.lanes = lane_draft.0.clone();
                         }
+                        ProfileKind::Settings => unreachable!("settings are not a profile"),
                     }
                 }
                 Err(message) => error.0 = Some(ui_error(kind, message)),

@@ -275,6 +275,8 @@ pub(super) fn close_on_escape(
     mut requests: MessageWriter<game_shell::TransitionRequest>,
     calib: Res<super::calibration::CalibrationState>,
     profile_session: Res<super::profile_state::CustomizeSession>,
+    saved_config: Res<super::tabs::SavedConfigDraft>,
+    config_draft: Res<super::tabs::ConfigDraft>,
     mut pending: ResMut<super::profile_state::PendingCloseState>,
     dialog: Res<super::profile_dialog::ProfileDialogState>,
 ) {
@@ -302,9 +304,10 @@ pub(super) fn close_on_escape(
         } else {
             // Dirty profile drafts intercept the close BEFORE EditorOpen
             // flips; the surface closes only after the user decides.
-            match super::profile_state::request_close(
+            match super::profile_state::request_close_with_settings(
                 super::profile_state::CloseIntent::Customize,
                 &profile_session.0,
+                super::tabs::config_draft_is_dirty(&saved_config, &config_draft),
             ) {
                 super::profile_state::CloseRequestOutcome::Guard(close) => {
                     *pending = super::profile_state::PendingCloseState::Pending(close);

@@ -5,12 +5,22 @@ use bevy_kira_audio::prelude::*;
 use game_shell::{CustomizeTab, PendingCustomizeTab};
 
 pub(super) fn plugin(app: &mut App) {
-    app.init_resource::<ActiveTab>()
+    app.add_message::<ConfigDraftAction>()
+        .init_resource::<ActiveTab>()
         .init_resource::<ConfigDraft>()
-        .add_systems(Update, save_draft_on_close)
+        .init_resource::<SavedConfigDraft>()
+        .add_systems(
+            Update,
+            handle_config_draft_actions
+                .run_if(super::editor_open)
+                .run_if(in_state(game_shell::AppState::Performance)),
+        )
         .add_systems(
             Update,
             (
+                apply_accessibility_policy
+                    .run_if(super::editor_open)
+                    .run_if(resource_changed::<ConfigDraft>),
                 sync_active_tab_on_open,
                 apply_draft_live
                     .run_if(super::editor_open)
@@ -35,6 +45,39 @@ impl Default for ActiveTab {
 #[derive(Resource, Default, Debug, Clone)]
 pub struct ConfigDraft(pub dtx_config::Config);
 
+/// Last loaded or successfully saved configuration snapshot.
+#[derive(Resource, Default, Debug, Clone)]
+pub struct SavedConfigDraft(pub dtx_config::Config);
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Message)]
+pub enum ConfigDraftAction {
+    Save,
+    Discard,
+}
+
+pub fn config_draft_is_dirty(saved: &SavedConfigDraft, draft: &ConfigDraft) -> bool {
+    saved.0 != draft.0
+}
+
+pub fn discard_config_draft(
+    saved: &SavedConfigDraft,
+    draft: &mut ConfigDraft,
+    policy: &mut dtx_ui::AccessibilityPolicy,
+) {
+    draft.0 = saved.0.clone();
+    *policy = dtx_ui::AccessibilityPolicy::from(&draft.0.accessibility);
+}
+
+pub fn save_config_draft_to(
+    path: &std::path::Path,
+    saved: &mut SavedConfigDraft,
+    draft: &ConfigDraft,
+) -> Result<(), dtx_config::ConfigError> {
+    dtx_config::save(path, &draft.0)?;
+    saved.0 = draft.0.clone();
+    Ok(())
+}
+
 /// On the frame the surface opens, load the config draft and adopt the pending
 /// tab (defaulting to Widgets when none was requested).
 fn sync_active_tab_on_open(
@@ -42,11 +85,13 @@ fn sync_active_tab_on_open(
     mut pending: ResMut<PendingCustomizeTab>,
     mut active: ResMut<ActiveTab>,
     mut draft: ResMut<ConfigDraft>,
+    mut saved: ResMut<SavedConfigDraft>,
 ) {
     if !open.is_changed() || !open.0 {
         return;
     }
     draft.0 = dtx_config::load(&dtx_config::default_path());
+    saved.0 = draft.0.clone();
     if let Some(tab) = pending.0.take() {
         active.0 = tab;
     } else {
@@ -54,26 +99,33 @@ fn sync_active_tab_on_open(
     }
 }
 
-/// When the surface closes, persist the draft (settings tabs auto-save on exit).
-fn save_draft_on_close(
-    open: Res<super::EditorOpen>,
-    draft: Res<ConfigDraft>,
-    state: Res<State<game_shell::AppState>>,
+fn handle_config_draft_actions(
+    mut actions: MessageReader<ConfigDraftAction>,
+    mut draft: ResMut<ConfigDraft>,
+    mut saved: ResMut<SavedConfigDraft>,
+    mut policy: ResMut<dtx_ui::AccessibilityPolicy>,
     time: Res<Time>,
     mut err: ResMut<super::footer::EditorSaveError>,
-    mut was_open: Local<bool>,
 ) {
-    if !super::should_persist_close(
-        open.0,
-        *state.get() == game_shell::AppState::Performance,
-        &mut was_open,
-    ) {
-        return;
-    }
-    let path = dtx_config::default_path();
-    if let Err(e) = dtx_config::save(&path, &draft.0) {
-        error!("customize: failed to save config {}: {e}", path.display());
-        err.set(time.elapsed_secs_f64(), format!("save failed: {e}"));
+    for action in actions.read() {
+        match action {
+            ConfigDraftAction::Save => {
+                let path = dtx_config::default_path();
+                if let Err(error) = save_config_draft_to(&path, &mut saved, &draft) {
+                    error!(
+                        "customize: failed to save config {}: {error}",
+                        path.display()
+                    );
+                    err.set(time.elapsed_secs_f64(), format!("save failed: {error}"));
+                }
+            }
+            ConfigDraftAction::Discard => {
+                // The live-apply system observes this draft change on the same
+                // update; set the policy immediately so text/motion preview
+                // never lingers for a frame.
+                discard_config_draft(&saved, &mut draft, &mut policy);
+            }
+        }
     }
 }
 
@@ -159,9 +211,60 @@ fn apply_draft_live(
     }
 }
 
+fn apply_accessibility_policy(
+    draft: Res<ConfigDraft>,
+    mut policy: ResMut<dtx_ui::AccessibilityPolicy>,
+) {
+    let next = dtx_ui::AccessibilityPolicy::from(&draft.0.accessibility);
+    if *policy != next {
+        *policy = next;
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn discard_restores_saved_config_and_policy() {
+        let saved = SavedConfigDraft(dtx_config::Config::default());
+        let mut draft = ConfigDraft(saved.0.clone());
+        draft.0.accessibility.text_scale = dtx_config::TextScale::XLarge;
+        let mut policy = dtx_ui::AccessibilityPolicy::from(&draft.0.accessibility);
+
+        discard_config_draft(&saved, &mut draft, &mut policy);
+
+        assert_eq!(draft.0, saved.0);
+        assert_eq!(
+            policy,
+            dtx_ui::AccessibilityPolicy::from(&saved.0.accessibility)
+        );
+    }
+
+    #[test]
+    fn saved_snapshot_identifies_dirty_draft() {
+        let saved = SavedConfigDraft(dtx_config::Config::default());
+        let mut draft = ConfigDraft(saved.0.clone());
+        assert!(!config_draft_is_dirty(&saved, &draft));
+        draft.0.accessibility.reduce_motion = true;
+        assert!(config_draft_is_dirty(&saved, &draft));
+    }
+
+    #[test]
+    fn successful_save_updates_snapshot() {
+        let tmp = std::env::temp_dir().join("dtxmaniars_config_draft_save_test");
+        let _ = std::fs::remove_dir_all(&tmp);
+        let path = tmp.join("config.toml");
+        let mut saved = SavedConfigDraft(dtx_config::Config::default());
+        let mut draft = ConfigDraft(saved.0.clone());
+        draft.0.accessibility.reduce_flashes = true;
+
+        save_config_draft_to(&path, &mut saved, &draft).unwrap();
+
+        assert_eq!(saved.0, draft.0);
+        assert_eq!(dtx_config::load(&path), draft.0);
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
 
     #[test]
     fn active_tab_defaults_to_widgets() {

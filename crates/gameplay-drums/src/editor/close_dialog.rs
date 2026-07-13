@@ -80,6 +80,7 @@ fn selected_is_builtin(kind: ProfileKind, session: &CustomizeSession) -> bool {
         ProfileKind::Lanes => {
             dtx_layout::profiles::lane_builtins().contains_key(&session.0.lanes.selected)
         }
+        ProfileKind::Settings => false,
     }
 }
 
@@ -90,6 +91,7 @@ fn dirty_names(dirty: &[ProfileKind]) -> String {
             ProfileKind::Keyboard => "keyboard",
             ProfileKind::Midi => "MIDI",
             ProfileKind::Lanes => "lane layout",
+            ProfileKind::Settings => "settings",
         })
         .collect::<Vec<_>>()
         .join(", ")
@@ -217,6 +219,7 @@ fn handle_buttons(
 /// focused decision wins).
 fn close_dialog_keys(
     keys: Res<ButtonInput<KeyCode>>,
+    mut nav: MessageReader<game_shell::NavAction>,
     pending: Res<PendingCloseState>,
     mut focus: ResMut<CloseDialogFocus>,
     mut requests: MessageWriter<CloseDecisionRequest>,
@@ -225,16 +228,32 @@ fn close_dialog_keys(
         // Closed, or armed this frame (the arming Esc/Enter must not resolve it).
         return;
     }
+    let mut nav_left = false;
+    let mut nav_right = false;
+    let mut nav_confirm = false;
+    let mut nav_back = false;
+    for action in nav.read() {
+        use game_shell::NavVerb;
+        match action.verb {
+            NavVerb::Dec | NavVerb::Up => nav_left = true,
+            NavVerb::Inc | NavVerb::Down => nav_right = true,
+            NavVerb::Confirm => nav_confirm = true,
+            NavVerb::Back => nav_back = true,
+            NavVerb::Practice => {}
+        }
+    }
     let next = step_focus(
         focus.0,
         CLOSE_DECISIONS.len(),
-        keys.just_pressed(KeyCode::ArrowLeft),
-        keys.just_pressed(KeyCode::ArrowRight),
+        keys.just_pressed(KeyCode::ArrowLeft) || nav_left,
+        keys.just_pressed(KeyCode::ArrowRight) || nav_right,
     );
     if next != focus.0 {
         focus.0 = next;
     }
-    if keys.just_pressed(KeyCode::Enter) {
+    if keys.just_pressed(KeyCode::Escape) || nav_back {
+        requests.write(CloseDecisionRequest(CloseDecision::Cancel));
+    } else if keys.just_pressed(KeyCode::Enter) || nav_confirm {
         requests.write(CloseDecisionRequest(CLOSE_DECISIONS[focus.0]));
     }
 }
@@ -319,6 +338,7 @@ mod tests {
             }))
             .init_resource::<CustomizeSession>()
             .init_resource::<dtx_ui::ThemeResource>()
+            .add_message::<game_shell::NavAction>()
             .add_message::<CloseDecisionRequest>()
             .add_systems(
                 Update,

@@ -190,7 +190,11 @@ fn close_editor_on_exit(
     mut session: ResMut<game_shell::EditorSession>,
     layouts: Res<crate::widget_layout::WidgetLayouts>,
     profile_session: Res<profile_state::CustomizeSession>,
-    draft: Res<tabs::ConfigDraft>,
+    mut config: (
+        ResMut<tabs::ConfigDraft>,
+        Res<tabs::SavedConfigDraft>,
+        ResMut<dtx_ui::AccessibilityPolicy>,
+    ),
     mut perf_draft: ResMut<crate::perf_hotkeys::PerfHotkeyDraft>,
     show_perf_info: Res<crate::resources::ShowPerfInfo>,
     mut capture: ResMut<bindings_capture::CaptureState>,
@@ -199,8 +203,8 @@ fn close_editor_on_exit(
     mut save_err: ResMut<footer::EditorSaveError>,
 ) {
     if open.0 {
-        // Config and widget layout keep their auto-save policy. Profile
-        // drafts are NOT saved here: committed profile state changes only
+        // Widget layout keeps its auto-save policy. Config and profile drafts
+        // are NOT saved here: committed state changes only
         // through explicit registry transactions (dirty close guard). The
         // lane snapshot is the last committed profile, not the preview.
         let file = save::layout_file_from(&layouts, &profile_session.0.lanes.saved.arrangement);
@@ -208,11 +212,12 @@ fn close_editor_on_exit(
             warn!("layout save on exit failed: {e}");
             save_err.set(time.elapsed_secs_f64(), format!("save failed: {e}"));
         }
-        if let Err(e) = dtx_config::save(&dtx_config::default_path(), &draft.0) {
-            warn!("config save on exit failed: {e}");
-            save_err.set(time.elapsed_secs_f64(), format!("save failed: {e}"));
+        if tabs::config_draft_is_dirty(&config.1, &config.0) {
+            let saved = config.1 .0.clone();
+            config.0 .0 = saved;
+            *config.2 = dtx_ui::AccessibilityPolicy::from(&config.0 .0.accessibility);
         }
-        perf_draft.sync_from_editor(&draft.0, show_perf_info.0);
+        perf_draft.sync_from_editor(&config.0 .0, show_perf_info.0);
         autoplay.0 = prev.0;
         open.0 = false;
     }
@@ -528,6 +533,7 @@ fn save_dirty_kind(
             };
             commit_lane_actions(startup, vec![action], save_lane_to_disk).map(|_| ())
         }
+        ProfileKind::Settings => Err("settings use the config transaction".to_string()),
     }
 }
 
@@ -544,6 +550,11 @@ fn resolve_pending_close(
     mut autoplay: ResMut<crate::autoplay::AutoplayEnabled>,
     mut editor_session: ResMut<game_shell::EditorSession>,
     mut requests: MessageWriter<game_shell::TransitionRequest>,
+    mut saved_config: ResMut<tabs::SavedConfigDraft>,
+    mut config_draft: ResMut<tabs::ConfigDraft>,
+    mut accessibility_policy: ResMut<dtx_ui::AccessibilityPolicy>,
+    time: Res<Time>,
+    mut save_error: ResMut<footer::EditorSaveError>,
 ) {
     // Skip the frame the guard was armed (or updated): the Esc/Enter press
     // that raised it must not immediately resolve it.
@@ -570,11 +581,31 @@ fn resolve_pending_close(
         close
             .dirty
             .iter()
-            .map(|kind| (*kind, save_dirty_kind(*kind, &session.0).is_ok()))
+            .map(|kind| {
+                let result = if *kind == profile_state::ProfileKind::Settings {
+                    tabs::save_config_draft_to(
+                        &dtx_config::default_path(),
+                        &mut saved_config,
+                        &config_draft,
+                    )
+                    .map_err(|error| error.to_string())
+                } else {
+                    save_dirty_kind(*kind, &session.0)
+                };
+                if let Err(error) = &result {
+                    save_error.set(time.elapsed_secs_f64(), format!("save failed: {error}"));
+                }
+                (*kind, result.is_ok())
+            })
             .collect()
     } else {
         Vec::new()
     };
+    if decision == profile_state::CloseDecision::DiscardAll
+        && close.dirty.contains(&profile_state::ProfileKind::Settings)
+    {
+        tabs::discard_config_draft(&saved_config, &mut config_draft, &mut accessibility_policy);
+    }
     match profile_state::reduce_close_decision(&close, decision, &mut session.0, &save_results) {
         profile_state::CloseOutcome::Cancelled => {
             *pending = profile_state::PendingCloseState::None;

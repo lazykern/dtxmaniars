@@ -229,6 +229,7 @@ pub enum CustomizeTab {
     Audio,
     Drums,
     System,
+    Accessibility,
     Controls,
     Lanes,
     Widgets,
@@ -236,21 +237,23 @@ pub enum CustomizeTab {
 
 impl CustomizeTab {
     /// All tabs in rail order.
-    pub const ALL: [CustomizeTab; 7] = [
+    pub const ALL: [CustomizeTab; 8] = [
         CustomizeTab::Gameplay,
         CustomizeTab::Audio,
         CustomizeTab::Drums,
         CustomizeTab::System,
+        CustomizeTab::Accessibility,
         CustomizeTab::Controls,
         CustomizeTab::Lanes,
         CustomizeTab::Widgets,
     ];
     /// Settings group (edits config.toml).
-    pub const SETTINGS: [CustomizeTab; 4] = [
+    pub const SETTINGS: [CustomizeTab; 5] = [
         CustomizeTab::Gameplay,
         CustomizeTab::Audio,
         CustomizeTab::Drums,
         CustomizeTab::System,
+        CustomizeTab::Accessibility,
     ];
     /// Kit group (edits layout.toml).
     pub const KIT: [CustomizeTab; 3] = [
@@ -266,6 +269,7 @@ impl CustomizeTab {
             CustomizeTab::Audio => "Audio",
             CustomizeTab::Drums => "Drums",
             CustomizeTab::System => "System",
+            CustomizeTab::Accessibility => "Accessibility",
             CustomizeTab::Controls => "Controls",
             CustomizeTab::Lanes => "Lanes",
             CustomizeTab::Widgets => "Widgets",
@@ -333,8 +337,15 @@ mod tests {
     }
 
     #[test]
-    fn customize_still_has_seven_tabs() {
-        assert_eq!(CustomizeTab::ALL.len(), 7);
+    fn accessibility_tab_is_a_settings_tab() {
+        assert!(CustomizeTab::Accessibility.is_settings());
+        assert_eq!(CustomizeTab::SETTINGS.len(), 5);
+        assert_eq!(CustomizeTab::Accessibility.label(), "Accessibility");
+    }
+
+    #[test]
+    fn customize_has_eight_tabs_after_accessibility_is_added() {
+        assert_eq!(CustomizeTab::ALL.len(), 8);
         assert_eq!(CustomizeTab::Controls.label(), "Controls");
     }
 

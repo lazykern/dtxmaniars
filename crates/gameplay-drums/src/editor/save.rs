@@ -63,16 +63,19 @@ fn save_layout_on_close(
     }
 }
 
-/// Ctrl+S writes layout.toml. Never commits profile drafts.
+/// Ctrl+S writes layout.toml and requests the explicit config transaction.
+/// It never commits profile drafts.
 fn save_hotkey(
     keys: Res<ButtonInput<KeyCode>>,
     layouts: Res<WidgetLayouts>,
     session: Res<CustomizeSession>,
     time: Res<Time>,
     mut err: ResMut<super::footer::EditorSaveError>,
+    mut config_actions: MessageWriter<super::tabs::ConfigDraftAction>,
 ) {
     let ctrl = keys.pressed(KeyCode::ControlLeft) || keys.pressed(KeyCode::ControlRight);
     if ctrl && keys.just_pressed(KeyCode::KeyS) {
+        config_actions.write(super::tabs::ConfigDraftAction::Save);
         let file = layout_file_from(&layouts, &session.0.lanes.saved.arrangement);
         match dtx_layout::save(&dtx_layout::default_path(), &file) {
             Ok(()) => info!("layout saved to {:?}", dtx_layout::default_path()),

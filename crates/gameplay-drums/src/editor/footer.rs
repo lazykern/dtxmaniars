@@ -31,6 +31,12 @@ struct FooterRoot;
 #[derive(Component)]
 struct FooterDescText;
 
+#[derive(Component, Clone, Copy)]
+enum FooterAction {
+    Save,
+    Discard,
+}
+
 /// Hint shown when no settings row is hovered.
 const HINT: &str = "Hover a setting for details.";
 
@@ -46,6 +52,7 @@ pub(super) fn plugin(app: &mut App) {
             (
                 spawn_footer_on_open.run_if(resource_changed::<EditorOpen>),
                 update_footer_desc.run_if(super::editor_open),
+                handle_footer_actions.run_if(super::editor_open),
             )
                 .run_if(in_state(game_shell::AppState::Performance)),
         )
@@ -109,12 +116,55 @@ fn spawn_footer_on_open(
                 ..default()
             },
         ));
-        p.spawn((
-            Text::new(LEGEND),
-            dtx_ui::theme::Theme::font(12.0),
-            TextColor(t.text_secondary),
-        ));
+        p.spawn(Node {
+            flex_direction: FlexDirection::Row,
+            align_items: AlignItems::Center,
+            column_gap: Val::Px(6.0),
+            ..default()
+        })
+        .with_children(|actions| {
+            actions.spawn((
+                Text::new(LEGEND),
+                dtx_ui::theme::Theme::font(12.0),
+                TextColor(t.text_secondary),
+            ));
+            for (action, label, color) in [
+                (FooterAction::Discard, "Discard", t.judgment_miss),
+                (FooterAction::Save, "Save", t.accent),
+            ] {
+                actions.spawn((
+                    action,
+                    Button,
+                    Node {
+                        padding: UiRect::axes(Val::Px(8.0), Val::Px(3.0)),
+                        ..default()
+                    },
+                    BackgroundColor(color),
+                    Outline::new(Val::Px(1.0), Val::Px(1.0), t.text_primary),
+                    children![(
+                        Text::new(label),
+                        dtx_ui::theme::Theme::font(12.0),
+                        TextColor(t.text_primary),
+                    )],
+                ));
+            }
+        });
     });
+}
+
+fn handle_footer_actions(
+    actions: Query<(&Interaction, &FooterAction), Changed<Interaction>>,
+    mut drafts: MessageWriter<super::tabs::ConfigDraftAction>,
+) {
+    for (interaction, action) in &actions {
+        if *interaction != Interaction::Pressed {
+            continue;
+        }
+        drafts.write(match action {
+            FooterAction::Save => super::tabs::ConfigDraftAction::Save,
+            FooterAction::Discard => super::tabs::ConfigDraftAction::Discard,
+        });
+    }
 }
 
 /// Who already drives a source a system capture refused — a lane, or the other
