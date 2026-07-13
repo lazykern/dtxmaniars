@@ -145,6 +145,7 @@ pub fn plugin(app: &mut App) {
                 midi_hit_autoselect,
                 sync_selected_channel_on_capture,
                 highlight_selected_row,
+                highlight_selected_system_row,
             )
                 .run_if(in_state(game_shell::AppState::Performance))
                 .run_if(super::editor_open),
@@ -617,13 +618,27 @@ pub(super) fn capture_binding(
 /// capture target). This is the primary way to pick a channel — the old
 /// autoplay-driven `pad_hit_autoselect` made the selection chase whatever note
 /// the autoplay was judging, so a user could never hold a channel selected.
+/// One row cursor, so a mouse click moves it the same way Up/Down does:
+/// clicking a lane row hands the cursor back to `SelectedChannel`, clicking a
+/// System row parks it on that verb (`SelectedSystem` wins in `current_row`).
 fn select_channel_on_row_click(
     rows: Query<(&Interaction, &BindChannelRow), Changed<Interaction>>,
+    system_rows: Query<
+        (&Interaction, &super::bindings_panel::BindSystemRow),
+        Changed<Interaction>,
+    >,
     mut selected: ResMut<SelectedChannel>,
+    mut system: ResMut<super::controls_panel::SelectedSystem>,
 ) {
     for (interaction, row) in &rows {
         if *interaction == Interaction::Pressed {
             selected.0 = Some(row.0);
+            system.0 = None;
+        }
+    }
+    for (interaction, row) in &system_rows {
+        if *interaction == Interaction::Pressed {
+            system.0 = Some(row.0);
         }
     }
 }
@@ -683,6 +698,7 @@ fn sync_selected_channel_on_capture(
 /// every frame, so no repaint plumbing is needed.
 fn highlight_selected_row(
     selected: Res<SelectedChannel>,
+    system: Res<super::controls_panel::SelectedSystem>,
     focus: Res<super::controls_panel::ControlsFocus>,
     mut rows: Query<(
         &BindChannelRow,
@@ -692,9 +708,51 @@ fn highlight_selected_row(
         &mut Outline,
     )>,
 ) {
-    let rows_focused = *focus == super::controls_panel::ControlsFocus::Rows;
+    // One cursor: while it sits on a System row the lane keeps its selection
+    // tint (the spatial display still points at it) but surrenders the ring.
+    let rows_focused =
+        *focus == super::controls_panel::ControlsFocus::Rows && system.0.is_none();
     for (row, unbound, mut bg, mut border, mut outline) in &mut rows {
         let on = selected.0 == Some(row.0);
+        *bg = BackgroundColor(if on {
+            super::chrome::ROW_SELECTED_BG
+        } else if unbound {
+            super::chrome::WARN_TINT
+        } else {
+            Color::NONE
+        });
+        *border = BorderColor::all(if on {
+            super::chrome::ACCENT
+        } else {
+            Color::NONE
+        });
+        if on && rows_focused {
+            outline.width = Val::Px(2.0);
+            outline.color = super::panel::FOCUS_RING;
+        } else {
+            outline.width = Val::Px(0.0);
+            outline.color = Color::NONE;
+        }
+    }
+}
+
+/// Tint the selected System row and, while keyboard focus sits on the rows,
+/// ring it — the mirror of `highlight_selected_row` for the System card. Runs
+/// every frame, so no repaint plumbing is needed.
+fn highlight_selected_system_row(
+    system: Res<super::controls_panel::SelectedSystem>,
+    focus: Res<super::controls_panel::ControlsFocus>,
+    mut rows: Query<(
+        &super::bindings_panel::BindSystemRow,
+        Has<super::bindings_panel::UnboundRow>,
+        &mut BackgroundColor,
+        &mut BorderColor,
+        &mut Outline,
+    )>,
+) {
+    let rows_focused = *focus == super::controls_panel::ControlsFocus::Rows;
+    for (row, unbound, mut bg, mut border, mut outline) in &mut rows {
+        let on = system.0 == Some(row.0);
         *bg = BackgroundColor(if on {
             super::chrome::ROW_SELECTED_BG
         } else if unbound {
@@ -923,6 +981,7 @@ mod tests {
         let mut app = App::new();
         app.insert_resource(SelectedChannel(Some(EChannel::Snare)))
             .insert_resource(ControlsFocus::Rows)
+            .init_resource::<crate::editor::controls_panel::SelectedSystem>()
             .add_systems(Update, highlight_selected_row);
         let sd = app
             .world_mut()

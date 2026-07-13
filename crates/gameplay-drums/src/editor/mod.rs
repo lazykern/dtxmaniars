@@ -124,6 +124,7 @@ pub fn plugin(app: &mut App) {
         .init_resource::<undo::UndoStack>()
         .init_resource::<controls_panel::ControlsSegment>()
         .init_resource::<controls_panel::ControlsFocus>()
+        .init_resource::<controls_panel::SelectedSystem>()
         .init_resource::<profile_state::LaneProfileDraft>()
         .init_resource::<profile_state::CustomizeSession>()
         .init_resource::<profile_state::PendingCloseState>()

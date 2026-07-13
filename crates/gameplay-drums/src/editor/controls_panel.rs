@@ -8,6 +8,7 @@
 
 use bevy::prelude::*;
 use dtx_core::EChannel;
+use dtx_input::{SystemVerb, SYSTEM_VERBS};
 use dtx_layout::{lane_chips, LaneArrangement};
 use game_shell::{NavAction, NavSource, NavVerb};
 
@@ -140,53 +141,85 @@ pub fn reduce_controls_nav(
     }
 }
 
+/// One focusable row in the Controls tab: the lane rows in display order,
+/// then one row per system verb.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ControlsRow {
+    Channel(EChannel),
+    System(SystemVerb),
+}
+
+/// The Controls row cursor when it sits on a System row. `None` = the cursor is
+/// on a lane row (`SelectedChannel` owns it, and the spatial lane display and
+/// the capture sync keep reading that resource untouched).
+#[derive(Resource, Debug, Clone, Copy, Default)]
+pub struct SelectedSystem(pub Option<SystemVerb>);
+
+/// Every Controls row, in focus order: lanes (display order), then verbs.
+pub fn controls_rows(arrangement: &LaneArrangement) -> Vec<ControlsRow> {
+    super::bindings_panel::bindable_channels_in_order(arrangement)
+        .into_iter()
+        .map(ControlsRow::Channel)
+        .chain(SYSTEM_VERBS.into_iter().map(ControlsRow::System))
+        .collect()
+}
+
+/// The row the cursor is on. The system cursor wins when set; clearing it
+/// (`SelectedSystem(None)`) hands the cursor back to `SelectedChannel`.
+pub fn current_row(selected: Option<EChannel>, system: Option<SystemVerb>) -> Option<ControlsRow> {
+    system
+        .map(ControlsRow::System)
+        .or(selected.map(ControlsRow::Channel))
+}
+
 /// Outcome of one Up/Down step through the Controls rows.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum RowStep {
+pub enum RowStep<T> {
     /// Up from the first row: focus returns to the segment selector.
     ToSegmentSelector,
-    /// The row cursor lands on this channel.
-    Select(EChannel),
+    /// The row cursor lands on this row.
+    Select(T),
     /// Nothing to do (Down on an empty row list).
     None,
 }
 
-/// Step the row cursor through `channels` (the panel's display order). A
-/// missing or stale `current` clamps to the first channel; Up from the first
-/// row hands focus back to the segment selector (the reducer's Rows+Up arm).
-pub fn step_channel(channels: &[EChannel], current: Option<EChannel>, dir: i32) -> RowStep {
-    if channels.is_empty() {
+/// Step the row cursor through `rows` (the panel's display order). A missing or
+/// stale `current` clamps to the first row; Up from the first row hands focus
+/// back to the segment selector (the reducer's Rows+Up arm).
+pub fn step_row<T: Copy + PartialEq>(rows: &[T], current: Option<T>, dir: i32) -> RowStep<T> {
+    if rows.is_empty() {
         return if dir < 0 {
             RowStep::ToSegmentSelector
         } else {
             RowStep::None
         };
     }
-    let Some(index) = current.and_then(|ch| channels.iter().position(|c| *c == ch)) else {
-        return RowStep::Select(channels[0]);
+    let Some(index) = current.and_then(|row| rows.iter().position(|r| *r == row)) else {
+        return RowStep::Select(rows[0]);
     };
     if dir < 0 {
         if index == 0 {
             RowStep::ToSegmentSelector
         } else {
-            RowStep::Select(channels[index - 1])
+            RowStep::Select(rows[index - 1])
         }
     } else {
-        RowStep::Select(channels[(index + 1).min(channels.len() - 1)])
+        RowStep::Select(rows[(index + 1).min(rows.len() - 1)])
     }
 }
 
 /// Keyboard-only `NavAction` consumer for the Controls tab. Level moves go
 /// through the pure `reduce_controls_nav`; at `Rows` the consumer owns what
-/// the reducer doesn't model: the row cursor (`SelectedChannel` through the
-/// panel's display order), Enter → capture arming, Backspace → delete the
-/// last binding of the selected channel in the active segment.
+/// the reducer doesn't model: the row cursor (one cursor over `controls_rows`
+/// — the lane rows then the System rows, held by `SelectedChannel` +
+/// `SelectedSystem`), Enter → capture arming, Backspace → delete the last
+/// binding of the selected row in the active segment.
 ///
 /// Ordered `.after(capture_binding)`: Enter is NOT a reserved capture key,
 /// so the press that arms a capture must already be stale when the capture
 /// machine next reads the keyboard — and the Enter that commits an Arrived
 /// state must not re-enter here and instantly re-arm (covered by the
-/// `capture.is_changed()` skip).
+/// capture-state skip below).
 #[allow(clippy::too_many_arguments)]
 pub(super) fn controls_nav_consumer(
     mut actions: MessageReader<NavAction>,
@@ -197,6 +230,7 @@ pub(super) fn controls_nav_consumer(
     mut focus: ResMut<ControlsFocus>,
     mut segment: ResMut<ControlsSegment>,
     mut selected: ResMut<SelectedChannel>,
+    mut system: ResMut<SelectedSystem>,
     mut live: ResMut<LiveBindings>,
     mut rev: ResMut<BindingsRev>,
 ) {
@@ -217,18 +251,31 @@ pub(super) fn controls_nav_consumer(
         actions.clear();
         return;
     }
-    let channels = super::bindings_panel::bindable_channels_in_order(&lanes.0);
+    let rows = controls_rows(&lanes.0);
     // Backspace is not a NavVerb — read it directly, Rows level only.
     if *focus == ControlsFocus::Rows && keys.just_pressed(KeyCode::Backspace) {
-        if let Some(channel) = selected.0 {
-            if let Some(index) =
-                super::bindings_panel::last_segment_source_index(&live.0, channel, *segment)
-            {
-                if let Some(sources) = live.0.map.get_mut(&channel) {
-                    sources.remove(index);
-                    rev.0 = rev.0.wrapping_add(1);
+        match current_row(selected.0, system.0) {
+            Some(ControlsRow::Channel(channel)) => {
+                if let Some(index) =
+                    super::bindings_panel::last_segment_source_index(&live.0, channel, *segment)
+                {
+                    if let Some(sources) = live.0.map.get_mut(&channel) {
+                        sources.remove(index);
+                        rev.0 = rev.0.wrapping_add(1);
+                    }
                 }
             }
+            Some(ControlsRow::System(verb)) => {
+                if let Some(index) =
+                    super::bindings_panel::last_system_source_index(&live.0, verb, *segment)
+                {
+                    if let Some(sources) = live.0.system.get_mut(&verb) {
+                        sources.remove(index);
+                        rev.0 = rev.0.wrapping_add(1);
+                    }
+                }
+            }
+            None => {}
         }
     }
     for action in actions.read() {
@@ -238,7 +285,7 @@ pub(super) fn controls_nav_consumer(
         match (*focus, action.verb) {
             (ControlsFocus::Rows, NavVerb::Up) | (ControlsFocus::Rows, NavVerb::Down) => {
                 let dir = if action.verb == NavVerb::Up { -1 } else { 1 };
-                match step_channel(&channels, selected.0, dir) {
+                match step_row(&rows, current_row(selected.0, system.0), dir) {
                     RowStep::ToSegmentSelector => {
                         let (next_focus, next_segment) =
                             reduce_controls_nav(*focus, *segment, NavVerb::Up);
@@ -249,22 +296,47 @@ pub(super) fn controls_nav_consumer(
                             *segment = next_segment;
                         }
                     }
-                    RowStep::Select(channel) => {
+                    RowStep::Select(ControlsRow::Channel(channel)) => {
                         if selected.0 != Some(channel) {
                             selected.0 = Some(channel);
+                        }
+                        if system.0.is_some() {
+                            system.0 = None;
+                        }
+                    }
+                    RowStep::Select(ControlsRow::System(verb)) => {
+                        if system.0 != Some(verb) {
+                            system.0 = Some(verb);
                         }
                     }
                     RowStep::None => {}
                 }
             }
             (ControlsFocus::Rows, NavVerb::Confirm) => {
-                if let Some(channel) = selected.0.filter(|ch| channels.contains(ch)) {
-                    *capture = match *segment {
-                        ControlsSegment::Keyboard => CaptureState::Keyboard(channel),
-                        ControlsSegment::Midi => CaptureState::Midi(channel),
-                    };
-                    actions.clear();
-                    return; // the capture flow owns input from here
+                match current_row(selected.0, system.0).filter(|row| rows.contains(row)) {
+                    Some(ControlsRow::Channel(channel)) => {
+                        *capture = match *segment {
+                            ControlsSegment::Keyboard => CaptureState::Keyboard(channel),
+                            ControlsSegment::Midi => CaptureState::Midi(channel),
+                        };
+                        actions.clear();
+                        return; // the capture flow owns input from here
+                    }
+                    Some(ControlsRow::System(verb)) => {
+                        *capture = match *segment {
+                            ControlsSegment::Keyboard => CaptureState::SystemKey {
+                                verb,
+                                refused: None,
+                            },
+                            ControlsSegment::Midi => CaptureState::SystemMidi {
+                                verb,
+                                refused: None,
+                            },
+                        };
+                        actions.clear();
+                        return;
+                    }
+                    None => {}
                 }
             }
             _ => {
@@ -277,10 +349,13 @@ pub(super) fn controls_nav_consumer(
                 if *segment != next_segment {
                     *segment = next_segment;
                 }
-                if entered_rows && !selected.0.is_some_and(|ch| channels.contains(&ch)) {
+                let stale =
+                    !current_row(selected.0, system.0).is_some_and(|row| rows.contains(&row));
+                if entered_rows && stale {
                     // Seed the row cursor so Enter/Backspace always target a row.
-                    if let Some(first) = channels.first() {
-                        selected.0 = Some(*first);
+                    if let Some(ControlsRow::Channel(first)) = rows.first().copied() {
+                        selected.0 = Some(first);
+                        system.0 = None;
                     }
                 }
             }
@@ -445,35 +520,153 @@ mod tests {
         let chs = [EChannel::LeftCymbal, EChannel::HiHatClose, EChannel::Snare];
         // Stale / missing selection clamps to the first channel.
         assert_eq!(
-            step_channel(&chs, None, 1),
+            step_row(&chs, None, 1),
             RowStep::Select(EChannel::LeftCymbal)
         );
         assert_eq!(
-            step_channel(&chs, Some(EChannel::Cymbal), -1),
+            step_row(&chs, Some(EChannel::Cymbal), -1),
             RowStep::Select(EChannel::LeftCymbal),
             "channel not in display order clamps to first"
         );
         // Down walks and clamps at the bottom.
         assert_eq!(
-            step_channel(&chs, Some(EChannel::LeftCymbal), 1),
+            step_row(&chs, Some(EChannel::LeftCymbal), 1),
             RowStep::Select(EChannel::HiHatClose)
         );
         assert_eq!(
-            step_channel(&chs, Some(EChannel::Snare), 1),
+            step_row(&chs, Some(EChannel::Snare), 1),
             RowStep::Select(EChannel::Snare)
         );
         // Up from the first row returns focus to the segment selector.
         assert_eq!(
-            step_channel(&chs, Some(EChannel::HiHatClose), -1),
+            step_row(&chs, Some(EChannel::HiHatClose), -1),
             RowStep::Select(EChannel::LeftCymbal)
         );
         assert_eq!(
-            step_channel(&chs, Some(EChannel::LeftCymbal), -1),
+            step_row(&chs, Some(EChannel::LeftCymbal), -1),
             RowStep::ToSegmentSelector
         );
         // Empty list: Up hands off, Down does nothing.
-        assert_eq!(step_channel(&[], None, -1), RowStep::ToSegmentSelector);
-        assert_eq!(step_channel(&[], None, 1), RowStep::None);
+        assert_eq!(
+            step_row::<EChannel>(&[], None, -1),
+            RowStep::ToSegmentSelector
+        );
+        assert_eq!(step_row::<EChannel>(&[], None, 1), RowStep::None);
+    }
+
+    #[test]
+    fn controls_rows_put_system_verbs_after_the_lane_rows() {
+        use dtx_input::{SystemVerb, BINDABLE_CHANNELS};
+        let rows = controls_rows(&dtx_layout::classic());
+        assert_eq!(rows.len(), BINDABLE_CHANNELS.len() + 2);
+        assert_eq!(
+            rows[BINDABLE_CHANNELS.len()],
+            ControlsRow::System(SystemVerb::Pause)
+        );
+        assert_eq!(
+            rows[BINDABLE_CHANNELS.len() + 1],
+            ControlsRow::System(SystemVerb::Restart)
+        );
+        assert!(matches!(rows[0], ControlsRow::Channel(_)));
+    }
+
+    #[test]
+    fn row_cursor_walks_from_the_last_lane_into_the_system_rows() {
+        use dtx_core::EChannel;
+        use dtx_input::SystemVerb;
+        let rows = [
+            ControlsRow::Channel(EChannel::Snare),
+            ControlsRow::System(SystemVerb::Pause),
+            ControlsRow::System(SystemVerb::Restart),
+        ];
+        assert_eq!(
+            step_row(&rows, Some(ControlsRow::Channel(EChannel::Snare)), 1),
+            RowStep::Select(ControlsRow::System(SystemVerb::Pause))
+        );
+        assert_eq!(
+            step_row(&rows, Some(ControlsRow::System(SystemVerb::Restart)), 1),
+            RowStep::Select(ControlsRow::System(SystemVerb::Restart)),
+            "clamps at the bottom"
+        );
+        assert_eq!(
+            step_row(&rows, Some(ControlsRow::System(SystemVerb::Pause)), -1),
+            RowStep::Select(ControlsRow::Channel(EChannel::Snare)),
+            "Up returns to the lanes"
+        );
+    }
+
+    #[test]
+    fn current_row_prefers_the_system_cursor() {
+        use dtx_core::EChannel;
+        use dtx_input::SystemVerb;
+        assert_eq!(
+            current_row(Some(EChannel::Snare), Some(SystemVerb::Pause)),
+            Some(ControlsRow::System(SystemVerb::Pause))
+        );
+        assert_eq!(
+            current_row(Some(EChannel::Snare), None),
+            Some(ControlsRow::Channel(EChannel::Snare))
+        );
+        assert_eq!(current_row(None, None), None);
+    }
+
+    #[test]
+    fn enter_on_a_system_row_arms_system_capture() {
+        use crate::editor::bindings_capture::{CaptureState, SelectedChannel};
+        use crate::editor::bindings_panel::BindingsRev;
+        use bevy::prelude::*;
+        use dtx_input::SystemVerb;
+        use game_shell::{NavAction, NavSource};
+
+        let mut app = App::new();
+        app.init_resource::<ButtonInput<KeyCode>>()
+            .init_resource::<ControlsFocus>()
+            .init_resource::<ControlsSegment>()
+            .init_resource::<CaptureState>()
+            .init_resource::<SelectedChannel>()
+            .init_resource::<SelectedSystem>()
+            .init_resource::<BindingsRev>()
+            .init_resource::<crate::bindings::LiveBindings>()
+            .init_resource::<crate::lanes::Lanes>()
+            .insert_resource(crate::editor::tabs::ActiveTab(
+                game_shell::CustomizeTab::Controls,
+            ))
+            .add_message::<NavAction>()
+            .add_systems(Update, controls_nav_consumer);
+        app.update();
+
+        fn nav(app: &mut App, verb: NavVerb) {
+            app.world_mut()
+                .resource_mut::<Messages<NavAction>>()
+                .write(NavAction {
+                    verb,
+                    source: NavSource::Keyboard,
+                    coarse: false,
+                });
+            app.update();
+        }
+
+        // TabBar → SegmentSelector → Rows (cursor seeds on the first lane row).
+        nav(&mut app, NavVerb::Down);
+        nav(&mut app, NavVerb::Down);
+        // Walk past the twelve lane rows onto the Pause row.
+        for _ in 0..dtx_input::BINDABLE_CHANNELS.len() {
+            nav(&mut app, NavVerb::Down);
+        }
+        assert_eq!(
+            app.world().resource::<SelectedSystem>().0,
+            Some(SystemVerb::Pause),
+            "the cursor walks off the lanes into the System rows"
+        );
+
+        nav(&mut app, NavVerb::Confirm);
+        assert!(matches!(
+            *app.world().resource::<CaptureState>(),
+            CaptureState::SystemKey {
+                verb: SystemVerb::Pause,
+                refused: None
+            }
+        ));
     }
 
     #[test]
@@ -490,6 +683,7 @@ mod tests {
             .init_resource::<ControlsSegment>()
             .init_resource::<CaptureState>()
             .init_resource::<SelectedChannel>()
+            .init_resource::<SelectedSystem>()
             .init_resource::<BindingsRev>()
             .init_resource::<crate::bindings::LiveBindings>()
             .init_resource::<crate::lanes::Lanes>()
@@ -602,6 +796,7 @@ mod tests {
             .init_resource::<ControlsSegment>()
             .init_resource::<CaptureState>()
             .init_resource::<SelectedChannel>()
+            .init_resource::<SelectedSystem>()
             .init_resource::<BindingsRev>()
             .init_resource::<crate::bindings::LiveBindings>()
             .init_resource::<crate::lanes::Lanes>()
