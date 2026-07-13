@@ -46,6 +46,7 @@ fn spawn_prompt(mut commands: Commands) {
         WaitPrompt,
         Text::new(""),
         Theme::label_font(),
+        dtx_ui::SemanticText(dtx_ui::TypographyRole::Label),
         TextColor(theme.text_primary),
         Node {
             position_type: PositionType::Absolute,

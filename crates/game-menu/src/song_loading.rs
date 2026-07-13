@@ -538,11 +538,13 @@ fn spawn_loading(
                     col.spawn((
                         Text::new("NOW LOADING"),
                         Theme::font(12.0),
+                        dtx_ui::SemanticText(dtx_ui::TypographyRole::Hint),
                         TextColor(t.text_secondary),
                     ));
                     col.spawn((
                         Text::new(title),
                         Theme::font(34.0),
+                        dtx_ui::SemanticText(dtx_ui::TypographyRole::Title),
                         TextColor(t.text_primary),
                     ));
                     col.spawn(Node {
@@ -559,6 +561,7 @@ fn spawn_loading(
                                     .unwrap_or_else(|| "?".into())
                             )),
                             Theme::font(15.0),
+                            dtx_ui::SemanticText(dtx_ui::TypographyRole::Body),
                             TextColor(t.text_secondary),
                         ));
                         meta.spawn((
@@ -577,6 +580,7 @@ fn spawn_loading(
                                         .unwrap_or_else(|| "--".into())
                                 )),
                                 Theme::font(12.0),
+                                dtx_ui::SemanticText(dtx_ui::TypographyRole::Hint),
                                 TextColor(t.text_primary),
                             ));
                         });
@@ -613,12 +617,14 @@ fn spawn_loading(
                     col.spawn((
                         Text::new(""),
                         Theme::font(12.0),
+                        dtx_ui::SemanticText(dtx_ui::TypographyRole::Hint),
                         TextColor(t.text_secondary),
                         LoadingStatusText,
                     ));
                     col.spawn((
                         Text::new("Esc / SD — cancel"),
                         Theme::font(12.0),
+                        dtx_ui::SemanticText(dtx_ui::TypographyRole::Hint),
                         TextColor(t.text_secondary),
                     ));
                 });

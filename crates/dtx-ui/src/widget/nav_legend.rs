@@ -47,12 +47,14 @@ pub fn spawn_nav_legend(parent: &mut ChildSpawnerCommands, theme: &Theme, items:
                         children![(
                             Text::new(*pad),
                             Theme::font(10.0),
+                            crate::SemanticText(crate::TypographyRole::Hint),
                             TextColor(theme.text_primary),
                         )],
                     ));
                     cell.spawn((
                         Text::new(*verb),
                         Theme::font(10.0),
+                        crate::SemanticText(crate::TypographyRole::Hint),
                         TextColor(theme.text_secondary),
                     ));
                 });

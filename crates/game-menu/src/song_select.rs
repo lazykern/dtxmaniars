@@ -883,6 +883,7 @@ fn spawn_song_select(
                         bar.spawn((
                             Text::new("DTXMANIARS"),
                             Theme::font(22.0),
+                            dtx_ui::SemanticText(dtx_ui::TypographyRole::Heading),
                             TextColor(t.text_primary),
                         ));
                         bar.spawn(Node {
@@ -915,6 +916,7 @@ fn spawn_song_select(
                                         SearchText,
                                         Text::new("type to search…"),
                                         Theme::font(13.0),
+                                        dtx_ui::SemanticText(dtx_ui::TypographyRole::Hint),
                                         TextColor(t.text_secondary),
                                     ));
                                 });
@@ -931,6 +933,7 @@ fn spawn_song_select(
                                         SortChipText,
                                         Text::new("SORT: DEFAULT"),
                                         Theme::font(12.0),
+                                        dtx_ui::SemanticText(dtx_ui::TypographyRole::Hint),
                                         TextColor(Color::BLACK),
                                     ));
                                 });
@@ -953,6 +956,7 @@ fn spawn_song_select(
                         },
                         Text::new(summary.unwrap_or_default()),
                         Theme::font(11.0),
+                        dtx_ui::SemanticText(dtx_ui::TypographyRole::Hint),
                         TextColor(t.select_yellow),
                     ));
 
@@ -966,6 +970,7 @@ fn spawn_song_select(
                         },
                         Text::new(library_status_text(&filters, &db.latest_scan, &chart_stats)),
                         Theme::font(11.0),
+                        dtx_ui::SemanticText(dtx_ui::TypographyRole::Hint),
                         TextColor(t.text_secondary),
                     ));
 
@@ -1201,6 +1206,7 @@ fn spawn_wheel_rows(
             BackgroundColor(t.stage_panel_bg),
             Text::new(empty_result_text(filters)),
             Theme::font(16.0),
+            dtx_ui::SemanticText(dtx_ui::TypographyRole::Body),
             TextColor(t.text_secondary),
         ));
         return;
@@ -1286,6 +1292,7 @@ fn spawn_wheel_rows(
                             WheelRowSkill,
                             Text::new(crate::chart_stats::row_skill_text(skill)),
                             Theme::font(15.0),
+                            dtx_ui::SemanticText(dtx_ui::TypographyRole::Label),
                             TextColor(t.select_yellow),
                         ));
                         // Progress-bar track.
@@ -1315,6 +1322,7 @@ fn spawn_wheel_rows(
                         WheelRowTitle,
                         Text::new(folder.title.clone()),
                         Theme::font(18.0),
+                        dtx_ui::SemanticText(dtx_ui::TypographyRole::Body),
                         TextColor(t.text_primary),
                     ));
                 });

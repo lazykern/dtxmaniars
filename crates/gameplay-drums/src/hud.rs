@@ -188,6 +188,7 @@ fn spawn_hud(
                 BorderColor::all(t.accent),
                 Text::new(label),
                 dtx_ui::Theme::font(14.0),
+                dtx_ui::SemanticText(dtx_ui::TypographyRole::Hint),
                 TextColor(t.text_primary),
             ));
         });

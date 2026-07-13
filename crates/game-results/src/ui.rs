@@ -88,6 +88,9 @@ pub(crate) struct ResultDetailsOpen(pub bool);
 #[derive(Component)]
 pub(crate) struct ResultDetailsPanel;
 
+#[derive(Component)]
+pub(crate) struct ResultScroll;
+
 /// Verb label text with a width-stable selection prefix.
 pub(crate) fn practice_label(has_recommendation: bool) -> &'static str {
     if has_recommendation {
@@ -116,7 +119,15 @@ fn reveal_text(
     font: TextFont,
     color: Color,
     slot: f32,
-) -> (Text, TextFont, TextColor, StatRow, EnterChoreo, UiTransform) {
+) -> (
+    Text,
+    TextFont,
+    TextColor,
+    StatRow,
+    EnterChoreo,
+    UiTransform,
+    dtx_ui::AccessibleText,
+) {
     (
         Text::new(text),
         font,
@@ -127,6 +138,7 @@ fn reveal_text(
         },
         EnterChoreo::slide(SLIDE_OFFSET, slot * STAGGER_MS, SLIDE_DURATION_MS),
         UiTransform::default(),
+        dtx_ui::AccessibleText,
     )
 }
 
@@ -249,14 +261,20 @@ pub(crate) fn spawn_result(
         ))
         .with_children(|root| {
             root.spawn((
+                ResultScroll,
                 Node {
                     width: Val::Percent(100.0),
                     max_width: Val::Px(CARD_MAX_WIDTH),
+                    max_height: Val::Percent(100.0),
                     padding: UiRect::all(Val::Px(CARD_PADDING)),
                     flex_direction: FlexDirection::Column,
                     row_gap: Val::Px(16.0),
+                    overflow: Overflow::scroll_y(),
                     ..default()
                 },
+                // If XL content exceeds 720p, start at the action row. Bevy's
+                // layout pass clamps this sentinel to the actual maximum.
+                ScrollPosition(Vec2::new(0.0, f32::MAX)),
                 BackgroundColor(t.panel_bg),
             ))
             .with_children(|card| {
@@ -544,6 +562,7 @@ fn spawn_details_panel(card: &mut ChildSpawnerCommands, t: &Theme, analysis: &Re
         panel.spawn((
             Text::new(details_text(analysis)),
             Theme::font(14.0),
+            dtx_ui::SemanticText(dtx_ui::TypographyRole::Body),
             TextColor(t.text_secondary),
         ));
     });
@@ -730,6 +749,30 @@ pub(crate) fn sync_details_panel(
         } else {
             Visibility::Hidden
         };
+    }
+}
+
+pub(crate) fn scroll_result(
+    keys: Res<ButtonInput<KeyCode>>,
+    mut wheel: MessageReader<bevy::input::mouse::MouseWheel>,
+    mut surfaces: Query<&mut ScrollPosition, With<ResultScroll>>,
+) {
+    let wheel_delta: f32 = wheel.read().map(|event| event.y * 48.0).sum();
+    for mut scroll in &mut surfaces {
+        if keys.just_pressed(KeyCode::Home) {
+            scroll.0.y = 0.0;
+        } else if keys.just_pressed(KeyCode::End) {
+            scroll.0.y = f32::MAX;
+        } else {
+            let keyboard = if keys.just_pressed(KeyCode::PageUp) {
+                240.0
+            } else if keys.just_pressed(KeyCode::PageDown) {
+                -240.0
+            } else {
+                0.0
+            };
+            scroll.0.y = (scroll.0.y - wheel_delta - keyboard).max(0.0);
+        }
     }
 }
 

@@ -68,6 +68,26 @@ fn full_hud_spawns_on_pause_and_despawns_on_resume() {
 }
 
 #[test]
+fn xlarge_practice_rail_is_a_scroll_surface() {
+    let mut app = build_app();
+    app.world_mut().insert_resource(PracticeSession::default());
+    app.world_mut()
+        .insert_resource(dtx_ui::AccessibilityPolicy::from(
+            &dtx_config::AccessibilityConfig {
+                text_scale: dtx_config::TextScale::XLarge,
+                ..Default::default()
+            },
+        ));
+    set_rail_surface(&mut app);
+    set_paused(&mut app, true);
+
+    let mut surfaces = app.world_mut().query::<(&Node, &ScrollPosition)>();
+    assert!(surfaces
+        .iter(app.world())
+        .any(|(node, _)| node.overflow.y == OverflowAxis::Scroll));
+}
+
+#[test]
 fn full_hud_absent_without_practice_session() {
     let mut app = build_app();
     set_paused(&mut app, true);

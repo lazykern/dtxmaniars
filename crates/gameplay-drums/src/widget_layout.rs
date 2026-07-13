@@ -88,6 +88,17 @@ pub fn translation_for(desired: Vec2, u_min: Vec2, screen_center: Vec2, s: f32) 
     desired - screen_center - s * (u_min - screen_center)
 }
 
+/// Runtime-only recovery for a widget's resolved visual rectangle.
+pub fn repair_widget_top_left(desired: Vec2, size: Vec2, viewport: Vec2) -> Vec2 {
+    let saved = Rect::from_corners(desired, desired + size.max(Vec2::ZERO));
+    dtx_ui::repair_runtime_rect(
+        saved,
+        dtx_ui::SafeArea::for_viewport(viewport.x, viewport.y),
+        dtx_ui::Size::new(24.0, 24.0),
+    )
+    .min
+}
+
 /// Whether a widget is visible in the current mode (practice vs play).
 pub fn widget_visible(inst: &WidgetInstance, practice: bool) -> bool {
     if practice {
@@ -269,10 +280,13 @@ fn apply_widget_layout(
         match inst.placement {
             dtx_layout::Placement::Natural => {
                 // v1 semantics: pure ref-px delta, scale inert.
-                tf.translation = Val2::new(
-                    Val::Px(inst.offset.0 * pfl.scale),
-                    Val::Px(inst.offset.1 * pfl.scale),
-                );
+                let mut t = Vec2::new(inst.offset.0 * pfl.scale, inst.offset.1 * pfl.scale);
+                if let Some(geom) = geoms.0.get(&container.0) {
+                    let desired = transform_point(geom.unscaled.min, sc, t, 1.0);
+                    let repaired = repair_widget_top_left(desired, geom.unscaled.size(), rect.size);
+                    t += repaired - desired;
+                }
+                tf.translation = Val2::new(Val::Px(t.x), Val::Px(t.y));
                 tf.scale = Vec2::ONE;
             }
             dtx_layout::Placement::Anchored => {
@@ -290,12 +304,12 @@ fn apply_widget_layout(
                     (inst.offset.0 * pfl.scale, inst.offset.1 * pfl.scale),
                     parent,
                 );
-                let t = translation_for(
+                let repaired = repair_widget_top_left(
                     Vec2::new(desired.0, desired.1),
-                    geom.unscaled.min,
-                    sc,
-                    inst.scale,
+                    Vec2::new(size.0 * inst.scale, size.1 * inst.scale),
+                    rect.size,
                 );
+                let t = translation_for(repaired, geom.unscaled.min, sc, inst.scale);
                 tf.translation = Val2::new(Val::Px(t.x), Val::Px(t.y));
                 tf.scale = Vec2::splat(inst.scale);
             }
@@ -437,5 +451,20 @@ mod tests {
         // Natural placement, offset 0 → desired == natural top-left → T == 0.
         let t = translation_for(u_min, u_min, sc, 1.0);
         assert!(t.length() < 0.001);
+    }
+
+    #[test]
+    fn runtime_widget_repair_keeps_persisted_offset_separate() {
+        let saved_offset = Vec2::new(1400.0, 900.0);
+        let repaired = repair_widget_top_left(
+            saved_offset,
+            Vec2::new(200.0, 80.0),
+            Vec2::new(1280.0, 720.0),
+        );
+        assert_ne!(repaired, saved_offset);
+        assert_eq!(saved_offset, Vec2::new(1400.0, 900.0));
+        let rect = Rect::from_corners(repaired, repaired + Vec2::new(200.0, 80.0));
+        assert!(dtx_ui::SafeArea::reference_720p()
+            .contains_focus_handle(rect, dtx_ui::Size::new(24.0, 24.0)));
     }
 }

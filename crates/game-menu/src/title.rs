@@ -98,6 +98,7 @@ fn spawn_title(
                 logo.spawn((
                     Text::new("DTXMANIARS"),
                     Theme::font(56.0),
+                    dtx_ui::SemanticText(dtx_ui::TypographyRole::Display),
                     TextColor(t.text_primary),
                 ));
             });
@@ -122,6 +123,7 @@ fn spawn_title(
                 chip.spawn((
                     Text::new("PRESS ENTER"),
                     Theme::font(20.0),
+                    dtx_ui::SemanticText(dtx_ui::TypographyRole::Heading),
                     TextColor(Color::BLACK),
                 ));
             });
@@ -148,17 +150,20 @@ fn spawn_title(
                     bar.spawn((
                         Text::new(format!("v{}", env!("CARGO_PKG_VERSION"))),
                         Theme::font(12.0),
+                        dtx_ui::SemanticText(dtx_ui::TypographyRole::Hint),
                         TextColor(t.text_secondary),
                     ));
                     bar.spawn((
                         Text::new("F1 SETTINGS   F2 LAYOUT EDITOR"),
                         Theme::font(12.0),
+                        dtx_ui::SemanticText(dtx_ui::TypographyRole::Hint),
                         TextColor(t.text_secondary),
                     ));
                     bar.spawn((
                         QuitHintText,
                         Text::new("ESC QUIT"),
                         Theme::font(12.0),
+                        dtx_ui::SemanticText(dtx_ui::TypographyRole::Hint),
                         TextColor(t.text_secondary),
                     ));
                 });

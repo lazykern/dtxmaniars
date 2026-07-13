@@ -314,6 +314,7 @@ fn rebuild_left_content(
             p.spawn((
                 Text::new("keyboard/mouse required — pads: SD to go back"),
                 dtx_ui::theme::Theme::font(10.0),
+                dtx_ui::SemanticText(dtx_ui::TypographyRole::Hint),
                 TextColor(Color::srgba(1.0, 0.8, 0.3, 0.9)),
                 Node {
                     margin: UiRect::bottom(Val::Px(6.0)),
@@ -372,6 +373,7 @@ fn spawn_widget_list(
     p.spawn((
         Text::new("Widgets"),
         dtx_ui::theme::Theme::font(13.0),
+        dtx_ui::SemanticText(dtx_ui::TypographyRole::Heading),
         TextColor(t.text_primary),
     ));
     for kind in WidgetKind::ALL {
@@ -443,6 +445,7 @@ fn rebuild_right_inspector(
         p.spawn((
             Text::new(format!("Settings ({})", kind.display_name())),
             dtx_ui::theme::Theme::font(13.0),
+            dtx_ui::SemanticText(dtx_ui::TypographyRole::Heading),
             TextColor(t.text_primary),
         ));
 
@@ -617,6 +620,7 @@ fn spawn_settings_block(
             h.spawn((
                 Text::new(tab.label()),
                 dtx_ui::theme::Theme::font(13.0),
+                dtx_ui::SemanticText(dtx_ui::TypographyRole::Label),
                 TextColor(t.text_primary),
             ));
             if tab == game_shell::CustomizeTab::Gameplay {
@@ -658,6 +662,7 @@ fn spawn_settings_block(
                 p.spawn((
                     Text::new(item.group),
                     dtx_ui::theme::Theme::font(10.0),
+                    dtx_ui::SemanticText(dtx_ui::TypographyRole::Hint),
                     TextColor(t.text_secondary),
                     Node {
                         margin: UiRect::top(Val::Px(4.0)),
@@ -703,6 +708,7 @@ fn spawn_settings_block(
                     l.spawn((
                         Text::new(item.label),
                         dtx_ui::theme::Theme::font(ROW_LABEL_FONT),
+                        dtx_ui::SemanticText(dtx_ui::TypographyRole::Label),
                         TextColor(t.text_secondary),
                     ));
                 });
@@ -721,6 +727,7 @@ fn spawn_settings_block(
                             SettingValueText(i),
                             Text::new((item.value)(&draft.0)),
                             dtx_ui::theme::Theme::font(ROW_VALUE_FONT),
+                            dtx_ui::SemanticText(dtx_ui::TypographyRole::Body),
                             TextColor(t.text_primary),
                             TextLayout {
                                 linebreak: bevy::text::LineBreak::NoWrap,
@@ -752,6 +759,7 @@ fn spawn_settings_block(
                             SettingValueText(i),
                             Text::new((item.value)(&draft.0)),
                             dtx_ui::theme::Theme::font(ROW_VALUE_FONT),
+                            dtx_ui::SemanticText(dtx_ui::TypographyRole::Body),
                             TextColor(t.text_primary),
                             TextLayout {
                                 linebreak: bevy::text::LineBreak::NoWrap,
@@ -885,6 +893,7 @@ fn row(
         r.spawn((
             Text::new(label.to_string()),
             dtx_ui::theme::Theme::font(11.0),
+            dtx_ui::SemanticText(dtx_ui::TypographyRole::Hint),
             TextColor(t.text_secondary),
         ));
         content(r);

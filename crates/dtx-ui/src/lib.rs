@@ -8,6 +8,7 @@ pub mod easing;
 pub mod motion;
 pub mod parallax;
 pub mod perf_common;
+pub mod reference_layout;
 pub mod theme;
 pub mod transition;
 pub mod tween;
@@ -22,9 +23,13 @@ pub use accessibility::{
     danger_effect, entrance_effect, hit_effect, AccessibilityPolicy, DangerEffect, EntranceEffect,
     FlashDecision, HitEffect, MotionDecision, StartupConfigWarning,
 };
+pub use reference_layout::{fit_overlay, repair_runtime_rect, FitDecision, SafeArea, Size};
 pub use theme::{Theme, ThemeResource, REF_HEIGHT, REF_WIDTH, SCREEN_TRANSITION_MS};
 pub use transition::{FadePhase, ScreenFade, TransitionOverlay};
-pub use typography::{InteractionTone, SpacingRole, StateMarker, Typography, TypographyRole};
+pub use typography::{
+    AccessibleText, InteractionTone, SemanticText, SpacingRole, StateMarker, Typography,
+    TypographyRole,
+};
 pub use widget::action_button::{
     reduce_activation, ActionButton, ActionButtonState, ActivationSource, DialogAction,
 };
@@ -124,6 +129,7 @@ pub fn plugin(app: &mut App) {
         .add_systems(
             Update,
             (
+                typography::apply_semantic_typography,
                 age_notifications,
                 widget::album_art::album_art_tween_system,
                 widget::album_art::apply_album_art_opacity,

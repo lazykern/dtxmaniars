@@ -52,10 +52,17 @@ pub fn rail_fixed_content_height(scale: f32) -> f32 {
 
 /// Worst-case rail height including both fully-populated trailing blocks.
 pub fn rail_content_height(scale: f32) -> f32 {
+    rail_content_height_for(scale, 1.0)
+}
+
+pub fn rail_content_height_for(scale: f32, text_multiplier: f32) -> f32 {
     let line = SMALL_REF_FONT * 1.2;
     let blocks =
         (HISTORY_MAX_LINES + DIAG_MAX_LINES) as f32 * line + 2.0 * (BLOCK_REF_MARGIN + ROW_REF_GAP);
-    rail_fixed_content_height(scale) + blocks * scale
+    let headers = 3.0 * (HEADER_REF_FONT * 1.2 + HEADER_REF_TOP_MARGIN);
+    let rows = RailItem::ORDER.len() as f32 * ROW_REF_HEIGHT;
+    let gaps = (3 + RailItem::ORDER.len() - 1) as f32 * ROW_REF_GAP;
+    (headers + rows + gaps + blocks) * scale * text_multiplier + 2.0 * RAIL_REF_PAD * scale
 }
 
 /// Keeps the first `max` lines of `text` — the blocks order their most
@@ -67,6 +74,15 @@ pub fn clamp_lines(text: &str, max: usize) -> String {
 /// Root marker for the full practice HUD.
 #[derive(Component)]
 pub struct FullHudRoot;
+
+#[derive(Component)]
+pub(super) struct PracticeRail {
+    row_height: f32,
+    row_gap: f32,
+    header_height: f32,
+    viewport_height: f32,
+    padding: f32,
+}
 
 /// The bottom timeline strip (mouse hit-target; markers are children).
 #[derive(Component)]
@@ -459,6 +475,7 @@ pub fn spawn_full_hud(
     clock: Res<GameplayClock>,
     timeline: Res<ChipTimeline>,
     layout: Option<Res<crate::layout::PlayfieldLayout>>,
+    accessibility: Option<Res<dtx_ui::AccessibilityPolicy>>,
 ) {
     selection.0 = 0;
     session.transport.scrub_cursor_ms = Some(clock.current_ms);
@@ -466,6 +483,7 @@ pub fn spawn_full_hud(
     let (scale, origin) = layout
         .map(|l| (l.scale, l.origin))
         .unwrap_or((1.0, Vec2::ZERO));
+    let text_multiplier = accessibility.map_or(1.0, |policy| policy.text_multiplier());
     let theme = Theme::default();
     commands
         .spawn((
@@ -480,8 +498,24 @@ pub fn spawn_full_hud(
             GlobalZIndex(crate::ui_z::PRACTICE_FULL_HUD),
         ))
         .with_children(|root| {
-            spawn_rail(root, &theme, scale, origin, &session, &timeline);
-            spawn_timeline_row(root, &theme, scale, origin, &clock, &timeline);
+            spawn_rail(
+                root,
+                &theme,
+                scale,
+                text_multiplier,
+                origin,
+                &session,
+                &timeline,
+            );
+            spawn_timeline_row(
+                root,
+                &theme,
+                scale,
+                text_multiplier,
+                origin,
+                &clock,
+                &timeline,
+            );
         });
 }
 
@@ -489,6 +523,7 @@ fn spawn_rail(
     root: &mut ChildSpawnerCommands,
     theme: &Theme,
     scale: f32,
+    text_multiplier: f32,
     origin: Vec2,
     session: &PracticeSession,
     timeline: &ChipTimeline,
@@ -497,15 +532,23 @@ fn spawn_rail(
     let mut rail_node = Node {
         position_type: PositionType::Absolute,
         flex_direction: FlexDirection::Column,
-        row_gap: Val::Px(ROW_REF_GAP * scale),
+        row_gap: Val::Px(ROW_REF_GAP * scale * text_multiplier),
         padding: UiRect::all(Val::Px(RAIL_REF_PAD * scale)),
-        // ponytail: worst-case history/diag overflow clips at the rail
-        // bottom; add a scroll view only if players actually hit it.
-        overflow: Overflow::clip_y(),
+        overflow: Overflow::scroll_y(),
         ..default()
     };
     rail_rect.apply(scale, origin, &mut rail_node);
     root.spawn((
+        PracticeRail {
+            row_height: ROW_REF_HEIGHT * scale * text_multiplier,
+            row_gap: ROW_REF_GAP * scale * text_multiplier,
+            header_height: (HEADER_REF_FONT * 1.2 + HEADER_REF_TOP_MARGIN)
+                * scale
+                * text_multiplier,
+            viewport_height: RAIL_REF_HEIGHT * scale,
+            padding: RAIL_REF_PAD * scale,
+        },
+        ScrollPosition::default(),
         rail_rect,
         rail_node,
         // Opaque: the rail now sits over the Now-Playing card and the skill
@@ -523,16 +566,18 @@ fn spawn_rail(
             if let Some(h) = header {
                 rail.spawn((
                     Text::new(h),
-                    scaled_font(scale, HEADER_REF_FONT),
+                    scaled_font(scale * text_multiplier, HEADER_REF_FONT),
                     TextColor(theme.text_secondary),
                     Node {
-                        margin: UiRect::top(Val::Px(HEADER_REF_TOP_MARGIN * scale)),
+                        margin: UiRect::top(Val::Px(
+                            HEADER_REF_TOP_MARGIN * scale * text_multiplier,
+                        )),
                         flex_shrink: 0.0,
                         ..default()
                     },
                 ));
             }
-            spawn_rail_row(rail, theme, scale, *item, session);
+            spawn_rail_row(rail, theme, scale, text_multiplier, *item, session);
         }
         rail.spawn((
             AttemptHistoryText,
@@ -540,7 +585,7 @@ fn spawn_rail(
                 &attempt_history_text(session, timeline.end_ms),
                 HISTORY_MAX_LINES,
             )),
-            scaled_font(scale, SMALL_REF_FONT),
+            scaled_font(scale * text_multiplier, SMALL_REF_FONT),
             TextColor(theme.text_secondary),
             Node {
                 margin: UiRect::top(Val::Px(BLOCK_REF_MARGIN * scale)),
@@ -555,7 +600,7 @@ fn spawn_rail(
                 &crate::practice::diagnosis::diagnosis_text(&session.lane_diag),
                 DIAG_MAX_LINES,
             )),
-            scaled_font(scale, SMALL_REF_FONT),
+            scaled_font(scale * text_multiplier, SMALL_REF_FONT),
             TextColor(theme.text_secondary),
             Node {
                 margin: UiRect::top(Val::Px(BLOCK_REF_MARGIN * scale)),
@@ -571,6 +616,7 @@ fn spawn_rail_row(
     rail: &mut ChildSpawnerCommands,
     theme: &Theme,
     scale: f32,
+    text_multiplier: f32,
     item: RailItem,
     session: &PracticeSession,
 ) {
@@ -578,7 +624,7 @@ fn spawn_rail_row(
         RailRowButton(item),
         Button,
         Node {
-            height: Val::Px(ROW_REF_HEIGHT * scale),
+            height: Val::Px(ROW_REF_HEIGHT * scale * text_multiplier),
             flex_direction: FlexDirection::Row,
             justify_content: JustifyContent::SpaceBetween,
             align_items: AlignItems::Center,
@@ -592,7 +638,7 @@ fn spawn_rail_row(
     .with_children(|row| {
         row.spawn((
             Text::new(rail_row_label(item)),
-            scaled_font(scale, ROW_REF_FONT),
+            scaled_font(scale * text_multiplier, ROW_REF_FONT),
             TextColor(theme.text_primary),
         ));
         if rail_row_kind(item) == RowKind::Value {
@@ -616,14 +662,14 @@ fn spawn_rail_row(
                     .with_children(|b| {
                         b.spawn((
                             Text::new("◂"),
-                            scaled_font(scale, ROW_REF_FONT),
+                            scaled_font(scale * text_multiplier, ROW_REF_FONT),
                             TextColor(theme.text_secondary),
                         ));
                     });
                 value.spawn((
                     RailValueText(item),
                     Text::new(rail_row_value(item, session)),
-                    scaled_font(scale, ROW_REF_FONT),
+                    scaled_font(scale * text_multiplier, ROW_REF_FONT),
                     TextColor(theme.text_primary),
                 ));
                 value
@@ -639,7 +685,7 @@ fn spawn_rail_row(
                     .with_children(|b| {
                         b.spawn((
                             Text::new("▸"),
-                            scaled_font(scale, ROW_REF_FONT),
+                            scaled_font(scale * text_multiplier, ROW_REF_FONT),
                             TextColor(theme.text_secondary),
                         ));
                     });
@@ -648,7 +694,7 @@ fn spawn_rail_row(
             row.spawn((
                 RailValueText(item),
                 Text::new(rail_row_value(item, session)),
-                scaled_font(scale, ROW_REF_FONT),
+                scaled_font(scale * text_multiplier, ROW_REF_FONT),
                 TextColor(theme.text_primary),
             ));
         }
@@ -659,6 +705,7 @@ fn spawn_timeline_row(
     root: &mut ChildSpawnerCommands,
     theme: &Theme,
     scale: f32,
+    text_multiplier: f32,
     origin: Vec2,
     clock: &GameplayClock,
     timeline: &ChipTimeline,
@@ -700,7 +747,7 @@ fn spawn_timeline_row(
             .with_children(|b| {
                 b.spawn((
                     Text::new(button.label()),
-                    scaled_font(scale, SMALL_REF_FONT),
+                    scaled_font(scale * text_multiplier, SMALL_REF_FONT),
                     TextColor(theme.text_primary),
                 ));
             });
@@ -708,7 +755,7 @@ fn spawn_timeline_row(
         row.spawn((
             HudTimeText,
             Text::new(format_chart_time(clock.current_ms)),
-            scaled_font(scale, ROW_REF_FONT),
+            scaled_font(scale * text_multiplier, ROW_REF_FONT),
             TextColor(theme.text_primary),
         ));
         let strip = spawn_density_strip(row, &timeline.density, theme);
@@ -884,7 +931,7 @@ pub fn rail_mouse(
 /// Re-render selection highlight + row values each frame while the rail is
 /// open. Selected row: `selection_highlight` background + accent value.
 #[allow(clippy::type_complexity)]
-pub fn refresh_rail(
+pub(super) fn refresh_rail(
     selection: Res<RailSelection>,
     session: Res<PracticeSession>,
     timeline: Res<ChipTimeline>,
@@ -899,9 +946,24 @@ pub fn refresh_rail(
             Without<AttemptHistoryText>,
         ),
     >,
+    mut rail: Query<(&PracticeRail, &mut ScrollPosition)>,
 ) {
     let theme = Theme::default();
     let selected = RailItem::ORDER[selection.0 % RailItem::ORDER.len()];
+    if let Ok((metrics, mut scroll)) = rail.single_mut() {
+        let index = selection.0 % RailItem::ORDER.len();
+        let preceding_headers = 1 + usize::from(index >= 7) + usize::from(index >= 10);
+        let top = metrics.padding
+            + index as f32 * (metrics.row_height + metrics.row_gap)
+            + preceding_headers as f32 * (metrics.header_height + metrics.row_gap);
+        let bottom = top + metrics.row_height;
+        let visible_height = (metrics.viewport_height - 2.0 * metrics.padding).max(1.0);
+        if top < scroll.0.y {
+            scroll.0.y = top;
+        } else if bottom > scroll.0.y + visible_height {
+            scroll.0.y = bottom - visible_height;
+        }
+    }
     for (RailRowButton(item), mut bg) in &mut rows {
         bg.0 = if *item == selected {
             theme.selection_highlight
@@ -1022,6 +1084,19 @@ mod tests {
         assert!(
             h <= RAIL_REF_HEIGHT,
             "rail worst-case content {h} ref-px must fit {RAIL_REF_HEIGHT}"
+        );
+    }
+
+    #[test]
+    fn xlarge_rail_overflow_uses_the_scrollable_layout() {
+        assert!(rail_content_height_for(1.0, 1.5) > RAIL_REF_HEIGHT);
+        assert_eq!(
+            dtx_ui::fit_overlay(
+                dtx_ui::Size::new(RAIL_REF_WIDTH, rail_content_height(1.0)),
+                dtx_ui::SafeArea::reference_720p(),
+                1.5,
+            ),
+            dtx_ui::FitDecision::CompactScrollable
         );
     }
 

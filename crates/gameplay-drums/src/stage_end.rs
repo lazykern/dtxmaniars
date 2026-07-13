@@ -137,10 +137,16 @@ fn spawn_banner(mut commands: Commands, mut timer: ResMut<BannerTimer>, label: &
             GlobalZIndex(crate::ui_z::STAGE_END),
         ))
         .with_children(|root| {
-            root.spawn((Text::new(label), Theme::title_font(), TextColor(color)));
+            root.spawn((
+                Text::new(label),
+                Theme::title_font(),
+                dtx_ui::SemanticText(dtx_ui::TypographyRole::Display),
+                TextColor(color),
+            ));
             root.spawn((
                 Text::new("Press Enter to continue"),
                 Theme::label_font(),
+                dtx_ui::SemanticText(dtx_ui::TypographyRole::Body),
                 TextColor(theme.text_secondary),
             ));
         });

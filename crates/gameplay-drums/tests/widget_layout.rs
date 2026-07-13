@@ -1,7 +1,8 @@
 //! Integration: widget layout resource drives container transform + visibility.
 
+use bevy::prelude::Vec2;
 use dtx_layout::{default_instance, WidgetKind, WidgetKindField};
-use gameplay_drums::widget_layout::{widget_visible, WidgetLayouts};
+use gameplay_drums::widget_layout::{repair_widget_top_left, widget_visible, WidgetLayouts};
 
 #[test]
 fn default_layouts_have_zero_offset_for_parity() {
@@ -52,4 +53,12 @@ fn custom_offset_flows_through_resolve() {
         *layouts.get(WidgetKind::ScorePanel),
         default_instance(WidgetKind::ScorePanel)
     );
+}
+
+#[test]
+fn offscreen_saved_position_gets_a_runtime_only_repair() {
+    let saved = Vec2::new(1400.0, 900.0);
+    let repaired = repair_widget_top_left(saved, Vec2::new(200.0, 80.0), Vec2::new(1280.0, 720.0));
+    assert_ne!(repaired, saved);
+    assert_eq!(saved, Vec2::new(1400.0, 900.0));
 }

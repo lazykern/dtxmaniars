@@ -72,6 +72,7 @@ pub fn plugin(app: &mut App) {
                 input::result_nav,
                 ui::sync_verb_row,
                 ui::sync_details_panel,
+                ui::scroll_result,
                 ui::animate_staggered_reveal,
             )
                 .chain()

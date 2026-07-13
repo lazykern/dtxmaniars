@@ -324,6 +324,7 @@ pub fn spawn_overlay(
             root.spawn((
                 Text::new("PAUSED"),
                 Theme::title_font(),
+                dtx_ui::SemanticText(dtx_ui::TypographyRole::Display),
                 TextColor(theme.text_primary),
                 Node {
                     margin: UiRect::bottom(Val::Px(24.0)),
@@ -341,6 +342,7 @@ pub fn spawn_overlay(
                     dtx_ui::ActionButton::new(dtx_ui::DialogAction::Custom(index as u16), tone),
                     Text::new(item.label()),
                     Theme::hud_font(),
+                    dtx_ui::SemanticText(dtx_ui::TypographyRole::Hud),
                     TextColor(theme.text_secondary),
                 ));
             }
