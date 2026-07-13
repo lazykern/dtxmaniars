@@ -299,10 +299,45 @@ static GAMEPLAY_ITEMS: LazyLock<Vec<SettingItem>> = LazyLock::new(|| {
             reset: |c, d| c.gameplay.play_speed = d.gameplay.play_speed,
         },
         SettingItem {
-            label: "Damage Level",
-            value: |c| c.gameplay.damage_level.label().to_string(),
+            label: "Fail Mode",
+            value: |c| match c.gameplay.fail_mode() {
+                dtx_config::FailMode::Standard => "Standard".to_string(),
+                dtx_config::FailMode::NoFail => "No Fail".to_string(),
+            },
+            adjust: |c, _| {
+                let next = match c.gameplay.fail_mode() {
+                    dtx_config::FailMode::Standard => dtx_config::FailMode::NoFail,
+                    dtx_config::FailMode::NoFail => dtx_config::FailMode::Standard,
+                };
+                c.gameplay.set_fail_mode(next);
+            },
+            desc:
+                "Standard ends the stage at zero life. No Fail is assisted and never saves records.",
+            group: "RULES",
+            control: SettingControl::Stepper,
+            raw: |_| 0.0,
+            set: |_, _| {},
+            reset: |c, d| c.gameplay.stage_failed_enabled = d.gameplay.stage_failed_enabled,
+        },
+        SettingItem {
+            label: "Damage Severity",
+            value: |c| {
+                let label = c.gameplay.damage_level.label();
+                if c.gameplay.fail_mode() == dtx_config::FailMode::NoFail {
+                    format!("{label} (inactive)")
+                } else {
+                    label.to_string()
+                }
+            },
             adjust: |c, d| {
-                let levels = dtx_config::DamageLevel::all();
+                if c.gameplay.fail_mode() == dtx_config::FailMode::NoFail {
+                    return;
+                }
+                let levels = [
+                    dtx_config::DamageLevel::Small,
+                    dtx_config::DamageLevel::Normal,
+                    dtx_config::DamageLevel::High,
+                ];
                 let cur = levels
                     .iter()
                     .position(|l| *l == c.gameplay.damage_level)
@@ -310,7 +345,7 @@ static GAMEPLAY_ITEMS: LazyLock<Vec<SettingItem>> = LazyLock::new(|| {
                 let next = (cur + d).rem_euclid(levels.len() as i32) as usize;
                 c.gameplay.damage_level = levels[next];
             },
-            desc: "How much life is lost per miss.",
+            desc: "How much life is lost per miss while Fail Mode is Standard.",
             group: "RULES",
             control: SettingControl::Stepper,
             raw: |_| 0.0,
@@ -700,6 +735,24 @@ mod tests {
         assert!(cfg.accessibility.reduce_motion);
         assert!(!cfg.accessibility.reduce_flashes);
         assert!(cfg.accessibility.background_motion);
+    }
+
+    #[test]
+    fn fail_mode_is_separate_from_three_damage_severities() {
+        let items = settings_items(game_shell::CustomizeTab::Gameplay);
+        let fail_mode = items.iter().find(|item| item.label == "Fail Mode").unwrap();
+        let severity = items
+            .iter()
+            .find(|item| item.label == "Damage Severity")
+            .unwrap();
+        let mut cfg = dtx_config::Config::default();
+
+        (fail_mode.adjust)(&mut cfg, 1);
+        assert_eq!(cfg.gameplay.fail_mode(), dtx_config::FailMode::NoFail);
+        for _ in 0..6 {
+            (severity.adjust)(&mut cfg, 1);
+            assert_ne!(cfg.gameplay.damage_level, dtx_config::DamageLevel::None);
+        }
     }
 
     #[test]

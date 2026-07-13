@@ -69,6 +69,7 @@ fn detect_stage_failure(
     practice: Option<Res<crate::practice::PracticeSession>>,
     session: Res<game_shell::EditorSession>,
     rate: Res<EffectivePlaybackRate>,
+    no_fail: Option<Res<crate::resources::NoFailEnabled>>,
     mut completed_run: ResMut<game_shell::CompletedRunContext>,
 ) {
     if practice.is_some() {
@@ -80,11 +81,18 @@ fn detect_stage_failure(
     if completion.end_requested {
         return;
     }
+    let no_fail = no_fail.is_some_and(|modifier| modifier.0);
+    if no_fail {
+        return;
+    }
     if gauge.failed {
         completion.end_requested = true;
         completion.gauge_failed = true;
         info!("DrumsStage: gauge failed, routing to StageFailed");
-        *completed_run = game_shell::CompletedRunContext::normal(rate.value);
+        *completed_run = game_shell::CompletedRunContext::normal(
+            rate.value,
+            game_shell::RunModifiers { no_fail },
+        );
         request_transition(&mut requests, AppState::StageFailed);
     }
 }
@@ -168,6 +176,7 @@ mod tests {
             .init_resource::<DrumsStageCompletion>()
             .init_resource::<game_shell::EditorSession>()
             .init_resource::<EffectivePlaybackRate>()
+            .init_resource::<crate::resources::NoFailEnabled>()
             .init_resource::<game_shell::CompletedRunContext>()
             .add_message::<TransitionRequest>()
             .add_systems(Update, detect_stage_failure);
@@ -180,5 +189,29 @@ mod tests {
         let run = app.world().resource::<game_shell::CompletedRunContext>();
         assert_eq!(run.kind, game_shell::RunKind::Normal);
         assert!((run.playback_rate - 0.75).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn no_fail_prevents_gauge_failure_transition() {
+        let mut app = App::new();
+        app.init_resource::<StageGauge>()
+            .init_resource::<DrumsStageCompletion>()
+            .init_resource::<game_shell::EditorSession>()
+            .init_resource::<EffectivePlaybackRate>()
+            .insert_resource(crate::resources::NoFailEnabled(true))
+            .init_resource::<game_shell::CompletedRunContext>()
+            .add_message::<TransitionRequest>()
+            .add_systems(Update, detect_stage_failure);
+        app.world_mut().resource_mut::<StageGauge>().failed = true;
+
+        app.update();
+
+        assert!(!app.world().resource::<DrumsStageCompletion>().end_requested);
+        assert_eq!(
+            app.world()
+                .resource::<game_shell::CompletedRunContext>()
+                .kind,
+            game_shell::RunKind::Practice
+        );
     }
 }

@@ -406,6 +406,7 @@ pub fn detect_end_of_stage(
     session: Res<game_shell::EditorSession>,
     rate: Res<EffectivePlaybackRate>,
     mut completed_run: ResMut<game_shell::CompletedRunContext>,
+    no_fail: Option<Res<crate::resources::NoFailEnabled>>,
     mut requests: MessageWriter<TransitionRequest>,
 ) {
     if completion.end_requested {
@@ -448,7 +449,11 @@ pub fn detect_end_of_stage(
         completion.end_requested = true;
         // Survived to the end → clear banner. The gauge-fail path (handled in
         // `stage_end::detect_stage_failure`) routes to `StageFailed` instead.
-        *completed_run = game_shell::CompletedRunContext::normal(rate.value);
+        let no_fail = no_fail.is_some_and(|modifier| modifier.0);
+        *completed_run = game_shell::CompletedRunContext::normal(
+            rate.value,
+            game_shell::RunModifiers { no_fail },
+        );
         request_transition(&mut requests, AppState::StageClear);
     }
 }

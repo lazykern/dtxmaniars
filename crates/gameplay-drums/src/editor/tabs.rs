@@ -144,6 +144,7 @@ fn apply_draft_live(
         ResMut<crate::resources::ShowPerfInfo>,
         ResMut<crate::resources::MetronomeEnabled>,
         ResMut<crate::resources::ShowTimingLines>,
+        ResMut<crate::resources::NoFailEnabled>,
     ),
     mut drum_cfg: ResMut<crate::resources::DrumGameplaySettings>,
     mut polyphony: ResMut<dtx_audio::DrumPolyphony>,
@@ -174,6 +175,7 @@ fn apply_draft_live(
     bgm_adjust.common_ms = g.bgm_adjust_ms;
     gauge.damage_level = crate::map_damage_level(g.damage_level);
     toggles.2 .0 = g.lane_display.shows_timing_lines();
+    toggles.3 .0 = g.fail_mode() == dtx_config::FailMode::NoFail;
     toggles.0 .0 = draft.0.system.show_perf_info;
     toggles.1 .0 = draft.0.system.metronome;
 

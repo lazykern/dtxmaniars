@@ -268,7 +268,7 @@ pub(crate) fn spawn_result(
                     ..default()
                 })
                 .with_children(|body| {
-                    spawn_rank_panel(body, &t, rank, failed);
+                    spawn_rank_panel(body, &t, rank, failed, *status);
                     spawn_stats_panel(
                         body, &t, &counts, total, combo.max, score.0, *status, &analysis,
                     );
@@ -324,7 +324,20 @@ fn spawn_header(
     });
 }
 
-fn spawn_rank_panel(body: &mut ChildSpawnerCommands, t: &Theme, rank: Rank, failed: bool) {
+const fn assistance_badge(status: SaveStatus) -> Option<&'static str> {
+    match status {
+        SaveStatus::NoFail => Some("NO FAIL ◈"),
+        _ => None,
+    }
+}
+
+fn spawn_rank_panel(
+    body: &mut ChildSpawnerCommands,
+    t: &Theme,
+    rank: Rank,
+    failed: bool,
+    status: SaveStatus,
+) {
     body.spawn(Node {
         width: Val::Percent(40.0),
         flex_direction: FlexDirection::Column,
@@ -347,6 +360,9 @@ fn spawn_rank_panel(body: &mut ChildSpawnerCommands, t: &Theme, rank: Rank, fail
                 t.judgment_miss,
                 SLOT_FAILED,
             ));
+        }
+        if let Some(label) = assistance_badge(status) {
+            left.spawn(reveal_text(label, Theme::font(16.0), t.accent, SLOT_FAILED));
         }
     });
 }
@@ -414,6 +430,14 @@ fn spawn_stats_panel(
                 ));
             }
             SaveStatus::Practice => {}
+            SaveStatus::NoFail => {
+                right.spawn(reveal_text(
+                    "NO FAIL · Not saved: No Fail enabled",
+                    Theme::font(14.0),
+                    t.text_secondary,
+                    SLOT_SAVE,
+                ));
+            }
             SaveStatus::ModifiedSpeed { rate } => {
                 right.spawn(reveal_text(
                     format!("{rate:.2}× play speed — result not saved as a normal record"),
@@ -745,6 +769,12 @@ pub(crate) fn despawn_result(commands: Commands, query: Query<Entity, With<Resul
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn no_fail_status_has_persistent_non_color_badge() {
+        assert_eq!(assistance_badge(SaveStatus::NoFail), Some("NO FAIL ◈"));
+        assert_eq!(assistance_badge(SaveStatus::Saved), None);
+    }
 
     fn spawn_world() -> World {
         let mut world = World::new();

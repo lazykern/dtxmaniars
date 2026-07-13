@@ -16,7 +16,7 @@ pub use score_store::ScoreStoreResource;
 pub use states::{
     AppState, CompletedRunContext, CustomizeTab, EGameMode, EditorSession, PauseState,
     PendingCustomizeTab, PracticeIntent, PracticePreRoll, PracticeReason, PracticeRecommendation,
-    RunKind, SelectedDifficulty, StageEntity, despawn_stage,
+    RunKind, RunModifiers, SelectedDifficulty, StageEntity, despawn_stage,
 };
 pub use transition::{TransitionRequest, request_transition};
 

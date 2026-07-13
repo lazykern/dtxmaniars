@@ -45,6 +45,16 @@ pub struct Config {
     pub accessibility: AccessibilityConfig,
 }
 
+impl Config {
+    /// Migrate accepted legacy encodings to the canonical persisted model.
+    pub fn normalize_legacy(&mut self) {
+        if self.gameplay.damage_level == DamageLevel::None {
+            self.gameplay.damage_level = DamageLevel::Small;
+            self.gameplay.stage_failed_enabled = false;
+        }
+    }
+}
+
 /// Player-facing text scale. Gameplay geometry is deliberately unaffected.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub enum TextScale {
@@ -138,6 +148,14 @@ pub enum DamageLevel {
     Normal,
     /// High drain.
     High,
+}
+
+/// Whether gauge depletion ends the stage. Kept separate from damage severity.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum FailMode {
+    #[default]
+    Standard,
+    NoFail,
 }
 
 impl DamageLevel {
@@ -277,6 +295,23 @@ impl Default for GameplayConfig {
     }
 }
 
+impl GameplayConfig {
+    pub const fn fail_mode(&self) -> FailMode {
+        if self.stage_failed_enabled {
+            FailMode::Standard
+        } else {
+            FailMode::NoFail
+        }
+    }
+
+    pub fn set_fail_mode(&mut self, mode: FailMode) {
+        self.stage_failed_enabled = matches!(mode, FailMode::Standard);
+        if self.damage_level == DamageLevel::None {
+            self.damage_level = DamageLevel::Small;
+        }
+    }
+}
+
 /// Audio section — CConfigIni.cs:200-300 (subset).
 ///
 /// Reference: `CActConfigList.Audio.cs:1-50`.
@@ -374,11 +409,14 @@ pub fn load_with_report(path: &Path) -> ConfigLoadReport {
             };
         }
     };
-    match toml::from_str(&contents) {
-        Ok(config) => ConfigLoadReport {
-            config,
-            warning: None,
-        },
+    match toml::from_str::<Config>(&contents) {
+        Ok(mut config) => {
+            config.normalize_legacy();
+            ConfigLoadReport {
+                config,
+                warning: None,
+            }
+        }
         Err(e) => {
             eprintln!("dtx-config: parse failed for {path:?}: {e}; using defaults");
             ConfigLoadReport {
@@ -397,7 +435,9 @@ pub fn save(path: &Path, cfg: &Config) -> Result<(), ConfigError> {
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)?;
     }
-    let s = toml::to_string_pretty(cfg)?;
+    let mut canonical = cfg.clone();
+    canonical.normalize_legacy();
+    let s = toml::to_string_pretty(&canonical)?;
     std::fs::write(path, s)?;
     Ok(())
 }
@@ -441,6 +481,18 @@ mod tests {
             warning.contains("could not be read") && warning.contains("using defaults")
         }));
         let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn legacy_damage_none_migrates_to_canonical_no_fail() {
+        let mut cfg = Config::default();
+        cfg.gameplay.damage_level = DamageLevel::None;
+
+        cfg.normalize_legacy();
+
+        assert_eq!(cfg.gameplay.fail_mode(), FailMode::NoFail);
+        assert_eq!(cfg.gameplay.damage_level, DamageLevel::Small);
+        assert!(!cfg.gameplay.stage_failed_enabled);
     }
 
     #[test]

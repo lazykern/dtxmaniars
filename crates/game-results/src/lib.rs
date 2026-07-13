@@ -30,6 +30,7 @@ pub(crate) enum SaveStatus {
     Practice, // nothing to save
     Saved,
     Failed,
+    NoFail,
     ModifiedSpeed {
         rate: f64,
     },
@@ -166,6 +167,10 @@ fn save_result(
         };
         return;
     }
+    if run.modifiers.no_fail {
+        *status = SaveStatus::NoFail;
+        return;
+    }
     let title = chart
         .chart
         .metadata
@@ -274,7 +279,9 @@ fn snapshot_result_analysis(
     timeline: &ChipTimeline,
 ) -> ResultAnalysis {
     let report = PerformanceAnalysis::from_stream(events, &timeline.bar_ms);
-    let comparable = run.kind == RunKind::Normal && (run.playback_rate - 1.0).abs() < 1e-9;
+    let comparable = run.kind == RunKind::Normal
+        && (run.playback_rate - 1.0).abs() < 1e-9
+        && !run.modifiers.no_fail;
     if !comparable {
         return ResultAnalysis {
             report,
@@ -307,7 +314,10 @@ mod tests {
     fn result_world(source_path: Option<std::path::PathBuf>, rate: f64) -> World {
         let mut world = World::new();
         world.init_resource::<SaveStatus>();
-        world.insert_resource(game_shell::CompletedRunContext::normal(rate));
+        world.insert_resource(game_shell::CompletedRunContext::normal(
+            rate,
+            game_shell::RunModifiers::default(),
+        ));
         world.insert_resource(Score(1234));
         world.insert_resource(Combo { current: 0, max: 9 });
         world.insert_resource(JudgmentCounts {
@@ -328,6 +338,29 @@ mod tests {
         world.insert_resource(LastStageOutcome { cleared: true });
         world.insert_resource(ScoreStoreResource::default());
         world
+    }
+
+    #[test]
+    fn no_fail_result_never_mutates_score_store_or_score_ini() {
+        use bevy::ecs::system::RunSystemOnce;
+
+        let dir = std::env::temp_dir().join(format!("dtxmaniars-no-fail-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let chart_path = dir.join("chart.dtx");
+        std::fs::write(&chart_path, b"#TITLE: Assisted\n#00113: 01\n").unwrap();
+        let mut world = result_world(Some(chart_path.clone()), 1.0);
+        world.insert_resource(game_shell::CompletedRunContext::normal(
+            1.0,
+            game_shell::RunModifiers { no_fail: true },
+        ));
+
+        world.run_system_once(save_result).unwrap();
+
+        assert_eq!(*world.resource::<SaveStatus>(), SaveStatus::NoFail);
+        assert!(world.resource::<ScoreStoreResource>().entries.is_empty());
+        assert!(!dtx_scoring::score_ini::score_ini_path(&chart_path).exists());
+        std::fs::remove_dir_all(dir).unwrap();
     }
 
     #[test]
@@ -411,7 +444,7 @@ mod tests {
         };
 
         let result = snapshot_result_analysis(
-            &game_shell::CompletedRunContext::normal(1.0),
+            &game_shell::CompletedRunContext::normal(1.0, game_shell::RunModifiers::default()),
             900,
             &chart,
             &store,

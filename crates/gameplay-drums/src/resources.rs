@@ -129,6 +129,10 @@ pub struct MetronomeEnabled(pub bool);
 #[derive(Resource, Debug, Clone, Copy, Default)]
 pub struct ShowTimingLines(pub bool);
 
+/// Assisted modifier: gauge depletion never ends the stage.
+#[derive(Resource, Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct NoFailEnabled(pub bool);
+
 /// Line ids that already fired metronome / cross detection this stage.
 #[derive(Resource, Default, Debug)]
 pub struct TimingLineCrossed(pub std::collections::HashSet<usize>);

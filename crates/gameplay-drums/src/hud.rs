@@ -49,6 +49,17 @@ struct LaneBackdrop;
 #[derive(Component)]
 struct HitLine;
 
+#[derive(Component)]
+struct NoFailBadge;
+
+const fn no_fail_badge_text(enabled: bool) -> Option<&'static str> {
+    if enabled {
+        Some("NO FAIL ◈")
+    } else {
+        None
+    }
+}
+
 /// Spawn a per-widget container under `root` (absolute, ref-origin 0,0,
 /// full-size) that `apply_widget_layout` positions. Returns the container
 /// entity to parent the widget's children to.
@@ -136,6 +147,7 @@ fn spawn_hud(
     layout: Res<PlayfieldLayout>,
     lanes: Res<crate::lanes::Lanes>,
     mut history: ResMut<AccuracyHistory>,
+    no_fail: Res<crate::resources::NoFailEnabled>,
 ) {
     if *mode != EGameMode::Drums {
         return;
@@ -159,6 +171,27 @@ fn spawn_hud(
             BackgroundColor(Color::srgb(0.0, 0.0, 0.0)),
         ))
         .id();
+
+    if let Some(label) = no_fail_badge_text(no_fail.0) {
+        commands.entity(root).with_children(|root| {
+            root.spawn((
+                NoFailBadge,
+                Node {
+                    position_type: PositionType::Absolute,
+                    right: Val::Px(20.0),
+                    top: Val::Px(20.0),
+                    padding: UiRect::axes(Val::Px(10.0), Val::Px(5.0)),
+                    border: UiRect::all(Val::Px(1.0)),
+                    ..default()
+                },
+                BackgroundColor(Color::srgba(0.06, 0.07, 0.10, 0.92)),
+                BorderColor::all(t.accent),
+                Text::new(label),
+                dtx_ui::Theme::font(14.0),
+                TextColor(t.text_primary),
+            ));
+        });
+    }
 
     // Playfield (backboard, hit line, key caps, notes) stays parented to `root`:
     // moving/scaling it as a widget needs PlayfieldLayout to take an origin
@@ -828,6 +861,12 @@ mod tests {
     #[test]
     fn kind_label_perfect() {
         assert_eq!(kind_label(JudgmentKind::Perfect), "PERFECT");
+    }
+
+    #[test]
+    fn no_fail_badge_combines_text_and_non_color_marker() {
+        assert_eq!(no_fail_badge_text(false), None);
+        assert_eq!(no_fail_badge_text(true), Some("NO FAIL ◈"));
     }
 
     fn unique_temp_dir(tag: &str) -> std::path::PathBuf {

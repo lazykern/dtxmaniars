@@ -102,6 +102,7 @@ pub fn plugin(app: &mut App) {
     .init_resource::<resources::ShowPerfInfo>()
     .init_resource::<resources::MetronomeEnabled>()
     .init_resource::<resources::ShowTimingLines>()
+    .init_resource::<resources::NoFailEnabled>()
     .init_resource::<resources::JudgmentCounts>()
     .init_resource::<resources::ScrollSettings>()
     .init_resource::<resources::EffectivePlaybackRate>()
@@ -325,7 +326,7 @@ pub(crate) fn map_damage_level(level: dtx_config::DamageLevel) -> dtx_core::cons
     use dtx_config::DamageLevel as Cfg;
     use dtx_core::constants::DamageLevel as Core;
     match level {
-        Cfg::None => Core::None,
+        Cfg::None => Core::Small,
         Cfg::Small => Core::Small,
         Cfg::Normal => Core::Normal,
         Cfg::High => Core::High,
@@ -344,6 +345,7 @@ fn apply_config_on_enter(
     mut show_perf_info: ResMut<resources::ShowPerfInfo>,
     mut metronome_on: ResMut<resources::MetronomeEnabled>,
     mut show_timing_lines: ResMut<resources::ShowTimingLines>,
+    mut no_fail: ResMut<resources::NoFailEnabled>,
     mut bga_settings: ResMut<dtx_bga::BgaSettings>,
     chart: Res<resources::ActiveChart>,
 ) {
@@ -362,6 +364,7 @@ fn apply_config_on_enter(
     show_perf_info.0 = cfg.system.show_perf_info;
     metronome_on.0 = cfg.system.metronome;
     show_timing_lines.0 = cfg.gameplay.lane_display.shows_timing_lines();
+    no_fail.0 = cfg.gameplay.fail_mode() == dtx_config::FailMode::NoFail;
     bgm_adjust.song_ms = chart
         .source_path
         .as_ref()

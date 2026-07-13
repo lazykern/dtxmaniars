@@ -184,17 +184,24 @@ pub enum RunKind {
     Normal,
 }
 
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct RunModifiers {
+    pub no_fail: bool,
+}
+
 #[derive(Resource, Debug, Clone, Copy, PartialEq)]
 pub struct CompletedRunContext {
     pub kind: RunKind,
     pub playback_rate: f64,
+    pub modifiers: RunModifiers,
 }
 
 impl CompletedRunContext {
-    pub fn normal(playback_rate: f64) -> Self {
+    pub fn normal(playback_rate: f64, modifiers: RunModifiers) -> Self {
         Self {
             kind: RunKind::Normal,
             playback_rate,
+            modifiers,
         }
     }
 }
@@ -204,6 +211,7 @@ impl Default for CompletedRunContext {
         Self {
             kind: RunKind::Practice,
             playback_rate: 1.0,
+            modifiers: RunModifiers::default(),
         }
     }
 }
@@ -312,9 +320,10 @@ mod tests {
 
     #[test]
     fn normal_run_records_its_rate() {
-        let run = CompletedRunContext::normal(0.75);
+        let run = CompletedRunContext::normal(0.75, RunModifiers { no_fail: true });
         assert_eq!(run.kind, RunKind::Normal);
         assert!((run.playback_rate - 0.75).abs() < f64::EPSILON);
+        assert!(run.modifiers.no_fail);
     }
 
     #[test]
