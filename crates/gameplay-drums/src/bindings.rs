@@ -12,7 +12,9 @@ use dtx_input::profiles::{
     keyboard_builtins, keyboard_registry, load_keyboard_registry, load_midi_registry,
     midi_builtins, midi_registry, KeyboardProfile, MidiProfile, ProfileRegistry, RegistryStartup,
 };
-use dtx_input::{BindSource, InputBindings, BINDABLE_CHANNELS, SYSTEM_VERBS};
+use dtx_input::{
+    lane_owner, BindSource, InputBindings, SystemVerb, BINDABLE_CHANNELS, SYSTEM_VERBS,
+};
 
 use crate::lane_map::{lane_of, LaneId};
 
@@ -49,6 +51,10 @@ pub struct LiveBindings(pub dtx_input::InputBindings);
 pub struct BindResolver {
     key_to_lanes: HashMap<KeyCode, Vec<LaneId>>,
     note_to_lanes: HashMap<u8, Vec<LaneId>>,
+    /// System verbs a key fires. A source a lane owns never reaches this table.
+    key_to_system: HashMap<KeyCode, Vec<SystemVerb>>,
+    /// System verbs a MIDI note fires. A source a lane owns never reaches this table.
+    note_to_system: HashMap<u8, Vec<SystemVerb>>,
     /// NoteOn velocities at or below this are ignored.
     pub velocity_threshold: u8,
 }
@@ -75,9 +81,33 @@ impl BindResolver {
                 note_to_lanes.entry(*note).or_insert_with(Vec::new).push(lane);
             }
         }
+        // Lanes win ties. Keys only ever live in the keyboard profile and notes
+        // only in the MIDI one, so each source is checked against its own map.
+        let mut key_to_system: HashMap<KeyCode, Vec<SystemVerb>> = HashMap::new();
+        let mut note_to_system: HashMap<u8, Vec<SystemVerb>> = HashMap::new();
+        for verb in SYSTEM_VERBS {
+            for key in keyboard.system.get(&verb).into_iter().flatten() {
+                match keyboard.key_owners(*key).first() {
+                    Some(owner) => warn!(
+                        "system bind {verb:?} ignored: key {key:?} already drives lane {owner:?}"
+                    ),
+                    None => key_to_system.entry(*key).or_default().push(verb),
+                }
+            }
+            for note in midi.system.get(&verb).into_iter().flatten() {
+                match midi.note_owner(*note) {
+                    Some(owner) => warn!(
+                        "system bind {verb:?} ignored: note {note} already drives lane {owner:?}"
+                    ),
+                    None => note_to_system.entry(*note).or_default().push(verb),
+                }
+            }
+        }
         Self {
             key_to_lanes,
             note_to_lanes,
+            key_to_system,
+            note_to_system,
             velocity_threshold: midi.velocity_threshold,
         }
     }
@@ -102,9 +132,27 @@ impl BindResolver {
                 }
             }
         }
+        let mut key_to_system: HashMap<KeyCode, Vec<SystemVerb>> = HashMap::new();
+        let mut note_to_system: HashMap<u8, Vec<SystemVerb>> = HashMap::new();
+        for verb in SYSTEM_VERBS {
+            for src in b.system.get(&verb).into_iter().flatten() {
+                // Lanes win ties. A hand-edited bindings.toml cannot make one
+                // note both judge and pause: the colliding source is dropped here.
+                if let Some(owner) = lane_owner(b, src) {
+                    warn!("system bind {verb:?} ignored: {src:?} already drives lane {owner:?}");
+                    continue;
+                }
+                match src {
+                    BindSource::Key(k) => key_to_system.entry(*k).or_default().push(verb),
+                    BindSource::Midi { note } => note_to_system.entry(*note).or_default().push(verb),
+                }
+            }
+        }
         Self {
             key_to_lanes,
             note_to_lanes,
+            key_to_system,
+            note_to_system,
             velocity_threshold: b.midi.velocity_threshold,
         }
     }
@@ -135,6 +183,22 @@ impl BindResolver {
             .get(&note)
             .into_iter()
             .flat_map(|lanes| lanes.iter().copied())
+    }
+
+    /// System verbs a MIDI note fires (empty unless bound and lane-free).
+    pub fn system_for_note(&self, note: u8) -> impl Iterator<Item = SystemVerb> + '_ {
+        self.note_to_system
+            .get(&note)
+            .into_iter()
+            .flat_map(|verbs| verbs.iter().copied())
+    }
+
+    /// System verbs a keyboard key fires (empty unless bound and lane-free).
+    pub fn system_for_key(&self, key: KeyCode) -> impl Iterator<Item = SystemVerb> + '_ {
+        self.key_to_system
+            .get(&key)
+            .into_iter()
+            .flat_map(|verbs| verbs.iter().copied())
     }
 }
 
@@ -357,6 +421,82 @@ mod tests {
             [BindSource::Key(KeyCode::F9)]
         );
         assert_eq!(composed.map, b.map, "lane map survives the round trip");
+    }
+
+    #[test]
+    fn note_bound_to_a_lane_and_a_verb_resolves_to_the_lane_only() {
+        use dtx_input::SystemVerb;
+        let mut b = InputBindings::default();
+        // 38 is the Snare default: a hand-edited file binding it to Pause too.
+        b.bind_system(SystemVerb::Pause, BindSource::Midi { note: 38 });
+        let r = BindResolver::from_bindings(&b);
+        assert_eq!(r.lane_for_note(38), Some(1), "the lane still judges");
+        assert_eq!(
+            r.system_for_note(38).count(),
+            0,
+            "the colliding system source is skipped"
+        );
+    }
+
+    #[test]
+    fn free_note_resolves_to_the_verb_and_no_lane() {
+        use dtx_input::SystemVerb;
+        let mut b = InputBindings::default();
+        b.bind_system(SystemVerb::Pause, BindSource::Midi { note: 37 });
+        let r = BindResolver::from_bindings(&b);
+        assert_eq!(r.lane_for_note(37), None);
+        assert_eq!(
+            r.system_for_note(37).collect::<Vec<_>>(),
+            vec![SystemVerb::Pause]
+        );
+    }
+
+    #[test]
+    fn free_key_resolves_to_the_verb_and_no_lane() {
+        use dtx_input::SystemVerb;
+        let mut b = InputBindings::default();
+        b.bind_system(SystemVerb::Restart, BindSource::Key(KeyCode::F9));
+        let r = BindResolver::from_bindings(&b);
+        assert_eq!(r.lane_for_key(KeyCode::F9), None);
+        assert_eq!(
+            r.system_for_key(KeyCode::F9).collect::<Vec<_>>(),
+            vec![SystemVerb::Restart]
+        );
+    }
+
+    #[test]
+    fn key_bound_to_a_lane_and_a_verb_resolves_to_the_lane_only() {
+        use dtx_input::SystemVerb;
+        let mut b = InputBindings::default();
+        // KeyX is the HiHatClose default.
+        b.bind_system(SystemVerb::Restart, BindSource::Key(KeyCode::KeyX));
+        let r = BindResolver::from_bindings(&b);
+        assert_eq!(r.lane_for_key(KeyCode::KeyX), Some(0));
+        assert_eq!(r.system_for_key(KeyCode::KeyX).count(), 0);
+    }
+
+    #[test]
+    fn from_profiles_builds_system_tables_and_skips_lane_collisions() {
+        use dtx_input::SystemVerb;
+        let mut keyboard = KeyboardProfile::default();
+        let mut midi = MidiProfile::default();
+        keyboard.add_system_key(SystemVerb::Restart, KeyCode::F9);
+        keyboard.add_system_key(SystemVerb::Pause, KeyCode::KeyX); // HH's key: refused
+        midi.bind_system_note(SystemVerb::Pause, 37); // free zone note
+        midi.bind_system_note(SystemVerb::Pause, 38); // Snare's note: refused
+        let r = BindResolver::from_profiles(&keyboard, &midi);
+        assert_eq!(
+            r.system_for_note(37).collect::<Vec<_>>(),
+            vec![SystemVerb::Pause]
+        );
+        assert_eq!(r.system_for_note(38).count(), 0, "lane wins the tie");
+        assert_eq!(r.lane_for_note(38), Some(1));
+        assert_eq!(r.system_for_key(KeyCode::KeyX).count(), 0, "lane wins");
+        assert_eq!(r.lane_for_key(KeyCode::KeyX), Some(0));
+        assert_eq!(
+            r.system_for_key(KeyCode::F9).collect::<Vec<_>>(),
+            vec![SystemVerb::Restart]
+        );
     }
 
     #[test]
