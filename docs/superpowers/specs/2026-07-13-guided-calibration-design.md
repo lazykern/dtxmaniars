@@ -42,4 +42,3 @@ The system observes display update cadence only for confidence; it does not alte
 - Automatic BGM adjustment or a visual-offset persistence field.
 - Rebinding controls, modifying chart data, or changing normal judgment.
 - Calibration during a normal scored run.
-
