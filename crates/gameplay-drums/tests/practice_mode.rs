@@ -13,7 +13,8 @@ use gameplay_drums::orchestrator::{
 };
 use gameplay_drums::practice::session::{LoopRegion, PracticeSession, PracticeTransport};
 use gameplay_drums::resources::{
-    ActiveChart, BgmAdjustState, Combo, GameStartMs, GameplayClock, JudgmentCounts, Score,
+    ActiveChart, BgmAdjustState, Combo, EffectivePlaybackRate, GameStartMs, GameplayClock,
+    JudgmentCounts, PlaybackRateSource, Score,
 };
 use gameplay_drums::se_scheduler::PlayedSeChips;
 use gameplay_drums::seek::SeekToChartTime;
@@ -41,6 +42,7 @@ fn build_app() -> App {
     .init_state::<AppState>()
     .init_resource::<DrumsStageCompletion>()
     .init_resource::<GameplayClock>()
+    .init_resource::<EffectivePlaybackRate>()
     .init_resource::<ActiveChart>()
     .init_resource::<Score>()
     .init_resource::<gameplay_drums::resources::DrumScoring>()
@@ -270,6 +272,90 @@ fn add_action_wiring(app: &mut App) {
                 .before(gameplay_drums::seek::apply_seek_system)
                 .run_if(resource_exists::<PracticeSession>),
         );
+}
+
+#[test]
+fn practice_rate_survives_pause_and_resume() {
+    let mut app = build_app();
+    add_action_wiring(&mut app);
+    enter_performance(&mut app, chart_with_measures(8));
+    *app.world_mut().resource_mut::<EffectivePlaybackRate>() =
+        EffectivePlaybackRate::practice(0.75);
+
+    app.world_mut()
+        .resource_mut::<NextState<game_shell::PauseState>>()
+        .set(game_shell::PauseState::Paused);
+    app.update();
+    app.world_mut()
+        .resource_mut::<NextState<game_shell::PauseState>>()
+        .set(game_shell::PauseState::Running);
+    app.update();
+
+    let rate = app.world().resource::<EffectivePlaybackRate>();
+    assert_eq!(rate.source, PlaybackRateSource::PracticeTempo);
+    assert!((rate.value - 0.75).abs() < f64::EPSILON);
+}
+
+fn prepare_fallback_bgm(app: &mut App, test_name: &str) -> std::path::PathBuf {
+    let dir = std::env::temp_dir().join(format!("dtxmaniars-{test_name}-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).expect("create fixture directory");
+    let chart_path = dir.join("chart.dtx");
+    std::fs::write(&chart_path, b"#TITLE: Rate Seek\n").expect("write fixture chart");
+    std::fs::write(dir.join("bgm.wav"), b"").expect("write fallback BGM marker");
+    app.world_mut().resource_mut::<ActiveChart>().source_path = Some(chart_path);
+    dir
+}
+
+#[test]
+fn seek_uses_chart_seconds_without_rate_scaling() {
+    let mut app = build_app();
+    let dir = prepare_fallback_bgm(&mut app, "rate-seek");
+    enter_performance(&mut app, chart_with_measures(8));
+    *app.world_mut().resource_mut::<EffectivePlaybackRate>() =
+        EffectivePlaybackRate::practice(0.75);
+    app.world_mut().resource_mut::<GameplayClock>().start();
+
+    send_seek(&mut app, 9_000);
+    app.update();
+
+    assert_eq!(app.world().resource::<GameplayClock>().current_ms, 9_000);
+    let pending = app
+        .world()
+        .resource::<gameplay_drums::seek::PendingBgmStart>()
+        .0
+        .as_ref()
+        .expect("fallback BGM queued");
+    assert!((pending.start_seconds - 9.0).abs() < f64::EPSILON);
+    std::fs::remove_dir_all(dir).expect("remove fixture directory");
+}
+
+#[test]
+fn restart_keeps_practice_rate_and_queues_zero_offset() {
+    let mut app = build_app();
+    let dir = prepare_fallback_bgm(&mut app, "rate-restart");
+    enter_performance(&mut app, chart_with_measures(8));
+    *app.world_mut().resource_mut::<EffectivePlaybackRate>() =
+        EffectivePlaybackRate::practice(0.75);
+    {
+        let mut clock = app.world_mut().resource_mut::<GameplayClock>();
+        clock.start();
+        clock.sync(Some(9_000));
+    }
+
+    send_seek(&mut app, 0);
+    app.update();
+
+    let rate = app.world().resource::<EffectivePlaybackRate>();
+    assert_eq!(rate.source, PlaybackRateSource::PracticeTempo);
+    assert!((rate.value - 0.75).abs() < f64::EPSILON);
+    let pending = app
+        .world()
+        .resource::<gameplay_drums::seek::PendingBgmStart>()
+        .0
+        .as_ref()
+        .expect("fallback BGM queued");
+    assert!((pending.start_seconds - 0.0).abs() < f64::EPSILON);
+    std::fs::remove_dir_all(dir).expect("remove fixture directory");
 }
 
 #[test]

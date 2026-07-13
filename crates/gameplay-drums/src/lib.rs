@@ -103,7 +103,6 @@ pub fn plugin(app: &mut App) {
     .init_resource::<resources::ShowTimingLines>()
     .init_resource::<resources::JudgmentCounts>()
     .init_resource::<resources::ScrollSettings>()
-    .init_resource::<resources::AudioRate>()
     .init_resource::<resources::EffectivePlaybackRate>()
     .init_resource::<resources::GameplayClock>()
     .init_resource::<resources::DrumGameplaySettings>()
@@ -346,11 +345,10 @@ fn apply_config_on_enter(
     mut bga_settings: ResMut<dtx_bga::BgaSettings>,
     chart: Res<resources::ActiveChart>,
 ) {
-    use dtx_config::{default_path, load, play_speed_multiplier};
+    use dtx_config::{default_path, load};
     let cfg = load(&default_path());
     *bga_settings = dtx_bga::BgaSettings::from(&cfg.system);
     *scroll = resources::ScrollSettings::from_scroll_speed(cfg.gameplay.scroll_speed);
-    scroll.play_speed = play_speed_multiplier(cfg.gameplay.play_speed);
     audio.bgm_enabled = cfg.audio.bgm_enabled;
     audio.drum_enabled = cfg.audio.drum_sound_enabled;
     audio.master_volume = cfg.audio.master_volume;
@@ -396,7 +394,7 @@ fn sync_bga_clock(gameplay: Res<resources::GameplayClock>, mut visuals: ResMut<d
 fn sync_gameplay_clock(
     audio_clock: Res<dtx_timing::AudioClock>,
     start_ms: Res<resources::GameStartMs>,
-    rate: Res<resources::AudioRate>,
+    rate: Res<resources::EffectivePlaybackRate>,
     time: Res<Time<Fixed>>,
     mut gameplay_clock: ResMut<resources::GameplayClock>,
 ) {
@@ -405,7 +403,7 @@ fn sync_gameplay_clock(
     let chart_ms = audio_clock
         .current_ms
         .map(|pos| start_ms.0.saturating_add(pos));
-    gameplay_clock.tick(time.delta_secs_f64() * rate.0, chart_ms);
+    gameplay_clock.tick(rate.scaled_delta_secs(time.delta_secs_f64()), chart_ms);
 }
 
 mod midi_consumer {

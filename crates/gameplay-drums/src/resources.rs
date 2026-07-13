@@ -224,10 +224,6 @@ pub struct FastSlowCount {
 pub struct ScrollSettings {
     /// Scroll velocity (px/ms) at the 720px reference height.
     pub pixels_per_ms: f32,
-    /// Playback speed multiplier (`nPlaySpeed / 20.0`). 1.0 = native.
-    /// Higher values make the chart finish earlier; only scroll + orchestrator
-    /// honor it (audio playback rate does NOT rescale — caveat per M13.5).
-    pub play_speed: f32,
 }
 
 impl ScrollSettings {
@@ -236,13 +232,8 @@ impl ScrollSettings {
     pub const NX_BASE_PIXELS_PER_MS: f32 = 0.17875;
 
     pub fn from_scroll_speed(multiplier: f32) -> Self {
-        Self::new(multiplier, 1.0)
-    }
-
-    pub fn new(scroll_multiplier: f32, play_speed: f32) -> Self {
         Self {
-            pixels_per_ms: Self::NX_BASE_PIXELS_PER_MS * scroll_multiplier.max(0.1),
-            play_speed,
+            pixels_per_ms: Self::NX_BASE_PIXELS_PER_MS * multiplier.max(0.1),
         }
     }
 }
@@ -250,19 +241,6 @@ impl ScrollSettings {
 impl Default for ScrollSettings {
     fn default() -> Self {
         Self::from_scroll_speed(1.0)
-    }
-}
-
-/// Audio playback rate (1.0 = native). Practice rate control writes it;
-/// the gameplay clock advances by `dt * rate` so chart-time math and
-/// judge windows stay in chart-ms. Distinct from
-/// `ScrollSettings::play_speed` (the DTXManiaNX chart-time compressor).
-#[derive(Resource, Debug, Clone, Copy)]
-pub struct AudioRate(pub f64);
-
-impl Default for AudioRate {
-    fn default() -> Self {
-        Self(1.0)
     }
 }
 
@@ -675,8 +653,8 @@ impl AccuracyHistory {
 #[cfg(test)]
 mod tests {
     use super::{
-        AccuracyHistory, AudioRate, DrumAudioSettings, EffectivePlaybackRate, GameplayClock,
-        JudgmentCounts, PlaybackRateSource, ScrollSettings,
+        AccuracyHistory, DrumAudioSettings, EffectivePlaybackRate, GameplayClock, JudgmentCounts,
+        PlaybackRateSource, ScrollSettings,
     };
 
     #[test]
@@ -901,12 +879,6 @@ mod tests {
     }
 
     #[test]
-    fn rate_default_is_native() {
-        let r = AudioRate::default();
-        assert!((r.0 - 1.0).abs() < f64::EPSILON);
-    }
-
-    #[test]
     fn effective_rate_defaults_to_native() {
         let rate = EffectivePlaybackRate::default();
         assert_eq!(rate.source, PlaybackRateSource::Native);
@@ -919,6 +891,30 @@ mod tests {
         let fast = EffectivePlaybackRate::normal(2.0);
         assert!((slow.scaled_delta_secs(0.016) - 0.008).abs() < 1e-12);
         assert!((fast.scaled_delta_secs(0.016) - 0.032).abs() < 1e-12);
+    }
+
+    #[test]
+    fn two_x_rate_reaches_one_second_of_chart_in_half_a_second() {
+        let rate = EffectivePlaybackRate::normal(2.0);
+        let mut clock = GameplayClock::default();
+        clock.start_wall_clock();
+        for _ in 0..30 {
+            clock.tick(rate.scaled_delta_secs(1.0 / 60.0), None);
+        }
+        assert!(
+            (clock.current_ms - 1_000).abs() <= 1,
+            "got {}",
+            clock.current_ms
+        );
+    }
+
+    #[test]
+    fn measured_chart_position_is_not_scaled_twice() {
+        let rate = EffectivePlaybackRate::normal(2.0);
+        let mut clock = GameplayClock::default();
+        clock.start_audio_required();
+        clock.tick(rate.scaled_delta_secs(1.0 / 60.0), Some(500));
+        assert_eq!(clock.current_ms, 500);
     }
 
     #[test]

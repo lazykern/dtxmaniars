@@ -122,8 +122,7 @@ fn spawn_notes_system(
         let Some(lane) = lane_of(chip.channel) else {
             continue;
         };
-        let target_ms =
-            crate::judge::chip_target_ms_with_speed(chip, base_bpm, timing, scroll.play_speed);
+        let target_ms = crate::judge::chip_target_ms(chip, base_bpm, timing);
         if target_ms < now - BACKFILL_MS || target_ms > now + spawn_window_ms {
             continue;
         }

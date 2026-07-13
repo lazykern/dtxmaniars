@@ -83,6 +83,7 @@ fn apply_draft_live(
     audio: Res<Audio>,
     chart: Res<crate::resources::ActiveChart>,
     mut scroll: ResMut<crate::resources::ScrollSettings>,
+    mut playback_rate: ResMut<crate::resources::EffectivePlaybackRate>,
     mut input_offset: ResMut<crate::resources::InputOffsetMs>,
     mut bgm_adjust: ResMut<crate::resources::BgmAdjustState>,
     mut audio_settings: ResMut<crate::resources::DrumAudioSettings>,
@@ -105,7 +106,18 @@ fn apply_draft_live(
     }
     let g = &draft.0.gameplay;
     *scroll = crate::resources::ScrollSettings::from_scroll_speed(g.scroll_speed);
-    scroll.play_speed = dtx_config::play_speed_multiplier(g.play_speed);
+    let next_rate = crate::resources::EffectivePlaybackRate::normal(f64::from(
+        dtx_config::play_speed_multiplier(g.play_speed),
+    ));
+    if *playback_rate != next_rate {
+        crate::playback_rate::apply_playback_rate(
+            next_rate,
+            &mut playback_rate,
+            &audio,
+            &bgm,
+            &mut instances,
+        );
+    }
     input_offset.0 = g.input_offset_ms;
     bgm_adjust.common_ms = g.bgm_adjust_ms;
     gauge.damage_level = crate::map_damage_level(g.damage_level);

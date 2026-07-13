@@ -218,23 +218,7 @@ pub fn chip_target_ms(chip: &dtx_core::Chip, base_bpm: f32, timing: ChartTiming<
     chip_time_ms_with_bpm_and_bar_changes(chip.measure, chip.value, base_bpm, timing)
 }
 
-/// Chip target with optional play-speed scaling (`nPlaySpeed / 20.0`).
-/// Speed = 1.0 is a no-op; >1.0 makes the chart finish earlier.
-pub fn chip_target_ms_with_speed(
-    chip: &dtx_core::Chip,
-    base_bpm: f32,
-    timing: ChartTiming<'_>,
-    play_speed: f32,
-) -> i64 {
-    if play_speed <= 0.0 || (play_speed - 1.0).abs() < f32::EPSILON {
-        return chip_target_ms(chip, base_bpm, timing);
-    }
-    ((chip_target_ms(chip, base_bpm, timing) as f64) / (play_speed as f64)) as i64
-}
-
 /// Chart time for auto-play chips (BGM/SE) including BGM adjust offset.
-/// `play_speed` is applied to the chip time before adding the BGM offset,
-/// matching BocuD semantics (chip time scales, BGMAdjust stays absolute).
 pub fn auto_chip_target_ms(
     chip: &dtx_core::Chip,
     base_bpm: f32,
@@ -399,6 +383,20 @@ mod tests {
         };
         let target_ms = chip_target_ms(&chart.chips[0], base_bpm, timing);
         assert_eq!(12000 - target_ms, 0);
+    }
+
+    #[test]
+    fn playback_rate_does_not_change_chart_target() {
+        let chip = dtx_core::Chip::new(2, dtx_core::EChannel::BassDrum, 0.5);
+        let timing = ChartTiming {
+            bpm_changes: &[],
+            bar_changes: &[],
+        };
+        let target_ms = chip_target_ms(&chip, 120.0, timing);
+        assert_eq!(target_ms, 5_000);
+        assert_eq!(target_ms as f64 / 0.5, 10_000.0);
+        assert_eq!(target_ms as f64 / 1.0, 5_000.0);
+        assert_eq!(target_ms as f64 / 2.0, 2_500.0);
     }
 
     #[test]

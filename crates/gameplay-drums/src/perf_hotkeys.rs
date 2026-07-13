@@ -176,7 +176,7 @@ fn apply_runtime_from_draft(
     input_offset: &mut InputOffsetMs,
     bgm_adjust: &mut BgmAdjustState,
 ) {
-    *scroll = ScrollSettings::new(draft.cfg.gameplay.scroll_speed, scroll.play_speed);
+    *scroll = ScrollSettings::from_scroll_speed(draft.cfg.gameplay.scroll_speed);
     input_offset.0 = draft.cfg.gameplay.input_offset_ms;
     bgm_adjust.common_ms = draft.cfg.gameplay.bgm_adjust_ms;
 }
