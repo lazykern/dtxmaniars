@@ -43,8 +43,8 @@ pub struct SongInfo {
     pub bpm: Option<f32>,
     /// Drums difficulty level (from #DLEVEL) or None.
     pub dlevel: Option<u32>,
-    /// Path to BGM audio file (ogg/wav) if found, else None.
-    /// Search order: `<dtx_stem>.ogg`, `1.ogg`, `<dtx_stem>.wav`, `1.wav`.
+    /// Path to BGM audio file (ogg/wav/mp3) if found, else None.
+    /// Search order preserves OGG/WAV priority before MP3 fallbacks.
     pub bgm_path: Option<PathBuf>,
     /// Path to the song-select preview audio: `#PREVIEW:` file if
     /// present, otherwise falls back to `bgm_path` (the full BGM).
@@ -80,13 +80,11 @@ impl SongInfo {
         // Preview path: prefer #PREVIEW: file; fall back to full BGM.
         // (ADR-0015 Q1: per-chart, BocaD-compatible.)
         let (preview_path, preview_is_loopable) = match chart.metadata.preview_filename.as_deref() {
-            Some(name) => {
-                let p = dtx_path.parent().map(|d| d.join(name));
-                match p {
-                    Some(p) => (Some(p), true),
-                    None => (bgm_path.clone(), false),
-                }
-            }
+            Some(name) => dtx_path
+                .parent()
+                .and_then(|parent| dtx_core::resolve_chart_asset_path(parent, name))
+                .filter(|path| dtx_audio::supported_audio_format(path).is_some())
+                .map_or_else(|| (bgm_path.clone(), false), |path| (Some(path), true)),
             None => (bgm_path.clone(), false),
         };
 
@@ -424,6 +422,31 @@ mod tests {
         let info = SongInfo::from_chart(&path, &chart);
         assert_eq!(info.preview_path, info.bgm_path);
         assert!(!info.preview_is_loopable);
+    }
+
+    #[test]
+    fn from_chart_uses_case_insensitive_mp3_preview() {
+        let dir = std::env::temp_dir().join(format!(
+            "dtx-library-mp3-preview-{}-{}",
+            std::process::id(),
+            std::thread::current().name().unwrap_or("test")
+        ));
+        std::fs::create_dir_all(&dir).expect("create temp chart dir");
+        let preview = dir.join("Preview.MP3");
+        std::fs::write(&preview, b"not decoded in this metadata test").expect("write fixture");
+
+        let chart = Chart {
+            metadata: dtx_core::Metadata {
+                preview_filename: Some("preview.mp3".into()),
+                ..default()
+            },
+            ..default()
+        };
+        let info = SongInfo::from_chart(&dir.join("song.dtx"), &chart);
+        assert_eq!(info.preview_path, Some(preview));
+        assert!(info.preview_is_loopable);
+
+        std::fs::remove_dir_all(dir).expect("remove temp chart dir");
     }
 
     #[test]

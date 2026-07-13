@@ -11,6 +11,7 @@ workspace = true
 [dependencies]
 bevy = { workspace = true, features = ["default"] }
 dtx-core = { path = "../dtx-core" }
+dtx-audio = { path = "../dtx-audio" }
 thiserror = { workspace = true }
 zip = "5"
 sevenz-rust2 = "0.21"

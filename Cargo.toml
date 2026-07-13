@@ -39,7 +39,7 @@ dev-tools = { path = "crates/dev-tools" }
 bevy = { version = "0.19", default-features = false }
 
 # Third-party (added per-crate as needed)
-bevy_kira_audio = { version = "0.26", default-features = false, features = ["ogg", "wav"] }
+bevy_kira_audio = { version = "0.26", default-features = false, features = ["ogg", "wav", "mp3"] }
 thiserror = "1"
 chrono = { version = "0.4", default-features = false, features = ["clock"] }
 atomicwrites = "0.4.4"

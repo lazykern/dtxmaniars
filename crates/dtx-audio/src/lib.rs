@@ -17,6 +17,24 @@ use bevy_kira_audio::AudioSource as KiraAudioSource;
 pub mod crossfade;
 pub mod preview;
 
+/// Audio formats accepted by the runtime decoder.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AudioFormat {
+    Ogg,
+    Wav,
+    Mp3,
+}
+
+/// Return the supported audio format for `path`, ignoring extension case.
+pub fn supported_audio_format(path: &Path) -> Option<AudioFormat> {
+    match path.extension()?.to_str()?.to_ascii_lowercase().as_str() {
+        "ogg" => Some(AudioFormat::Ogg),
+        "wav" => Some(AudioFormat::Wav),
+        "mp3" => Some(AudioFormat::Mp3),
+        _ => None,
+    }
+}
+
 pub use preview::{
     drain_pending_preview, get_or_load as get_or_load_audio_handle, preview_tick_system,
     screen_fade_responder_system, AudioHandleCache, PreviewPlayer, PreviewState,
@@ -177,6 +195,33 @@ pub fn resolve_chart_audio_path(chart_dir: &Path, filename: &str) -> PathBuf {
         }
     }
     current
+}
+
+#[cfg(test)]
+mod audio_format_tests {
+    use super::*;
+
+    #[test]
+    fn supported_audio_format_accepts_case_insensitive_extensions() {
+        assert_eq!(
+            supported_audio_format(Path::new("song.ogg")),
+            Some(AudioFormat::Ogg)
+        );
+        assert_eq!(
+            supported_audio_format(Path::new("song.WaV")),
+            Some(AudioFormat::Wav)
+        );
+        assert_eq!(
+            supported_audio_format(Path::new("song.Mp3")),
+            Some(AudioFormat::Mp3)
+        );
+    }
+
+    #[test]
+    fn supported_audio_format_rejects_unsupported_or_extensionless_paths() {
+        assert_eq!(supported_audio_format(Path::new("song.xa")), None);
+        assert_eq!(supported_audio_format(Path::new("song")), None);
+    }
 }
 
 /// Case-insensitive lookup of a single path component within `dir`.

@@ -390,8 +390,7 @@ pub fn resolve_bgm_path(
 
     for &slot in &chart.metadata.bgm_wav_slots {
         if let Some(name) = chart.assets.wav.get(slot) {
-            let p = parent.join(name);
-            if p.is_file() {
+            if let Some(p) = resolve_chart_asset_path(parent, name) {
                 return Some(p);
             }
         }
@@ -405,24 +404,25 @@ pub fn resolve_bgm_path(
         "drums.wav",
         "bgm.wav",
         "1.wav",
+        "drums.mp3",
+        "bgm_d.mp3",
+        "bgm.mp3",
+        "1.mp3",
     ] {
-        let p = parent.join(name);
-        if p.is_file() {
+        if let Some(p) = resolve_chart_asset_path(parent, name) {
             return Some(p);
         }
     }
 
     if let Some(preview) = chart.metadata.preview_filename.as_deref() {
-        let p = parent.join(preview);
-        if p.is_file() {
+        if let Some(p) = resolve_chart_asset_path(parent, preview) {
             return Some(p);
         }
     }
 
     let stem = dtx_path.file_stem()?.to_str()?;
-    for ext in &["ogg", "wav"] {
-        let p = parent.join(format!("{stem}.{ext}"));
-        if p.is_file() {
+    for ext in &["ogg", "wav", "mp3"] {
+        if let Some(p) = resolve_chart_asset_path(parent, &format!("{stem}.{ext}")) {
             return Some(p);
         }
     }
@@ -432,30 +432,59 @@ pub fn resolve_bgm_path(
 
 /// Resolve a chart-relative asset filename against `chart_dir`.
 ///
-/// Tries a direct join first, then a case-insensitive match on the file name
-/// within the chart directory (DTX charts authored on Windows frequently
-/// disagree with the on-disk case). Returns `None` when no match exists.
+/// Tries a direct join first, then a case-insensitive match on every nested
+/// component (DTX charts authored on Windows frequently disagree with the
+/// on-disk case). Returns `None` when no match exists or when the supplied
+/// path escapes the chart directory.
 /// Shared by audio and visual asset loaders so both use one filesystem
 /// algorithm.
 pub fn resolve_chart_asset_path(
     chart_dir: &std::path::Path,
     filename: &str,
 ) -> Option<std::path::PathBuf> {
-    let direct = chart_dir.join(filename);
+    let normalized = filename.replace('\\', "/");
+    let relative = std::path::Path::new(&normalized);
+    if relative.is_absolute()
+        || relative.components().any(|component| {
+            matches!(
+                component,
+                std::path::Component::ParentDir
+                    | std::path::Component::RootDir
+                    | std::path::Component::Prefix(_)
+            )
+        })
+    {
+        return None;
+    }
+
+    let direct = chart_dir.join(relative);
     if direct.is_file() {
         return Some(direct);
     }
-    let wanted = std::path::Path::new(filename).file_name()?.to_str()?;
-    std::fs::read_dir(chart_dir)
-        .ok()?
-        .filter_map(Result::ok)
-        .find(|entry| {
-            entry
-                .file_name()
-                .to_str()
-                .is_some_and(|name| name.eq_ignore_ascii_case(wanted))
-        })
-        .map(|entry| entry.path())
+
+    let mut current = chart_dir.to_path_buf();
+    for component in relative.components() {
+        let std::path::Component::Normal(component) = component else {
+            continue;
+        };
+        let wanted = component.to_str()?;
+        let candidate = current.join(component);
+        if candidate.exists() {
+            current = candidate;
+            continue;
+        }
+        current = std::fs::read_dir(&current)
+            .ok()?
+            .filter_map(Result::ok)
+            .find(|entry| {
+                entry
+                    .file_name()
+                    .to_str()
+                    .is_some_and(|name| name.eq_ignore_ascii_case(wanted))
+            })?
+            .path();
+    }
+    current.is_file().then_some(current)
 }
 
 #[cfg(test)]
@@ -633,6 +662,43 @@ mod tests {
             resolve_chart_asset_path(&dir, "jacket.png"),
             Some(dir.join("Jacket.PNG"))
         );
+
+        std::fs::remove_dir_all(dir).expect("remove temp chart dir");
+    }
+
+    #[test]
+    fn resolve_chart_asset_path_matches_nested_windows_path_case_insensitively() {
+        let dir = std::env::temp_dir().join(format!(
+            "dtx-core-nested-{}-{}",
+            std::process::id(),
+            std::thread::current().name().unwrap_or("test")
+        ));
+        let nested = dir.join("Kit").join("Cymbals");
+        std::fs::create_dir_all(&nested).expect("create nested chart dir");
+        let fixture = nested.join("Crash.WAV");
+        std::fs::write(&fixture, b"x").expect("write fixture");
+
+        assert_eq!(
+            resolve_chart_asset_path(&dir, "kit\\cymbals\\crash.wav"),
+            Some(fixture)
+        );
+
+        std::fs::remove_dir_all(dir).expect("remove temp chart dir");
+    }
+
+    #[test]
+    fn resolve_bgm_path_falls_back_to_case_insensitive_mp3() {
+        let dir = std::env::temp_dir().join(format!(
+            "dtx-core-mp3-{}-{}",
+            std::process::id(),
+            std::thread::current().name().unwrap_or("test")
+        ));
+        std::fs::create_dir_all(&dir).expect("create temp chart dir");
+        let mp3 = dir.join("BGM.MP3");
+        std::fs::write(&mp3, b"not decoded in this resolver test").expect("write fixture");
+
+        let chart = crate::chart::Chart::default();
+        assert_eq!(resolve_bgm_path(&dir.join("song.dtx"), &chart), Some(mp3));
 
         std::fs::remove_dir_all(dir).expect("remove temp chart dir");
     }
