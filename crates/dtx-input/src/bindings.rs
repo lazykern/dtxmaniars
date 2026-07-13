@@ -74,9 +74,10 @@ impl SystemVerb {
 /// The lane channel that already owns `src`, if any. A system verb may not
 /// share an input with a lane: the same hit would both judge and fire the verb.
 ///
-/// One-directional: lane binds are never refused — lanes win ties. The editor's
-/// capture path and `BindResolver` are the only two callers, and they are the
-/// only two places the rule is enforced.
+/// One-directional: lane binds are never refused — lanes win ties. This is the
+/// single place the rule lives: `BindResolver::from_bindings` is its only
+/// caller, and every resolver path (including `from_profiles`, which composes
+/// `InputBindings` first) routes through it.
 pub fn lane_owner(bindings: &InputBindings, src: &BindSource) -> Option<EChannel> {
     BINDABLE_CHANNELS
         .into_iter()

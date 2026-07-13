@@ -121,8 +121,9 @@ impl Serialize for KeyboardProfile {
         S: Serializer,
     {
         use serde::ser::SerializeMap;
-        // Channel arrays come first: TOML forbids a value after a table at the
-        // same level.
+        // Channel arrays, then the `system` sub-table — the order the file reads
+        // best in. Cosmetic only: toml emits a table's values before its
+        // sub-tables whatever order they are serialized in.
         let channels = channel_map(&self.map);
         let system = verb_map(&self.system);
         let mut map =
@@ -153,12 +154,19 @@ impl<'de> Deserialize<'de> for KeyboardProfile {
         let mut channels: BTreeMap<String, Vec<KeyCode>> = BTreeMap::new();
         let mut system: BTreeMap<String, Vec<KeyCode>> = BTreeMap::new();
         for (name, entry) in raw {
-            match entry {
-                Entry::Keys(keys) => {
+            match (name.as_str(), entry) {
+                ("system", Entry::System(table)) => system = table,
+                // `system = ["F9"]` parses as a key array, so it would otherwise
+                // land in `channels` and be dropped as an unknown channel.
+                ("system", Entry::Keys(_)) => eprintln!(
+                    "dtx-input: keyboard profile `system` must be a table of verb = [keys]; dropped"
+                ),
+                (_, Entry::Keys(keys)) => {
                     channels.insert(name, keys);
                 }
-                Entry::System(table) if name == "system" => system = table,
-                Entry::System(_) => {} // unknown nested table: skipped
+                (_, Entry::System(_)) => {
+                    eprintln!("dtx-input: keyboard profile unknown table {name:?}; skipped")
+                }
             }
         }
         Ok(Self {
@@ -276,23 +284,43 @@ fn channel_map<T: Clone>(map: &HashMap<EChannel, Vec<T>>) -> BTreeMap<String, Ve
         .collect()
 }
 
-/// Deserialize a channel map, dropping unknown channel names and deduping
+/// Deserialize a channel map, warning on unknown channel names and deduping
 /// values within each channel (a key/note bound twice to one channel must
 /// fire that lane once). Cross-channel sharing is preserved.
 fn parse_channel_map<T: PartialEq>(map: BTreeMap<String, Vec<T>>) -> HashMap<EChannel, Vec<T>> {
     map.into_iter()
         .filter_map(|(name, values)| {
-            EChannel::from_short_name(&name).map(|channel| {
-                let mut unique = Vec::with_capacity(values.len());
-                for value in values {
-                    if !unique.contains(&value) {
-                        unique.push(value);
-                    }
-                }
-                (channel, unique)
-            })
+            let Some(channel) = EChannel::from_short_name(&name) else {
+                eprintln!("dtx-input: profile unknown channel {name:?}; skipped");
+                return None;
+            };
+            Some((channel, dedup(values)))
         })
         .collect()
+}
+
+/// Deserialize a verb map, warning on unknown verb keys and deduping within
+/// each verb (a key/note bound twice to one verb must fire it once).
+fn parse_verb_map<T: PartialEq>(map: BTreeMap<String, Vec<T>>) -> HashMap<SystemVerb, Vec<T>> {
+    map.into_iter()
+        .filter_map(|(name, values)| {
+            let Some(verb) = SystemVerb::from_key(&name) else {
+                eprintln!("dtx-input: profile unknown system verb {name:?}; skipped");
+                return None;
+            };
+            Some((verb, dedup(values)))
+        })
+        .collect()
+}
+
+fn dedup<T: PartialEq>(values: Vec<T>) -> Vec<T> {
+    let mut unique = Vec::with_capacity(values.len());
+    for value in values {
+        if !unique.contains(&value) {
+            unique.push(value);
+        }
+    }
+    unique
 }
 
 /// Serialize a verb map with stable, brand-independent keys (`SystemVerb::key`).
@@ -303,24 +331,6 @@ fn verb_map<T: Clone>(map: &HashMap<SystemVerb, Vec<T>>) -> BTreeMap<String, Vec
             map.get(&verb)
                 .filter(|values| !values.is_empty())
                 .map(|values| (verb.key().to_owned(), values.clone()))
-        })
-        .collect()
-}
-
-/// Deserialize a verb map, dropping unknown verb keys and deduping within each
-/// verb (a key/note bound twice to one verb must fire it once).
-fn parse_verb_map<T: PartialEq>(map: BTreeMap<String, Vec<T>>) -> HashMap<SystemVerb, Vec<T>> {
-    map.into_iter()
-        .filter_map(|(name, values)| {
-            SystemVerb::from_key(&name).map(|verb| {
-                let mut unique = Vec::with_capacity(values.len());
-                for value in values {
-                    if !unique.contains(&value) {
-                        unique.push(value);
-                    }
-                }
-                (verb, unique)
-            })
         })
         .collect()
 }
@@ -837,7 +847,7 @@ mod tests {
                 map: [(EChannel::HiHatClose, vec![KeyCode::KeyX, KeyCode::KeyC])]
                     .into_iter()
                     .collect(),
-                system: HashMap::new(),
+                system: [(SystemVerb::Pause, vec![KeyCode::F9])].into_iter().collect(),
             },
         );
 
@@ -846,6 +856,14 @@ mod tests {
         let profile = &value["profiles"]["Desk"];
         assert_eq!(profile["HH"].as_array().expect("HH is an array").len(), 2);
         assert!(profile.get("map").is_none());
+        // The on-disk shape is nested: [profiles.Desk] + [profiles.Desk.system].
+        assert_eq!(
+            profile["system"]["pause"]
+                .as_array()
+                .expect("pause is an array")
+                .len(),
+            1
+        );
         assert!(!raw.contains("Midi"));
         let parsed: ProfileRegistry<KeyboardProfile> =
             toml::from_str(&raw).expect("registry parses");
@@ -866,7 +884,7 @@ mod tests {
                 map: [(EChannel::Snare, vec![38]), (EChannel::HiHatOpen, vec![46])]
                     .into_iter()
                     .collect(),
-                system: HashMap::new(),
+                system: [(SystemVerb::Restart, vec![37])].into_iter().collect(),
             },
         );
 
@@ -879,6 +897,14 @@ mod tests {
             profile["map"]["SD"]
                 .as_array()
                 .expect("SD is an array")
+                .len(),
+            1
+        );
+        // The on-disk shape is nested: [profiles."Roland TD-17".system].
+        assert_eq!(
+            profile["system"]["restart"]
+                .as_array()
+                .expect("restart is an array")
                 .len(),
             1
         );
@@ -982,6 +1008,26 @@ mod tests {
             .expect("legacy MIDI profile parses");
         assert!(profile.system.is_empty());
         assert_eq!(profile.map[&EChannel::HiHatClose], vec![42]);
+    }
+
+    /// A hand-edited `system = ["F9"]` (array, not a verb table) is the wrong
+    /// shape: it is dropped with a warning, and must not leak into the channel
+    /// map — a bogus "system" channel would be erased on the next write anyway.
+    #[test]
+    fn malformed_system_array_is_dropped_not_taken_as_a_channel() {
+        let profile: KeyboardProfile = toml::from_str("HH = [\"KeyX\"]\nsystem = [\"F9\"]")
+            .expect("malformed system still parses");
+        assert!(profile.system.is_empty());
+        assert_eq!(profile.map[&EChannel::HiHatClose], vec![KeyCode::KeyX]);
+        assert_eq!(profile.map.len(), 1, "no bogus channel from `system`");
+    }
+
+    #[test]
+    fn unknown_system_verb_key_is_dropped() {
+        let profile: KeyboardProfile = toml::from_str("[system]\nnope = [\"F9\"]\npause = [\"F8\"]")
+            .expect("unknown verb still parses");
+        assert_eq!(profile.system[&SystemVerb::Pause], vec![KeyCode::F8]);
+        assert_eq!(profile.system.len(), 1);
     }
 
     #[test]

@@ -70,46 +70,7 @@ impl BindResolver {
     /// Lane ids come from the fixed logical order (`lane_map::lane_of`) and
     /// never depend on the display lane arrangement.
     pub fn from_profiles(keyboard: &KeyboardProfile, midi: &MidiProfile) -> Self {
-        let mut key_to_lanes = HashMap::new();
-        let mut note_to_lanes = HashMap::new();
-        for ch in BINDABLE_CHANNELS {
-            let Some(lane) = lane_of(ch) else { continue };
-            for key in keyboard.map.get(&ch).into_iter().flatten() {
-                key_to_lanes.entry(*key).or_insert_with(Vec::new).push(lane);
-            }
-            for note in midi.map.get(&ch).into_iter().flatten() {
-                note_to_lanes.entry(*note).or_insert_with(Vec::new).push(lane);
-            }
-        }
-        // Lanes win ties. Keys only ever live in the keyboard profile and notes
-        // only in the MIDI one, so each source is checked against its own map.
-        let mut key_to_system: HashMap<KeyCode, Vec<SystemVerb>> = HashMap::new();
-        let mut note_to_system: HashMap<u8, Vec<SystemVerb>> = HashMap::new();
-        for verb in SYSTEM_VERBS {
-            for key in keyboard.system.get(&verb).into_iter().flatten() {
-                match keyboard.key_owners(*key).first() {
-                    Some(owner) => warn!(
-                        "system bind {verb:?} ignored: key {key:?} already drives lane {owner:?}"
-                    ),
-                    None => key_to_system.entry(*key).or_default().push(verb),
-                }
-            }
-            for note in midi.system.get(&verb).into_iter().flatten() {
-                match midi.note_owner(*note) {
-                    Some(owner) => warn!(
-                        "system bind {verb:?} ignored: note {note} already drives lane {owner:?}"
-                    ),
-                    None => note_to_system.entry(*note).or_default().push(verb),
-                }
-            }
-        }
-        Self {
-            key_to_lanes,
-            note_to_lanes,
-            key_to_system,
-            note_to_system,
-            velocity_threshold: midi.velocity_threshold,
-        }
+        Self::from_bindings(&compose_bindings(keyboard, midi))
     }
 
     /// Build lookup tables from channel-keyed bindings.
