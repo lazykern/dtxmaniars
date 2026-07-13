@@ -110,21 +110,49 @@ struct LoadProblem {
     detail: String,
 }
 
-impl LoadProblem {
-    fn parser_warning(line: usize, detail: impl Into<String>) -> Self {
-        Self {
-            kind: LoadProblemKind::ParserWarning,
-            path: None,
-            detail: format!("line {line}: {}", detail.into()),
-        }
-    }
-}
-
 #[derive(Resource, Debug, Default)]
 struct LoadDiagnostics {
     fatal: Option<String>,
     warnings: Vec<LoadProblem>,
     advance_not_before: Option<std::time::Instant>,
+}
+
+impl LoadDiagnostics {
+    fn push_warning(&mut self, problem: LoadProblem) {
+        if self
+            .warnings
+            .iter()
+            .any(|existing| existing.kind == problem.kind && existing.path == problem.path)
+        {
+            return;
+        }
+        self.warnings.push(problem);
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum LoadSupport {
+    Supported,
+    Degraded { problems: Vec<String> },
+    Rejected { problems: Vec<String> },
+}
+
+fn load_support(diagnostics: &LoadDiagnostics) -> LoadSupport {
+    if let Some(fatal) = &diagnostics.fatal {
+        LoadSupport::Rejected {
+            problems: vec![fatal.clone()],
+        }
+    } else if diagnostics.warnings.is_empty() {
+        LoadSupport::Supported
+    } else {
+        LoadSupport::Degraded {
+            problems: diagnostics
+                .warnings
+                .iter()
+                .map(|problem| problem.detail.clone())
+                .collect(),
+        }
+    }
 }
 
 fn load_failure_for(chart: &Chart) -> Option<String> {
@@ -206,7 +234,7 @@ fn start_load(
         let path_clone = path.clone();
         let pool = AsyncComputeTaskPool::get();
         task.0 = Some(pool.spawn(async move {
-            dtx_assets::load_dtx_report(&path_clone).map_err(|e| e.to_string())
+            dtx_assets::load_chart_report(&path_clone).map_err(|e| e.to_string())
         }));
     } else {
         warn!("SongLoading entered with no SelectedSong; using empty chart");
@@ -254,11 +282,23 @@ fn poll_chart_parse(
                 *phase = LoadPhase::Failed;
                 return;
             }
-            for warning in report.warnings {
-                diagnostics.warnings.push(LoadProblem::parser_warning(
-                    warning.line,
-                    format!("{:?}", warning.kind),
-                ));
+            for diagnostic in &report.diagnostics {
+                warn!(
+                    path = ?path,
+                    line = ?diagnostic.line,
+                    kind = ?diagnostic.kind,
+                    detail = %diagnostic.detail,
+                    recovery = ?diagnostic.recovery,
+                    "chart compatibility diagnostic"
+                );
+                diagnostics.push_warning(LoadProblem {
+                    kind: LoadProblemKind::ParserWarning,
+                    path: None,
+                    detail: match diagnostic.line {
+                        Some(line) => format!("line {line}: {}", diagnostic.detail),
+                        None => diagnostic.detail.clone(),
+                    },
+                });
             }
             let chart = report.chart;
             if let Some(fatal) = load_failure_for(&chart) {
@@ -272,7 +312,8 @@ fn poll_chart_parse(
                 return;
             }
             info!(
-                "Parsed DTX ({} chips, BPM {:?}, dlevel {:?})",
+                "Parsed {:?} ({} chips, BPM {:?}, dlevel {:?})",
+                chart.format,
                 chart.chips.len(),
                 chart.metadata.bpm,
                 chart.metadata.dlevel
@@ -300,7 +341,7 @@ fn poll_chart_parse(
                     sound_bank::PreloadIssueKind::Missing => LoadProblemKind::MissingAudio,
                     sound_bank::PreloadIssueKind::Unsupported => LoadProblemKind::UnsupportedAudio,
                 };
-                diagnostics.warnings.push(LoadProblem {
+                diagnostics.push_warning(LoadProblem {
                     kind,
                     path: Some(issue.path),
                     detail: format!("chart audio slot {}", issue.slot),
@@ -339,7 +380,7 @@ fn poll_chart_parse(
             *phase = LoadPhase::LoadingAudio;
         }
         Err(e) => {
-            error!("Failed to load DTX: {e}");
+            error!("Failed to load chart: {e}");
             diagnostics.fatal = Some(e);
             diagnostics.advance_not_before = Some(
                 std::time::Instant::now()
@@ -364,7 +405,7 @@ fn record_missing_visuals(
         .chain(chart.assets.bga.by_id.iter())
     {
         if !active_visuals.bmp_paths.contains_key(&id) {
-            diagnostics.warnings.push(LoadProblem {
+            diagnostics.push_warning(LoadProblem {
                 kind: LoadProblemKind::MissingVisual,
                 path: source_dir.map(|dir| dir.join(filename.replace('\\', "/"))),
                 detail: format!("image asset {id:02X} ({filename})"),
@@ -373,7 +414,7 @@ fn record_missing_visuals(
     }
     for (&id, filename) in &chart.assets.avi.by_id {
         if !active_visuals.avi_paths.contains_key(&id) {
-            diagnostics.warnings.push(LoadProblem {
+            diagnostics.push_warning(LoadProblem {
                 kind: LoadProblemKind::MissingVisual,
                 path: source_dir.map(|dir| dir.join(filename.replace('\\', "/"))),
                 detail: format!("movie asset {id:02X} ({filename})"),
@@ -422,7 +463,7 @@ fn wait_for_audio(
                     && problem.path.as_ref() == Some(&asset.path)
             })
         {
-            diagnostics.warnings.push(LoadProblem {
+            diagnostics.push_warning(LoadProblem {
                 kind: LoadProblemKind::DecoderFailure,
                 path: Some(asset.path.clone()),
                 detail: "audio decoder rejected this file".into(),
@@ -748,6 +789,7 @@ fn update_status_text(
         node.width = Val::Percent(next.clamp(0.0, 100.0));
     }
     let total = required.0.len();
+    let support = load_support(&diagnostics);
     let status = match *phase {
         LoadPhase::Idle => String::new(),
         LoadPhase::Parsing => "parsing chart…".to_string(),
@@ -756,11 +798,14 @@ fn update_status_text(
             ((progress.0 * total as f32).round() as usize).min(total),
             total
         ),
-        LoadPhase::Ready if diagnostics.warnings.is_empty() => "ready".to_string(),
-        LoadPhase::Ready => format!(
-            "ready — {} media warnings; continuing…",
-            diagnostics.warnings.len()
-        ),
+        LoadPhase::Ready => match support {
+            LoadSupport::Supported => "ready — supported".to_string(),
+            LoadSupport::Degraded { problems } => format!(
+                "ready — degraded with warning ({}); continuing…",
+                problems.len()
+            ),
+            LoadSupport::Rejected { .. } => "rejected — returning to song select".to_string(),
+        },
         LoadPhase::Failed => diagnostics
             .fatal
             .clone()
@@ -841,6 +886,26 @@ mod tests {
     }
 
     #[test]
+    fn load_support_names_supported_degraded_and_rejected_states() {
+        let mut diagnostics = LoadDiagnostics::default();
+        assert_eq!(load_support(&diagnostics), LoadSupport::Supported);
+        diagnostics.push_warning(LoadProblem {
+            kind: LoadProblemKind::MissingAudio,
+            path: Some("optional.ogg".into()),
+            detail: "optional audio missing".into(),
+        });
+        assert!(matches!(
+            load_support(&diagnostics),
+            LoadSupport::Degraded { .. }
+        ));
+        diagnostics.fatal = Some("required gameplay structure unsupported".into());
+        assert!(matches!(
+            load_support(&diagnostics),
+            LoadSupport::Rejected { .. }
+        ));
+    }
+
+    #[test]
     fn load_policy_rejects_empty_chart_and_accepts_playable_drums() {
         assert!(load_failure_for(&Chart::default()).is_some());
         let playable = Chart {
@@ -859,7 +924,11 @@ mod tests {
     fn load_policy_uses_readable_failure_and_warning_holds() {
         assert_eq!(failure_hold_seconds(), 2.5);
         assert_eq!(
-            warning_hold_seconds(&[LoadProblem::parser_warning(1, "x")]),
+            warning_hold_seconds(&[LoadProblem {
+                kind: LoadProblemKind::ParserWarning,
+                path: None,
+                detail: "line 1: x".into(),
+            }]),
             0.75
         );
         assert_eq!(warning_hold_seconds(&[]), 0.0);

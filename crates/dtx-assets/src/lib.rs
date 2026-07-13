@@ -19,7 +19,7 @@ use std::io;
 use std::path::{Path, PathBuf};
 
 use bevy::prelude::*;
-use dtx_core::{Chart, DtxError, ParseOptions, ParseReport, parse_with_options};
+use dtx_core::{Chart, ChartFormat, DtxError, ParseOptions, ParseReport, parse_source};
 
 /// Load a DTX file from disk and parse it into a [`Chart`].
 ///
@@ -32,11 +32,29 @@ pub fn load_dtx(path: &Path) -> Result<Chart, LoadError> {
 
 /// Load a DTX file while retaining recoverable parser warnings.
 pub fn load_dtx_report(path: &Path) -> Result<ParseReport, LoadError> {
+    load_report_as(path, ChartFormat::Dtx)
+}
+
+/// Load any supported drums chart using its case-insensitive path extension.
+pub fn load_chart_report(path: &Path) -> Result<ParseReport, LoadError> {
+    let format = path
+        .extension()
+        .and_then(|extension| extension.to_str())
+        .and_then(ChartFormat::from_extension)
+        .ok_or_else(|| LoadError::UnsupportedFormat(path.to_path_buf()))?;
+    load_report_as(path, format)
+}
+
+pub fn load_chart(path: &Path) -> Result<Chart, LoadError> {
+    load_chart_report(path).map(|report| report.chart)
+}
+
+fn load_report_as(path: &Path, format: ChartFormat) -> Result<ParseReport, LoadError> {
     let file = fs::File::open(path).map_err(|source| LoadError::Io {
         path: path.to_path_buf(),
         source,
     })?;
-    parse_with_options(file, ParseOptions::default()).map_err(|source| LoadError::Parse {
+    parse_source(file, format, ParseOptions::default()).map_err(|source| LoadError::Parse {
         path: path.to_path_buf(),
         source,
     })
@@ -45,6 +63,8 @@ pub fn load_dtx_report(path: &Path) -> Result<ParseReport, LoadError> {
 /// Combined error type for DTX loading: I/O + parse.
 #[derive(Debug, thiserror::Error)]
 pub enum LoadError {
+    #[error("unsupported chart format: {0}")]
+    UnsupportedFormat(PathBuf),
     #[error("I/O error reading {path}: {source}")]
     Io {
         path: PathBuf,
@@ -76,7 +96,7 @@ impl DtxCache {
     pub fn get_or_load(&mut self, path: &Path) -> Result<&Chart, LoadError> {
         if !self.by_path.contains_key(path) {
             let path_buf = path.to_path_buf();
-            let chart = load_dtx(&path_buf)?;
+            let chart = load_chart(&path_buf)?;
             self.by_path.insert(path_buf, chart);
         }
         Ok(self.by_path.get(path).expect("just inserted"))
@@ -143,6 +163,29 @@ mod tests {
         assert_eq!(report.chart.drum_chips().count(), 1);
         assert!(!report.warnings.is_empty());
 
+        std::fs::remove_dir_all(dir).expect("remove fixture dir");
+    }
+
+    #[test]
+    fn path_aware_loader_uses_legacy_format_and_rejects_bms() {
+        let dir = std::env::temp_dir().join(format!(
+            "dtx-assets-format-{}-{}",
+            std::process::id(),
+            std::thread::current().name().unwrap_or("test")
+        ));
+        std::fs::create_dir_all(&dir).expect("create fixture dir");
+        let gda = dir.join("legacy.GDA");
+        std::fs::write(&gda, b"#000BD: 01\n").expect("write gda");
+        assert_eq!(
+            load_chart_report(&gda).expect("gda loads").chart.format,
+            dtx_core::ChartFormat::Gda
+        );
+        let bms = dir.join("keys.bms");
+        std::fs::write(&bms, b"#00011: 01\n").expect("write bms");
+        assert!(matches!(
+            load_chart_report(&bms),
+            Err(LoadError::UnsupportedFormat(_))
+        ));
         std::fs::remove_dir_all(dir).expect("remove fixture dir");
     }
 

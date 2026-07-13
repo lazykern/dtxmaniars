@@ -21,6 +21,35 @@ pub struct ImportOutcome {
     pub dest_name: String,
     /// Number of `.dtx` charts found under it.
     pub chart_count: usize,
+    pub formats: ChartFormatCounts,
+    pub rejected: Vec<ImportChartDiagnostic>,
+}
+
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+pub struct ChartFormatCounts {
+    pub dtx: usize,
+    pub gda: usize,
+    pub g2d: usize,
+}
+
+impl ChartFormatCounts {
+    pub const fn total(self) -> usize {
+        self.dtx + self.gda + self.g2d
+    }
+
+    fn record(&mut self, format: dtx_core::ChartFormat) {
+        match format {
+            dtx_core::ChartFormat::Dtx => self.dtx += 1,
+            dtx_core::ChartFormat::Gda => self.gda += 1,
+            dtx_core::ChartFormat::G2d => self.g2d += 1,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ImportChartDiagnostic {
+    pub path: PathBuf,
+    pub detail: String,
 }
 
 #[derive(Debug, Error)]
@@ -83,7 +112,8 @@ pub fn import_archive(archive: &Path, song_root: &Path) -> Result<ImportOutcome,
         }
 
         let (content, wrapper_name) = collapse_wrappers(temp.clone())?;
-        let chart_count = count_dtx(&content)?;
+        let (formats, rejected) = count_chart_formats(&content)?;
+        let chart_count = formats.total();
         if chart_count == 0 {
             return Err(ImportError::NoCharts);
         }
@@ -102,6 +132,8 @@ pub fn import_archive(archive: &Path, song_root: &Path) -> Result<ImportOutcome,
         Ok(ImportOutcome {
             dest_name,
             chart_count,
+            formats,
+            rejected,
         })
     })();
 
@@ -211,17 +243,31 @@ fn collapse_wrappers(mut dir: PathBuf) -> io::Result<(PathBuf, Option<String>)> 
 
 /// Count `.dtx` files recursively. Shares the scanner's case-insensitive
 /// extension rule so archive counts match a later rescan.
-fn count_dtx(dir: &Path) -> io::Result<usize> {
-    let mut n = 0;
+fn count_chart_formats(dir: &Path) -> io::Result<(ChartFormatCounts, Vec<ImportChartDiagnostic>)> {
+    let mut formats = ChartFormatCounts::default();
+    let mut rejected = Vec::new();
     for entry in fs::read_dir(dir)?.flatten() {
         let path = entry.path();
         if path.is_dir() {
-            n += count_dtx(&path)?;
-        } else if crate::is_dtx_path(&path) {
-            n += 1;
+            let (nested_formats, mut nested_rejected) = count_chart_formats(&path)?;
+            formats.dtx += nested_formats.dtx;
+            formats.gda += nested_formats.gda;
+            formats.g2d += nested_formats.g2d;
+            rejected.append(&mut nested_rejected);
+        } else {
+            match crate::classify_chart_path(&path) {
+                crate::ChartPathKind::Playable(format) => formats.record(format),
+                crate::ChartPathKind::Rejected(_) => rejected.push(ImportChartDiagnostic {
+                    path,
+                    detail:
+                        "BMS/BME is not supported by the drums player; convert to DTX, GDA, or G2D."
+                            .into(),
+                }),
+                crate::ChartPathKind::NotAChart => {}
+            }
         }
     }
-    Ok(n)
+    Ok((formats, rejected))
 }
 
 /// Decode an archive entry name: UTF-8 if valid, else Shift-JIS

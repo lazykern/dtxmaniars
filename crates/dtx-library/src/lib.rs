@@ -31,7 +31,7 @@ use std::path::{Path, PathBuf};
 use std::time::Instant;
 
 use bevy::prelude::*;
-use dtx_core::{Chart, ParseOptions, parse_with_options};
+use dtx_core::{Chart, ChartFormat, ParseOptions, parse_source};
 use thiserror::Error;
 
 /// One chart (= one .dtx file in M5; M6+ supports multi-chart songs).
@@ -119,7 +119,17 @@ impl SongInfo {
         let Ok(bytes) = std::fs::read(&self.path) else {
             return 0;
         };
-        let Ok(chart) = dtx_core::parse(bytes.as_slice()) else {
+        let Some(format) = self
+            .path
+            .extension()
+            .and_then(|extension| extension.to_str())
+            .and_then(ChartFormat::from_extension)
+        else {
+            return 0;
+        };
+        let Ok(chart) = dtx_core::parse_source(bytes.as_slice(), format, ParseOptions::default())
+            .map(|report| report.chart)
+        else {
             return 0;
         };
         chart.chips.iter().filter(|c| c.channel.is_drum()).count() as u32
@@ -150,6 +160,7 @@ pub enum ScanProblemKind {
     ParserWarning,
     MissingPreview,
     UnsupportedPreview,
+    RejectedFormat,
 }
 
 /// Detailed context for a nonfatal chart scan issue.
@@ -185,9 +196,39 @@ impl ScanReport {
 
 /// True if `path` names a DTX chart, regardless of extension letter case.
 pub fn is_dtx_path(path: &Path) -> bool {
-    path.extension()
-        .and_then(|extension| extension.to_str())
-        .is_some_and(|extension| extension.eq_ignore_ascii_case("dtx"))
+    classify_chart_path(path) == ChartPathKind::Playable(ChartFormat::Dtx)
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RejectedChartFormat {
+    Bms,
+    Bme,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ChartPathKind {
+    Playable(ChartFormat),
+    Rejected(RejectedChartFormat),
+    NotAChart,
+}
+
+pub fn classify_chart_path(path: &Path) -> ChartPathKind {
+    let Some(extension) = path.extension().and_then(|extension| extension.to_str()) else {
+        return ChartPathKind::NotAChart;
+    };
+    if let Some(format) = ChartFormat::from_extension(extension) {
+        ChartPathKind::Playable(format)
+    } else if extension.eq_ignore_ascii_case("bms") {
+        ChartPathKind::Rejected(RejectedChartFormat::Bms)
+    } else if extension.eq_ignore_ascii_case("bme") {
+        ChartPathKind::Rejected(RejectedChartFormat::Bme)
+    } else {
+        ChartPathKind::NotAChart
+    }
+}
+
+pub fn is_playable_chart_path(path: &Path) -> bool {
+    matches!(classify_chart_path(path), ChartPathKind::Playable(_))
 }
 
 /// Walk a directory recursively, parse each .dtx file, return SongInfo list.
@@ -218,17 +259,33 @@ fn walk_dtx(
         let path = entry.path();
         if path.is_dir() {
             walk_dtx(&path, songs, report)?;
-        } else if is_dtx_path(&path) {
+        } else {
+            let format = match classify_chart_path(&path) {
+                ChartPathKind::Playable(format) => format,
+                ChartPathKind::Rejected(_) => {
+                    report.discovered += 1;
+                    let problem = ScanProblem {
+                        path: path.clone(),
+                        line: None,
+                        kind: ScanProblemKind::RejectedFormat,
+                        detail: "BMS/BME is not supported by the drums player; convert the chart to DTX, GDA, or G2D.".into(),
+                    };
+                    warn_scan_problem(&problem);
+                    report.problems.push(problem);
+                    continue;
+                }
+                ChartPathKind::NotAChart => continue,
+            };
             report.discovered += 1;
             match fs::File::open(&path) {
-                Ok(file) => match parse_with_options(file, ParseOptions::default()) {
+                Ok(file) => match parse_source(file, format, ParseOptions::default()) {
                     Ok(parse_report) => {
-                        for warning in parse_report.warnings {
+                        for diagnostic in parse_report.diagnostics {
                             let problem = ScanProblem {
                                 path: path.clone(),
-                                line: Some(warning.line),
+                                line: diagnostic.line,
                                 kind: ScanProblemKind::ParserWarning,
-                                detail: format!("{:?}", warning.kind),
+                                detail: diagnostic.detail,
                             };
                             warn_scan_problem(&problem);
                             report.problems.push(problem);
@@ -489,6 +546,50 @@ impl Plugin for SongDbPlugin {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn classifies_supported_legacy_and_rejected_keyboard_formats() {
+        assert_eq!(
+            classify_chart_path(Path::new("A.GDA")),
+            ChartPathKind::Playable(dtx_core::ChartFormat::Gda)
+        );
+        assert_eq!(
+            classify_chart_path(Path::new("B.g2d")),
+            ChartPathKind::Playable(dtx_core::ChartFormat::G2d)
+        );
+        assert_eq!(
+            classify_chart_path(Path::new("keys.BMS")),
+            ChartPathKind::Rejected(RejectedChartFormat::Bms)
+        );
+        assert_eq!(
+            classify_chart_path(Path::new("keys.bme")),
+            ChartPathKind::Rejected(RejectedChartFormat::Bme)
+        );
+    }
+
+    #[test]
+    fn scanner_loads_gda_but_reports_and_excludes_bms() {
+        let dir = std::env::temp_dir().join(format!(
+            "dtx-library-formats-{}-{}",
+            std::process::id(),
+            std::thread::current().name().unwrap_or("test")
+        ));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).expect("create fixture dir");
+        std::fs::write(dir.join("drums.GDA"), b"#TITLE: Drums\n#000BD: 01\n").expect("write gda");
+        std::fs::write(dir.join("keys.BMS"), b"#TITLE: Keys\n#00011: 01\n").expect("write bms");
+
+        let (songs, report) = scan_directory(&dir).expect("scan succeeds");
+        assert_eq!(songs.len(), 1);
+        assert_eq!(songs[0].title, "Drums");
+        assert!(songs.iter().all(|song| !song.path.ends_with("keys.BMS")));
+        assert!(report.problems.iter().any(|problem| {
+            problem.kind == ScanProblemKind::RejectedFormat
+                && problem.detail.contains("BMS/BME is not supported")
+        }));
+
+        std::fs::remove_dir_all(dir).expect("remove fixture dir");
+    }
 
     #[test]
     fn library_preferences_round_trip_favorites_by_chart_path() {

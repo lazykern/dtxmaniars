@@ -141,6 +141,28 @@ fn zip_uppercase_dtx_counts_as_chart() {
 }
 
 #[test]
+fn mixed_format_archive_reports_playable_and_rejected_counts() {
+    let dir = test_dir("mixed-formats");
+    let archive = dir.join("Mixed.zip");
+    make_zip(
+        &archive,
+        &[
+            ("Pack/basic.dtx", DTX),
+            ("Pack/advanced.GDA", DTX),
+            ("Pack/legacy.g2d", DTX),
+            ("Pack/keys.bms", DTX),
+        ],
+    );
+    let out = import_archive(&archive, &dir.join("songs")).expect("playable charts import");
+    assert_eq!(out.chart_count, 3);
+    assert_eq!(out.formats.dtx, 1);
+    assert_eq!(out.formats.gda, 1);
+    assert_eq!(out.formats.g2d, 1);
+    assert_eq!(out.rejected.len(), 1);
+    assert!(out.rejected[0].detail.contains("BMS/BME is not supported"));
+}
+
+#[test]
 fn zip_bare_files_get_archive_name_folder() {
     let dir = test_dir("bare");
     let archive = dir.join("MySong.zip");

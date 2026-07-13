@@ -168,15 +168,18 @@ fn process_line(
         return Ok(());
     }
 
+    let mut context = ChipParseContext {
+        format: chart.format,
+        line_no,
+        wav: &chart.assets.wav,
+        diagnostics,
+    };
     parse_chip_line(
-        chart.format,
+        &mut context,
         head,
         value,
-        line_no,
-        &chart.assets.wav,
         &mut chart.chips,
         &mut chart.empty_hit_events,
-        diagnostics,
     )?;
     if !is_chip_head(head, chart.format) {
         diagnostics.push(crate::diagnostic::ChartDiagnostic {
@@ -311,20 +314,24 @@ fn apply_metadata(
 /// DTX files contain many other commands (WAV, VOLUME, PAN, BMP, AVI defs)
 /// that share the `#XXXX:` prefix shape. We silently skip those rather
 /// than erroring out — they're definitions we don't model yet.
-fn parse_chip_line(
+struct ChipParseContext<'a> {
     format: ChartFormat,
+    line_no: usize,
+    wav: &'a crate::assets::WavRegistry,
+    diagnostics: &'a mut Vec<crate::diagnostic::ChartDiagnostic>,
+}
+
+fn parse_chip_line(
+    context: &mut ChipParseContext<'_>,
     head: &str,
     value: &str,
-    line_no: usize,
-    wav: &crate::assets::WavRegistry,
     chips: &mut Vec<Chip>,
     empty_hits: &mut Vec<EmptyHitEvent>,
-    diagnostics: &mut Vec<crate::diagnostic::ChartDiagnostic>,
 ) -> Result<()> {
     if head.len() != 5 {
         // Other commands like `#WAV01:`, `#VOLUME02:`, `#PAN03:` are not chip lines.
         // Silently skip.
-        let _ = (line_no, value);
+        let _ = (context.line_no, value);
         return Ok(());
     }
 
@@ -341,7 +348,7 @@ fn parse_chip_line(
     // `#000xx` therefore lands at chart measure 1, not measure 0.
     let measure = raw_measure + 1;
 
-    let channel = match format {
+    let channel = match context.format {
         ChartFormat::Dtx => {
             // Channel is hex (uppercase). If not, skip silently — many DTX commands
             // happen to be 5 chars but aren't chip lines.
@@ -355,7 +362,7 @@ fn parse_chip_line(
                 let Some(lane) = nosound_byte_to_lane(channel_byte) else {
                     return Ok(());
                 };
-                push_empty_hit_events(measure, lane, value, wav, empty_hits);
+                push_empty_hit_events(measure, lane, value, context.wav, empty_hits);
                 return Ok(());
             }
 
@@ -369,12 +376,16 @@ fn parse_chip_line(
                 Ok(Some(channel)) => channel,
                 Ok(None) => return Ok(()),
                 Err(crate::legacy_gda::LegacyChannelError::Unsupported(name)) => {
-                    diagnostics.push(crate::diagnostic::ChartDiagnostic {
-                        line: Some(line_no),
-                        kind: crate::diagnostic::DiagnosticKind::UnsupportedChannel,
-                        detail: format!("Unsupported GDA/G2D channel {name}"),
-                        recovery: Some("Remove or replace the unsupported legacy channel.".into()),
-                    });
+                    context
+                        .diagnostics
+                        .push(crate::diagnostic::ChartDiagnostic {
+                            line: Some(context.line_no),
+                            kind: crate::diagnostic::DiagnosticKind::UnsupportedChannel,
+                            detail: format!("Unsupported GDA/G2D channel {name}"),
+                            recovery: Some(
+                                "Remove or replace the unsupported legacy channel.".into(),
+                            ),
+                        });
                     return Ok(());
                 }
             }
@@ -446,7 +457,7 @@ fn parse_chip_line(
         return Ok(());
     }
 
-    if is_binary_only(&data) && !binary_pairs_reference_defined_wav(&data, wav) {
+    if is_binary_only(&data) && !binary_pairs_reference_defined_wav(&data, context.wav) {
         push_single_char_chips(measure, channel, &data, chips);
         return Ok(());
     }
