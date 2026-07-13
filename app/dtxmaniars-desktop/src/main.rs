@@ -21,8 +21,14 @@ use bevy_brp_extras::BrpExtrasPlugin;
 
 fn main() {
     let windowed = std::env::var("DTXMANIARS_WINDOWED").is_ok();
+    let config_report = dtx_config::load_with_report(&dtx_config::default_path());
+    let accessibility_policy =
+        dtx_ui::AccessibilityPolicy::from(&config_report.config.accessibility);
+    let startup_config_warning = dtx_ui::StartupConfigWarning(config_report.warning);
 
     let mut app = App::new();
+    app.insert_resource(accessibility_policy)
+        .insert_resource(startup_config_warning);
     app.add_plugins(
         DefaultPlugins
             .set(WindowPlugin {
@@ -38,7 +44,7 @@ fn main() {
                     } else {
                         (1280u32, REF_HEIGHT as u32).into()
                     },
-                    present_mode: if dtx_config::load(&dtx_config::default_path()).system.vsync {
+                    present_mode: if config_report.config.system.vsync {
                         PresentMode::AutoVsync
                     } else {
                         PresentMode::AutoNoVsync
@@ -73,8 +79,8 @@ fn main() {
         Startup,
         (
             load_score_store,
-            load_config_summary,
             log_boot,
+            log_config_summary,
             spawn_ui_camera,
         ),
     )
@@ -119,13 +125,11 @@ fn log_state_transitions(state: Res<State<AppState>>, mut last: Local<Option<App
     }
 }
 
-fn load_config_summary() {
-    use dtx_config::{default_path, load};
-    let cfg = load(&default_path());
+fn log_config_summary(policy: Res<dtx_ui::AccessibilityPolicy>) {
     info!(
-        "config: master_vol={:.0}%, scroll={:.2}x, vsync={}",
-        cfg.audio.master_volume * 100.0,
-        cfg.gameplay.scroll_speed,
-        cfg.system.vsync,
+        "accessibility: text={:.2}x, transition={}ms, background_motion={}",
+        policy.text_multiplier(),
+        policy.screen_transition_ms(),
+        policy.background_motion(),
     );
 }

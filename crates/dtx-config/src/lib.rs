@@ -40,6 +40,49 @@ pub struct Config {
     /// Drums grouping / cymbal-free / hit-sound priority.
     #[serde(default)]
     pub drums: DrumsConfig,
+    /// Independent player-facing accessibility choices.
+    #[serde(default)]
+    pub accessibility: AccessibilityConfig,
+}
+
+/// Player-facing text scale. Gameplay geometry is deliberately unaffected.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub enum TextScale {
+    #[default]
+    Standard,
+    Large,
+    XLarge,
+}
+
+impl TextScale {
+    pub const fn multiplier(self) -> f32 {
+        match self {
+            Self::Standard => 1.0,
+            Self::Large => 1.25,
+            Self::XLarge => 1.5,
+        }
+    }
+}
+
+/// Independent accessibility controls. Defaults preserve pre-Cycle-6 behavior.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct AccessibilityConfig {
+    pub text_scale: TextScale,
+    pub reduce_motion: bool,
+    pub reduce_flashes: bool,
+    pub background_motion: bool,
+}
+
+impl Default for AccessibilityConfig {
+    fn default() -> Self {
+        Self {
+            text_scale: TextScale::Standard,
+            reduce_motion: false,
+            reduce_flashes: false,
+            background_motion: true,
+        }
+    }
 }
 
 /// System section — CConfigIni.cs:1-100 (subset).
@@ -301,15 +344,50 @@ pub fn default_path() -> PathBuf {
 /// Load config from `path`. Returns `Config::default()` if file is missing or unreadable.
 /// Logs a warning on parse failure but still returns defaults.
 pub fn load(path: &Path) -> Config {
+    load_with_report(path).config
+}
+
+/// Result of loading configuration, including a player-presentable recovery warning.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ConfigLoadReport {
+    pub config: Config,
+    pub warning: Option<String>,
+}
+
+/// Load config while preserving a readable warning when recovery was necessary.
+pub fn load_with_report(path: &Path) -> ConfigLoadReport {
     let contents = match std::fs::read_to_string(path) {
         Ok(s) => s,
-        Err(_) => return Config::default(),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            return ConfigLoadReport {
+                config: Config::default(),
+                warning: None,
+            };
+        }
+        Err(error) => {
+            return ConfigLoadReport {
+                config: Config::default(),
+                warning: Some(format!(
+                    "Configuration at {} could not be read ({error}); using defaults.",
+                    path.display()
+                )),
+            };
+        }
     };
     match toml::from_str(&contents) {
-        Ok(cfg) => cfg,
+        Ok(config) => ConfigLoadReport {
+            config,
+            warning: None,
+        },
         Err(e) => {
             eprintln!("dtx-config: parse failed for {path:?}: {e}; using defaults");
-            Config::default()
+            ConfigLoadReport {
+                config: Config::default(),
+                warning: Some(format!(
+                    "Configuration at {} could not be read ({e}); using defaults.",
+                    path.display()
+                )),
+            }
         }
     }
 }
@@ -327,6 +405,43 @@ pub fn save(path: &Path, cfg: &Config) -> Result<(), ConfigError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn old_config_defaults_to_current_accessibility_behavior() {
+        let cfg: Config = toml::from_str("").unwrap();
+        assert_eq!(cfg.accessibility.text_scale, TextScale::Standard);
+        assert!(!cfg.accessibility.reduce_motion);
+        assert!(!cfg.accessibility.reduce_flashes);
+        assert!(cfg.accessibility.background_motion);
+    }
+
+    #[test]
+    fn accessibility_text_scales_round_trip() {
+        for text_scale in [TextScale::Standard, TextScale::Large, TextScale::XLarge] {
+            let mut cfg = Config::default();
+            cfg.accessibility.text_scale = text_scale;
+            let encoded = toml::to_string_pretty(&cfg).unwrap();
+            let decoded: Config = toml::from_str(&encoded).unwrap();
+            assert_eq!(decoded.accessibility.text_scale, text_scale);
+        }
+    }
+
+    #[test]
+    fn malformed_accessibility_enum_reports_recovery_warning() {
+        let tmp = std::env::temp_dir().join("dtxmaniars_bad_accessibility_config_test");
+        let _ = std::fs::remove_dir_all(&tmp);
+        std::fs::create_dir_all(&tmp).unwrap();
+        let path = tmp.join("config.toml");
+        std::fs::write(&path, "[accessibility]\ntext_scale = 'Huge'\n").unwrap();
+
+        let report = load_with_report(&path);
+
+        assert_eq!(report.config, Config::default());
+        assert!(report.warning.as_deref().is_some_and(|warning| {
+            warning.contains("could not be read") && warning.contains("using defaults")
+        }));
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
 
     #[test]
     fn default_system_vsync_on() {

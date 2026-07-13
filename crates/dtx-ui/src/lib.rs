@@ -2,6 +2,7 @@
 //!
 //! osu-inspired UX redesign. Game mechanics stay BocuD-ported; visuals are new.
 
+pub mod accessibility;
 pub mod core_sub_acts;
 pub mod easing;
 pub mod motion;
@@ -16,6 +17,7 @@ use bevy::asset::Handle;
 use bevy::prelude::*;
 use bevy::text::Font;
 
+pub use accessibility::{AccessibilityPolicy, FlashDecision, MotionDecision, StartupConfigWarning};
 pub use theme::{Theme, ThemeResource, REF_HEIGHT, REF_WIDTH, SCREEN_TRANSITION_MS};
 pub use transition::{FadePhase, ScreenFade, TransitionOverlay};
 
@@ -93,7 +95,9 @@ pub fn absolute_label(
 }
 
 pub fn plugin(app: &mut App) {
-    app.init_resource::<ThemeResource>()
+    app.init_resource::<AccessibilityPolicy>()
+        .init_resource::<StartupConfigWarning>()
+        .init_resource::<ThemeResource>()
         .init_resource::<widget::density_graph::DensityData>()
         .init_resource::<widget::difficulty_grid::DifficultyGridData>()
         .init_resource::<widget::play_history::PlayHistoryData>()
@@ -133,6 +137,8 @@ mod tests {
         let mut app = App::new();
         app.add_plugins(plugin);
         assert!(app.world().get_resource::<ThemeResource>().is_some());
+        assert!(app.world().get_resource::<AccessibilityPolicy>().is_some());
+        assert!(app.world().get_resource::<StartupConfigWarning>().is_some());
         assert!(app.world().get_resource::<ScreenFade>().is_some());
     }
 

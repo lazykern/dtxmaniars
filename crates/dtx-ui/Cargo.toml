@@ -19,3 +19,4 @@ bevy_tweening = { workspace = true }
 # ADR-0015: PreviewSwapEvent consumed by widget/album_art. dtx-ui is
 # Game, dtx-audio is Engine — Game→Engine is allowed.
 dtx-audio = { workspace = true }
+dtx-config = { workspace = true }

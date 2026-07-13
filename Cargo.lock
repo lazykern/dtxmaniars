@@ -3012,6 +3012,7 @@ dependencies = [
  "bevy_tweening",
  "chrono",
  "dtx-audio",
+ "dtx-config",
 ]
 
 [[package]]
