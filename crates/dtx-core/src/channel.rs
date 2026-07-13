@@ -123,6 +123,8 @@ pub enum EChannel {
     // Timed system sounds.
     Click = 0xEC,
     FirstSoundChip = 0xED,
+    MixerAdd = 0xEE,
+    MixerRemove = 0xEF,
 }
 
 impl EChannel {
@@ -228,6 +230,8 @@ impl EChannel {
             0x92 => Self::SE32,
             0xEC => Self::Click,
             0xED => Self::FirstSoundChip,
+            0xEE => Self::MixerAdd,
+            0xEF => Self::MixerRemove,
             _ => return None,
         })
     }

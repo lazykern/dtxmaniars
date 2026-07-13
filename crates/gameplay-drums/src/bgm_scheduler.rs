@@ -165,6 +165,7 @@ fn schedule_bgm_chips(
     mut bgm: ResMut<dtx_audio::BgmHandle>,
     mut instances: ResMut<Assets<AudioInstance>>,
     sound_bank: Res<dtx_audio::ChartSoundBank>,
+    mixer: Res<crate::mixer_events::MixerEligibility>,
     mut played: ResMut<PlayedBgmChips>,
     mut active: ResMut<ActiveDrumSounds>,
 ) {
@@ -197,6 +198,10 @@ fn schedule_bgm_chips(
         }
         let target_ms = auto_chip_target_ms(chip, base_bpm, timing, bgm_shift);
         if now < target_ms {
+            continue;
+        }
+        if !mixer.is_slot_eligible(chip.wav_slot) {
+            played.0.insert(idx);
             continue;
         }
         let Some(path) = chip_wav_path(&chart.chart, idx, source_dir) else {
@@ -279,6 +284,7 @@ fn recover_primary_bgm(
     mut bgm: ResMut<dtx_audio::BgmHandle>,
     mut instances: ResMut<Assets<AudioInstance>>,
     sound_bank: Res<dtx_audio::ChartSoundBank>,
+    mixer: Res<crate::mixer_events::MixerEligibility>,
     mut recovery: ResMut<BgmRecoveryState>,
 ) {
     if completion.end_requested || !gameplay_clock.is_ready() || !settings.bgm_enabled {
@@ -308,6 +314,9 @@ fn recover_primary_bgm(
     let Some(idx) = primary.0 else {
         return;
     };
+    if !mixer.is_slot_eligible(chart.chart.chips[idx].wav_slot) {
+        return;
+    }
     let source_dir = chart.source_path.as_ref().and_then(|p| p.parent());
     let Some(path) = chip_wav_path(&chart.chart, idx, source_dir) else {
         return;

@@ -86,6 +86,7 @@ fn play_judgment_sounds(
     mut instances: ResMut<Assets<AudioInstance>>,
     mut polyphony: ResMut<dtx_audio::DrumPolyphony>,
     sound_bank: Res<dtx_audio::ChartSoundBank>,
+    mixer: Res<crate::mixer_events::MixerEligibility>,
     mut active: ResMut<ActiveDrumSounds>,
 ) {
     if !settings.drum_enabled || chart.chart.assets.wav.is_empty() {
@@ -119,6 +120,9 @@ fn play_judgment_sounds(
         ) else {
             continue;
         };
+        if !mixer.is_slot_eligible(wav_slot) {
+            continue;
+        }
         let Some(path) = wav_path(&chart.chart, wav_slot, source_dir.as_deref()) else {
             continue;
         };
@@ -173,6 +177,7 @@ fn play_empty_hit_sounds(
     mut instances: ResMut<Assets<AudioInstance>>,
     mut polyphony: ResMut<dtx_audio::DrumPolyphony>,
     sound_bank: Res<dtx_audio::ChartSoundBank>,
+    mixer: Res<crate::mixer_events::MixerEligibility>,
     mut active: ResMut<ActiveDrumSounds>,
 ) {
     if !settings.drum_enabled || chart.chart.assets.wav.is_empty() {
@@ -200,6 +205,9 @@ fn play_empty_hit_sounds(
             &templates,
             &drum_settings,
         );
+        if !mixer.is_slot_eligible(wav_slot) {
+            continue;
+        }
         let Some(path) = wav_path(&chart.chart, wav_slot, source_dir.as_deref()) else {
             continue;
         };

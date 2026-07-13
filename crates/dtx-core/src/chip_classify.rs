@@ -190,6 +190,7 @@ pub const fn classify(ch: EChannel) -> ChipClass {
 
         // System
         EChannel::Click | EChannel::FirstSoundChip => ChipClass::Click,
+        EChannel::MixerAdd | EChannel::MixerRemove => ChipClass::Mixer,
         EChannel::Nil => ChipClass::System,
         other => {
             debug_assert!(other.is_se());

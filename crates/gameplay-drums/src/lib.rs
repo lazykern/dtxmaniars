@@ -42,6 +42,7 @@ pub mod lanes;
 pub mod layout;
 pub mod menu_nav;
 pub mod miss;
+pub mod mixer_events;
 pub mod orchestrator;
 pub mod pause;
 pub mod perf_common;
@@ -81,6 +82,7 @@ pub const DRUMS_FIXED_TIMESTEP_HZ: f64 = 60.0;
 #[derive(SystemSet, Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum DrumsSets {
     ClockSync,
+    Mixer,
     Input,
     NoteSpawn,
     Judge,
@@ -158,7 +160,8 @@ pub fn plugin(app: &mut App) {
         FixedUpdate,
         (
             DrumsSets::ClockSync.after(dtx_timing::update_audio_clock_system),
-            DrumsSets::Input.after(DrumsSets::ClockSync),
+            DrumsSets::Mixer.after(DrumsSets::ClockSync),
+            DrumsSets::Input.after(DrumsSets::Mixer),
             DrumsSets::NoteSpawn.after(DrumsSets::Input),
             DrumsSets::Judge.after(DrumsSets::NoteSpawn),
             DrumsSets::Score.after(DrumsSets::Judge),
@@ -223,6 +226,7 @@ pub fn plugin(app: &mut App) {
         hit_feedback::plugin,
         menu_nav::plugin,
         system_events::plugin,
+        mixer_events::plugin,
     ));
 }
 

@@ -93,6 +93,7 @@ const fn channel_uses_wav(channel: EChannel) -> bool {
             | ChipClass::BGM
             | ChipClass::SE
             | ChipClass::Click
+            | ChipClass::Mixer
     )
 }
 

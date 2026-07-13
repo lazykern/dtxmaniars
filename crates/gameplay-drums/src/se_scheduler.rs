@@ -44,6 +44,7 @@ fn schedule_se_chips(
     mut instances: ResMut<Assets<AudioInstance>>,
     mut polyphony: ResMut<dtx_audio::DrumPolyphony>,
     sound_bank: Res<dtx_audio::ChartSoundBank>,
+    mixer: Res<crate::mixer_events::MixerEligibility>,
     mut active: ResMut<ActiveDrumSounds>,
     mut played: ResMut<PlayedSeChips>,
 ) {
@@ -78,6 +79,9 @@ fn schedule_se_chips(
             continue;
         }
         played.0.insert(idx);
+        if !mixer.is_slot_eligible(chip.wav_slot) {
+            continue;
+        }
         let Some(filename) = chart.chart.assets.wav.get(chip.wav_slot) else {
             continue;
         };

@@ -86,7 +86,10 @@ pub fn seed_skip_sets(
                     played_bgm.insert(e.chip_idx);
                 }
             }
-            channel if channel.is_se() && e.auto_ms < target_ms => {
+            channel
+                if (channel.is_se() || channel.is_timed_system_sound())
+                    && e.auto_ms < target_ms =>
+            {
                 played_se.insert(e.chip_idx);
             }
             _ => {}
@@ -123,6 +126,8 @@ pub struct SeekState<'w> {
     pub start_ms: ResMut<'w, GameStartMs>,
     pub clock: ResMut<'w, GameplayClock>,
     pub last_seek_from: ResMut<'w, LastSeekFrom>,
+    pub mixer_cursor: Option<ResMut<'w, crate::mixer_events::MixerEventCursor>>,
+    pub mixer_eligibility: Option<ResMut<'w, crate::mixer_events::MixerEligibility>>,
 }
 
 pub fn apply_seek_system(
@@ -146,6 +151,12 @@ pub fn apply_seek_system(
         Some(snap) => timeline.resolve_snap(seek.target_ms, snap),
         None => seek.target_ms.clamp(0, timeline.end_ms.max(0)),
     };
+
+    if let (Some(cursor), Some(eligibility)) =
+        (&mut state.mixer_cursor, &mut state.mixer_eligibility)
+    {
+        cursor.rebuild_at(resolved, eligibility);
+    }
 
     // 1. Stop everything currently sounding (layers, HH, stick SE, drums).
     audio.active.stop_all(&mut audio.instances);
@@ -175,6 +186,16 @@ pub fn apply_seek_system(
             state.start_ms.0 = chip_ms;
             let start_seconds = (resolved - chip_ms).max(0) as f64 / 1000.0;
             let wav_slot = chart.chart.chips[idx].wav_slot;
+            if state
+                .mixer_eligibility
+                .as_ref()
+                .is_some_and(|eligibility| !eligibility.is_slot_eligible(wav_slot))
+            {
+                state.start_ms.0 = chip_ms;
+                state.last_seek_from.0 = Some(state.clock.current_ms);
+                state.clock.seek(resolved);
+                return;
+            }
             let within_slice = audio
                 .sound_bank
                 .get(wav_slot)
@@ -238,13 +259,19 @@ pub fn start_pending_bgm(
     asset_server: Res<AssetServer>,
     settings: Res<DrumAudioSettings>,
     sound_bank: Res<dtx_audio::ChartSoundBank>,
+    mixer: Option<Res<crate::mixer_events::MixerEligibility>>,
     mut bgm: ResMut<dtx_audio::BgmHandle>,
     mut instances: ResMut<Assets<AudioInstance>>,
 ) {
     let Some(p) = pending.0.take() else {
         return;
     };
-    if !settings.bgm_enabled {
+    if !settings.bgm_enabled
+        || (p.wav_slot != 0
+            && mixer
+                .as_ref()
+                .is_some_and(|eligibility| !eligibility.is_slot_eligible(p.wav_slot)))
+    {
         return;
     }
     if let Some(sound) = sound_bank.get(p.wav_slot) {
@@ -293,11 +320,12 @@ mod tests {
                 ..Default::default()
             },
             chips: vec![
-                Chip::with_wav(0, EChannel::BGM, 0.0, 1),  // 0ms
-                Chip::new(0, EChannel::BassDrum, 0.0),     // 0ms
-                Chip::new(1, EChannel::Snare, 0.0),        // 2000ms
-                Chip::with_wav(2, EChannel::SE32, 0.0, 2), // 4000ms
-                Chip::new(3, EChannel::BassDrum, 0.0),     // 6000ms
+                Chip::with_wav(0, EChannel::BGM, 0.0, 1),   // 0ms
+                Chip::new(0, EChannel::BassDrum, 0.0),      // 0ms
+                Chip::new(1, EChannel::Snare, 0.0),         // 2000ms
+                Chip::with_wav(2, EChannel::SE32, 0.0, 2),  // 4000ms
+                Chip::with_wav(2, EChannel::Click, 0.5, 2), // 5000ms
+                Chip::new(3, EChannel::BassDrum, 0.0),      // 6000ms
             ],
             assets,
             ..Default::default()
@@ -337,9 +365,15 @@ mod tests {
             j.contains(&1) && j.contains(&2),
             "drum chips before target judged"
         );
-        assert!(!j.contains(&4), "chip after target stays live");
+        assert!(!j.contains(&5), "chip after target stays live");
         assert!(b.contains(&0), "bgm chip at 0 marked played");
         assert!(s.contains(&3), "se chip before target marked played");
+    }
+
+    #[test]
+    fn forward_seek_marks_timed_system_sounds_played() {
+        let (_, _, played_se, _) = seeded(5_500);
+        assert!(played_se.contains(&4), "click before target marked played");
     }
 
     #[test]
