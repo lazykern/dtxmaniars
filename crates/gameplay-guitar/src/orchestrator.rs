@@ -1,4 +1,4 @@
-//! `CStagePerfGuitarScreen` orchestrator — port of `references/DTXmaniaNX-BocuD/DTXMania/Stage/06.Performance/GuitarScreen/CStagePerfGuitarScreen.cs` (787) + `.Chip.cs` (808) = 1595 LoC.
+//! `CStagePerfGuitarScreen` orchestrator — port of `references/DTXmaniaNX/DTXMania/Stage/06.Performance/GuitarScreen/CStagePerfGuitarScreen.cs` (787) + `.Chip.cs` (808) = 1595 LoC.
 //!
 //! Strict-port-first (ADR-0010). 1:1 file mapping.
 //!
@@ -37,7 +37,7 @@
 //! | `CActPerformanceInformation`   | gameplay-guitar | (planned M14) |
 //! | `CActPerfProgressBar`          | gameplay-guitar | (planned M14) |
 //!
-//! Reference: `references/DTXmaniaNX-BocuD/DTXMania/Stage/06.Performance/GuitarScreen/CStagePerfGuitarScreen.cs:14-29`
+//! Reference: `references/DTXmaniaNX/DTXMania/Stage/06.Performance/GuitarScreen/CStagePerfGuitarScreen.cs:14-29`
 
 #![allow(dead_code)] // Re-exports for future cross-cutting systems.
 

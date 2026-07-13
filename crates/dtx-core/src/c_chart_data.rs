@@ -1,7 +1,7 @@
 #![allow(non_snake_case)]
 //! `CChartData` (472 LOC) — chart-level data container.
 //!
-//! Reference: `references/DTXmaniaNX-BocuD/DTXMania/Score,Song/CChartData.cs:1-472`
+//! Reference: `references/DTXmaniaNX/DTXMania/Score,Song/CChartData.cs:1-472`
 //!
 //! v1 strict-port: holds per-chart data that spans the loading and
 //! playback phases (BGA list, BPM list, chart-specific metadata).

@@ -4,7 +4,12 @@ Date: 2026-07-12
 Status: Companion to `2026-07-12-player-ux-audit.md` (behavioral audit). That doc covers reachability/journeys; this one covers visual and interaction design per screen, judged against the project's own stated direction.
 Sources: source sweep of `dtx-ui`, `game-menu`, `game-shell`, `game-results`, `gameplay-drums` (HUD, pause, practice, editor); 13 live 1080p screenshots; AGENTS.md ADR summaries.
 
-**Caveat on references:** `references/DTXmaniaNX-BocuD/` does not exist in this snapshot and the original ADR files (including ADR-0014) are lost — `docs/decisions/README.md` says decisions survive only as code comments. The design direction below is reconstructed from those comments: *"osu-inspired UX redesign. Game mechanics stay BocuD-ported; visuals are new"* (`dtx-ui/src/lib.rs:1-3`), *"300ms OutQuint (not 1500ms BocuD snapshot)"* (`lib.rs:22`), *"osu-lazer uses OutQuint for most UI fades"* (`easing.rs:3`). The review judges each screen against that yardstick: **fluid, motion-rich, dark-themed, feedback-forward**.
+> Correction (2026-07-13): The vendored reference is present at
+> `references/DTXmaniaNX/`, and binding reconstructed ADRs now live under
+> `docs/decisions/`. The original observation below described the repository
+> state visible during that earlier audit.
+
+**Original caveat on references:** The vendored reference and original ADR files were not visible in the audited snapshot. The design direction below was reconstructed from code comments: *"osu-inspired UX redesign. Game mechanics stay NX-ported; visuals are new"* (`dtx-ui/src/lib.rs:1-3`), *"300ms OutQuint (not 1500ms NX snapshot)"* (`lib.rs:22`), *"osu-lazer uses OutQuint for most UI fades"* (`easing.rs:3`). The review judges each screen against that yardstick: **fluid, motion-rich, dark-themed, feedback-forward**.
 
 ---
 

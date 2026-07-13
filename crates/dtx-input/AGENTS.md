@@ -5,7 +5,7 @@ Engine-layer crate. Keyboard + MIDI input sources for all gameplay modes.
 ## Reference / context
 
 - **ADR-0009** (this crate's originating decision): `docs/decisions/0009-dtx-input-deferred.md`
-- BocuD input: `references/DTXmaniaNX-BocuD/DTXMania/Input/` (no consolidated
+- NX input: `references/DTXmaniaNX/FDK/Input/` (no consolidated
   file — M6c ports the Rust API only; full port of CInputManager.cs is M6.1)
 
 ## Why now (M6c)

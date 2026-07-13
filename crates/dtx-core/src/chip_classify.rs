@@ -5,7 +5,7 @@
 //! chart extension: DTX channels in the 0x9x-0xAx range carry value
 //! scale modifiers (x0.1, x0.2, x2, x3, x5, x8) that scale the chip's
 //! contribution to score/combo/gauge. Mirrors the high-nibble convention
-//! from `references/DTXmaniaNX-BocuD/DTXMania/Score,Song/EChannel.cs`.
+//! from `references/DTXmaniaNX/DTXMania/Score,Song/EChannel.cs`.
 //!
 //! Reference: `EChannel.cs:1-200` (channel id table).
 

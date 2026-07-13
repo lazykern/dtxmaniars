@@ -5,7 +5,7 @@
 //! and to keep diffs against the reference small.
 #![allow(non_snake_case)]
 //!
-//! Reference: `references/DTXmaniaNX-BocuD/DTXMania/Score,Song/CDTX.cs:1-7295`
+//! Reference: `references/DTXmaniaNX/DTXMania/Score,Song/CDTX.cs:1-7295`
 //!
 //! Replaces constants-only nested types with real structures used by CDTX
 //! for BGA panels, AVI panels, BPM tables, WAV files, BMP files, etc.

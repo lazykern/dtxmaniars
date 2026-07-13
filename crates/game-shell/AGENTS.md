@@ -1,16 +1,16 @@
 # crates/game-shell
 
 Game-layer crate. Owns the AppState machine and the DTXManiaNX fade transition
-(per ADR-0010 port-first rule, matched verbatim from `references/DTXmaniaNX-BocuD/`).
+(per ADR-0010 port-first rule, matched verbatim from `references/DTXmaniaNX/`).
 
 ## Reference files (READ BEFORE IMPLEMENTING per ADR-0008)
 
-- `references/DTXmaniaNX-BocuD/DTXMania/Core/StageManager.cs` — full file (699 lines).
+- `references/DTXmaniaNX/DTXMania/Core/StageManager.cs` — full file (699 lines).
   - Line 29: `private float FadeDurationMs = 1500f;` ← single source for fade duration
   - Lines 645-665: `BeginFadeTransition` — capture snapshot, swap stage, latch fade
   - Lines 670-699: `DrawFadeOverlay` — linear alpha decay, snapshot-on-top
-- `references/DTXmaniaNX-BocuD/DTXMania/Stage/CStage.cs` — `EStage` enum (8 stages)
-- `references/DTXmaniaNX-BocuD/DTXMania/Stage/05.SongLoading/CStageSongLoading.cs` (1110 lines)
+- `references/DTXmaniaNX/DTXMania/Stage/CStage.cs` — `EStage` enum (8 stages)
+- `references/DTXmaniaNX/DTXMania/Stage/05.SongLoading/CStageSongLoading.cs` (1110 lines)
   - Loading screen behavior (BGM preview, asset preload, progress bar)
 - Per-stage refs as work lands:
   - `Stage/01.Startup/CStageStartup.cs`

@@ -3,7 +3,7 @@
 //! ADR-0010 relaxed: free redesign. 5 lanes (R/G/B/Y/P) + hit line +
 //! score + combo + gauge bar.
 //!
-//! Reference: `references/DTXmaniaNX-BocuD/DTXMania/Stage/06.Performance/GuitarScreen/*`
+//! Reference: `references/DTXmaniaNX/DTXMania/Stage/06.Performance/GuitarScreen/*`
 #![allow(missing_docs)]
 
 use bevy::prelude::*;

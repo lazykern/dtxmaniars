@@ -9,7 +9,7 @@ comments to this index.
   Implementation: `GameplayClock::tick` in `crates/gameplay-drums/src/resources.rs`,
   doc header of `crates/dtx-timing/src/lib.rs`.
 - **ADR-0008 — Reference-first workflow.** Port behavior from
-  `references/DTXmaniaNX-BocuD/` first; deviate only with a written reason.
+  `references/DTXmaniaNX/` first; deviate only with a written reason.
 - **Atomic multi-target input.** A physical source may name a primary lane and
   ordered accepted alternates. One multi-target press judges at most one chip;
   the primary wins an exact-time tie. Lane merging affects display only. This

@@ -1,6 +1,6 @@
 //! Post-process transforms applied after DTX parse.
 //!
-//! Mirrors `references/DTXmaniaNX-BocuD/DTXMania/Score,Song/CDTX.cs`
+//! Mirrors `references/DTXmaniaNX/DTXMania/Score,Song/CDTX.cs`
 //! post-load methods:
 //! - `t旧仕様のドコドコチップを振り分ける` (assign-to-LBD)
 //! - `tドコドコ仕様変更` (DKDK type)

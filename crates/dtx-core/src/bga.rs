@@ -1,9 +1,9 @@
 //! BGA (Background Animation) helpers.
 //!
 //! References:
-//! - `references/DTXmaniaNX-BocuD/DTXMania/Stage/06.Performance/CActPerfBGA.cs` (305 lines)
-//! - `references/DTXmaniaNX-BocuD/DTXMania/Stage/06.Performance/CActPerfVideo.cs` (520 lines)
-//! - `references/DTXmaniaNX-BocuD/DTXMania/Score,Song/EChannel.cs` (lines 10-13, 64-76)
+//! - `references/DTXmaniaNX/DTXMania/Stage/06.Performance/CActPerfBGA.cs` (305 lines)
+//! - `references/DTXmaniaNX/DTXMania/Stage/06.Performance/CActPerfVideo.cs` (520 lines)
+//! - `references/DTXmaniaNX/DTXMania/Score,Song/EChannel.cs` (lines 10-13, 64-76)
 //!
 //! ## M7 scope
 //!

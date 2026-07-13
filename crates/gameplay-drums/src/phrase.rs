@@ -1,6 +1,6 @@
 //! Phrase detection — BocuD `CActPerfProgressBar` port.
 //!
-//! Reference: `references/DTXmaniaNX-BocuD/DTXMania/Stage/06.Performance/CActPerfProgressBar.cs`.
+//! Reference: `references/DTXmaniaNX/DTXMania/Stage/06.Performance/CActPerfProgressBar.cs`.
 //!
 //! BocuD partitions the chart into `nSectionIntervalCount = 64` time slices
 //! and counts drum chips per slice. The visual phrase meter is drawn as a

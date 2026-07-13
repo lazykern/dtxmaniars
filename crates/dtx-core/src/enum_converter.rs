@@ -1,6 +1,6 @@
 //! `EnumConverter` (207 LOC) — bidirectional string ↔ int conversion.
 //!
-//! Reference: `references/DTXmaniaNX-BocuD/DTXMania/Score,Song/EnumConverter.cs:1-207`
+//! Reference: `references/DTXmaniaNX/DTXMania/Score,Song/EnumConverter.cs:1-207`
 //!
 //! v1 strict-port: generic utility for parsing/writing enum values in
 //! INI files. C# uses reflection; Rust uses trait + macro-free lookup.

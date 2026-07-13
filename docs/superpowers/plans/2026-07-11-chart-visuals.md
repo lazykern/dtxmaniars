@@ -11,7 +11,7 @@
 ## Global Constraints
 
 - Read `AGENTS.md`, `crates/dtx-core/AGENTS.md`, `crates/dtx-bga/AGENTS.md`, and `crates/gameplay-drums/AGENTS.md` before implementation.
-- Cite `references/DTXmaniaNX-BocuD/...:L<line>` in commits for ported chart behavior.
+- Cite `references/DTXmaniaNX/...:L<line>` in commits for ported chart behavior.
 - Keep `references/` read-only.
 - Keep `dtx-core` Bevy-free. Game crates may depend on Engine crates; Engine crates may depend on Pure crates.
 - Keep `unsafe_code = "forbid"` in workspace code. Unsafe internals may remain inside third-party decoder crates.
@@ -72,8 +72,8 @@
 - Modify: `crates/dtx-audio/src/lib.rs`
 
 **References:**
-- `references/DTXmaniaNX-BocuD/DTXMania/Score,Song/CDTX.cs:1296-1476`
-- `references/DTXmaniaNX-BocuD/DTXMania/Stage/06.Performance/CActPerfBGA.cs:61-96`
+- `references/DTXmaniaNX/DTXMania/Score,Song/CDTX.cs:1296-1476`
+- `references/DTXmaniaNX/DTXMania/Stage/06.Performance/CActPerfBGA.cs:61-96`
 
 **Interfaces:**
 - Produces: `dtx_core::resolve_chart_asset_path(chart_dir: &Path, filename: &str) -> Option<PathBuf>`.
@@ -251,7 +251,7 @@ git add crates/dtx-core crates/dtx-audio/src/lib.rs
 git commit -m "fix(core): preserve chart visual timing"
 ```
 
-Commit body must cite `references/DTXmaniaNX-BocuD/DTXMania/Score,Song/CDTX.cs:1296-1476`.
+Commit body must cite `references/DTXmaniaNX/DTXMania/Score,Song/CDTX.cs:1296-1476`.
 
 ---
 
@@ -429,7 +429,7 @@ git add crates/dtx-bga crates/game-menu/src/song_loading.rs
 git commit -m "feat(bga): render timed chart images"
 ```
 
-Commit body must cite `references/DTXmaniaNX-BocuD/DTXMania/Stage/06.Performance/CActPerfBGA.cs:61-96`.
+Commit body must cite `references/DTXmaniaNX/DTXMania/Stage/06.Performance/CActPerfBGA.cs:61-96`.
 
 ---
 
@@ -585,7 +585,7 @@ git commit -m "feat(settings): wire chart visual controls"
 - Modify: `crates/gameplay-drums/src/hud.rs`
 
 **References:**
-- `references/DTXmaniaNX-BocuD/DTXMania/Stage/06.Performance/InfoBox.cs:20-34`
+- `references/DTXmaniaNX/DTXMania/Stage/06.Performance/InfoBox.cs:20-34`
 
 **Interfaces:**
 - Consumes: `ActiveChart.chart.metadata.preimage_filename` and `ActiveChart.source_path`.
@@ -674,7 +674,7 @@ git add crates/dtx-ui/src/widget/now_playing.rs crates/gameplay-drums/src/hud.rs
 git commit -m "feat(hud): show chart cover in now playing"
 ```
 
-Commit body must cite `references/DTXmaniaNX-BocuD/DTXMania/Stage/06.Performance/InfoBox.cs:20-34`.
+Commit body must cite `references/DTXmaniaNX/DTXMania/Stage/06.Performance/InfoBox.cs:20-34`.
 
 ---
 
@@ -871,10 +871,10 @@ git commit -m "feat(bga): decode chart movies with ffmpeg"
 - Modify: `crates/gameplay-drums/src/lib.rs`
 
 **References:**
-- `references/DTXmaniaNX-BocuD/DTXMania/Stage/06.Performance/CActPerfVideo.cs:16-34`
-- `references/DTXmaniaNX-BocuD/DTXMania/Stage/06.Performance/CActPerfVideo.cs:202-225`
-- `references/DTXmaniaNX-BocuD/DTXMania/Stage/06.Performance/CActPerfVideo.cs:266-285`
-- `references/DTXmaniaNX-BocuD/DTXMania/Stage/06.Performance/CActPerfVideo.cs:319-332`
+- `references/DTXmaniaNX/DTXMania/Stage/06.Performance/CActPerfVideo.cs:16-34`
+- `references/DTXmaniaNX/DTXMania/Stage/06.Performance/CActPerfVideo.cs:202-225`
+- `references/DTXmaniaNX/DTXMania/Stage/06.Performance/CActPerfVideo.cs:266-285`
+- `references/DTXmaniaNX/DTXMania/Stage/06.Performance/CActPerfVideo.cs:319-332`
 
 **Interfaces:**
 - Consumes: `TimedVisualEvent`, `ActiveChartRes.avi_paths`, `BgaClock`, `BgaSettings`, and `MovieWorker`.
@@ -1017,7 +1017,7 @@ git add crates/dtx-bga crates/game-menu/src/song_loading.rs crates/gameplay-drum
 git commit -m "feat(bga): sync fullscreen chart movies"
 ```
 
-Commit body must cite `references/DTXmaniaNX-BocuD/DTXMania/Stage/06.Performance/CActPerfVideo.cs:266-285` and `:319-332`.
+Commit body must cite `references/DTXmaniaNX/DTXMania/Stage/06.Performance/CActPerfVideo.cs:266-285` and `:319-332`.
 
 ---
 

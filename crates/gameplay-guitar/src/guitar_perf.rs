@@ -21,7 +21,7 @@
 //! | `CActPerfGuitarBonus`           |  86 | full state |
 //! | `HoldNote`                      |  93 | full state |
 //!
-//! Reference: `references/DTXmaniaNX-BocuD/DTXMania/Stage/06.Performance/GuitarScreen/`
+//! Reference: `references/DTXmaniaNX/DTXMania/Stage/06.Performance/GuitarScreen/`
 
 #![allow(dead_code)] // Sub-acts consumed by gameplay systems.
 

@@ -1,6 +1,6 @@
 //! Auto-play bot (Phase F5).
 //!
-//! Reference: `references/DTXmaniaNX-BocuD/DTXMania/Stage/06.Performance/DrumsScreen/CStagePerfDrumsScreen.cs`
+//! Reference: `references/DTXmaniaNX/DTXMania/Stage/06.Performance/DrumsScreen/CStagePerfDrumsScreen.cs`
 //! (auto-play logic).
 //!
 //! The bot reads `ActiveChart` + `AudioClock` and emits a `LaneHit` event

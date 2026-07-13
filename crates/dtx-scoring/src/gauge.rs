@@ -1,6 +1,6 @@
 //! Gauge + combo state machines (Phase F9).
 //!
-//! Reference: `references/DTXmaniaNX-BocuD/DTXMania/Stage/06.Performance/Common/CActPerfCommonGauge.cs`
+//! Reference: `references/DTXmaniaNX/DTXMania/Stage/06.Performance/CActPerfCommonGauge.cs`
 //! — full gauge state machine with thresholds (Good 80% / Excellent 100%).
 //!
 //! The gauge is a 0-100% resource that fills on hits and drains on

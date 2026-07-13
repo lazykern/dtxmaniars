@@ -12,7 +12,7 @@
 
 - Read `crates/dtx-input/AGENTS.md`, `crates/gameplay-drums/AGENTS.md`, and the reference excerpts before implementation.
 - Preserve ordinary BocuD drum-group behavior. The one-chip limit applies only to explicit multi-target bindings.
-- Cite `references/DTXmaniaNX-BocuD/DTXMania/Stage/06.Performance/DrumsScreen/CStagePerfDrumsScreen.cs:L972` and the exact tie-handling lines used when committing judgment changes.
+- Cite `references/DTXmaniaNX/DTXMania/Stage/06.Performance/DrumsScreen/CStagePerfDrumsScreen.cs:L972` and the exact tie-handling lines used when committing judgment changes.
 - Keep `references/` read-only.
 - Do not add `unwrap()` under `crates/*`.
 - Use one plugin function per Bevy module.
@@ -623,7 +623,7 @@ Commit body:
 
 ```text
 Keep ordinary grouped-pad tie behavior from
-references/DTXmaniaNX-BocuD/DTXMania/Stage/06.Performance/DrumsScreen/CStagePerfDrumsScreen.cs:L972.
+references/DTXmaniaNX/DTXMania/Stage/06.Performance/DrumsScreen/CStagePerfDrumsScreen.cs:L972.
 
 Explicit multi-target bindings are a DTXManiaRS accessibility feature and
 use the approved one-press, one-chip rule.

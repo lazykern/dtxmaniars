@@ -1,6 +1,6 @@
 //! Random mode shuffler + 5-key/Classic drum layout (Phase F4).
 //!
-//! Reference: `references/DTXmaniaNX-BocuD/DTXMania/Core/CConstants.cs:148-157`
+//! Reference: `references/DTXmaniaNX/DTXMania/Core/CConstants.cs:148-157`
 //! (ERandomMode) + `Stage/06.Performance/DrumsScreen/CActPerfDrumsPad.cs`
 //! (lane layouts).
 //!

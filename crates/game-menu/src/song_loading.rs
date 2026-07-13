@@ -1,6 +1,6 @@
 //! CStageSongLoading — chart + BGM preview load (M4 minimum viable).
 //!
-//! Reference: `references/DTXmaniaNX-BocuD/DTXMania/Stage/05.SongLoading/CStageSongLoading.cs` (1110 lines)
+//! Reference: `references/DTXmaniaNX/DTXMania/Stage/05.SongLoading/CStageSongLoading.cs` (1110 lines)
 //!
 //! DTXManiaNX behavior:
 //! 1. OnActivate: read selected song from SongSelectionNew
@@ -58,7 +58,7 @@ struct CancelRequested(bool);
 /// for later wiring to a ghost-replay lane (M14+); we just read + store here.
 ///
 /// `CStageSongLoading.LoadSongDataAsync` does the same read in
-/// `references/DTXmaniaNX-BocuD/DTXMania/Stage/05.SongLoading/CStageSongLoading.cs:535-580`.
+/// `references/DTXmaniaNX/DTXMania/Stage/05.SongLoading/CStageSongLoading.cs:535-580`.
 #[derive(Resource, Default, Debug)]
 struct GhostLag {
     /// Lag samples in chip-occurrence order. Empty when no ghost file exists.

@@ -1,8 +1,8 @@
 //! AppState + EGameMode — mirrors DTXManiaNX's CStage.EStage + EGameMode.
 //!
 //! References:
-//! - `references/DTXmaniaNX-BocuD/DTXMania/Stage/CStage.cs` — EStage enum (8 values)
-//! - `references/DTXmaniaNX-BocuD/DTXMania/Game/EInstrument.cs` — drums/guitar/bass
+//! - `references/DTXmaniaNX/DTXMania/Stage/CStage.cs` — EStage enum (8 values)
+//! - `references/DTXmaniaNX/DTXMania/Core/CConstants.cs:158` — drums/guitar/bass instrument parts
 
 use bevy::prelude::*;
 
@@ -35,7 +35,7 @@ pub enum AppState {
 /// Which game mode the user picked. Resource, not state (sub-state within
 /// Performance). Defaults to Drums per ADR-0001.
 ///
-/// Reference: `references/DTXmaniaNX-BocuD/DTXMania/Game/EInstrument.cs`
+/// Reference: `references/DTXmaniaNX/DTXMania/Core/CConstants.cs:158`
 /// has Drums / Guitar / Bass. M6b ships Drums + Guitar. Bass is M6.2.
 #[derive(Resource, Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
 pub enum EGameMode {

@@ -3,12 +3,12 @@
 //! Port of `#WAVxx: filename`, `#BMPxx: filename`, `#AVIxx: filename`,
 //! `#BGAxx: filename`, `#BGAPANxx: filename`, `#AVIPANxx: filename`
 //! directive parsing from
-//! `references/DTXmaniaNX-BocuD/DTXMania/Score,Song/CDTX.cs:1300-1800`.
+//! `references/DTXmaniaNX/DTXMania/Score,Song/CDTX.cs:1300-1800`.
 //!
 //! Strict-port-first (ADR-0010). 1:1 file mapping (functions extracted from
 //! the monolithic CDTX class into a focused module).
 //!
-//! Reference: `references/DTXmaniaNX-BocuD/DTXMania/Score,Song/CDTX.cs:1300-1800`
+//! Reference: `references/DTXmaniaNX/DTXMania/Score,Song/CDTX.cs:1300-1800`
 
 use std::collections::HashMap;
 

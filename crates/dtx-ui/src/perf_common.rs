@@ -1,7 +1,7 @@
 //! Common performance sub-acts — base types shared between Drums/Guitar.
 //!
 //! Strict-port-first (ADR-0010). These are the 9 CActPerfCommon*.cs files
-//! from `references/DTXmaniaNX-BocuD/DTXMania/Stage/06.Performance/`.
+//! from `references/DTXmaniaNX/DTXMania/Stage/06.Performance/`.
 //!
 //! ## Coverage
 //!

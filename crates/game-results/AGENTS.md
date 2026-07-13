@@ -5,10 +5,10 @@ after a song. Reads from gameplay-drums resources.
 
 ## Reference files (READ BEFORE IMPLEMENTING per ADR-0008)
 
-- `references/DTXmaniaNX-BocuD/DTXMania/Stage/07.Result/CStageResult.cs` (811 lines)
-- `references/DTXmaniaNX-BocuD/DTXMania/Stage/07.Result/CActResultParameterPanel.cs`
-- `references/DTXmaniaNX-BocuD/DTXMania/Stage/07.Result/ResultRankIcon.cs`
-- `references/DTXmaniaNX-BocuD/DTXMania/Score,Song/CScoreIni.cs` (CScoreEntry)
+- `references/DTXmaniaNX/DTXMania/Stage/07.Result/CStageResult.cs` (811 lines)
+- `references/DTXmaniaNX/DTXMania/Stage/07.Result/CActResultParameterPanel.cs`
+- `references/DTXmaniaNX/DTXMania/Stage/07.Result/ResultRankIcon.cs`
+- `references/DTXmaniaNX/DTXMania/Score,Song/CScoreIni.cs` (CScoreEntry)
 
 ## API
 

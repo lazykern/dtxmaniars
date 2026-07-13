@@ -1,6 +1,6 @@
 //! Per-difficulty hit ranges (Phase F3).
 //!
-//! Reference: `references/DTXmaniaNX-BocuD/DTXMania/Core/STHitRanges.cs` (200 LOC)
+//! Reference: `references/DTXmaniaNX/DTXMania/Core/STHitRanges.cs` (200 LOC)
 //!
 //! Each difficulty tier defines the timing windows (in ms) for the 5
 //! judgment kinds (Perfect / Great / Good / Poor / Miss). The default

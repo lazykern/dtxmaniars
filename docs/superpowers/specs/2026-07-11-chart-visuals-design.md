@@ -36,11 +36,11 @@ Movies fill the gameplay background with aspect-fit scaling. Lanes and HUD remai
 
 ## Reference behavior
 
-DTXManiaNX resolves performance cover art from the chart folder plus `PREIMAGE`, then uses default art when the file is missing (`references/DTXmaniaNX-BocuD/DTXMania/Stage/06.Performance/InfoBox.cs:20-34`).
+DTXManiaNX resolves performance cover art from the chart folder plus `PREIMAGE`, then uses default art when the file is missing (`references/DTXmaniaNX/DTXMania/Stage/06.Performance/InfoBox.cs:20-34`).
 
-DTXManiaNX starts a movie at its chart event time and resolves the movie path relative to the chart (`references/DTXmaniaNX-BocuD/DTXMania/Stage/06.Performance/CActPerfVideo.cs:16-34`, `:465-472`). It compares video time with performance time and seeks when drift exceeds 100 ms (`references/DTXmaniaNX-BocuD/DTXMania/Stage/06.Performance/CActPerfVideo.cs:266-285`). Its AVI setting gates renderer visibility (`references/DTXmaniaNX-BocuD/DTXMania/Stage/06.Performance/CActPerfVideo.cs:319-332`).
+DTXManiaNX starts a movie at its chart event time and resolves the movie path relative to the chart (`references/DTXmaniaNX/DTXMania/Stage/06.Performance/CActPerfVideo.cs:16-34`, `:465-472`). It compares video time with performance time and seeks when drift exceeds 100 ms (`references/DTXmaniaNX/DTXMania/Stage/06.Performance/CActPerfVideo.cs:266-285`). Its AVI setting gates renderer visibility (`references/DTXmaniaNX/DTXMania/Stage/06.Performance/CActPerfVideo.cs:319-332`).
 
-DTXManiaNX resolves image events through BMP, BGA, and BGAPAN registries and starts each layer at the chip playback time (`references/DTXmaniaNX-BocuD/DTXMania/Score,Song/CDTX.cs:1370-1476`, `references/DTXmaniaNX-BocuD/DTXMania/Stage/06.Performance/CActPerfBGA.cs:61-96`). This implementation covers direct BMP/BGA image display. Pan animation remains deferred.
+DTXManiaNX resolves image events through BMP, BGA, and BGAPAN registries and starts each layer at the chip playback time (`references/DTXmaniaNX/DTXMania/Score,Song/CDTX.cs:1370-1476`, `references/DTXmaniaNX/DTXMania/Stage/06.Performance/CActPerfBGA.cs:61-96`). This implementation covers direct BMP/BGA image display. Pan animation remains deferred.
 
 Bevy has no built-in video texture support in 0.19. The upstream request remains open and marked as needing design: <https://github.com/bevyengine/bevy/issues/5221>. The thread recommends `video-rs` when FFmpeg and LGPL requirements are acceptable. `video-rs` 0.11 is independent of Bevy versions and exposes timestamps, seek operations, resizing, and decoder output suitable for texture upload.
 

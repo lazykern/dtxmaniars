@@ -639,7 +639,7 @@ fn sync_perf_combo(
 /// source directory, matching case-insensitively. Returns `None` when metadata
 /// or the file is absent (fallback tile stays visible).
 ///
-/// Reference: `references/DTXmaniaNX-BocuD/DTXMania/Stage/06.Performance/InfoBox.cs:20-34`
+/// Reference: `references/DTXmaniaNX/DTXMania/Stage/06.Performance/InfoBox.cs:20-34`
 pub fn performance_preimage_path(chart: &ActiveChart) -> Option<std::path::PathBuf> {
     let filename = chart.chart.metadata.preimage_filename.as_deref()?;
     let dir = chart.source_path.as_ref()?.parent()?;

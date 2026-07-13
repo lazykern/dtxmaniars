@@ -3,8 +3,8 @@
 //! Loads `.dtx` files from disk into [`dtx_core::Chart`] values and caches them.
 //!
 //! ## Reference
-//! - `references/DTXmaniaNX-BocuD/DTXMania/Score,Song/CDTX.cs` (272KB) — DTX parser
-//! - `references/DTXmaniaNX-BocuD/DTXMania/Stage/05.SongLoading/CStageSongLoading.cs` (1110 lines)
+//! - `references/DTXmaniaNX/DTXMania/Score,Song/CDTX.cs` (272KB) — DTX parser
+//! - `references/DTXmaniaNX/DTXMania/Stage/05.SongLoading/CStageSongLoading.cs` (1110 lines)
 //!
 //! ## Scope (M4)
 //!

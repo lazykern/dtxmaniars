@@ -7,8 +7,8 @@
 //! ADR-0010 relaxed: fade UI removed (osu-style no fades).
 //!
 //! References:
-//! - `references/DTXmaniaNX-BocuD/DTXMania/Stage/06.Performance/DrumsScreen/CStagePerfDrumsScreen.cs` (194KB)
-//! - `references/DTXmaniaNX-BocuD/DTXMania/Stage/06.Performance/GuitarScreen/CStagePerfGuitarScreen.cs`
+//! - `references/DTXmaniaNX/DTXMania/Stage/06.Performance/DrumsScreen/CStagePerfDrumsScreen.cs` (194KB)
+//! - `references/DTXmaniaNX/DTXMania/Stage/06.Performance/GuitarScreen/CStagePerfGuitarScreen.cs`
 
 use bevy::prelude::*;
 

@@ -1,6 +1,6 @@
 //! Score,Song real ports — additional logic + constants from BocuD.
 //!
-//! Reference: `references/DTXmaniaNX-BocuD/DTXMania/Score,Song/`
+//! Reference: `references/DTXmaniaNX/DTXMania/Score,Song/`
 //!
 //! Replaces constants-only score_song with actual logic:
 //! - Difficulty level conversion (1-100 with decimal display)

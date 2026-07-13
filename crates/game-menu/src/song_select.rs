@@ -10,7 +10,7 @@
 //! them to `SongSelectSelection`/`Selection` and the M5 song-list
 //! logic below.
 //!
-//! Reference: `references/DTXmaniaNX-BocuD/DTXMania/Stage/04.SongSelectionNew/CStageSongSelectionNew.cs`
+//! Reference: `references/DTXmaniaNX/DTXMania/Stage/04.SongSelectionNew/CStageSongSelectionNew.cs`
 //!
 //! M5 ports the LOGIC: EReturnValue (Selected/ReturnToTitle/CallConfig),
 //! arrow nav, BGM preview on row select (per CActSelectPresound.cs).

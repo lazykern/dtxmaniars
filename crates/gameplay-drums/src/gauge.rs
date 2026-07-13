@@ -1,7 +1,7 @@
 //! Stage life gauge — DTXManiaNX `CActPerfCommonGauge` port.
 //!
 //! Reference:
-//! `references/DTXmaniaNX-BocuD/DTXMania/Stage/06.Performance/Common/CActPerfCommonGauge.cs:37-154`.
+//! `references/DTXmaniaNX/DTXMania/Stage/06.Performance/CActPerfCommonGauge.cs:37-154`.
 //!
 //! - Range `[GAUGE_MIN, GAUGE_MAX]` = `[-0.1, 1.0]`; starts at `2/3`.
 //! - Fails when the value falls to `GAUGE_MIN` (`-0.1`), NOT at zero.

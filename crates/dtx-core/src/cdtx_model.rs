@@ -1,7 +1,7 @@
 #![allow(non_snake_case)]
 //! `CDTX` (7295 LOC) — real DTX model port.
 //!
-//! Reference: `references/DTXmaniaNX-BocuD/DTXMania/Score,Song/CDTX.cs:1-7295`
+//! Reference: `references/DTXmaniaNX/DTXMania/Score,Song/CDTX.cs:1-7295`
 //!
 //! v1 strict-port: parse all DTX metadata + chip list, build CChip list with
 //! playback time pre-computed. This is the in-memory representation of a

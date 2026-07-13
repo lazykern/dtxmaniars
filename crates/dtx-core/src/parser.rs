@@ -7,7 +7,7 @@
 //!   produces a [`Chip`] at that fractional measure position.
 //! - Lines starting with `//` are comments.
 //!
-//! Reference: `references/DTXmaniaNX-BocuD/DTXMania/Score,Song/CDTX.cs` (7295 LOC).
+//! Reference: `references/DTXmaniaNX/DTXMania/Score,Song/CDTX.cs` (7295 LOC).
 
 use std::io::Read;
 
@@ -433,7 +433,7 @@ fn parse_chip_line(
     //   - 0x03: the 2 hex digits ARE the integer BPM (0x00..0xFF).
     //   - 0x08: the 2 base36 digits reference a `#BPMxx` definition; the real
     //     BPM is resolved from `chart.assets.bpm` in a post-parse pass.
-    // Reference: `references/DTXmaniaNX-BocuD/DTXMania/Score,Song/CDTX.cs`
+    // Reference: `references/DTXmaniaNX/DTXMania/Score,Song/CDTX.cs`
     //   channel 0x03 → direct BPM, channel 0x08 → listBPM lookup.
     if matches!(channel, EChannel::BPM | EChannel::BPMEx) {
         let data = strip_dtx_param(value).replace(' ', "");
@@ -469,7 +469,7 @@ fn parse_chip_line(
     // channels: each non-"00" slot references a `#BMPxx` / `#AVIxx` asset id
     // and carries a fractional measure position. Handled by the generic
     // chip-data parser below so visual timing is preserved
-    // (`references/DTXmaniaNX-BocuD/DTXMania/Score,Song/CDTX.cs:1296-1476`).
+    // (`references/DTXmaniaNX/DTXMania/Score,Song/CDTX.cs:1296-1476`).
 
     // Chip data: pairs of hex digits (standard) or one char per slot (legacy).
     let data = strip_dtx_param(value).replace(' ', "");

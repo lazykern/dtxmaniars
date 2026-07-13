@@ -233,7 +233,7 @@ Completed 2026-07-13:
 
 ## Cycle 8 — Documentation and repository maintenance
 
-Repair all stale `DTXmaniaNX-BocuD` links to the actual reference root, restore
+Repair all stale `DTXmaniaNX` links to the actual reference root, restore
 or replace the missing roadmap link, reconcile conflicting transition rules,
 and reconstruct binding ADRs that are currently described as lost. Expand the
 README with installation dependencies, song location/import, supported media,

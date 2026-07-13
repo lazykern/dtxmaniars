@@ -61,7 +61,7 @@ pub fn chip_time_ms_with_bpm_changes_and_speed(
 /// different positions (e.g. `#20208: 090B` = BPM09 at 0.0, BPM0B at 0.5).
 /// Snapping them to the measure boundary mistimes everything downstream.
 ///
-/// Reference: `references/DTXmaniaNX-BocuD/DTXMania/Score,Song/CDTX.cs:1070-1080`
+/// Reference: `references/DTXmaniaNX/DTXMania/Score,Song/CDTX.cs:1070-1080`
 /// — `n現在のBPM` updated by `listBPM変更` as chips are walked in position order.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct BpmChange {

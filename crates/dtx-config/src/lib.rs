@@ -1,6 +1,6 @@
 //! dtx-config — persisted user configuration (TOML).
 //!
-//! Port of `references/DTXmaniaNX-BocuD/DTXMania/Core/CConfigIni.cs` (baseline sections).
+//! Port of `references/DTXmaniaNX/DTXMania/Core/Config/CConfigIni.cs` (baseline sections).
 //! Baseline CConfigIni (Drums tables) is ported. KeyAssign lives in
 //! `dtx_input::bindings` (moved out so this crate stays bevy-free / Pure);
 //! Skin / ChangeSkin / Guitar/Bass tables dropped — no skin browser per
@@ -12,7 +12,7 @@
 //! - `Audio` — bBGMを発声する, bドラム打音を発声する, per-track volume (subset)
 //! - `Drums` — CY/HH/FT/BD grouping, cymbal-free, hit-sound priority, polyphony
 //!
-//! Reference: `references/DTXmaniaNX-BocuD/DTXMania/Core/CConfigIni.cs:1-100` (field names).
+//! Reference: `references/DTXmaniaNX/DTXMania/Core/Config/CConfigIni.cs:1-100` (field names).
 
 #![allow(dead_code)] // Some fields used by Phase 1 sub-acts, not yet wired.
 

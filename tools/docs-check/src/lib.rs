@@ -107,6 +107,7 @@ fn allow_historical_obsolete_token(file: &Path) -> bool {
     matches!(
         file.to_string_lossy().as_ref(),
         "docs/superpowers/specs/2026-07-13-documentation-truth-repair-design.md"
+            | "tools/docs-check/tests/fixtures/stale-root/README.md"
     )
 }
 
@@ -124,6 +125,7 @@ fn is_external_or_anchor(target: &str) -> bool {
         || target.starts_with('#')
         || target.starts_with("mailto:")
         || target.starts_with("app://")
+        || target.contains("::")
         || target.contains("://")
 }
 
@@ -135,9 +137,22 @@ fn local_target_path(root: &Path, file: &Path, target: &str) -> PathBuf {
     }
 }
 
+fn reference_repository_root(root: &Path) -> &Path {
+    if root.join("references/DTXmaniaNX").is_dir() {
+        return root;
+    }
+    root.parent()
+        .and_then(Path::parent)
+        .filter(|candidate| candidate.join("references/DTXmaniaNX").is_dir())
+        .unwrap_or(root)
+}
+
 fn trim_reference_location(token: &str) -> &str {
     let token = token.trim_end_matches(['.', ',', ';', ':', ')', ']']);
     if let Some((path, suffix)) = token.rsplit_once(':') {
+        if Path::new(path).extension().is_some() && !suffix.contains('/') {
+            return path;
+        }
         let location = suffix.strip_prefix('L').unwrap_or(suffix);
         if location.split('-').all(|part| {
             !part.is_empty() && part.chars().all(|character| character.is_ascii_digit())
@@ -167,7 +182,11 @@ fn check_file(root: &Path, file: &Path, failures: &mut Vec<CheckFailure>) -> io:
             });
         }
 
-        for captures in markdown_link.captures_iter(line) {
+        for captures in markdown_link.captures_iter(line).filter(|_| {
+            relative
+                .extension()
+                .is_some_and(|extension| extension == "md")
+        }) {
             let raw = captures
                 .name("target")
                 .map_or("", |capture| capture.as_str());
@@ -191,6 +210,13 @@ fn check_file(root: &Path, file: &Path, failures: &mut Vec<CheckFailure>) -> io:
         if !line.contains(&obsolete) {
             for found in reference_path.find_iter(line) {
                 let token = trim_reference_location(found.as_str());
+                if token
+                    .chars()
+                    .any(|character| matches!(character, '[' | ']' | '*'))
+                    || token.contains("...")
+                {
+                    continue;
+                }
                 let path = Path::new(token);
                 let canonical_root = Path::new("references/DTXmaniaNX");
                 if !path.starts_with(canonical_root)
@@ -211,7 +237,9 @@ fn check_file(root: &Path, file: &Path, failures: &mut Vec<CheckFailure>) -> io:
                     .next()
                     .unwrap_or(token)
                     .trim_end_matches('/');
-                if !check_token.is_empty() && !root.join(check_token).exists() {
+                if !check_token.is_empty()
+                    && !reference_repository_root(root).join(check_token).exists()
+                {
                     failures.push(CheckFailure {
                         file: relative.clone(),
                         line: line_number,
@@ -289,13 +317,19 @@ fn check_canonical_map(root: &Path, failures: &mut Vec<CheckFailure>) -> io::Res
 }
 
 pub fn check_repository(root: &Path, options: CheckOptions) -> io::Result<Vec<CheckFailure>> {
-    let files = discover_checked_files(root)?;
+    let root = fs::canonicalize(root)?;
+    let files = discover_checked_files(&root)?;
     let mut failures = Vec::new();
     for file in files {
-        check_file(root, &file, &mut failures)?;
+        let relative = relative_file(&root, &file);
+        if options.enforce_canonical_map && relative.starts_with("tools/docs-check/tests/fixtures")
+        {
+            continue;
+        }
+        check_file(&root, &file, &mut failures)?;
     }
     if options.enforce_canonical_map {
-        check_canonical_map(root, &mut failures)?;
+        check_canonical_map(&root, &mut failures)?;
     }
     failures.sort_by(|left, right| {
         (&left.file, left.line, &left.target).cmp(&(&right.file, right.line, &right.target))

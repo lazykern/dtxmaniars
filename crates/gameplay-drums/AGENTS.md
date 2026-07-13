@@ -34,9 +34,9 @@ cargo test -p gameplay-drums
 
 ## Reference files
 
-- `references/DTXmaniaNX-BocuD/DTXMania/Stage/06.Performance/DrumsScreen/CActPerfDrumsLaneFlushD.cs` — lane visual order (HH..RD), 10-lane default
-- `references/DTXmaniaNX-BocuD/DTXMania/Stage/06.Performance/DrumsScreen/CActPerfDrumsPad.cs` — key/lane mapping inspiration
-- `references/DTXmaniaNX-BocuD/DTXMania/Stage/06.Performance/DrumsScreen/CActPerfDrumsLaneFlushD.cs` — lane X coordinates
+- `references/DTXmaniaNX/DTXMania/Stage/06.Performance/DrumsScreen/CActPerfDrumsLaneFlushD.cs` — lane visual order (HH..RD), 10-lane default
+- `references/DTXmaniaNX/DTXMania/Stage/06.Performance/DrumsScreen/CActPerfDrumsPad.cs` — key/lane mapping inspiration
+- `references/DTXmaniaNX/DTXMania/Stage/06.Performance/DrumsScreen/CActPerfDrumsLaneFlushD.cs` — lane X coordinates
 
 ## Mechanics (corrected to DTXManiaNX-BocuD)
 

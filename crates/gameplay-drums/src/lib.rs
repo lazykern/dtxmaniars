@@ -9,7 +9,7 @@
 //! v1 mechanics-only core loop + osu-style HUD (`hud.rs`, ADR-0014).
 //! State machines (DrumsPad, DrumsDanger, DrumsFillingEffect) live here.
 //!
-//! Reference: `references/DTXmaniaNX-BocuD/DTXMania/Stage/06.Performance/DrumsScreen/*`
+//! Reference: `references/DTXmaniaNX/DTXMania/Stage/06.Performance/DrumsScreen/*`
 //! Lane order: LC, HH, SD, BD, HT, LT, FT, CY, LP, RD, HHO (BocuD CActPerfDrumsLaneFlushD.cs).
 
 // Bevy systems take many params (queries/res/commands/events) and Bevy queries

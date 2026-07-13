@@ -1,8 +1,8 @@
 #![allow(non_snake_case)]
 //! `CBoxDef` (260 LOC) + `CSetDef` (240 LOC) — chip-pattern definitions.
 //!
-//! Reference: `references/DTXmaniaNX-BocuD/DTXMania/Score,Song/CBoxDef.cs:1-260`
-//! Reference: `references/DTXmaniaNX-BocuD/DTXMania/Score,Song/CSetDef.cs:1-240`
+//! Reference: `references/DTXmaniaNX/DTXMania/Score,Song/CBoxDef.cs:1-260`
+//! Reference: `references/DTXmaniaNX/DTXMania/Score,Song/CSetDef.cs:1-240`
 //!
 //! CBoxDef: a single 36-bit chip pattern + delay used to express
 //! "a chip at position X with delay Y". In the DTX format chips are

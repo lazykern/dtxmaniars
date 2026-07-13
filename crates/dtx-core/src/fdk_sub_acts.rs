@@ -1,6 +1,6 @@
 //! FDK sub-acts — real ports of BocuD's FDK module.
 //!
-//! Reference: `references/DTXmaniaNX-BocuD/FDK/`
+//! Reference: `references/DTXmaniaNX/FDK/`
 //!
 //! Replaces constants-only FDK sub-acts with real logic:
 //! - CTimer: monotonic high-resolution timer

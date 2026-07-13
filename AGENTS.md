@@ -59,12 +59,12 @@ debugger information is needed.
 
 **Mechanics port from DTXManiaNX-BocuD.** Judgment windows, scoring, lane order,
 EChannel mapping, chart parsing, scroll logic, default input bindings must match
-`references/DTXmaniaNX-BocuD/` verbatim. Cite reference file:line in commits.
+`references/DTXmaniaNX/` verbatim. Cite reference file:line in commits.
 
 **UX/UI is redesigned** per ADR-0014 (osu-inspired fluidity). Do NOT copy BocuD
 pixel layouts, GitaDora transitions, or static HUD when ADR-0014 specifies otherwise.
 
-- Mechanics source of truth: `references/DTXmaniaNX-BocuD/`
+- Mechanics source of truth: `references/DTXmaniaNX/`
 - UX/UI source of truth: ADR-0014
 - Screen transitions: 300ms OutQuint fades (not GitaDora, not 1500ms snapshot)
 - Exception: correctness fixes for crashes/data corruption are always OK

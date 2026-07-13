@@ -6,7 +6,7 @@
 //!   (4) fraction > 1.0
 //!   (5) same-measure edge case
 //!
-//! Reference: `references/DTXmaniaNX-BocuD/DTXMania/Core/CChip.cs:ComputeTime`
+//! Reference: `references/DTXmaniaNX/DTXMania/Score,Song/CChip.cs` (`ComputeTime`)
 
 use dtx_timing::math::{chip_time_ms, chip_time_ms_with_bpm_changes, BpmChange};
 

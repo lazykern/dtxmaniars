@@ -4,10 +4,10 @@ Game-layer crate. Guitar mode vertical slice (M6b).
 
 ## Reference files (READ BEFORE IMPLEMENTING per ADR-0008)
 
-- `references/DTXmaniaNX-BocuD/DTXMania/Stage/06.Performance/GuitarScreen/CStagePerfGuitarScreen.cs` (29KB)
-- `references/DTXmaniaNX-BocuD/DTXMania/Score,Song/EChannel.cs` (guitar channels 0x21-0x27 / 0x93-0x9A / 0xA2-0xAA)
-- `references/DTXmaniaNX-BocuD/DTXMania/Stage/06.Performance/GuitarScreen/CActPerfGuitarLaneFlushGB.cs`
-- `references/DTXmaniaNX-BocuD/DTXMania/Stage/06.Performance/GuitarScreen/CActPerfGuitarScore.cs`
+- `references/DTXmaniaNX/DTXMania/Stage/06.Performance/GuitarScreen/CStagePerfGuitarScreen.cs` (29KB)
+- `references/DTXmaniaNX/DTXMania/Score,Song/EChannel.cs` (guitar channels 0x21-0x27 / 0x93-0x9A / 0xA2-0xAA)
+- `references/DTXmaniaNX/DTXMania/Stage/06.Performance/GuitarScreen/CActPerfGuitarLaneFlushGB.cs`
+- `references/DTXmaniaNX/DTXMania/Stage/06.Performance/GuitarScreen/CActPerfGuitarScore.cs`
 
 ## Lane layout (M6b minimum)
 

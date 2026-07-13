@@ -5,8 +5,8 @@
 //! [`BgaClock`]. Image layers replace the earlier colored placeholders.
 //!
 //! References:
-//! - `references/DTXmaniaNX-BocuD/DTXMania/Stage/06.Performance/CActPerfBGA.cs` (305 lines)
-//! - `references/DTXmaniaNX-BocuD/DTXMania/Stage/06.Performance/CActPerfVideo.cs` (520 lines)
+//! - `references/DTXmaniaNX/DTXMania/Stage/06.Performance/CActPerfBGA.cs` (305 lines)
+//! - `references/DTXmaniaNX/DTXMania/Stage/06.Performance/CActPerfVideo.cs` (520 lines)
 
 #![warn(missing_docs)]
 // Bevy systems take many params; a Bevy-idiomatic false-positive, allowed

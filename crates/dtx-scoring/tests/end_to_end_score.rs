@@ -8,7 +8,7 @@
 //! 5. Persist to `score.ini` on disk via `dtx_core::CScoreIni::save`
 //! 6. Reload and verify the high score / clear state survived
 //!
-//! Reference: `references/DTXmaniaNX-BocuD/DTXMania/Score,Song/CScoreIni.cs:1-1773`
+//! Reference: `references/DTXmaniaNX/DTXMania/Score,Song/CScoreIni.cs:1-1773`
 
 use std::path::PathBuf;
 

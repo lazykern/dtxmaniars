@@ -1,6 +1,6 @@
 //! Song database — scans a directory of `.dtx` files, builds SongInfo list.
 //!
-//! Reference: `references/DTXmaniaNX-BocuD/DTXMania/SongDb/SongDb.cs`
+//! Reference: `references/DTXmaniaNX/DTXMania/SongDb/SongDb.cs`
 //!
 //! ## M5 scope
 //!

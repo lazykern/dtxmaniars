@@ -17,10 +17,10 @@ cargo test -p dtx-core
 
 ## Reference files
 
-- `references/DTXmaniaNX-BocuD/DTXMania/Score,Song/CDTX.cs:1` — original parser (7295 LOC)
-- `references/DTXmaniaNX-BocuD/DTXMania/Score,Song/EChannel.cs:1` — channel enum
-- `references/DTXmaniaNX-BocuD/DTXMania/Score,Song/CChip.cs:1` — chip data model
-- `references/DTXmaniaNX-BocuD/DTXMania/Score,Song/CChartData.cs:1` — chart container
+- `references/DTXmaniaNX/DTXMania/Score,Song/CDTX.cs:1` — original parser (7295 LOC)
+- `references/DTXmaniaNX/DTXMania/Score,Song/EChannel.cs:1` — channel enum
+- `references/DTXmaniaNX/DTXMania/Score,Song/CChip.cs:1` — chip data model
+- `references/DTXmaniaNX/DTXMania/Score,Song/CChartData.cs:1` — chart container
 
 ## v1 scope (M0 → M2)
 

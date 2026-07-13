@@ -1,7 +1,7 @@
 #![allow(clippy::inherent_to_string)]
 //! `CScoreIni` (1773 LOC) — score persistence to/from DTX-compatible INI file.
 //!
-//! Reference: `references/DTXmaniaNX-BocuD/DTXMania/Score,Song/CScoreIni.cs:1-1773`
+//! Reference: `references/DTXmaniaNX/DTXMania/Score,Song/CScoreIni.cs:1-1773`
 //!
 //! v1 strict-port: load/save BestScore/ClearState per (hash, chart) in the
 //! legacy `#HIDDEN/...` INI format. Format matches what other DTX players

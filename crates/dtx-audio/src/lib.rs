@@ -3,7 +3,7 @@
 //! Engine layer. Owns the [`BgmHandle`] resource that `dtx-timing` polls
 //! each frame to populate `AudioClock`.
 //!
-//! Reference: `references/DTXmaniaNX-BocuD/FDK/Sound/CSoundTimer.cs` (92 LOC).
+//! Reference: `references/DTXmaniaNX/FDK/Sound/CSoundTimer.cs` (92 LOC).
 //! ADR-0002: audio-clock authoritative for hit-window judgment.
 
 use std::collections::HashMap;

@@ -1,6 +1,6 @@
 //! BGA / AVI / Sound trigger pipeline (Phase F7).
 //!
-//! Reference: `references/DTXmaniaNX-BocuD/DTXMania/Stage/06.Performance/Common/CStagePerfCommonScreen.cs`
+//! Reference: `references/DTXmaniaNX/DTXMania/Stage/06.Performance/CStagePerfCommonScreen.cs`
 //! `OnChip発声時` method — chip → BGA / AVI / WAV cue.
 //!
 //! Routes a chip's channel + value to the appropriate asset cue:

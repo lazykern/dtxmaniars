@@ -5,7 +5,7 @@
 //! that BocuD reads back for the song-select best-score panel and the result
 //! screen.
 //!
-//! Reference: `references/DTXmaniaNX-BocuD/DTXMania/Score,Song/CScoreIni.cs`
+//! Reference: `references/DTXmaniaNX/DTXMania/Score,Song/CScoreIni.cs`
 //! (`[File]`, `[HiScore.Drums]`, `[LastPlay.Drums]` sections).
 //!
 //! Scope notes:

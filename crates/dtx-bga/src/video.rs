@@ -5,7 +5,7 @@
 //! stale frames are dropped so decoding never delays gameplay. Movie audio is
 //! ignored — chart BGM and keysounds stay authoritative.
 //!
-//! Reference: `references/DTXmaniaNX-BocuD/DTXMania/Stage/06.Performance/CActPerfVideo.cs:266-285`
+//! Reference: `references/DTXmaniaNX/DTXMania/Stage/06.Performance/CActPerfVideo.cs:266-285`
 
 use std::collections::VecDeque;
 use std::path::PathBuf;

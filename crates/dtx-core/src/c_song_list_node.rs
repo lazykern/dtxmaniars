@@ -1,7 +1,7 @@
 #![allow(non_snake_case)]
 //! `CSongListNode` (92 LOC) — a single node in the song tree.
 //!
-//! Reference: `references/DTXmaniaNX-BocuD/DTXMania/Score,Song/CSongListNode.cs:1-92`
+//! Reference: `references/DTXmaniaNX/DTXMania/Score,Song/CSongListNode.cs:1-92`
 //!
 //! v1 strict-port: tree node with children + parent + chart metadata.
 

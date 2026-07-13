@@ -1,6 +1,6 @@
 //! Damage level logic (Phase F6).
 //!
-//! Reference: `references/DTXmaniaNX-BocuD/DTXMania/Core/CConstants.cs:44-48`
+//! Reference: `references/DTXmaniaNX/DTXMania/Core/CConstants.cs:44-48`
 //! (EDamageLevel) + `Stage/06.Performance/DrumsScreen/CStagePerfDrumsScreen.cs`
 //! (HP drain on miss).
 //!

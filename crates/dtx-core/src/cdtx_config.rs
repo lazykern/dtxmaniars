@@ -1,6 +1,6 @@
 //! CDTX config fields + chip timing model (Phase F8).
 //!
-//! Reference: `references/DTXmaniaNX-BocuD/DTXMania/Score,Song/CDTX.cs:1070-1080`
+//! Reference: `references/DTXmaniaNX/DTXMania/Score,Song/CDTX.cs:1070-1080`
 //! (configurable per-chart fields).
 //!
 //! Adds ScoreMode (Type1/Type2/3), LagAdjustment, and `chip_to_ms` helper

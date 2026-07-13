@@ -27,7 +27,7 @@ fn judge_lane(clock: Res<AudioClock>, lane_hit: EventReader<LaneHit>) {
 
 ## Reference files
 
-- `references/DTXmaniaNX-BocuD/FDK/Sound/CSoundTimer.cs:1` — original wall-clock-based timing (92 LOC). Our approach: kira gives position-in-seconds directly.
+- `references/DTXmaniaNX/FDK/Sound/CSoundTimer.cs:1` — original wall-clock-based timing (92 LOC). Our approach: kira gives position-in-seconds directly.
 
 ## Design decisions
 

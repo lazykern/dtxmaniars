@@ -3,7 +3,7 @@
 //! ADR-0010 relaxed: position constants stripped. State machines (presence
 //! updates, stage state, song info) kept.
 //!
-//! Reference: `references/DTXmaniaNX-BocuD/DTXMania/Stage/06.Performance/CStagePerfCommonScreen.cs:1-5067`
+//! Reference: `references/DTXmaniaNX/DTXMania/Stage/06.Performance/CStagePerfCommonScreen.cs:1-5067`
 
 use bevy::prelude::Resource;
 

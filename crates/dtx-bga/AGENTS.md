@@ -4,12 +4,12 @@ Engine-layer crate. BGA / video playback for DTXManiaNX charts.
 
 ## Reference (READ BEFORE IMPLEMENTING per ADR-0008)
 
-- `references/DTXmaniaNX-BocuD/DTXMania/Stage/06.Performance/CActPerfBGA.cs` (305 lines)
-- `references/DTXmaniaNX-BocuD/DTXMania/Stage/06.Performance/CActPerfVideo.cs` (520 lines)
-- `references/DTXmaniaNX-BocuD/DTXMania/Core/Video/FFmpegCore.cs` (FFmpeg wrapper, M7.1+)
-- `references/DTXmaniaNX-BocuD/DTXMania/Core/Video/VideoPlayerController.cs`
-- `references/DTXmaniaNX-BocuD/DTXMania/Core/Video/UINewVideoRenderer.cs`
-- `references/DTXmaniaNX-BocuD/DTXMania/Score,Song/EChannel.cs` (BGA channels)
+- `references/DTXmaniaNX/DTXMania/Stage/06.Performance/CActPerfBGA.cs` (305 lines)
+- `references/DTXmaniaNX/DTXMania/Stage/06.Performance/CActPerfVideo.cs` (520 lines)
+- `references/DTXmaniaNX/DTXMania/Core/Video/FFmpegCore.cs` (FFmpeg wrapper, M7.1+)
+- `references/DTXmaniaNX/DTXMania/Core/Video/VideoPlayerController.cs`
+- `references/DTXmaniaNX/DTXMania/Core/Video/UINewVideoRenderer.cs`
+- `references/DTXmaniaNX/DTXMania/Score,Song/EChannel.cs` (BGA channels)
 
 ## M7.1 scope (implemented)
 

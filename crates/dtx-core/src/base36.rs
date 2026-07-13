@@ -1,6 +1,6 @@
 //! DTX base-36 id encoding (BocuD `CConversion.nConvert2DigitBase36StringToNumber`).
 //!
-//! Reference: `references/DTXmaniaNX-BocuD/FDK/Common/CConversion.cs:113-133`
+//! Reference: `references/DTXmaniaNX/FDK/Common/CConversion.cs:113-133`
 
 const BASE36_CHARS: &str = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz";
 

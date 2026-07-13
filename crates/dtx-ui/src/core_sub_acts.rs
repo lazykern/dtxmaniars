@@ -1,6 +1,6 @@
 //! Core sub-acts — real ports of BocuD's Core module.
 //!
-//! Reference: `references/DTXmaniaNX-BocuD/DTXMania/Core/`
+//! Reference: `references/DTXmaniaNX/DTXMania/Core/`
 //!
 //! Replaces constants-only Core sub-acts with real logic:
 //! - Video: VideoState (Playing/Paused/Stopped/Error), VideoFrame

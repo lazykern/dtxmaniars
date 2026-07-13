@@ -1,7 +1,7 @@
 #![allow(non_snake_case)]
 //! `CChip` (644 LOC) — chip with rich metadata.
 //!
-//! Reference: `references/DTXmaniaNX-BocuD/DTXMania/Score,Song/CChip.cs:1-644`
+//! Reference: `references/DTXmaniaNX/DTXMania/Score,Song/CChip.cs:1-644`
 //!
 //! v1 strict-port: chip with channel + value + state for playback.
 //! Models the runtime chip list that drives judgment + visualization.

@@ -218,7 +218,7 @@ pub struct FastSlowCount {
 /// the live `PlayfieldLayout::scale`.
 ///
 /// Reference: `CChip.ComputeDistanceFromBar`
-/// (`references/DTXmaniaNX-BocuD/DTXMania/Score,Song/CChip.cs:568-578`):
+/// (`references/DTXmaniaNX/DTXMania/Score,Song/CChip.cs:568-578`):
 /// ```text
 /// ScrollSpeedDrums = (nScrollSpeedIndex + 1) * 0.5 * 37.5 * 286 / 60000
 /// ```
@@ -441,7 +441,7 @@ impl DrumGameplaySettings {
 }
 
 /// Gameplay clock. Free-running like DTXManiaNX's `CSoundManager.rcPerformanceTimer`
-/// (`references/DTXmaniaNX-BocuD/DTXMania/Stage/06.Performance/CStagePerfCommonScreen.cs`)
+/// (`references/DTXmaniaNX/DTXMania/Stage/06.Performance/CStagePerfCommonScreen.cs`)
 /// and dtxpt's `ChartClock` (`gameplay/clock.rs`, `audio/playback/transport.rs`):
 /// the clock advances on its own and BGM playback position is used **only** for
 /// drift correction — it is never a gate. This is deliberate: gating note

@@ -1,4 +1,4 @@
-//! `CStagePerfDrumsScreen` orchestrator — port of `references/DTXmaniaNX-BocuD/DTXMania/Stage/06.Performance/DrumsScreen/CStagePerfDrumsScreen.cs` (3671 LoC).
+//! `CStagePerfDrumsScreen` orchestrator — port of `references/DTXmaniaNX/DTXMania/Stage/06.Performance/DrumsScreen/CStagePerfDrumsScreen.cs` (3671 LoC).
 //!
 //! Strict-port-first (ADR-0010). 1:1 file mapping.
 //!
@@ -37,7 +37,7 @@
 //! | `CActPerfDrumsFillingEffect` | gameplay-drums | `drums_perf.rs` |
 //! | `CActPerfProgressBar`      | gameplay-drums | (planned M14) |
 //!
-//! Reference: `references/DTXmaniaNX-BocuD/DTXMania/Stage/06.Performance/DrumsScreen/CStagePerfDrumsScreen.cs:11-30`
+//! Reference: `references/DTXmaniaNX/DTXMania/Stage/06.Performance/DrumsScreen/CStagePerfDrumsScreen.cs:11-30`
 
 #![allow(dead_code)] // Re-exports for future cross-cutting systems.
 

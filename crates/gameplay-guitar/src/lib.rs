@@ -3,7 +3,7 @@
 //! 5-lane standard (R/G/B/Y/P). Mechanics-only port: scroll + judge +
 //! score + input. Visual layer (HUD) is in the osu-style HUD crate.
 //!
-//! Reference: `references/DTXmaniaNX-BocuD/DTXMania/Stage/06.Performance/GuitarScreen/CStagePerfGuitarScreen.cs`
+//! Reference: `references/DTXmaniaNX/DTXMania/Stage/06.Performance/GuitarScreen/CStagePerfGuitarScreen.cs`
 //!
 //! Layer: Game. Mirrors `gameplay-drums`.
 

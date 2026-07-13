@@ -1,8 +1,8 @@
 //! Pure scoring rules + CScoreIni-style persistence.
 //!
 //! References:
-//! - `references/DTXmaniaNX-BocuD/DTXMania/Score,Song/CScoreIni.cs` (1773 lines, ported minimally)
-//! - `references/DTXmaniaNX-BocuD/DTXMania/Score,Song/CPerformanceEntry.cs`
+//! - `references/DTXmaniaNX/DTXMania/Score,Song/CScoreIni.cs` (1773 lines, ported minimally)
+//! - `references/DTXmaniaNX/DTXMania/Score,Song/CScoreIni.cs:171` (`CPerformanceEntry`)
 //!
 //! M6a: persist per-chart results to a JSON file. We do NOT port the full
 //! 1773-line CScoreIni (config .ini parsing, 9-section STSection, etc.) —

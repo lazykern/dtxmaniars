@@ -29,7 +29,7 @@ fn tick(audio: Res<Audio>, bgm: Res<BgmHandle>) {
 
 ## Reference files
 
-- `references/DTXmaniaNX-BocuD/FDK/Sound/CSoundTimer.cs` — original wall-clock-based timing reference (92 LOC). Our approach is cleaner: kira position is already ms-accurate.
+- `references/DTXmaniaNX/FDK/Sound/CSoundTimer.cs` — original wall-clock-based timing reference (92 LOC). Our approach is cleaner: kira position is already ms-accurate.
 - bevy_kira_audio docs via `npx ctx7@latest docs /niklasei/bevy_kira_audio "<q>"`
 
 ## Design decisions

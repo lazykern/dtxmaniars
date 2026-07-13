@@ -1,6 +1,6 @@
 //! SongDb sub-acts — real ports of BocuD's SongDb module.
 //!
-//! Reference: `references/DTXmaniaNX-BocuD/DTXMania/SongDb/`
+//! Reference: `references/DTXmaniaNX/DTXMania/SongDb/`
 //!
 //! Replaces constants-only SongDb sub-acts with real state machine +
 //! cache model + sort comparators + status transitions.

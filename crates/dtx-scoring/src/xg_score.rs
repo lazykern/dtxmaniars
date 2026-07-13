@@ -1,9 +1,9 @@
 //! DTXManiaNX XG-mode drum scoring (`nSkillMode == 1`).
 //!
 //! Pure port of the score block in
-//! `references/DTXmaniaNX-BocuD/DTXMania/Stage/06.Performance/CStagePerfCommonScreen.cs:1606-1658`
+//! `references/DTXmaniaNX/DTXMania/Stage/06.Performance/CStagePerfCommonScreen.cs:1606-1658`
 //! and the end-of-song bonuses in
-//! `references/DTXmaniaNX-BocuD/DTXMania/Stage/06.Performance/DrumsScreen/CStagePerfDrumsScreen.cs:191-215`.
+//! `references/DTXmaniaNX/DTXMania/Stage/06.Performance/DrumsScreen/CStagePerfDrumsScreen.cs:191-215`.
 //!
 //! Formula (drums):
 //! ```text

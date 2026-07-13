@@ -5,9 +5,9 @@ values for use by gameplay crates.
 
 ## Reference files (READ BEFORE IMPLEMENTING per ADR-0008)
 
-- `references/DTXmaniaNX-BocuD/DTXMania/Score,Song/CDTX.cs` (272KB) — DTX parser
-- `references/DTXmaniaNX-BocuD/DTXMania/Score,Song/CChartData.cs` — Chart container
-- `references/DTXmaniaNX-BocuD/DTXMania/Stage/05.SongLoading/CStageSongLoading.cs` (1110 lines) — loading flow
+- `references/DTXmaniaNX/DTXMania/Score,Song/CDTX.cs` (272KB) — DTX parser
+- `references/DTXmaniaNX/DTXMania/Score,Song/CChartData.cs` — Chart container
+- `references/DTXmaniaNX/DTXMania/Stage/05.SongLoading/CStageSongLoading.cs` (1110 lines) — loading flow
 
 ## API
 

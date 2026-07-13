@@ -5,7 +5,7 @@
 //! 2. detect_end_of_stage monitors AudioClock
 //! 3. When audio clock passes chart_end, transitions to Result state
 //!
-//! Reference: `references/DTXmaniaNX-BocuD/DTXMania/Stage/06.Performance/DrumsScreen/CStagePerfDrumsScreen.cs`
+//! Reference: `references/DTXmaniaNX/DTXMania/Stage/06.Performance/DrumsScreen/CStagePerfDrumsScreen.cs`
 
 use bevy::prelude::*;
 use dtx_audio::BgmHandle;

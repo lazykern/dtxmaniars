@@ -1,4 +1,4 @@
-//! `CPad` — port of `references/DTXmaniaNX-BocuD/DTXMania/Core/CPad.cs` (278 LoC).
+//! `CPad` — port of `references/DTXmaniaNX/DTXMania/Core/CPad.cs` (278 LoC).
 //!
 //! Strict-port-first (ADR-0010). 1:1 file mapping.
 //!
@@ -16,7 +16,7 @@
 //! detected-device flags and dispatches to the underlying `InputManager`.
 //! The full key-assignment table is in `dtx-config` (see `CKeyAssign`).
 //!
-//! Reference: `references/DTXmaniaNX-BocuD/DTXMania/Core/CPad.cs:1-278`
+//! Reference: `references/DTXmaniaNX/DTXMania/Core/CPad.cs:1-278`
 
 use bevy::prelude::*;
 

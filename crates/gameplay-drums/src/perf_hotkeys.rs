@@ -6,7 +6,7 @@
 //! - Shift+↑/↓ BGM auto-chip timing adjust (per-song `.score.ini`)
 //! - F11 toggle performance debug overlay (NX Guitar Help / `bShowPerformanceInformation`)
 //!
-//! Reference: `references/DTXmaniaNX-BocuD/DTXMania/Stage/06.Performance/CStagePerfCommonScreen.cs:2266-2437`
+//! Reference: `references/DTXmaniaNX/DTXMania/Stage/06.Performance/CStagePerfCommonScreen.cs:2266-2437`
 
 use std::time::{Duration, Instant};
 

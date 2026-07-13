@@ -1,6 +1,6 @@
 //! DTX channel identifiers.
 //!
-//! Ported from `references/DTXmaniaNX-BocuD/DTXMania/Score,Song/EChannel.cs`.
+//! Ported from `references/DTXmaniaNX/DTXMania/Score,Song/EChannel.cs`.
 //! Covers the subset we need for drums (M2) and leaves guitar/bass available
 //! for M6+ (parsed but unused by gameplay).
 

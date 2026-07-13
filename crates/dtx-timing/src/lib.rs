@@ -7,7 +7,7 @@
 //! ADR-0002: **never** judge on `Time::delta()` accumulated frame time.
 //! Use `Res<AudioClock>` for timing windows.
 //!
-//! Reference: `references/DTXmaniaNX-BocuD/FDK/Sound/CSoundTimer.cs`.
+//! Reference: `references/DTXmaniaNX/FDK/Sound/CSoundTimer.cs`.
 //! Our approach is simpler than the C# original: kira exposes a
 //! position-in-seconds callback directly, so we skip the manual
 //! timestamp-to-ms conversion.

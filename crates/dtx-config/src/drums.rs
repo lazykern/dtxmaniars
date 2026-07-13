@@ -1,7 +1,7 @@
 //! Drums gameplay config — grouping, cymbal-free, hit-sound priority.
 //!
-//! Reference: `references/DTXmaniaNX-BocuD/Runtime/Config.ini:166-195`
-//! Reference: `references/DTXmaniaNX-BocuD/DTXMania/Core/CConstants.cs:5-28`
+//! Reference: `references/DTXmaniaNX/DTXMania/Core/Config/CConfigIni.cs`
+//! Reference: `references/DTXmaniaNX/DTXMania/Core/CConstants.cs:5-28`
 
 use serde::{Deserialize, Serialize};
 

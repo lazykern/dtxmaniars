@@ -5,12 +5,12 @@ into a `SongInfo`, and supports multiple sort modes.
 
 ## Reference files (READ BEFORE IMPLEMENTING per ADR-0008)
 
-- `references/DTXmaniaNX-BocuD/DTXMania/SongDb/SongDb.cs` (26.5KB, 800+ lines) — full impl
-- `references/DTXmaniaNX-BocuD/DTXMania/SongDb/SongNode.cs` — folder/song tree
-- `references/DTXmaniaNX-BocuD/DTXMania/SongDb/Sorting/SortDefault.cs`
-- `references/DTXmaniaNX-BocuD/DTXMania/SongDb/Sorting/SortByTitle.cs`
-- `references/DTXmaniaNX-BocuD/DTXMania/SongDb/Sorting/SortByArtist.cs`
-- `references/DTXmaniaNX-BocuD/DTXMania/SongDb/Sorting/SortByDifficulty.cs`
+- `references/DTXmaniaNX/DTXMania/SongDb/SongDb.cs` (26.5KB, 800+ lines) — full impl
+- `references/DTXmaniaNX/DTXMania/SongDb/SongNode.cs` — folder/song tree
+- `references/DTXmaniaNX/DTXMania/SongDb/Sorting/SortDefault.cs`
+- `references/DTXmaniaNX/DTXMania/SongDb/Sorting/SortByTitle.cs`
+- `references/DTXmaniaNX/DTXMania/SongDb/Sorting/SortByArtist.cs`
+- `references/DTXmaniaNX/DTXMania/SongDb/Sorting/SortByDifficulty.cs`
 
 ## API
 

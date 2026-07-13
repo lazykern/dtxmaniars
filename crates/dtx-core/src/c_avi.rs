@@ -1,6 +1,6 @@
 //! `CAVI` (108 LOC) — AVI video clip handle.
 //!
-//! Reference: `references/DTXmaniaNX-BocuD/DTXMania/Score,Song/CAVI.cs:1-108`
+//! Reference: `references/DTXmaniaNX/DTXMania/Score,Song/CAVI.cs:1-108`
 //!
 //! v1 strict-port: register + lookup for AVI video clips used by
 //! Movie/MovieFull BGA channels. We don't decode (FFmpeg deferred).
