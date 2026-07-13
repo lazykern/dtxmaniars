@@ -114,10 +114,7 @@ pub fn preload_chart_sounds_on_enter(
 
 /// True for chart-timed auto-SE channels.
 pub const fn is_auto_se_channel(ch: EChannel) -> bool {
-    matches!(
-        ch,
-        EChannel::SE01 | EChannel::SE02 | EChannel::SE03 | EChannel::SE04 | EChannel::SE05
-    )
+    ch.is_se()
 }
 
 #[cfg(test)]
@@ -161,7 +158,7 @@ mod tests {
             chips: vec![
                 Chip::with_wav(0, EChannel::BGM, 0.0, 1),
                 Chip::with_wav(0, EChannel::Snare, 0.5, 2),
-                Chip::with_wav(0, EChannel::SE01, 0.75, 3),
+                Chip::with_wav(0, EChannel::SE32, 0.75, 3),
                 Chip::with_wav(0, EChannel::BassDrum, 0.25, 0),
             ],
             empty_hit_events: vec![EmptyHitEvent {

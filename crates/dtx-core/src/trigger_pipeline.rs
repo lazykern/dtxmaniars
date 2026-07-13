@@ -6,7 +6,7 @@
 //! Routes a chip's channel + value to the appropriate asset cue:
 //! - BGA layer channels (1, 2, 3..8) → BgaCue(layer=N, idx=value)
 //! - Movie / MovieFull channels → AviCue(idx=value)
-//! - SE channels (0x61-0x65) → WavCue(kind=SoundEffect, idx=value)
+//! - SE channels (SE01-SE32) → WavCue(kind=SoundEffect, idx=value)
 //! - BGM channel → WavCue(kind=Bgm, idx=value)
 //!
 //! The renderer / audio system consumes the cue and dispatches to
@@ -52,6 +52,13 @@ pub enum Trigger {
 pub fn trigger_for(chip: &Chip, assets: &DtxAssets) -> Option<Trigger> {
     let idx = chip.value as u32;
     let volume = (chip.value as u8).min(100);
+    if chip.channel.is_se() {
+        return assets.wav.get(idx).map(|_| Trigger::Wav {
+            is_bgm: false,
+            idx,
+            volume,
+        });
+    }
     match chip.channel {
         EChannel::BGALayer1 => Some(Trigger::Bga {
             layer: 1,
@@ -106,17 +113,6 @@ pub fn trigger_for(chip: &Chip, assets: &DtxAssets) -> Option<Trigger> {
             if assets.wav.get(idx).is_some() {
                 Some(Trigger::Wav {
                     is_bgm: true,
-                    idx,
-                    volume,
-                })
-            } else {
-                None
-            }
-        }
-        EChannel::SE01 | EChannel::SE02 | EChannel::SE03 | EChannel::SE04 | EChannel::SE05 => {
-            if assets.wav.get(idx).is_some() {
-                Some(Trigger::Wav {
-                    is_bgm: false,
                     idx,
                     volume,
                 })
@@ -265,8 +261,8 @@ mod tests {
     }
 
     #[test]
-    fn se01_returns_wav_se() {
-        let chip = chip_with(EChannel::SE01, 1.0);
+    fn se32_returns_wav_se() {
+        let chip = chip_with(EChannel::SE32, 1.0);
         let t = trigger_for(&chip, &assets_with_wav_bmp_avi());
         assert_eq!(
             t,

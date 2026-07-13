@@ -120,3 +120,10 @@ fn conditional_nested_fixture_keeps_one_inner_branch() {
     assert!(report.warnings.is_empty());
     assert_eq!(report.chart.drum_chips().count(), 1);
 }
+
+#[test]
+fn parser_recognizes_se32_channel() {
+    let chart = parse(&b"#00092: 01\n"[..]).expect("SE32 chart parses");
+    assert_eq!(chart.chips.len(), 1);
+    assert_eq!(chart.chips[0].channel, EChannel::SE32);
+}

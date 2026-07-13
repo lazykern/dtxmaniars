@@ -110,6 +110,9 @@ impl ChipClass {
 
 /// Classify a chip by its channel.
 pub const fn classify(ch: EChannel) -> ChipClass {
+    if ch.is_se() {
+        return ChipClass::SE;
+    }
     match ch {
         // Drums
         EChannel::HiHatClose
@@ -156,11 +159,6 @@ pub const fn classify(ch: EChannel) -> ChipClass {
         // BGM
         EChannel::BGM => ChipClass::BGM,
 
-        // SE
-        EChannel::SE01 | EChannel::SE02 | EChannel::SE03 | EChannel::SE04 | EChannel::SE05 => {
-            ChipClass::SE
-        }
-
         // Bar / beat
         EChannel::BonusEffect1
         | EChannel::BonusEffect2
@@ -177,6 +175,10 @@ pub const fn classify(ch: EChannel) -> ChipClass {
 
         // System
         EChannel::Nil => ChipClass::System,
+        other => {
+            debug_assert!(other.is_se());
+            ChipClass::SE
+        }
     }
 }
 
@@ -265,6 +267,11 @@ mod tests {
         assert_eq!(classify(EChannel::BassDrum), ChipClass::Drum);
         assert_eq!(classify(EChannel::Cymbal), ChipClass::Drum);
         assert_eq!(classify(EChannel::RideCymbal), ChipClass::Drum);
+    }
+
+    #[test]
+    fn se32_classifies_as_sound_effect() {
+        assert_eq!(classify(EChannel::SE32), ChipClass::SE);
     }
 
     #[test]

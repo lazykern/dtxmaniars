@@ -86,13 +86,7 @@ pub fn seed_skip_sets(
                     played_bgm.insert(e.chip_idx);
                 }
             }
-            dtx_core::EChannel::SE01
-            | dtx_core::EChannel::SE02
-            | dtx_core::EChannel::SE03
-            | dtx_core::EChannel::SE04
-            | dtx_core::EChannel::SE05
-                if e.auto_ms < target_ms =>
-            {
+            channel if channel.is_se() && e.auto_ms < target_ms => {
                 played_se.insert(e.chip_idx);
             }
             _ => {}
@@ -302,7 +296,7 @@ mod tests {
                 Chip::with_wav(0, EChannel::BGM, 0.0, 1),  // 0ms
                 Chip::new(0, EChannel::BassDrum, 0.0),     // 0ms
                 Chip::new(1, EChannel::Snare, 0.0),        // 2000ms
-                Chip::with_wav(2, EChannel::SE01, 0.0, 2), // 4000ms
+                Chip::with_wav(2, EChannel::SE32, 0.0, 2), // 4000ms
                 Chip::new(3, EChannel::BassDrum, 0.0),     // 6000ms
             ],
             assets,

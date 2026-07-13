@@ -1,6 +1,6 @@
 //! Auto SE chip scheduler — plays chart-timed sound effects.
 //!
-//! Schedules SE01–SE05 (0x61–0x65) chips when their target time is reached.
+//! Schedules SE01-SE32 chips when their target time is reached.
 //! Reference: BocuD chip scroll loop + dtxpt `schedule_auto_se`.
 
 use bevy::prelude::*;
@@ -63,7 +63,7 @@ fn schedule_se_chips(
     let source_dir = chart.source_path.as_ref().and_then(|p| p.parent());
 
     for (idx, chip) in chart.chart.chips.iter().enumerate() {
-        if !is_se_channel(chip.channel) {
+        if !chip.channel.is_se() {
             continue;
         }
         if played.0.contains(&idx) {
@@ -123,15 +123,8 @@ fn schedule_se_chips(
     }
 }
 
-const fn is_se_channel(ch: EChannel) -> bool {
-    matches!(
-        ch,
-        EChannel::SE01 | EChannel::SE02 | EChannel::SE03 | EChannel::SE04 | EChannel::SE05
-    )
-}
-
 const fn auto_se_replaces_previous(ch: EChannel) -> bool {
-    is_se_channel(ch)
+    ch.is_se()
 }
 
 #[cfg(test)]
@@ -140,16 +133,16 @@ mod tests {
 
     #[test]
     fn se_channel_detection() {
-        assert!(is_se_channel(EChannel::SE01));
-        assert!(is_se_channel(EChannel::SE05));
-        assert!(!is_se_channel(EChannel::BassDrum));
-        assert!(!is_se_channel(EChannel::BGM));
+        assert!(EChannel::SE01.is_se());
+        assert!(EChannel::SE32.is_se());
+        assert!(!EChannel::BassDrum.is_se());
+        assert!(!EChannel::BGM.is_se());
     }
 
     #[test]
     fn modeled_auto_se_channels_replace_previous_instance() {
         assert!(auto_se_replaces_previous(EChannel::SE01));
-        assert!(auto_se_replaces_previous(EChannel::SE05));
+        assert!(auto_se_replaces_previous(EChannel::SE32));
         assert!(!auto_se_replaces_previous(EChannel::BGM));
     }
 }

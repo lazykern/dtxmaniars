@@ -71,6 +71,33 @@ pub enum EChannel {
     SE03 = 0x63,
     SE04 = 0x64,
     SE05 = 0x65,
+    SE06 = 0x66,
+    SE07 = 0x67,
+    SE08 = 0x68,
+    SE09 = 0x69,
+    SE10 = 0x70,
+    SE11 = 0x71,
+    SE12 = 0x72,
+    SE13 = 0x73,
+    SE14 = 0x74,
+    SE15 = 0x75,
+    SE16 = 0x76,
+    SE17 = 0x77,
+    SE18 = 0x78,
+    SE19 = 0x79,
+    SE20 = 0x80,
+    SE21 = 0x81,
+    SE22 = 0x82,
+    SE23 = 0x83,
+    SE24 = 0x84,
+    SE25 = 0x85,
+    SE26 = 0x86,
+    SE27 = 0x87,
+    SE28 = 0x88,
+    SE29 = 0x89,
+    SE30 = 0x90,
+    SE31 = 0x91,
+    SE32 = 0x92,
 
     // BGA / Movie (parsed but not rendered in M2)
     Movie = 0x54,
@@ -138,6 +165,33 @@ impl EChannel {
             0x63 => Self::SE03,
             0x64 => Self::SE04,
             0x65 => Self::SE05,
+            0x66 => Self::SE06,
+            0x67 => Self::SE07,
+            0x68 => Self::SE08,
+            0x69 => Self::SE09,
+            0x70 => Self::SE10,
+            0x71 => Self::SE11,
+            0x72 => Self::SE12,
+            0x73 => Self::SE13,
+            0x74 => Self::SE14,
+            0x75 => Self::SE15,
+            0x76 => Self::SE16,
+            0x77 => Self::SE17,
+            0x78 => Self::SE18,
+            0x79 => Self::SE19,
+            0x80 => Self::SE20,
+            0x81 => Self::SE21,
+            0x82 => Self::SE22,
+            0x83 => Self::SE23,
+            0x84 => Self::SE24,
+            0x85 => Self::SE25,
+            0x86 => Self::SE26,
+            0x87 => Self::SE27,
+            0x88 => Self::SE28,
+            0x89 => Self::SE29,
+            0x90 => Self::SE30,
+            0x91 => Self::SE31,
+            0x92 => Self::SE32,
             _ => return None,
         })
     }
@@ -200,6 +254,14 @@ impl EChannel {
         )
     }
 
+    /// True for DTXManiaNX chart-timed sound-effect channels SE01 through SE32.
+    pub const fn is_se(self) -> bool {
+        matches!(
+            self as u8,
+            0x61..=0x69 | 0x70..=0x79 | 0x80..=0x89 | 0x90..=0x92
+        )
+    }
+
     /// True for DTXManiaNX bonus-effect marker channels 0x4C..=0x4F.
     pub const fn is_bonus_effect(self) -> bool {
         matches!(
@@ -251,6 +313,22 @@ mod tests {
         assert_eq!(EChannel::from_byte(0x11), Some(EChannel::HiHatClose));
         assert_eq!(EChannel::from_byte(0x4C), Some(EChannel::BonusEffect1));
         assert_eq!(EChannel::from_byte(0xFF), None);
+    }
+
+    #[test]
+    fn all_nx_se_channel_values_round_trip() {
+        let values = [
+            0x61, 0x62, 0x63, 0x64, 0x65, 0x66, 0x67, 0x68, 0x69, 0x70, 0x71, 0x72, 0x73, 0x74,
+            0x75, 0x76, 0x77, 0x78, 0x79, 0x80, 0x81, 0x82, 0x83, 0x84, 0x85, 0x86, 0x87, 0x88,
+            0x89, 0x90, 0x91, 0x92,
+        ];
+        for value in values {
+            let channel = EChannel::from_byte(value).expect("known NX SE channel");
+            assert!(channel.is_se(), "0x{value:02X}");
+            assert_eq!(channel as u8, value);
+        }
+        assert!(!EChannel::BGM.is_se());
+        assert!(!EChannel::BassDrum.is_se());
     }
 
     #[test]
