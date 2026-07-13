@@ -18,12 +18,46 @@ pub enum PreloadIssueKind {
     Unsupported,
 }
 
+/// How a chart audio reference resolves before decoder submission.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum AudioResolution {
+    Native(PathBuf),
+    Substituted(PathBuf),
+    Missing,
+    Unsupported,
+}
+
+/// Whether losing an audio slot makes the chart unplayable.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AudioRequirement {
+    RequiredBgm,
+    Optional,
+}
+
 /// One chart audio slot rejected during preloading.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PreloadIssue {
     pub slot: u32,
     pub path: PathBuf,
     pub kind: PreloadIssueKind,
+    pub requirement: AudioRequirement,
+    pub guidance: String,
+}
+
+/// A legacy XA reference recovered through a supported same-stem file.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AudioSubstitution {
+    pub slot: u32,
+    pub requested: PathBuf,
+    pub resolved: PathBuf,
+}
+
+/// Usage-sensitive audio diagnostics for one chart.
+#[derive(Debug, Default, Clone, PartialEq, Eq)]
+pub struct ChartAudioReport {
+    pub substitutions: Vec<AudioSubstitution>,
+    pub warnings: Vec<PreloadIssue>,
+    pub required_failures: Vec<PreloadIssue>,
 }
 
 /// A chart audio slot accepted by preflight and submitted to the asset server.
@@ -31,6 +65,7 @@ pub struct PreloadIssue {
 pub struct PreloadedAudio {
     pub slot: u32,
     pub path: PathBuf,
+    pub requirement: AudioRequirement,
     pub handle: Handle<KiraAudioSource>,
 }
 
@@ -38,7 +73,7 @@ pub struct PreloadedAudio {
 #[derive(Debug, Default)]
 pub struct PreloadBatch {
     pub assets: Vec<PreloadedAudio>,
-    pub issues: Vec<PreloadIssue>,
+    pub report: ChartAudioReport,
 }
 
 /// Collect every chart WAV slot that can be needed during performance.
@@ -98,33 +133,174 @@ const fn channel_uses_wav(channel: EChannel) -> bool {
 }
 
 /// Classify a chart-relative audio reference before submitting it to Bevy.
+#[cfg(test)]
 fn preflight_chart_audio(
     source_dir: Option<&Path>,
     slot: u32,
     filename: &str,
 ) -> Result<PathBuf, PreloadIssue> {
-    let path = source_dir.map_or_else(
-        || PathBuf::from(filename),
+    let path = requested_audio_path(source_dir, filename);
+    match source_dir.map_or_else(
+        || resolve_audio_path_without_chart_dir(filename),
+        |dir| resolve_chart_audio(dir, filename),
+    ) {
+        AudioResolution::Native(path) | AudioResolution::Substituted(path) => Ok(path),
+        AudioResolution::Missing => Err(audio_issue(
+            slot,
+            path,
+            PreloadIssueKind::Missing,
+            AudioRequirement::Optional,
+        )),
+        AudioResolution::Unsupported => Err(audio_issue(
+            slot,
+            path,
+            PreloadIssueKind::Unsupported,
+            AudioRequirement::Optional,
+        )),
+    }
+}
+
+fn requested_audio_path(source_dir: Option<&Path>, filename: &str) -> PathBuf {
+    source_dir.map_or_else(
+        || PathBuf::from(filename.replace('\\', "/")),
         |dir| {
             dtx_core::resolve_chart_asset_path(dir, filename)
                 .unwrap_or_else(|| dir.join(filename.replace('\\', "/")))
         },
-    );
+    )
+}
+
+fn resolve_audio_path_without_chart_dir(filename: &str) -> AudioResolution {
+    let path = PathBuf::from(filename.replace('\\', "/"));
     if !path.is_file() {
-        return Err(PreloadIssue {
-            slot,
-            path,
-            kind: PreloadIssueKind::Missing,
-        });
+        AudioResolution::Missing
+    } else if dtx_audio::supported_audio_format(&path).is_some() {
+        AudioResolution::Native(path)
+    } else {
+        AudioResolution::Unsupported
     }
-    if dtx_audio::supported_audio_format(&path).is_none() {
-        return Err(PreloadIssue {
-            slot,
-            path,
-            kind: PreloadIssueKind::Unsupported,
-        });
+}
+
+/// Resolve supported chart audio. Legacy XA references recover through a
+/// same-directory, same-stem OGG/WAV/MP3 file in that priority order.
+pub fn resolve_chart_audio(chart_dir: &Path, filename: &str) -> AudioResolution {
+    let requested = dtx_core::resolve_chart_asset_path(chart_dir, filename)
+        .unwrap_or_else(|| chart_dir.join(filename.replace('\\', "/")));
+    if requested.is_file() && dtx_audio::supported_audio_format(&requested).is_some() {
+        return AudioResolution::Native(requested);
     }
-    Ok(path)
+
+    let is_xa = Path::new(filename)
+        .extension()
+        .and_then(|extension| extension.to_str())
+        .is_some_and(|extension| extension.eq_ignore_ascii_case("xa"));
+    if !is_xa {
+        return if requested.is_file() {
+            AudioResolution::Unsupported
+        } else {
+            AudioResolution::Missing
+        };
+    }
+
+    let normalized = filename.replace('\\', "/");
+    let requested_relative = Path::new(&normalized);
+    let parent = requested_relative.parent().unwrap_or_else(|| Path::new(""));
+    let Some(stem) = requested_relative
+        .file_stem()
+        .and_then(|stem| stem.to_str())
+    else {
+        return AudioResolution::Unsupported;
+    };
+    for extension in ["ogg", "wav", "mp3"] {
+        let fallback = parent.join(format!("{stem}.{extension}"));
+        if let Some(resolved) =
+            dtx_core::resolve_chart_asset_path(chart_dir, &fallback.to_string_lossy())
+        {
+            return AudioResolution::Substituted(resolved);
+        }
+    }
+    if requested.is_file() {
+        AudioResolution::Unsupported
+    } else {
+        AudioResolution::Missing
+    }
+}
+
+fn audio_requirement(chart: &Chart, slot: u32) -> AudioRequirement {
+    let used_by_bgm_chip = chart
+        .chips
+        .iter()
+        .any(|chip| classify(chip.channel) == ChipClass::BGM && chip.wav_slot == slot);
+    if used_by_bgm_chip || chart.metadata.bgm_wav_slots.contains(&slot) {
+        AudioRequirement::RequiredBgm
+    } else {
+        AudioRequirement::Optional
+    }
+}
+
+fn audio_issue(
+    slot: u32,
+    path: PathBuf,
+    kind: PreloadIssueKind,
+    requirement: AudioRequirement,
+) -> PreloadIssue {
+    PreloadIssue {
+        slot,
+        path,
+        kind,
+        requirement,
+        guidance:
+            "provide a same-stem OGG, WAV, or MP3 file; XA conversion is not run by DTXManiaRS"
+                .into(),
+    }
+}
+
+/// Inspect every requested slot without touching Bevy's asset server.
+pub fn preflight_chart_audio_report(
+    chart: &Chart,
+    source_dir: Option<&Path>,
+    slots: &BTreeSet<u32>,
+) -> ChartAudioReport {
+    let mut report = ChartAudioReport::default();
+    for &slot in slots {
+        let Some(filename) = chart.assets.wav.get(slot) else {
+            continue;
+        };
+        let requirement = audio_requirement(chart, slot);
+        let requested = requested_audio_path(source_dir, filename);
+        let resolution = source_dir.map_or_else(
+            || resolve_audio_path_without_chart_dir(filename),
+            |dir| resolve_chart_audio(dir, filename),
+        );
+        match resolution {
+            AudioResolution::Native(_) => {}
+            AudioResolution::Substituted(resolved) => {
+                report.substitutions.push(AudioSubstitution {
+                    slot,
+                    requested,
+                    resolved,
+                });
+            }
+            AudioResolution::Missing | AudioResolution::Unsupported => {
+                let kind = if matches!(resolution, AudioResolution::Missing) {
+                    PreloadIssueKind::Missing
+                } else {
+                    PreloadIssueKind::Unsupported
+                };
+                let issue = audio_issue(slot, requested, kind, requirement);
+                let is_xa = Path::new(filename)
+                    .extension()
+                    .and_then(|extension| extension.to_str())
+                    .is_some_and(|extension| extension.eq_ignore_ascii_case("xa"));
+                if is_xa && requirement == AudioRequirement::RequiredBgm {
+                    report.required_failures.push(issue);
+                } else {
+                    report.warnings.push(issue);
+                }
+            }
+        }
+    }
+    report
 }
 
 /// Preload a specific set of WAV slots into the shared audio bank, retaining
@@ -136,28 +312,38 @@ pub fn preload_slots_report(
     slots: &BTreeSet<u32>,
 ) -> PreloadBatch {
     let source_dir = chart.source_path.as_ref().and_then(|p| p.parent());
-    let mut batch = PreloadBatch::default();
+    let report = preflight_chart_audio_report(&chart.chart, source_dir, slots);
+    let mut batch = PreloadBatch {
+        report,
+        ..default()
+    };
     for &slot in slots {
         let Some(filename) = chart.chart.assets.wav.get(slot) else {
             continue;
         };
-        let path = match preflight_chart_audio(source_dir, slot, filename) {
-            Ok(path) => path,
-            Err(issue) => {
-                batch.issues.push(issue);
-                continue;
-            }
+        let resolution = source_dir.map_or_else(
+            || resolve_audio_path_without_chart_dir(filename),
+            |dir| resolve_chart_audio(dir, filename),
+        );
+        let path = match resolution {
+            AudioResolution::Native(path) | AudioResolution::Substituted(path) => path,
+            AudioResolution::Missing | AudioResolution::Unsupported => continue,
         };
         let handle = dtx_audio::preload_chart_sound(
             asset_server,
             bank,
-            source_dir,
+            None,
             slot,
-            filename,
+            &path.to_string_lossy(),
             chart.chart.assets.wav.volume(slot),
             chart.chart.assets.wav.pan(slot),
         );
-        batch.assets.push(PreloadedAudio { slot, path, handle });
+        batch.assets.push(PreloadedAudio {
+            slot,
+            path,
+            requirement: audio_requirement(&chart.chart, slot),
+            handle,
+        });
     }
     batch
 }
@@ -184,7 +370,12 @@ pub fn preload_chart_sounds(
 ) -> usize {
     let slots = collect_preload_wav_slots(&chart.chart);
     let batch = preload_slots_report(chart, asset_server, bank, &slots);
-    for issue in &batch.issues {
+    for issue in batch
+        .report
+        .warnings
+        .iter()
+        .chain(&batch.report.required_failures)
+    {
         warn!(
             "Performance: {:?} chart audio slot {} at {}",
             issue.kind,
@@ -212,7 +403,10 @@ pub const fn is_auto_se_channel(ch: EChannel) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::{collect_preload_wav_slots, preflight_chart_audio, PreloadIssue, PreloadIssueKind};
+    use super::{
+        collect_preload_wav_slots, preflight_chart_audio, AudioRequirement, PreloadIssue,
+        PreloadIssueKind,
+    };
     use dtx_core::{Chart, Chip, EChannel, EmptyHitEvent};
     use std::collections::BTreeSet;
 
@@ -307,6 +501,8 @@ mod tests {
                 slot: 2,
                 path: dir.join("missing.ogg"),
                 kind: PreloadIssueKind::Missing,
+                requirement: AudioRequirement::Optional,
+                guidance: "provide a same-stem OGG, WAV, or MP3 file; XA conversion is not run by DTXManiaRS".into(),
             })
         );
         assert_eq!(
@@ -315,6 +511,8 @@ mod tests {
                 slot: 3,
                 path: dir.join("legacy.xa"),
                 kind: PreloadIssueKind::Unsupported,
+                requirement: AudioRequirement::Optional,
+                guidance: "provide a same-stem OGG, WAV, or MP3 file; XA conversion is not run by DTXManiaRS".into(),
             })
         );
         assert_eq!(

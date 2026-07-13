@@ -99,6 +99,7 @@ enum LoadProblemKind {
     ParserWarning,
     MissingAudio,
     UnsupportedAudio,
+    AudioSubstitution,
     DecoderFailure,
     MissingVisual,
 }
@@ -173,6 +174,59 @@ fn warning_hold_seconds(warnings: &[LoadProblem]) -> f64 {
 
 fn required_audio_slots(chart: &Chart) -> std::collections::BTreeSet<u32> {
     gameplay_drums::sound_bank::collect_preload_wav_slots(chart)
+}
+
+fn apply_chart_audio_report(
+    report: gameplay_drums::sound_bank::ChartAudioReport,
+    diagnostics: &mut LoadDiagnostics,
+) {
+    use gameplay_drums::sound_bank::PreloadIssueKind;
+
+    for substitution in report.substitutions {
+        diagnostics.push_warning(LoadProblem {
+            kind: LoadProblemKind::AudioSubstitution,
+            path: Some(substitution.resolved.clone()),
+            detail: format!(
+                "chart audio slot {} substituted {} with {}",
+                substitution.slot,
+                substitution.requested.display(),
+                substitution.resolved.display()
+            ),
+        });
+    }
+    for issue in report.warnings {
+        let kind = match issue.kind {
+            PreloadIssueKind::Missing => LoadProblemKind::MissingAudio,
+            PreloadIssueKind::Unsupported => LoadProblemKind::UnsupportedAudio,
+        };
+        diagnostics.push_warning(LoadProblem {
+            kind,
+            path: Some(issue.path.clone()),
+            detail: format!(
+                "chart audio slot {} at {}: {}",
+                issue.slot,
+                issue.path.display(),
+                issue.guidance
+            ),
+        });
+    }
+    if !report.required_failures.is_empty() {
+        diagnostics.fatal = Some(
+            report
+                .required_failures
+                .into_iter()
+                .map(|issue| {
+                    format!(
+                        "required BGM slot {} at {} cannot be loaded: {}",
+                        issue.slot,
+                        issue.path.display(),
+                        issue.guidance
+                    )
+                })
+                .collect::<Vec<_>>()
+                .join("; "),
+        );
+    }
 }
 
 pub fn plugin(app: &mut App) {
@@ -336,16 +390,14 @@ fn poll_chart_parse(
             let slots = required_audio_slots(&chart);
             let batch =
                 sound_bank::preload_slots_report(&drums_chart, &asset_server, &mut bank, &slots);
-            for issue in batch.issues {
-                let kind = match issue.kind {
-                    sound_bank::PreloadIssueKind::Missing => LoadProblemKind::MissingAudio,
-                    sound_bank::PreloadIssueKind::Unsupported => LoadProblemKind::UnsupportedAudio,
-                };
-                diagnostics.push_warning(LoadProblem {
-                    kind,
-                    path: Some(issue.path),
-                    detail: format!("chart audio slot {}", issue.slot),
-                });
+            apply_chart_audio_report(batch.report, &mut diagnostics);
+            if diagnostics.fatal.is_some() {
+                diagnostics.advance_not_before = Some(
+                    std::time::Instant::now()
+                        + std::time::Duration::from_secs_f64(failure_hold_seconds()),
+                );
+                *phase = LoadPhase::Failed;
+                return;
             }
             required.0 = batch.assets;
             info!("SongLoading: waiting on {} chart WAVs", required.0.len());
@@ -463,20 +515,34 @@ fn wait_for_audio(
                     && problem.path.as_ref() == Some(&asset.path)
             })
         {
-            diagnostics.push_warning(LoadProblem {
-                kind: LoadProblemKind::DecoderFailure,
-                path: Some(asset.path.clone()),
-                detail: "audio decoder rejected this file".into(),
-            });
+            let detail = format!("audio decoder rejected {}", asset.path.display());
+            if asset.requirement == gameplay_drums::sound_bank::AudioRequirement::RequiredBgm {
+                diagnostics.fatal = Some(format!("required BGM {detail}"));
+            } else {
+                diagnostics.push_warning(LoadProblem {
+                    kind: LoadProblemKind::DecoderFailure,
+                    path: Some(asset.path.clone()),
+                    detail,
+                });
+            }
         }
     }
     progress.0 = done as f32 / total as f32;
     if done >= total {
-        *phase = LoadPhase::Ready;
-        diagnostics.advance_not_before = (!diagnostics.warnings.is_empty()).then(|| {
-            std::time::Instant::now()
-                + std::time::Duration::from_secs_f64(warning_hold_seconds(&diagnostics.warnings))
-        });
+        *phase = if diagnostics.fatal.is_some() {
+            LoadPhase::Failed
+        } else {
+            LoadPhase::Ready
+        };
+        diagnostics.advance_not_before =
+            (diagnostics.fatal.is_some() || !diagnostics.warnings.is_empty()).then(|| {
+                std::time::Instant::now()
+                    + std::time::Duration::from_secs_f64(if diagnostics.fatal.is_some() {
+                        failure_hold_seconds()
+                    } else {
+                        warning_hold_seconds(&diagnostics.warnings)
+                    })
+            });
     }
 }
 
@@ -899,6 +965,45 @@ mod tests {
             LoadSupport::Degraded { .. }
         ));
         diagnostics.fatal = Some("required gameplay structure unsupported".into());
+        assert!(matches!(
+            load_support(&diagnostics),
+            LoadSupport::Rejected { .. }
+        ));
+    }
+
+    #[test]
+    fn xa_audio_report_maps_required_failures_to_rejected_and_optional_to_degraded() {
+        use gameplay_drums::sound_bank::{
+            AudioRequirement, ChartAudioReport, PreloadIssue, PreloadIssueKind,
+        };
+
+        let issue = |requirement| PreloadIssue {
+            slot: 1,
+            path: "music.xa".into(),
+            kind: PreloadIssueKind::Unsupported,
+            requirement,
+            guidance: "provide a same-stem OGG, WAV, or MP3 file".into(),
+        };
+        let mut diagnostics = LoadDiagnostics::default();
+        apply_chart_audio_report(
+            ChartAudioReport {
+                warnings: vec![issue(AudioRequirement::Optional)],
+                ..default()
+            },
+            &mut diagnostics,
+        );
+        assert!(matches!(
+            load_support(&diagnostics),
+            LoadSupport::Degraded { .. }
+        ));
+
+        apply_chart_audio_report(
+            ChartAudioReport {
+                required_failures: vec![issue(AudioRequirement::RequiredBgm)],
+                ..default()
+            },
+            &mut diagnostics,
+        );
         assert!(matches!(
             load_support(&diagnostics),
             LoadSupport::Rejected { .. }

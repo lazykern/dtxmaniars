@@ -23,6 +23,9 @@ pub struct ImportOutcome {
     pub chart_count: usize,
     pub formats: ChartFormatCounts,
     pub rejected: Vec<ImportChartDiagnostic>,
+    /// Recoverable or blocking media issues discovered without converting
+    /// archive contents.
+    pub media_diagnostics: Vec<ImportChartDiagnostic>,
 }
 
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
@@ -112,7 +115,7 @@ pub fn import_archive(archive: &Path, song_root: &Path) -> Result<ImportOutcome,
         }
 
         let (content, wrapper_name) = collapse_wrappers(temp.clone())?;
-        let (formats, rejected) = count_chart_formats(&content)?;
+        let (formats, rejected, media_diagnostics) = count_chart_formats(&content)?;
         let chart_count = formats.total();
         if chart_count == 0 {
             return Err(ImportError::NoCharts);
@@ -134,6 +137,7 @@ pub fn import_archive(archive: &Path, song_root: &Path) -> Result<ImportOutcome,
             chart_count,
             formats,
             rejected,
+            media_diagnostics,
         })
     })();
 
@@ -243,20 +247,32 @@ fn collapse_wrappers(mut dir: PathBuf) -> io::Result<(PathBuf, Option<String>)> 
 
 /// Count `.dtx` files recursively. Shares the scanner's case-insensitive
 /// extension rule so archive counts match a later rescan.
-fn count_chart_formats(dir: &Path) -> io::Result<(ChartFormatCounts, Vec<ImportChartDiagnostic>)> {
+fn count_chart_formats(
+    dir: &Path,
+) -> io::Result<(
+    ChartFormatCounts,
+    Vec<ImportChartDiagnostic>,
+    Vec<ImportChartDiagnostic>,
+)> {
     let mut formats = ChartFormatCounts::default();
     let mut rejected = Vec::new();
+    let mut media_diagnostics = Vec::new();
     for entry in fs::read_dir(dir)?.flatten() {
         let path = entry.path();
         if path.is_dir() {
-            let (nested_formats, mut nested_rejected) = count_chart_formats(&path)?;
+            let (nested_formats, mut nested_rejected, mut nested_media_diagnostics) =
+                count_chart_formats(&path)?;
             formats.dtx += nested_formats.dtx;
             formats.gda += nested_formats.gda;
             formats.g2d += nested_formats.g2d;
             rejected.append(&mut nested_rejected);
+            media_diagnostics.append(&mut nested_media_diagnostics);
         } else {
             match crate::classify_chart_path(&path) {
-                crate::ChartPathKind::Playable(format) => formats.record(format),
+                crate::ChartPathKind::Playable(format) => {
+                    formats.record(format);
+                    media_diagnostics.extend(xa_diagnostics_for_chart(&path, format));
+                }
                 crate::ChartPathKind::Rejected(_) => rejected.push(ImportChartDiagnostic {
                     path,
                     detail:
@@ -267,7 +283,79 @@ fn count_chart_formats(dir: &Path) -> io::Result<(ChartFormatCounts, Vec<ImportC
             }
         }
     }
-    Ok((formats, rejected))
+    Ok((formats, rejected, media_diagnostics))
+}
+
+fn xa_diagnostics_for_chart(
+    chart_path: &Path,
+    format: dtx_core::ChartFormat,
+) -> Vec<ImportChartDiagnostic> {
+    use std::collections::BTreeSet;
+
+    let Ok(file) = fs::File::open(chart_path) else {
+        return Vec::new();
+    };
+    let Ok(report) = dtx_core::parse_source(file, format, dtx_core::ParseOptions::default()) else {
+        return Vec::new();
+    };
+    let chart = report.chart;
+    let chart_dir = chart_path.parent().unwrap_or_else(|| Path::new(""));
+    let mut used_slots = chart
+        .chips
+        .iter()
+        .filter_map(|chip| (chip.wav_slot != 0).then_some(chip.wav_slot))
+        .collect::<BTreeSet<_>>();
+    used_slots.extend(chart.metadata.bgm_wav_slots.iter().copied());
+
+    let mut diagnostics = Vec::new();
+    for slot in used_slots {
+        let Some(filename) = chart.assets.wav.get(slot) else {
+            continue;
+        };
+        let is_xa = Path::new(filename)
+            .extension()
+            .and_then(|extension| extension.to_str())
+            .is_some_and(|extension| extension.eq_ignore_ascii_case("xa"));
+        if !is_xa {
+            continue;
+        }
+        let normalized = filename.replace('\\', "/");
+        let relative = Path::new(&normalized);
+        let parent = relative.parent().unwrap_or_else(|| Path::new(""));
+        let Some(stem) = relative.file_stem().and_then(|stem| stem.to_str()) else {
+            continue;
+        };
+        let fallback = ["ogg", "wav", "mp3"].into_iter().find_map(|extension| {
+            let candidate = parent.join(format!("{stem}.{extension}"));
+            dtx_core::resolve_chart_asset_path(chart_dir, &candidate.to_string_lossy())
+        });
+        let required = chart.metadata.bgm_wav_slots.contains(&slot)
+            || chart.chips.iter().any(|chip| {
+                chip.wav_slot == slot
+                    && dtx_core::chip_classify::classify(chip.channel)
+                        == dtx_core::chip_classify::ChipClass::BGM
+            });
+        let requested = chart_dir.join(&normalized);
+        let detail = match fallback {
+            Some(resolved) => format!(
+                "XA audio slot {slot} ({filename}) will be substituted with {}; no converter was run",
+                resolved.display()
+            ),
+            None if required => format!(
+                "required BGM slot {slot} references unsupported XA {}; provide a same-stem OGG, WAV, or MP3 file",
+                requested.display()
+            ),
+            None => format!(
+                "optional audio slot {slot} references unsupported XA {}; provide a same-stem OGG, WAV, or MP3 file",
+                requested.display()
+            ),
+        };
+        diagnostics.push(ImportChartDiagnostic {
+            path: chart_path.to_path_buf(),
+            detail,
+        });
+    }
+    diagnostics
 }
 
 /// Decode an archive entry name: UTF-8 if valid, else Shift-JIS

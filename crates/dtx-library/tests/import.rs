@@ -163,6 +163,47 @@ fn mixed_format_archive_reports_playable_and_rejected_counts() {
 }
 
 #[test]
+fn archive_reports_xa_substitution_without_running_a_converter() {
+    let dir = test_dir("xa-substitution");
+    let archive = dir.join("XaFallback.zip");
+    make_zip(
+        &archive,
+        &[
+            (
+                "Song/chart.dtx",
+                b"#WAV01: MUSIC.xa\n#00001: 01\n#00012: 01\n",
+            ),
+            ("Song/music.OGG", b"ogg"),
+        ],
+    );
+
+    let out = import_archive(&archive, &dir.join("songs")).expect("XA chart imports");
+
+    assert_eq!(out.media_diagnostics.len(), 1);
+    assert!(out.media_diagnostics[0].detail.contains("substituted"));
+    assert!(out.media_diagnostics[0].detail.contains("music.OGG"));
+}
+
+#[test]
+fn archive_reports_unresolved_required_xa_with_recovery_guidance() {
+    let dir = test_dir("xa-required");
+    let archive = dir.join("XaRequired.zip");
+    make_zip(
+        &archive,
+        &[(
+            "Song/chart.dtx",
+            b"#WAV01: music.xa\n#00001: 01\n#00012: 01\n",
+        )],
+    );
+
+    let out = import_archive(&archive, &dir.join("songs")).expect("archive still imports");
+
+    assert_eq!(out.media_diagnostics.len(), 1);
+    assert!(out.media_diagnostics[0].detail.contains("required BGM"));
+    assert!(out.media_diagnostics[0].detail.contains("OGG, WAV, or MP3"));
+}
+
+#[test]
 fn zip_bare_files_get_archive_name_folder() {
     let dir = test_dir("bare");
     let archive = dir.join("MySong.zip");

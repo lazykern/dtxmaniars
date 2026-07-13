@@ -16,11 +16,18 @@ use gameplay_drums::events::LaneHit;
 use gameplay_drums::judge::{BarLengthChangeList, BpmChangeList};
 use gameplay_drums::resources::ActiveChart;
 use std::fs;
+use std::path::Path;
 
 fn load_minimal() -> Chart {
     let path = "../dtx-core/tests/fixtures/minimal.dtx";
     let bytes = fs::read(path).expect("minimal.dtx fixture");
     dtx_core::parse(bytes.as_slice()).expect("minimal.dtx parses")
+}
+
+fn load_xa_fixture(name: &str) -> Chart {
+    let path = format!("tests/fixtures/xa/{name}");
+    let bytes = fs::read(path).expect("XA chart fixture");
+    dtx_core::parse(bytes.as_slice()).expect("XA fixture parses")
 }
 
 fn build_app() -> App {
@@ -323,4 +330,60 @@ fn play_chart_run_dtx_cli_matches_test() {
         stdout.contains("gauge:      21.0%"),
         "expected gauge=21%, got: {stdout}"
     );
+}
+
+#[test]
+fn xa_fallback_uses_ogg_then_wav_then_mp3_case_insensitively() {
+    use gameplay_drums::sound_bank::{resolve_chart_audio, AudioResolution};
+
+    let dir = std::env::temp_dir().join(format!("dtx-xa-priority-{}", std::process::id()));
+    let _ = fs::remove_dir_all(&dir);
+    fs::create_dir_all(&dir).expect("create XA fixture directory");
+    fs::write(dir.join("music.MP3"), b"mp3").expect("write MP3 fallback");
+    fs::write(dir.join("music.WAV"), b"wav").expect("write WAV fallback");
+    fs::write(dir.join("music.OGG"), b"ogg").expect("write OGG fallback");
+
+    assert_eq!(
+        resolve_chart_audio(&dir, "MUSIC.xa"),
+        AudioResolution::Substituted(dir.join("music.OGG"))
+    );
+
+    fs::remove_file(dir.join("music.OGG")).expect("remove OGG fallback");
+    assert_eq!(
+        resolve_chart_audio(&dir, "music.XA"),
+        AudioResolution::Substituted(dir.join("music.WAV"))
+    );
+    fs::remove_file(dir.join("music.WAV")).expect("remove WAV fallback");
+    assert_eq!(
+        resolve_chart_audio(&dir, "music.xa"),
+        AudioResolution::Substituted(dir.join("music.MP3"))
+    );
+
+    fs::remove_dir_all(dir).expect("remove XA fixture directory");
+}
+
+#[test]
+fn missing_required_xa_bgm_rejects_but_optional_se_degrades() {
+    use gameplay_drums::sound_bank::{collect_preload_wav_slots, preflight_chart_audio_report};
+
+    let required = load_xa_fixture("required_bgm.dtx");
+    let required_report = preflight_chart_audio_report(
+        &required,
+        Some(Path::new("tests/fixtures/xa")),
+        &collect_preload_wav_slots(&required),
+    );
+    assert_eq!(required_report.required_failures.len(), 1);
+    assert!(required_report.warnings.is_empty());
+    assert!(required_report.required_failures[0]
+        .guidance
+        .contains("OGG, WAV, or MP3"));
+
+    let optional = load_xa_fixture("optional_se.dtx");
+    let optional_report = preflight_chart_audio_report(
+        &optional,
+        Some(Path::new("tests/fixtures/xa")),
+        &collect_preload_wav_slots(&optional),
+    );
+    assert_eq!(optional_report.warnings.len(), 1);
+    assert!(optional_report.required_failures.is_empty());
 }
