@@ -163,6 +163,8 @@ fn enqueue_startup_config_warning(
 
 fn present_notifications(
     notifications: Res<NotificationQueue>,
+    typography: Res<Typography>,
+    policy: Res<AccessibilityPolicy>,
     mut commands: Commands,
     visible: Query<Entity, With<widget::notification::GlobalNotificationRoot>>,
 ) {
@@ -180,8 +182,13 @@ fn present_notifications(
         };
         commands.spawn((
             widget::notification::GlobalNotificationRoot,
-            Text::new(notification.message.clone()),
-            Theme::label_font(),
+            Text::new(format!(
+                "[{}] {}",
+                notification.tone.marker(),
+                notification.message
+            )),
+            typography.font(TypographyRole::Label, *policy),
+            SemanticText(TypographyRole::Label),
             TextColor(theme.text_primary),
             BackgroundColor(Color::srgba(0.02, 0.02, 0.02, 0.94)),
             BorderColor::all(accent),
@@ -231,6 +238,12 @@ mod tests {
         app.add_plugins(MinimalPlugins)
             .init_resource::<ButtonInput<KeyCode>>()
             .init_resource::<ButtonInput<MouseButton>>()
+            .insert_resource(AccessibilityPolicy::from(
+                &dtx_config::AccessibilityConfig {
+                    text_scale: dtx_config::TextScale::XLarge,
+                    ..Default::default()
+                },
+            ))
             .insert_resource(StartupConfigWarning(Some(
                 "Recovered invalid config".into(),
             )))
@@ -238,11 +251,17 @@ mod tests {
 
         app.update();
 
-        let visible = app
+        let (text, font) = app
             .world_mut()
-            .query_filtered::<&Text, With<widget::notification::GlobalNotificationRoot>>()
+            .query_filtered::<
+                (&Text, &TextFont),
+                With<widget::notification::GlobalNotificationRoot>,
+            >()
             .iter(app.world())
-            .any(|text| text.0.contains("Recovered invalid config"));
-        assert!(visible);
+            .next()
+            .expect("global warning text");
+        assert!(text.0.contains("WARNING"));
+        assert!(text.0.contains("Recovered invalid config"));
+        assert_eq!(font.font_size, bevy::text::FontSize::Px(24.0));
     }
 }

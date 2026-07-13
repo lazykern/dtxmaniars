@@ -173,8 +173,9 @@ target at `/home/lazykern/lab/dtxmaniars/target`.
 
 ### Documentation and documented commands
 
-- `cargo test -p docs-check`: 3 passed, 0 failed.
-- `cargo run -p docs-check`: 391 repository files checked, 0 failures.
+- `cargo test -p docs-check`: 5 passed, 0 failed, including invalid,
+  malformed, and reversed reference-line ranges.
+- `cargo run -p docs-check`: 393 repository files checked, 0 failures.
 - `cargo run -p dtx-cli -- validate crates/dtx-core/tests/fixtures/minimal.dtx`:
   validated the fixture and reported its metadata and two chips.
 - Every safe package/check/test command named by the eleven refreshed crate
@@ -204,6 +205,22 @@ target at `/home/lazykern/lab/dtxmaniars/target`.
   failures or ignored tests.
 - `git diff --check` passed.
 
+### Independent pre-merge review remediation
+
+The independent review found three semantic gaps and two guarantees that were
+present but insufficiently demonstrated. Before merge, the branch was repaired
+and reverified so hidden drum chips update empty-hit sound templates, FillIn
+start/end state rebuilds across seeks, startup config recovery is presented by
+global UI, and reference citations reject zero, reversed, and past-EOF line
+ranges. The unused primary-BGM bootstrap path was removed so the only live
+scheduler is mixer-gated, and decoded BGA crop rectangles now clamp authored
+edges exactly at both zero and media bounds. Focused regression tests cover all
+five original review areas. Follow-up remediation also ensures hidden-template WAV
+slots participate in the immediate preload/diagnostic tier, notification text
+uses the active accessibility scale plus explicit INFO/OK/WARNING/ERROR
+markers, the production FixedUpdate ordering exposes MixerAdd before primary
+BGM eligibility is observed, and malformed citation-range syntax fails closed.
+
 ### Cross-cycle acceptance and scope
 
 Focused and workspace evidence covers one-rate chart/audio/visual/seek/end
@@ -214,7 +231,8 @@ Practice loops; composable library discovery; and non-color, scalable,
 reduced-effect accessibility behavior. The maintained guides and ADR map pass
 the executable documentation checker.
 
-`git diff --name-only main...HEAD` contained 189 program files. A mechanical
+`git diff --name-only main...HEAD` contained 194 program files at final
+closeout. A mechanical
 path audit found zero CI/CD paths and zero `references/` paths. The main
 checkout also reported a clean `git status --short references`. No CI/CD or
 vendored reference change is part of this program.

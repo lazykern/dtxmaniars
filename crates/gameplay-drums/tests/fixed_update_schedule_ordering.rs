@@ -30,6 +30,9 @@
 //! for the real-registration smoke coverage that exists instead).
 
 use bevy::prelude::*;
+use gameplay_drums::mixer_events::{
+    MixerEligibility, MixerEvent, MixerEventCursor, MixerEventKind,
+};
 use gameplay_drums::DrumsSets;
 
 fn update_audio_clock_stub() {}
@@ -40,17 +43,43 @@ fn track_attempt_stub() {}
 fn wrap_micro_report_stub() {}
 fn ramp_apply_stub() {}
 
+#[derive(Resource, Default)]
+struct PrimaryBgmObserved(bool);
+
+fn advance_real_mixer_cursor(
+    mut cursor: ResMut<MixerEventCursor>,
+    mut eligibility: ResMut<MixerEligibility>,
+) {
+    cursor.advance_to(500, &mut eligibility);
+}
+
+fn observe_primary_bgm_eligibility(
+    eligibility: Res<MixerEligibility>,
+    mut observed: ResMut<PrimaryBgmObserved>,
+) {
+    observed.0 = eligibility.is_slot_eligible(7);
+}
+
 /// Build an `App` with the FixedUpdate ordering graph mirrored from
 /// `lib.rs` + `practice/stats.rs`. `cyclic` reproduces the pre-fix wiring
 /// (`track_attempt_stub` also `.before(apply_seek_stub)`).
 fn build_app(cyclic: bool) -> App {
     let mut app = App::new();
 
+    app.insert_resource(MixerEventCursor::new(vec![MixerEvent {
+        at_ms: 500,
+        slot: 7,
+        kind: MixerEventKind::Add,
+    }]))
+    .insert_resource(MixerEligibility::restricted())
+    .init_resource::<PrimaryBgmObserved>();
+
     app.configure_sets(
         FixedUpdate,
         (
             DrumsSets::ClockSync.after(update_audio_clock_stub),
-            DrumsSets::Input.after(DrumsSets::ClockSync),
+            DrumsSets::Mixer.after(DrumsSets::ClockSync),
+            DrumsSets::Input.after(DrumsSets::Mixer),
             DrumsSets::NoteSpawn.after(DrumsSets::Input),
             DrumsSets::Judge.after(DrumsSets::NoteSpawn),
             DrumsSets::Score.after(DrumsSets::Judge),
@@ -65,7 +94,15 @@ fn build_app(cyclic: bool) -> App {
             .chain(),
     )
     .add_systems(FixedUpdate, apply_seek_stub.before(update_audio_clock_stub))
-    .add_systems(FixedUpdate, judge_stub.in_set(DrumsSets::Judge));
+    .add_systems(FixedUpdate, judge_stub.in_set(DrumsSets::Judge))
+    .add_systems(
+        FixedUpdate,
+        advance_real_mixer_cursor.in_set(DrumsSets::Mixer),
+    )
+    .add_systems(
+        FixedUpdate,
+        observe_primary_bgm_eligibility.in_set(DrumsSets::NoteSpawn),
+    );
 
     if cyclic {
         app.add_systems(
@@ -94,6 +131,7 @@ fn fixed_update_ordering_builds_without_a_cycle() {
     // Time<Fixed> accumulation (which a bare `app.update()` cannot
     // guarantee triggers on the very first frame).
     app.world_mut().run_schedule(FixedUpdate);
+    assert!(app.world().resource::<PrimaryBgmObserved>().0);
 }
 
 #[test]

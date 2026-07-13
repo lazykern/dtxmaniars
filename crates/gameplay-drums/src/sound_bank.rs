@@ -90,7 +90,7 @@ pub fn collect_immediate_wav_slots(chart: &Chart) -> BTreeSet<u32> {
     chart
         .chips
         .iter()
-        .filter(|chip| lane_of(chip.channel).is_some())
+        .filter(|chip| lane_of(chip.channel).is_some() || chip.channel.is_hidden_drum())
         .filter_map(|chip| (chip.wav_slot != 0).then_some(chip.wav_slot))
         .chain(
             chart
@@ -411,7 +411,7 @@ mod tests {
     use std::collections::BTreeSet;
 
     #[test]
-    fn immediate_tier_is_lane_notes_and_empty_hits_only() {
+    fn immediate_tier_includes_lane_notes_hidden_templates_and_empty_hits() {
         use super::{collect_deferred_wav_slots, collect_immediate_wav_slots};
         let chart = Chart {
             chips: vec![
@@ -419,6 +419,7 @@ mod tests {
                 Chip::with_wav(0, EChannel::Snare, 0.5, 2),     // immediate (lane)
                 Chip::with_wav(0, EChannel::SE01, 0.75, 3),     // deferred (non-lane)
                 Chip::with_wav(0, EChannel::BassDrum, 0.25, 4), // immediate (lane)
+                Chip::with_wav(0, EChannel::SnareHidden, 0.80, 6), // immediate template
             ],
             empty_hit_events: vec![EmptyHitEvent {
                 lane: 0,
@@ -432,7 +433,7 @@ mod tests {
         let immediate = collect_immediate_wav_slots(&chart);
         let deferred = collect_deferred_wav_slots(&chart);
 
-        assert_eq!(immediate, [2, 4, 5].into_iter().collect::<BTreeSet<_>>());
+        assert_eq!(immediate, [2, 4, 5, 6].into_iter().collect::<BTreeSet<_>>());
         assert_eq!(deferred, [1, 3].into_iter().collect::<BTreeSet<_>>());
         // Tiers must be disjoint.
         assert!(immediate.is_disjoint(&deferred));
@@ -459,6 +460,21 @@ mod tests {
         let slots = collect_preload_wav_slots(&chart);
 
         assert_eq!(slots, [1, 2, 3, 4].into_iter().collect::<BTreeSet<_>>());
+    }
+
+    #[test]
+    fn parsed_hidden_drum_slot_is_in_the_immediate_preload_tier() {
+        let chart = dtx_core::parse_str("#WAV01: hidden-snare.wav\n#00032: 01\n")
+            .expect("parse hidden-channel fixture");
+
+        assert!(chart
+            .chips
+            .iter()
+            .any(|chip| chip.channel == EChannel::SnareHidden && chip.wav_slot == 1));
+        assert_eq!(
+            super::collect_immediate_wav_slots(&chart),
+            [1].into_iter().collect::<BTreeSet<_>>()
+        );
     }
 
     #[test]

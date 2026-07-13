@@ -14,6 +14,18 @@ pub enum NotificationTone {
     Error,
 }
 
+impl NotificationTone {
+    /// Textual marker keeps tone legible without relying on border color.
+    pub const fn marker(self) -> &'static str {
+        match self {
+            Self::Info => "INFO",
+            Self::Success => "OK",
+            Self::Warning => "WARNING",
+            Self::Error => "ERROR",
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Notification {
     pub message: String,

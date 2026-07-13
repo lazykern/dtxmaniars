@@ -149,7 +149,14 @@ fn reference_repository_root(root: &Path) -> &Path {
         .unwrap_or(root)
 }
 
-fn parse_reference_location(token: &str) -> (&str, Option<(usize, usize)>) {
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ReferenceLineRange {
+    None,
+    Bounds { start: usize, end: usize },
+    Invalid,
+}
+
+fn parse_reference_location(token: &str) -> (&str, ReferenceLineRange) {
     let token = token.trim_end_matches(['.', ',', ';', ')', ']']);
     if let Some((path, suffix)) = token.rsplit_once(':') {
         if Path::new(path).extension().is_some() && !suffix.contains('/') {
@@ -157,16 +164,35 @@ fn parse_reference_location(token: &str) -> (&str, Option<(usize, usize)>) {
             let mut bounds = location.split('-');
             if let (Some(start), end, None) = (bounds.next(), bounds.next(), bounds.next()) {
                 if let Ok(start) = start.parse::<usize>() {
-                    let end = end
-                        .and_then(|value| value.parse::<usize>().ok())
-                        .unwrap_or(start);
-                    return (path, Some((start, end)));
+                    match end {
+                        Some(value) => match value.parse::<usize>() {
+                            Ok(end) => {
+                                return (path, ReferenceLineRange::Bounds { start, end });
+                            }
+                            Err(_) => return (path, ReferenceLineRange::Invalid),
+                        },
+                        None => {
+                            return (path, ReferenceLineRange::Bounds { start, end: start });
+                        }
+                    }
                 }
             }
-            return (path, None);
+            let looks_like_location = suffix.starts_with('L')
+                || location
+                    .chars()
+                    .next()
+                    .is_some_and(|character| character.is_ascii_digit());
+            return (
+                path,
+                if looks_like_location {
+                    ReferenceLineRange::Invalid
+                } else {
+                    ReferenceLineRange::None
+                },
+            );
         }
     }
-    (token, None)
+    (token, ReferenceLineRange::None)
 }
 
 fn check_file(root: &Path, file: &Path, failures: &mut Vec<CheckFailure>) -> io::Result<()> {
@@ -215,7 +241,7 @@ fn check_file(root: &Path, file: &Path, failures: &mut Vec<CheckFailure>) -> io:
 
         if !line.contains(&obsolete) {
             for found in reference_path.find_iter(line) {
-                let (token, line_range) = parse_reference_location(found.as_str());
+                let (token, parsed_line_range) = parse_reference_location(found.as_str());
                 if token
                     .chars()
                     .any(|character| matches!(character, '[' | ']' | '*'))
@@ -251,7 +277,17 @@ fn check_file(root: &Path, file: &Path, failures: &mut Vec<CheckFailure>) -> io:
                         target: token.to_owned(),
                         reason: FailureReason::MissingLocalTarget,
                     });
-                } else if let Some((start, end)) = line_range {
+                } else if parsed_line_range == ReferenceLineRange::Invalid {
+                    failures.push(CheckFailure {
+                        file: relative.clone(),
+                        line: line_number,
+                        target: found
+                            .as_str()
+                            .trim_end_matches(['.', ',', ';', ')', ']'])
+                            .to_owned(),
+                        reason: FailureReason::InvalidReferenceLineRange,
+                    });
+                } else if let ReferenceLineRange::Bounds { start, end } = parsed_line_range {
                     let line_count = fs::read_to_string(&reference_file)?.lines().count();
                     if start == 0 || start > end || end > line_count {
                         failures.push(CheckFailure {
@@ -407,6 +443,16 @@ mod tests {
     fn reference_ranges_must_be_ordered_and_within_file() {
         let failures =
             check_repository(&fixture("invalid-range"), CheckOptions::fixture()).unwrap();
+        assert_eq!(failures.len(), 2);
+        assert!(failures
+            .iter()
+            .all(|failure| failure.reason == FailureReason::InvalidReferenceLineRange));
+    }
+
+    #[test]
+    fn malformed_reference_ranges_fail() {
+        let failures =
+            check_repository(&fixture("malformed-range"), CheckOptions::fixture()).unwrap();
         assert_eq!(failures.len(), 2);
         assert!(failures
             .iter()
