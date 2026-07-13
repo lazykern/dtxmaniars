@@ -66,9 +66,10 @@ pub fn normalize_gda_head(head: &str) -> Result<Option<EChannel>, LegacyChannelE
         "HT" => EChannel::HighTom,
         "LT" => EChannel::LowTom,
         "CY" => EChannel::Cymbal,
+        "FI" => EChannel::FillIn,
         // Flow-speed and guitar/bass commands do not produce drums gameplay.
-        "GS" | "DS" | "FI" | "G0" | "G1" | "G2" | "G3" | "G4" | "G5" | "G6" | "G7" | "GW"
-        | "B0" | "B1" | "B2" | "B3" | "B4" | "B5" | "B6" | "B7" | "BW" => return Ok(None),
+        "GS" | "DS" | "G0" | "G1" | "G2" | "G3" | "G4" | "G5" | "G6" | "G7" | "GW" | "B0"
+        | "B1" | "B2" | "B3" | "B4" | "B5" | "B6" | "B7" | "BW" => return Ok(None),
         other => return Err(LegacyChannelError::Unsupported(other.to_owned())),
     }))
 }

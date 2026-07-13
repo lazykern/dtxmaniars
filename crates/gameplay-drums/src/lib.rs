@@ -59,6 +59,7 @@ pub mod skill;
 pub mod sound_bank;
 pub mod stage_end;
 pub mod stage_rect;
+pub mod system_events;
 pub mod timeline;
 pub mod ui_z;
 pub mod widget_layout;
@@ -221,6 +222,7 @@ pub fn plugin(app: &mut App) {
         editor::plugin,
         hit_feedback::plugin,
         menu_nav::plugin,
+        system_events::plugin,
     ));
 }
 

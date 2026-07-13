@@ -131,6 +131,19 @@ pub const fn classify(ch: EChannel) -> ChipClass {
         // Drums fill-in (visual only)
         EChannel::DrumsFillin => ChipClass::DrumsFillin,
 
+        EChannel::HiHatCloseHidden
+        | EChannel::SnareHidden
+        | EChannel::BassDrumHidden
+        | EChannel::HighTomHidden
+        | EChannel::LowTomHidden
+        | EChannel::CymbalHidden
+        | EChannel::FloorTomHidden
+        | EChannel::HiHatOpenHidden
+        | EChannel::RideCymbalHidden
+        | EChannel::LeftCymbalHidden
+        | EChannel::LeftPedalHidden
+        | EChannel::LeftBassDrumHidden => ChipClass::System,
+
         // Guitar
         EChannel::GuitarOpen
         | EChannel::GuitarRxxBxx
@@ -168,12 +181,15 @@ pub const fn classify(ch: EChannel) -> ChipClass {
         EChannel::BeatLine => ChipClass::BarLine,
         EChannel::BeatLineShift => ChipClass::BeatLineShift,
         EChannel::BeatLineDisplay => ChipClass::BeatLineDisplay,
+        EChannel::MIDIChorus => ChipClass::MidiChorus,
+        EChannel::FillIn => ChipClass::FillIn,
         EChannel::BarLength => ChipClass::BarLength,
 
         // BPM
         EChannel::BPM | EChannel::BPMEx => ChipClass::BPM,
 
         // System
+        EChannel::Click | EChannel::FirstSoundChip => ChipClass::Click,
         EChannel::Nil => ChipClass::System,
         other => {
             debug_assert!(other.is_se());

@@ -101,3 +101,16 @@ fn malformed_gda_channel_has_line_diagnostic() {
         diagnostic.line == Some(4) && diagnostic.kind == DiagnosticKind::UnsupportedChannel
     }));
 }
+
+#[test]
+fn hidden_and_system_channels_never_become_drum_notes() {
+    let report = legacy_fixture("compatibility/system_channels.dtx", ChartFormat::Dtx);
+    assert_eq!(report.chart.drum_chips().count(), 1);
+    for byte in [0x31, 0x3C, 0x52, 0x53, 0xEC, 0xED] {
+        assert!(report
+            .chart
+            .chips
+            .iter()
+            .any(|chip| chip.channel as u8 == byte));
+    }
+}

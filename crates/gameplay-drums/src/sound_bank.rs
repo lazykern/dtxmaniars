@@ -92,6 +92,7 @@ const fn channel_uses_wav(channel: EChannel) -> bool {
             | ChipClass::Wailing
             | ChipClass::BGM
             | ChipClass::SE
+            | ChipClass::Click
     )
 }
 
@@ -205,7 +206,7 @@ pub fn preload_chart_sounds_on_enter(
 
 /// True for chart-timed auto-SE channels.
 pub const fn is_auto_se_channel(ch: EChannel) -> bool {
-    ch.is_se()
+    ch.is_se() || ch.is_timed_system_sound()
 }
 
 #[cfg(test)]

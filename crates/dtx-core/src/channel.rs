@@ -46,6 +46,20 @@ pub enum EChannel {
     GuitarYxxYx = 0x93,
     GuitarPxx = 0xA3,
 
+    // Hidden drums: timed sound-lane updates, never visible or judgeable.
+    HiHatCloseHidden = 0x31,
+    SnareHidden = 0x32,
+    BassDrumHidden = 0x33,
+    HighTomHidden = 0x34,
+    LowTomHidden = 0x35,
+    CymbalHidden = 0x36,
+    FloorTomHidden = 0x37,
+    HiHatOpenHidden = 0x38,
+    RideCymbalHidden = 0x39,
+    LeftCymbalHidden = 0x3A,
+    LeftPedalHidden = 0x3B,
+    LeftBassDrumHidden = 0x3C,
+
     // BGA image/video layers (BocuD EChannel.cs lines 10-13, 64-76)
     BGALayer4 = 0x56,
     BGALayer5 = 0x57,
@@ -62,6 +76,8 @@ pub enum EChannel {
     BonusEffect4 = 0x4F,
     BarLine = 0x50,
     BeatLine = 0x51,
+    MIDIChorus = 0x52,
+    FillIn = 0x53,
     BeatLineShift = 0xC1,
     BeatLineDisplay = 0xC2,
 
@@ -103,6 +119,10 @@ pub enum EChannel {
     Movie = 0x54,
     BGALayer3 = 0x55,
     MovieFull = 0x5A,
+
+    // Timed system sounds.
+    Click = 0xEC,
+    FirstSoundChip = 0xED,
 }
 
 impl EChannel {
@@ -136,6 +156,18 @@ impl EChannel {
             0x25 => Self::GuitarRxBxx,
             0x26 => Self::GuitarRGxxx,
             0x27 => Self::GuitarRGBxx,
+            0x31 => Self::HiHatCloseHidden,
+            0x32 => Self::SnareHidden,
+            0x33 => Self::BassDrumHidden,
+            0x34 => Self::HighTomHidden,
+            0x35 => Self::LowTomHidden,
+            0x36 => Self::CymbalHidden,
+            0x37 => Self::FloorTomHidden,
+            0x38 => Self::HiHatOpenHidden,
+            0x39 => Self::RideCymbalHidden,
+            0x3A => Self::LeftCymbalHidden,
+            0x3B => Self::LeftPedalHidden,
+            0x3C => Self::LeftBassDrumHidden,
             0x93 => {
                 Self::// Renamed: was Guitar_xxxYx
     GuitarYxxYx
@@ -155,6 +187,8 @@ impl EChannel {
             0x4F => Self::BonusEffect4,
             0x50 => Self::BarLine,
             0x51 => Self::BeatLine,
+            0x52 => Self::MIDIChorus,
+            0x53 => Self::FillIn,
             0xC1 => Self::BeatLineShift,
             0xC2 => Self::BeatLineDisplay,
             0x54 => Self::Movie,
@@ -192,6 +226,8 @@ impl EChannel {
             0x90 => Self::SE30,
             0x91 => Self::SE31,
             0x92 => Self::SE32,
+            0xEC => Self::Click,
+            0xED => Self::FirstSoundChip,
             _ => return None,
         })
     }
@@ -260,6 +296,35 @@ impl EChannel {
             self as u8,
             0x61..=0x69 | 0x70..=0x79 | 0x80..=0x89 | 0x90..=0x92
         )
+    }
+
+    /// True for hidden drum-channel events (0x31 through 0x3C).
+    pub const fn is_hidden_drum(self) -> bool {
+        matches!(self as u8, 0x31..=0x3C)
+    }
+
+    /// Visible sound lane corresponding to a hidden drum event.
+    pub const fn hidden_sound_lane(self) -> Option<Self> {
+        Some(match self {
+            Self::HiHatCloseHidden => Self::HiHatClose,
+            Self::SnareHidden => Self::Snare,
+            Self::BassDrumHidden => Self::BassDrum,
+            Self::HighTomHidden => Self::HighTom,
+            Self::LowTomHidden => Self::LowTom,
+            Self::CymbalHidden => Self::Cymbal,
+            Self::FloorTomHidden => Self::FloorTom,
+            Self::HiHatOpenHidden => Self::HiHatOpen,
+            Self::RideCymbalHidden => Self::RideCymbal,
+            Self::LeftCymbalHidden => Self::LeftCymbal,
+            Self::LeftPedalHidden => Self::LeftPedal,
+            Self::LeftBassDrumHidden => Self::LeftBassDrum,
+            _ => return None,
+        })
+    }
+
+    /// True for system channels that schedule audio without judgment.
+    pub const fn is_timed_system_sound(self) -> bool {
+        matches!(self, Self::Click | Self::FirstSoundChip)
     }
 
     /// True for DTXManiaNX bonus-effect marker channels 0x4C..=0x4F.
@@ -336,6 +401,17 @@ mod tests {
         assert!(EChannel::BonusEffect1.is_bonus_effect());
         assert!(EChannel::BonusEffect4.is_bonus_effect());
         assert!(!EChannel::BonusEffect1.is_drum());
+    }
+
+    #[test]
+    fn hidden_channels_map_to_sound_lanes_but_are_not_notes() {
+        assert_eq!(EChannel::from_byte(0x31), Some(EChannel::HiHatCloseHidden));
+        assert_eq!(
+            EChannel::HiHatCloseHidden.hidden_sound_lane(),
+            Some(EChannel::HiHatClose)
+        );
+        assert!(EChannel::HiHatCloseHidden.is_hidden_drum());
+        assert!(!EChannel::HiHatCloseHidden.is_drum());
     }
 
     #[test]

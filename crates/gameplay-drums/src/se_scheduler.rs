@@ -63,7 +63,7 @@ fn schedule_se_chips(
     let source_dir = chart.source_path.as_ref().and_then(|p| p.parent());
 
     for (idx, chip) in chart.chart.chips.iter().enumerate() {
-        if !chip.channel.is_se() {
+        if !chip.channel.is_se() && !chip.channel.is_timed_system_sound() {
             continue;
         }
         if played.0.contains(&idx) {
