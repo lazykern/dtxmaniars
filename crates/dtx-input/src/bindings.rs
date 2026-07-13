@@ -621,4 +621,52 @@ HH = [{ key = "KeyX" }]
         assert_eq!(SystemVerb::from_key("nope"), None);
         assert_eq!(SYSTEM_VERBS.len(), 2);
     }
+
+    #[test]
+    fn lane_owner_names_the_channel_holding_the_source() {
+        let b = InputBindings::default();
+        assert_eq!(
+            lane_owner(&b, &BindSource::Midi { note: 38 }),
+            Some(EChannel::Snare)
+        );
+        assert_eq!(
+            lane_owner(&b, &BindSource::Key(KeyCode::Space)),
+            Some(EChannel::BassDrum)
+        );
+    }
+
+    #[test]
+    fn lane_owner_is_none_for_a_free_source() {
+        let b = InputBindings::default();
+        // Zone notes a 12-channel chart cannot address: xstick 37, ride bell 53.
+        assert_eq!(lane_owner(&b, &BindSource::Midi { note: 37 }), None);
+        assert_eq!(lane_owner(&b, &BindSource::Midi { note: 53 }), None);
+        assert_eq!(lane_owner(&b, &BindSource::Key(KeyCode::F9)), None);
+    }
+
+    #[test]
+    fn lane_owner_ignores_system_binds_lanes_win_ties() {
+        // A source bound ONLY to a verb has no lane owner — the rule is
+        // one-directional: it never refuses a lane bind.
+        let mut b = InputBindings::default();
+        b.bind_system(SystemVerb::Pause, BindSource::Midi { note: 37 });
+        assert_eq!(lane_owner(&b, &BindSource::Midi { note: 37 }), None);
+        // ...and once a lane takes it, the lane is reported.
+        b.bind_shared(EChannel::Snare, BindSource::Midi { note: 37 });
+        assert_eq!(
+            lane_owner(&b, &BindSource::Midi { note: 37 }),
+            Some(EChannel::Snare)
+        );
+    }
+
+    #[test]
+    fn lane_owner_returns_the_first_owner_in_lane_order() {
+        let mut b = InputBindings::default();
+        b.bind_shared(EChannel::Snare, BindSource::Midi { note: 42 }); // 42 = HH default
+        // HiHatClose precedes Snare in BINDABLE_CHANNELS.
+        assert_eq!(
+            lane_owner(&b, &BindSource::Midi { note: 42 }),
+            Some(EChannel::HiHatClose)
+        );
+    }
 }
