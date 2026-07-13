@@ -1,4 +1,5 @@
 use std::collections::BTreeSet;
+use std::path::{Path, PathBuf};
 
 use bevy::prelude::*;
 use bevy_kira_audio::prelude::AudioSource as KiraAudioSource;
@@ -9,6 +10,36 @@ use dtx_core::{
 
 use crate::lane_map::lane_of;
 use crate::resources::ActiveChart;
+
+/// Why a chart audio slot was not submitted to Bevy's decoder.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PreloadIssueKind {
+    Missing,
+    Unsupported,
+}
+
+/// One chart audio slot rejected during preloading.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PreloadIssue {
+    pub slot: u32,
+    pub path: PathBuf,
+    pub kind: PreloadIssueKind,
+}
+
+/// A chart audio slot accepted by preflight and submitted to the asset server.
+#[derive(Debug, Clone)]
+pub struct PreloadedAudio {
+    pub slot: u32,
+    pub path: PathBuf,
+    pub handle: Handle<KiraAudioSource>,
+}
+
+/// Complete outcome of chart-audio preloading.
+#[derive(Debug, Default)]
+pub struct PreloadBatch {
+    pub assets: Vec<PreloadedAudio>,
+    pub issues: Vec<PreloadIssue>,
+}
 
 /// Collect every chart WAV slot that can be needed during performance.
 pub fn collect_preload_wav_slots(chart: &Chart) -> BTreeSet<u32> {
@@ -64,19 +95,56 @@ const fn channel_uses_wav(channel: EChannel) -> bool {
     )
 }
 
-/// Preload a specific set of WAV slots into the shared audio bank, returning
-/// the handles requested (for load-state polling).
-pub fn preload_slots(
+/// Classify a chart-relative audio reference before submitting it to Bevy.
+fn preflight_chart_audio(
+    source_dir: Option<&Path>,
+    slot: u32,
+    filename: &str,
+) -> Result<PathBuf, PreloadIssue> {
+    let path = source_dir.map_or_else(
+        || PathBuf::from(filename),
+        |dir| {
+            dtx_core::resolve_chart_asset_path(dir, filename)
+                .unwrap_or_else(|| dir.join(filename.replace('\\', "/")))
+        },
+    );
+    if !path.is_file() {
+        return Err(PreloadIssue {
+            slot,
+            path,
+            kind: PreloadIssueKind::Missing,
+        });
+    }
+    if dtx_audio::supported_audio_format(&path).is_none() {
+        return Err(PreloadIssue {
+            slot,
+            path,
+            kind: PreloadIssueKind::Unsupported,
+        });
+    }
+    Ok(path)
+}
+
+/// Preload a specific set of WAV slots into the shared audio bank, retaining
+/// asset identity for load diagnostics.
+pub fn preload_slots_report(
     chart: &ActiveChart,
     asset_server: &AssetServer,
     bank: &mut dtx_audio::ChartSoundBank,
     slots: &BTreeSet<u32>,
-) -> Vec<Handle<KiraAudioSource>> {
+) -> PreloadBatch {
     let source_dir = chart.source_path.as_ref().and_then(|p| p.parent());
-    let mut handles = Vec::new();
+    let mut batch = PreloadBatch::default();
     for &slot in slots {
         let Some(filename) = chart.chart.assets.wav.get(slot) else {
             continue;
+        };
+        let path = match preflight_chart_audio(source_dir, slot, filename) {
+            Ok(path) => path,
+            Err(issue) => {
+                batch.issues.push(issue);
+                continue;
+            }
         };
         let handle = dtx_audio::preload_chart_sound(
             asset_server,
@@ -87,9 +155,23 @@ pub fn preload_slots(
             chart.chart.assets.wav.volume(slot),
             chart.chart.assets.wav.pan(slot),
         );
-        handles.push(handle);
+        batch.assets.push(PreloadedAudio { slot, path, handle });
     }
-    handles
+    batch
+}
+
+/// Compatibility wrapper for callers that only need handles for polling.
+pub fn preload_slots(
+    chart: &ActiveChart,
+    asset_server: &AssetServer,
+    bank: &mut dtx_audio::ChartSoundBank,
+    slots: &BTreeSet<u32>,
+) -> Vec<Handle<KiraAudioSource>> {
+    preload_slots_report(chart, asset_server, bank, slots)
+        .assets
+        .into_iter()
+        .map(|asset| asset.handle)
+        .collect()
 }
 
 /// Preload every chart WAV handle into the shared audio bank (both tiers).
@@ -99,7 +181,16 @@ pub fn preload_chart_sounds(
     bank: &mut dtx_audio::ChartSoundBank,
 ) -> usize {
     let slots = collect_preload_wav_slots(&chart.chart);
-    preload_slots(chart, asset_server, bank, &slots).len()
+    let batch = preload_slots_report(chart, asset_server, bank, &slots);
+    for issue in &batch.issues {
+        warn!(
+            "Performance: {:?} chart audio slot {} at {}",
+            issue.kind,
+            issue.slot,
+            issue.path.display()
+        );
+    }
+    batch.assets.len()
 }
 
 /// System wrapper for performance entry.
@@ -119,10 +210,9 @@ pub const fn is_auto_se_channel(ch: EChannel) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use std::collections::BTreeSet;
-
-    use super::collect_preload_wav_slots;
+    use super::{collect_preload_wav_slots, preflight_chart_audio, PreloadIssue, PreloadIssueKind};
     use dtx_core::{Chart, Chip, EChannel, EmptyHitEvent};
+    use std::collections::BTreeSet;
 
     #[test]
     fn immediate_tier_is_lane_notes_and_empty_hits_only() {
@@ -188,5 +278,48 @@ mod tests {
         let slots = collect_preload_wav_slots(&chart);
 
         assert_eq!(slots, [2].into_iter().collect::<BTreeSet<_>>());
+    }
+
+    #[test]
+    fn preflight_classifies_supported_missing_and_unsupported_audio() {
+        let dir = std::env::temp_dir().join(format!(
+            "dtx-preflight-{}-{}",
+            std::process::id(),
+            std::thread::current().name().unwrap_or("test")
+        ));
+        let nested = dir.join("Kit");
+        std::fs::create_dir_all(&nested).expect("create fixture dir");
+        std::fs::write(dir.join("tone.mp3"), b"not decoded by preflight")
+            .expect("write mp3 fixture");
+        std::fs::write(dir.join("legacy.xa"), b"unsupported").expect("write xa fixture");
+        let wav = nested.join("Snare.WAV");
+        std::fs::write(&wav, b"not decoded by preflight").expect("write wav fixture");
+
+        assert_eq!(
+            preflight_chart_audio(Some(&dir), 1, "tone.mp3"),
+            Ok(dir.join("tone.mp3"))
+        );
+        assert_eq!(
+            preflight_chart_audio(Some(&dir), 2, "missing.ogg"),
+            Err(PreloadIssue {
+                slot: 2,
+                path: dir.join("missing.ogg"),
+                kind: PreloadIssueKind::Missing,
+            })
+        );
+        assert_eq!(
+            preflight_chart_audio(Some(&dir), 3, "legacy.xa"),
+            Err(PreloadIssue {
+                slot: 3,
+                path: dir.join("legacy.xa"),
+                kind: PreloadIssueKind::Unsupported,
+            })
+        );
+        assert_eq!(
+            preflight_chart_audio(Some(&dir), 4, "kit\\snare.wav"),
+            Ok(wav)
+        );
+
+        std::fs::remove_dir_all(dir).expect("remove fixture dir");
     }
 }
