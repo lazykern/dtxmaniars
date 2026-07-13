@@ -184,7 +184,7 @@ fn channel_from_byte_round_trip() {
 #[test]
 fn channel_unknown_byte_returns_none() {
     assert!(EChannel::from_byte(0xFF).is_none());
-    assert!(EChannel::from_byte(0x90).is_none());
+    assert!(EChannel::from_byte(0x6A).is_none());
 }
 
 // =================== CDTX model tests ===================
