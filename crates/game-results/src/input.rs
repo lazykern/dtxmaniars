@@ -7,7 +7,8 @@ use game_shell::{
 };
 use gameplay_drums::resources::ActiveChart;
 
-use crate::ui::{RevealState, StatRow};
+use crate::ui::{ResultDetailsOpen, RevealState, StatRow};
+use crate::ResultAnalysis;
 
 /// The verb the cursor sits on. Resets to Continue on every Result enter.
 #[derive(Resource, Default, Clone, Copy, PartialEq, Eq, Debug)]
@@ -80,6 +81,8 @@ pub(crate) fn result_nav(
     mut cursor: ResMut<ResultVerb>,
     mut reveal: ResMut<RevealState>,
     mut practice_intent: ResMut<PracticeIntent>,
+    analysis: Res<ResultAnalysis>,
+    mut details: ResMut<ResultDetailsOpen>,
     chart: Res<ActiveChart>,
     mut requests: MessageWriter<TransitionRequest>,
     mut fades: Query<(
@@ -106,7 +109,8 @@ pub(crate) fn result_nav(
         verbs.push(NavVerb::Back);
     }
     let retry_key = keys.just_pressed(KeyCode::KeyR);
-    if verbs.is_empty() && !retry_key {
+    let toggle_details = keys.just_pressed(KeyCode::Tab);
+    if verbs.is_empty() && !retry_key && !toggle_details {
         return;
     }
 
@@ -131,12 +135,17 @@ pub(crate) fn result_nav(
         return;
     }
 
+    if toggle_details {
+        details.0 = !details.0;
+    }
+
     for verb in verbs {
         let action = reduce_result_nav(*cursor, verb);
         apply(
             action,
             &mut cursor,
             &mut practice_intent,
+            analysis.recommendation,
             &chart,
             &mut requests,
         );
@@ -146,6 +155,7 @@ pub(crate) fn result_nav(
             ResultAction::Activate(ResultVerb::Retry),
             &mut cursor,
             &mut practice_intent,
+            analysis.recommendation,
             &chart,
             &mut requests,
         );
@@ -160,6 +170,7 @@ fn apply(
     action: ResultAction,
     cursor: &mut ResultVerb,
     practice_intent: &mut PracticeIntent,
+    recommendation: Option<game_shell::PracticeRecommendation>,
     chart: &ActiveChart,
     requests: &mut MessageWriter<TransitionRequest>,
 ) {
@@ -179,7 +190,9 @@ fn apply(
         }
         ResultAction::PracticeNow | ResultAction::Activate(ResultVerb::Practice) => {
             if chart.source_path.is_some() {
-                *practice_intent = PracticeIntent::Manual;
+                *practice_intent = recommendation
+                    .map(PracticeIntent::Recommended)
+                    .unwrap_or(PracticeIntent::Manual);
                 request_transition(requests, AppState::SongLoading);
             } else {
                 request_transition(requests, AppState::SongSelect);
@@ -265,6 +278,8 @@ mod tests {
         world.insert_resource(ButtonInput::<KeyCode>::default());
         world.insert_resource(ResultVerb::default());
         world.insert_resource(PracticeIntent::default());
+        world.insert_resource(ResultAnalysis::default());
+        world.insert_resource(ResultDetailsOpen::default());
         world.insert_resource(RevealState {
             elapsed_ms: 2_000.0,
             total_ms: 1_130.0,

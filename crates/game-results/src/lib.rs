@@ -12,9 +12,13 @@ use bevy::prelude::*;
 use dtx_scoring::identity::{canonical_chart_hash, raw_file_sha256, ChartIdentity};
 use dtx_scoring::skill::{drum_performance_skill, drum_song_skill, DrumAutoPlay};
 use dtx_scoring::{JudgmentTotals, Rank, ScoreEntry, ScoreSource};
-use game_shell::{AppState, ScoreStoreResource};
+use game_shell::{
+    AppState, CompletedRunContext, PracticeRecommendation, RunKind, ScoreStoreResource,
+};
 use gameplay_drums::resources::{ActiveChart, Combo, DrumScoring, JudgmentCounts, Score};
+use gameplay_drums::results_analysis::{NormalPlayEventStream, PerformanceAnalysis};
 use gameplay_drums::stage_end::LastStageOutcome;
+use gameplay_drums::timeline::ChipTimeline;
 
 #[derive(Component)]
 pub struct ResultEntity;
@@ -31,6 +35,14 @@ pub(crate) enum SaveStatus {
     },
 }
 
+/// Ephemeral diagnostic context for the current Result entry.
+#[derive(Resource, Debug, Clone, Default)]
+pub(crate) struct ResultAnalysis {
+    pub report: PerformanceAnalysis,
+    pub pb_delta: Option<i64>,
+    pub recommendation: Option<PracticeRecommendation>,
+}
+
 pub struct GameResultsPlugin;
 
 impl Plugin for GameResultsPlugin {
@@ -41,10 +53,16 @@ impl Plugin for GameResultsPlugin {
 
 pub fn plugin(app: &mut App) {
     app.init_resource::<SaveStatus>()
+        .init_resource::<ResultAnalysis>()
         .init_resource::<input::ResultVerb>()
         .add_systems(
             OnEnter(AppState::Result),
-            (save_result, ui::spawn_result).chain(),
+            (
+                snapshot_result_analysis_system,
+                save_result,
+                ui::spawn_result,
+            )
+                .chain(),
         )
         .add_systems(OnExit(AppState::Result), ui::despawn_result)
         .add_systems(
@@ -52,6 +70,7 @@ pub fn plugin(app: &mut App) {
             (
                 input::result_nav,
                 ui::sync_verb_row,
+                ui::sync_details_panel,
                 ui::animate_staggered_reveal,
             )
                 .chain()
@@ -234,6 +253,53 @@ fn save_result(
     }
 }
 
+fn snapshot_result_analysis_system(
+    run: Res<CompletedRunContext>,
+    score: Res<Score>,
+    chart: Res<ActiveChart>,
+    store: Res<ScoreStoreResource>,
+    events: Res<NormalPlayEventStream>,
+    timeline: Res<ChipTimeline>,
+    mut analysis: ResMut<ResultAnalysis>,
+) {
+    *analysis = snapshot_result_analysis(&run, score.0, &chart, &store, &events, &timeline);
+}
+
+fn snapshot_result_analysis(
+    run: &CompletedRunContext,
+    score: i64,
+    chart: &ActiveChart,
+    store: &ScoreStoreResource,
+    events: &NormalPlayEventStream,
+    timeline: &ChipTimeline,
+) -> ResultAnalysis {
+    let report = PerformanceAnalysis::from_stream(events, &timeline.bar_ms);
+    let comparable = run.kind == RunKind::Normal && (run.playback_rate - 1.0).abs() < 1e-9;
+    if !comparable {
+        return ResultAnalysis {
+            report,
+            ..Default::default()
+        };
+    }
+
+    let identity = chart_identity(chart);
+    let pb_delta = store
+        .best_for_chart(&identity.canonical_hash)
+        .map(|best| score - best.score);
+    let recommendation = report.weakest_section.map(|section| {
+        PracticeRecommendation::weak_section(
+            section.loop_start_ms,
+            section.loop_end_ms,
+            report.weakest_lane.map(|lane| lane.lane),
+        )
+    });
+    ResultAnalysis {
+        report,
+        pb_delta,
+        recommendation,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -310,6 +376,53 @@ mod tests {
     #[test]
     fn save_status_defaults_to_practice() {
         assert_eq!(SaveStatus::default(), SaveStatus::Practice);
+    }
+
+    #[test]
+    fn result_analysis_compares_before_saving_and_recommends_a_section() {
+        use gameplay_drums::results_analysis::{NormalPlayEventStream, RecordedJudgment};
+        use gameplay_drums::timeline::ChipTimeline;
+
+        let chart = ActiveChart::default();
+        let mut store = ScoreStoreResource::default();
+        store.add(native_score_entry(
+            chart_identity(&chart),
+            "Prior".into(),
+            "Player".into(),
+            800,
+            3,
+            0.0,
+            3,
+            &JudgmentCounts::default(),
+            Rank::Unknown,
+            1,
+        ));
+        let events = NormalPlayEventStream {
+            events: vec![
+                RecordedJudgment::new(3, dtx_scoring::JudgmentKind::Miss, 0, 0, 2_100),
+                RecordedJudgment::new(3, dtx_scoring::JudgmentKind::Poor, -20, 1, 2_200),
+                RecordedJudgment::new(3, dtx_scoring::JudgmentKind::Poor, -25, 2, 2_300),
+            ],
+            truncated: false,
+        };
+        let timeline = ChipTimeline {
+            bar_ms: vec![0, 2_000, 4_000, 6_000],
+            ..Default::default()
+        };
+
+        let result = snapshot_result_analysis(
+            &game_shell::CompletedRunContext::normal(1.0),
+            900,
+            &chart,
+            &store,
+            &events,
+            &timeline,
+        );
+        assert_eq!(result.pb_delta, Some(100));
+        assert_eq!(
+            result.recommendation.expect("weak section").loop_start_ms,
+            0
+        );
     }
 
     #[test]

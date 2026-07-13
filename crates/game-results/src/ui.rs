@@ -10,7 +10,7 @@ use gameplay_drums::resources::{ActiveChart, Combo, DrumScoring, JudgmentCounts,
 use gameplay_drums::stage_end::LastStageOutcome;
 
 use crate::input::ResultVerb;
-use crate::{ResultEntity, SaveStatus};
+use crate::{ResultAnalysis, ResultEntity, SaveStatus};
 
 /// Marks a revealed element: fade starts at `reveal_at_ms`, rises to
 /// `target_alpha` (the element's authored alpha, e.g. 0.5 for
@@ -81,12 +81,27 @@ pub(crate) const LAST_SLOT: f32 = SLOT_LEGEND;
 #[derive(Component)]
 pub(crate) struct VerbLabel(pub ResultVerb);
 
+/// Whether the focused diagnostic surface is visible on the Result screen.
+#[derive(Resource, Default, Debug, Clone, Copy)]
+pub(crate) struct ResultDetailsOpen(pub bool);
+
+#[derive(Component)]
+pub(crate) struct ResultDetailsPanel;
+
 /// Verb label text with a width-stable selection prefix.
-pub(crate) fn verb_text(verb: ResultVerb, selected: bool) -> String {
+pub(crate) fn practice_label(has_recommendation: bool) -> &'static str {
+    if has_recommendation {
+        "Practice weakest section"
+    } else {
+        "Practice"
+    }
+}
+
+pub(crate) fn verb_text(verb: ResultVerb, selected: bool, has_recommendation: bool) -> String {
     let name = match verb {
         ResultVerb::Continue => "Continue",
         ResultVerb::Retry => "Retry",
-        ResultVerb::Practice => "Practice",
+        ResultVerb::Practice => practice_label(has_recommendation),
     };
     if selected {
         format!("▸ {name}")
@@ -193,9 +208,11 @@ pub(crate) fn spawn_result(
     outcome: Option<Res<LastStageOutcome>>,
     midi: Option<Res<game_shell::MidiConnected>>,
     status: Res<SaveStatus>,
+    analysis: Res<ResultAnalysis>,
 ) {
     commands.insert_resource(RevealState::new(LAST_SLOT));
     commands.insert_resource(ResultVerb::default());
+    commands.insert_resource(ResultDetailsOpen::default());
 
     let t = theme.0;
     let title = chart
@@ -252,10 +269,13 @@ pub(crate) fn spawn_result(
                 })
                 .with_children(|body| {
                     spawn_rank_panel(body, &t, rank, failed);
-                    spawn_stats_panel(body, &t, &counts, total, combo.max, score.0, *status);
+                    spawn_stats_panel(
+                        body, &t, &counts, total, combo.max, score.0, *status, &analysis,
+                    );
                 });
+                spawn_details_panel(card, &t, &analysis);
                 divider(card, &t, SLOT_VERBS);
-                spawn_verb_row(card, &t);
+                spawn_verb_row(card, &t, analysis.recommendation.is_some());
                 spawn_legends(card, &t, midi_connected);
             });
         });
@@ -339,6 +359,7 @@ fn spawn_stats_panel(
     max_combo: u32,
     score: i64,
     status: SaveStatus,
+    analysis: &ResultAnalysis,
 ) {
     body.spawn(Node {
         flex_grow: 1.0,
@@ -402,6 +423,105 @@ fn spawn_stats_panel(
                 ));
             }
         }
+        if let Some(delta) = analysis.pb_delta {
+            let text = if delta >= 0 {
+                format!("+{} vs PB", format_thousands(delta))
+            } else {
+                format!("{} below PB", format_thousands(delta.unsigned_abs() as i64))
+            };
+            right.spawn(reveal_text(
+                text,
+                Theme::font(14.0),
+                t.text_secondary,
+                SLOT_SAVE,
+            ));
+        }
+        if let Some(section) = analysis.report.weakest_section {
+            let lane = analysis
+                .report
+                .weakest_lane
+                .map(|lane| format!("lane {}", lane.lane + 1))
+                .unwrap_or_else(|| "timing".into());
+            right.spawn(reveal_text(
+                format!(
+                    "Weakest: {lane} · {}",
+                    chart_time_label(section.bar_start_ms)
+                ),
+                Theme::font(14.0),
+                t.text_secondary,
+                SLOT_SAVE,
+            ));
+        }
+    });
+}
+
+fn chart_time_label(ms: i64) -> String {
+    let total_tenths = (ms.max(0) + 50) / 100;
+    format!(
+        "{}:{:02}.{}",
+        total_tenths / 600,
+        (total_tenths / 10) % 60,
+        total_tenths % 10
+    )
+}
+
+fn details_text(analysis: &ResultAnalysis) -> String {
+    let report = &analysis.report;
+    let bias = match report.bias_ms {
+        Some(value) if value < -3 => format!("{}ms early", value.unsigned_abs()),
+        Some(value) if value > 3 => format!("{}ms late", value),
+        Some(_) => "centred".into(),
+        None => "no hit timing data".into(),
+    };
+    let spread = report
+        .spread_ms
+        .map(|value| format!("{value}ms MAD"))
+        .unwrap_or_else(|| "no spread".into());
+    let lanes = if report.lane_weaknesses.is_empty() {
+        "no lane evidence".into()
+    } else {
+        report
+            .lane_weaknesses
+            .iter()
+            .map(|lane| format!("L{} {:.0}%", lane.lane + 1, lane.average_weight * 100.0))
+            .collect::<Vec<_>>()
+            .join(" · ")
+    };
+    let section = report
+        .weakest_section
+        .map(|section| {
+            format!(
+                "{}–{}",
+                chart_time_label(section.bar_start_ms),
+                chart_time_label(section.bar_end_ms)
+            )
+        })
+        .unwrap_or_else(|| "no section evidence".into());
+    let truncated = if report.truncated {
+        "\nFirst 8,192 events shown."
+    } else {
+        ""
+    };
+    format!("DETAILS\nTiming: {bias} · {spread}\nLanes: {lanes}\nSection: {section}{truncated}")
+}
+
+fn spawn_details_panel(card: &mut ChildSpawnerCommands, t: &Theme, analysis: &ResultAnalysis) {
+    card.spawn((
+        ResultDetailsPanel,
+        Node {
+            width: Val::Percent(100.0),
+            padding: UiRect::all(Val::Px(12.0)),
+            ..default()
+        },
+        BackgroundColor(t.bg_top),
+        Visibility::Hidden,
+    ))
+    .with_children(|panel| {
+        panel.spawn((
+            Text::new(details_text(analysis)),
+            Theme::font(14.0),
+            TextColor(t.text_secondary),
+        ));
     });
 }
 
@@ -487,7 +607,7 @@ fn value_row(
         });
 }
 
-fn spawn_verb_row(card: &mut ChildSpawnerCommands, t: &Theme) {
+fn spawn_verb_row(card: &mut ChildSpawnerCommands, t: &Theme, has_recommendation: bool) {
     card.spawn(Node {
         width: Val::Percent(100.0),
         flex_direction: FlexDirection::Row,
@@ -506,7 +626,7 @@ fn spawn_verb_row(card: &mut ChildSpawnerCommands, t: &Theme) {
             row.spawn((
                 VerbLabel(verb),
                 reveal_text(
-                    verb_text(verb, selected),
+                    verb_text(verb, selected, has_recommendation),
                     Theme::font(20.0),
                     color,
                     SLOT_VERBS,
@@ -542,7 +662,7 @@ fn spawn_legends(card: &mut ChildSpawnerCommands, t: &Theme, midi_connected: boo
             );
         }
         legends.spawn(reveal_text(
-            "←/→ move · Enter select · R retry · Esc continue",
+            "←/→ move · Enter select · Tab details · R retry · Esc continue",
             Theme::font(12.0),
             t.text_secondary,
             SLOT_LEGEND,
@@ -557,12 +677,13 @@ pub(crate) fn sync_verb_row(
     theme: Res<ThemeResource>,
     cursor: Res<ResultVerb>,
     reveal: Res<RevealState>,
+    analysis: Res<ResultAnalysis>,
     mut q: Query<(&VerbLabel, &mut Text, &mut TextColor)>,
 ) {
     let t = theme.0;
     for (label, mut text, mut color) in &mut q {
         let selected = label.0 == *cursor;
-        let next = verb_text(label.0, selected);
+        let next = verb_text(label.0, selected, analysis.recommendation.is_some());
         if text.0 != next {
             text.0 = next;
         }
@@ -571,6 +692,19 @@ pub(crate) fn sync_verb_row(
             target
         } else {
             target.with_alpha(color.0.alpha())
+        };
+    }
+}
+
+pub(crate) fn sync_details_panel(
+    details: Res<ResultDetailsOpen>,
+    mut panels: Query<&mut Visibility, With<ResultDetailsPanel>>,
+) {
+    for mut visibility in &mut panels {
+        *visibility = if details.0 {
+            Visibility::Inherited
+        } else {
+            Visibility::Hidden
         };
     }
 }
@@ -637,6 +771,7 @@ mod tests {
         });
         world.insert_resource(game_shell::SelectedDifficulty(2));
         world.insert_resource(SaveStatus::Saved);
+        world.insert_resource(ResultAnalysis::default());
         world
     }
 
@@ -732,6 +867,12 @@ mod tests {
     }
 
     #[test]
+    fn practice_label_names_a_recommended_section() {
+        assert_eq!(practice_label(true), "Practice weakest section");
+        assert_eq!(practice_label(false), "Practice");
+    }
+
+    #[test]
     fn rank_color_total_mapping() {
         let t = Theme::default();
         assert_eq!(rank_color(Rank::SS, &t), t.judgment_perfect);
@@ -796,18 +937,19 @@ mod tests {
             total_ms: 1_130.0,
             done: true,
         });
+        world.insert_resource(ResultAnalysis::default());
         let t = Theme::default();
         let retry = world
             .spawn((
                 VerbLabel(ResultVerb::Retry),
-                Text::new(verb_text(ResultVerb::Retry, false)),
+                Text::new(verb_text(ResultVerb::Retry, false, false)),
                 TextColor(t.text_secondary),
             ))
             .id();
         let cont = world
             .spawn((
                 VerbLabel(ResultVerb::Continue),
-                Text::new(verb_text(ResultVerb::Continue, true)),
+                Text::new(verb_text(ResultVerb::Continue, true, false)),
                 TextColor(t.accent),
             ))
             .id();
