@@ -38,7 +38,7 @@ ledger is the durable inventory; completing one cycle never removes later work.
 | 4 | Results analysis and weakest-section practice handoff | Implemented |
 | 5 | Large-library discovery and measured scan performance | Implemented |
 | 6 | Accessibility and design-system consolidation | Implemented |
-| 7 | Extended format/media compatibility | Queued |
+| 7 | Extended format/media compatibility | Implemented |
 | 8 | Documentation and repository-maintenance repair | Queued |
 
 ## Cycle 0 — Truthful local quality baseline
@@ -206,6 +206,30 @@ Complete compatibility work that should not inflate the core DTX fix:
 - support metadata aliases and decimal level directives such as `PLAYLEVEL`
   and `DLVDEC`;
 - add box/folder organization only if it improves the approved discovery flow.
+
+Completed 2026-07-13:
+
+- DTX, GDA, and G2D use explicit case-insensitive discovery and dedicated
+  parsing front ends; executable fixtures prove equivalent drum/timing output.
+  BMS and BME are rejected with conversion guidance rather than treated as
+  playable from their extensions.
+- `PLAYLEVEL`, `DLVDEC`, hidden-level/background aliases, all hidden drum
+  channels, MIDI chorus, fill-in, click, first-sound, mixer add/remove, and all
+  eight BGA swap channels are typed and tested.
+- Mixer eligibility, system-event cursors, BGA layers, pan geometry, and movie
+  state reconstruct deterministically across seeks and restarts. Reduced
+  Background Motion resolves optional visuals without authored motion.
+- OGG, WAV, and MP3 remain native chart-audio formats. XA is never decoded or
+  converted: same-stem OGG, WAV, then MP3 are tried case-insensitively. A
+  substitution or optional missing sound degrades with a warning; unresolved
+  XA required by BGM rejects with recovery guidance. Archive import reports the
+  same policy without mutating media.
+- [The compatibility guide](../compatibility.md) states the executable support
+  tiers and the current playback-rate truth: rate changes alter pitch, and no
+  pitch-preserving mode is offered. Modified-speed results remain
+  non-qualifying.
+- Box/folder hierarchy was not added. The approved Cycle 5 discovery flow has
+  no measured need for another navigation hierarchy.
 
 ## Cycle 8 — Documentation and repository maintenance
 
