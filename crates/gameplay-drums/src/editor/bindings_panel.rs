@@ -10,7 +10,7 @@
 //! rebuild so chips repaint.
 
 use bevy::prelude::*;
-use dtx_input::{BindSource, InputBindings, BINDABLE_CHANNELS};
+use dtx_input::{BindSource, InputBindings, SystemVerb, BINDABLE_CHANNELS, SYSTEM_VERBS};
 use dtx_layout::LaneArrangement;
 
 use super::bindings_capture::CaptureState;
@@ -51,6 +51,21 @@ pub struct ChipSource {
 /// `+` on a channel row: starts capturing a new source for `channel`.
 #[derive(Component, Clone, Copy)]
 pub struct BindCaptureStart(pub dtx_core::EChannel);
+
+/// One system-verb row in the System card.
+#[derive(Component, Clone, Copy)]
+pub struct BindSystemRow(pub SystemVerb);
+
+/// The `×` remove button on a system chip: removes `source[index]` from `verb`.
+#[derive(Component, Clone, Copy)]
+pub struct BindSystemChipRemove {
+    pub verb: SystemVerb,
+    pub index: usize,
+}
+
+/// `+` on a system row: starts capturing a new source for `verb`.
+#[derive(Component, Clone, Copy)]
+pub struct BindSystemCaptureStart(pub SystemVerb);
 
 /// `Keyboard` / `MIDI` segment-selector button.
 #[derive(Component, Clone, Copy)]
@@ -122,6 +137,8 @@ pub fn plugin(app: &mut App) {
                 handle_velocity_adjust,
                 handle_bind_chip_remove,
                 handle_capture_start,
+                handle_system_chip_remove,
+                handle_system_capture_start,
                 handle_port_cycle,
                 handle_rescan,
                 handle_bindings_reset,
@@ -199,7 +216,8 @@ pub struct SegmentRow {
 fn segment_matches(segment: ControlsSegment, source: &BindSource) -> bool {
     matches!(
         (segment, source),
-        (ControlsSegment::Keyboard, BindSource::Key(_)) | (ControlsSegment::Midi, BindSource::Midi { .. })
+        (ControlsSegment::Keyboard, BindSource::Key(_))
+            | (ControlsSegment::Midi, BindSource::Midi { .. })
     )
 }
 
@@ -220,7 +238,11 @@ pub(super) fn last_segment_source_index(
 /// Rows for the active segment: only that segment's sources; `shared` = the
 /// source is also held by another channel; `unbound` = the channel has no
 /// source in this segment.
-pub fn segment_rows(b: &InputBindings, segment: ControlsSegment, lanes: &LaneArrangement) -> Vec<SegmentRow> {
+pub fn segment_rows(
+    b: &InputBindings,
+    segment: ControlsSegment,
+    lanes: &LaneArrangement,
+) -> Vec<SegmentRow> {
     bindable_channels_in_order(lanes)
         .into_iter()
         .map(|channel| {
@@ -240,7 +262,61 @@ pub fn segment_rows(b: &InputBindings, segment: ControlsSegment, lanes: &LaneArr
                 })
                 .collect();
             let unbound = chips.is_empty();
-            SegmentRow { channel, chips, unbound }
+            SegmentRow {
+                channel,
+                chips,
+                unbound,
+            }
+        })
+        .collect()
+}
+
+/// One system-verb row for the active segment.
+pub struct SystemSegmentRow {
+    pub verb: SystemVerb,
+    pub chips: Vec<SegmentChip>,
+    pub unbound: bool,
+}
+
+/// Index (into the verb's FULL, unfiltered source list) of the LAST source
+/// belonging to `segment` — the target of a keyboard Backspace on a System row.
+/// `None` = nothing to delete (Backspace no-ops).
+pub(super) fn last_system_source_index(
+    b: &InputBindings,
+    verb: SystemVerb,
+    segment: ControlsSegment,
+) -> Option<usize> {
+    b.system
+        .get(&verb)?
+        .iter()
+        .rposition(|source| segment_matches(segment, source))
+}
+
+/// Rows for the System card in the active segment. `shared` is always false:
+/// a source a lane owns can never be bound to a verb (`lane_owner` refuses it),
+/// so a system chip is never shared with a lane.
+pub fn system_segment_rows(b: &InputBindings, segment: ControlsSegment) -> Vec<SystemSegmentRow> {
+    SYSTEM_VERBS
+        .into_iter()
+        .map(|verb| {
+            let chips: Vec<SegmentChip> = b
+                .system_sources(verb)
+                .iter()
+                .enumerate()
+                .filter(|(_, source)| segment_matches(segment, source))
+                .map(|(index, source)| SegmentChip {
+                    source: *source,
+                    label: source_label(source),
+                    index,
+                    shared: false,
+                })
+                .collect();
+            let unbound = chips.is_empty();
+            SystemSegmentRow {
+                verb,
+                chips,
+                unbound,
+            }
         })
         .collect()
 }
@@ -265,6 +341,7 @@ pub fn spawn_bindings_block(
             spawn_device_card(p, t, live, ports);
         }
         spawn_pads_card(p, t, live, lanes, segment, selected);
+        spawn_system_card(p, t, live, segment);
     });
 }
 
@@ -308,11 +385,19 @@ fn spawn_segment_selector(
                         border_radius: BorderRadius::all(Val::Px(4.0)),
                         ..default()
                     },
-                    BackgroundColor(if active { chrome::ACCENT } else { chrome::CHIP_BG }),
+                    BackgroundColor(if active {
+                        chrome::ACCENT
+                    } else {
+                        chrome::CHIP_BG
+                    }),
                     children![(
                         Text::new(seg.label()),
                         dtx_ui::theme::Theme::font(11.0),
-                        TextColor(if active { Color::WHITE } else { chrome::TEXT_MUTED }),
+                        TextColor(if active {
+                            Color::WHITE
+                        } else {
+                            chrome::TEXT_MUTED
+                        }),
                     )],
                 ));
             }
@@ -404,7 +489,12 @@ fn spawn_reset_controls(
 
 /// Small ◂/▸ stepper button sharing one style across the port cycler and the
 /// velocity-threshold stepper.
-fn spawn_stepper_button(parent: &mut ChildSpawnerCommands, t: &dtx_ui::theme::Theme, bundle: impl Bundle, label: &str) {
+fn spawn_stepper_button(
+    parent: &mut ChildSpawnerCommands,
+    t: &dtx_ui::theme::Theme,
+    bundle: impl Bundle,
+    label: &str,
+) {
     parent.spawn((
         bundle,
         Button,
@@ -424,7 +514,12 @@ fn spawn_stepper_button(parent: &mut ChildSpawnerCommands, t: &dtx_ui::theme::Th
 
 /// MIDI-segment-only Device card: live status dot, port cycler + Rescan,
 /// velocity threshold stepper + meter.
-fn spawn_device_card(p: &mut ChildSpawnerCommands, t: &dtx_ui::theme::Theme, live: &LiveBindings, ports: &MidiPortList) {
+fn spawn_device_card(
+    p: &mut ChildSpawnerCommands,
+    t: &dtx_ui::theme::Theme,
+    live: &LiveBindings,
+    ports: &MidiPortList,
+) {
     let threshold = live.0.midi.velocity_threshold;
     let port_label = port_display_label(&live.0.midi.port, &ports.0);
     let mark_pct = threshold as f32 / 127.0 * 100.0;
@@ -450,7 +545,10 @@ fn spawn_device_card(p: &mut ChildSpawnerCommands, t: &dtx_ui::theme::Theme, liv
                 ..default()
             })
             .with_children(|label_row| {
-                panel_kit::spawn_channel_dot(label_row, if connected { chrome::OK } else { chrome::ERR });
+                panel_kit::spawn_channel_dot(
+                    label_row,
+                    if connected { chrome::OK } else { chrome::ERR },
+                );
                 label_row.spawn((
                     Text::new("Port"),
                     dtx_ui::theme::Theme::font(11.0),
@@ -589,7 +687,10 @@ fn spawn_pads_card(
     p.commands_mut().entity(body).with_children(|card| {
         for row in rows {
             let ch = row.channel;
-            let swatch = lanes.col_of(ch).map(|c| lanes.column_color(c)).unwrap_or(Color::WHITE);
+            let swatch = lanes
+                .col_of(ch)
+                .map(|c| lanes.column_color(c))
+                .unwrap_or(Color::WHITE);
             let name = ch.short_name().unwrap_or("?");
             let is_selected = selected == Some(ch);
             let unbound = row.unbound;
@@ -613,7 +714,11 @@ fn spawn_pads_card(
                 } else {
                     Color::NONE
                 }),
-                BorderColor::all(if is_selected { chrome::ACCENT } else { Color::NONE }),
+                BorderColor::all(if is_selected {
+                    chrome::ACCENT
+                } else {
+                    Color::NONE
+                }),
                 // Zero-width baseline; `highlight_selected_row` widens it to
                 // the FOCUS_RING while keyboard focus sits on the rows.
                 Outline::new(Val::Px(0.0), Val::Px(1.0), Color::NONE),
@@ -641,11 +746,20 @@ fn spawn_pads_card(
                         r,
                         &chip.label,
                         chip.shared,
-                        (ChipSource { channel: ch, source: chip.source }, Button),
+                        (
+                            ChipSource {
+                                channel: ch,
+                                source: chip.source,
+                            },
+                            Button,
+                        ),
                     );
                     r.commands_mut().entity(chip_id).with_children(|cc| {
                         cc.spawn((
-                            BindChipRemove { channel: ch, index: chip.index },
+                            BindChipRemove {
+                                channel: ch,
+                                index: chip.index,
+                            },
                             Button,
                             // Clickable but does NOT block the chip body below
                             // it from hovering — so hovering the × keeps the
@@ -695,6 +809,106 @@ fn spawn_pads_card(
     });
 }
 
+/// System card: one row per bindable system verb (Pause, Restart), with the
+/// same segment-filtered chips / `×` / `+` grammar as a lane row. Unbound by
+/// default — Escape keeps working, and note maps vary by brand.
+fn spawn_system_card(
+    p: &mut ChildSpawnerCommands,
+    t: &dtx_ui::theme::Theme,
+    live: &LiveBindings,
+    segment: ControlsSegment,
+) {
+    let body = panel_kit::spawn_card(p, "System");
+    let rows = system_segment_rows(&live.0, segment);
+    p.commands_mut().entity(body).with_children(|card| {
+        for row in rows {
+            let verb = row.verb;
+            let unbound = row.unbound;
+            let mut row_cmds = card.spawn((
+                BindSystemRow(verb),
+                Button,
+                Node {
+                    flex_direction: FlexDirection::Row,
+                    align_items: AlignItems::Center,
+                    column_gap: Val::Px(4.0),
+                    padding: UiRect::axes(Val::Px(4.0), Val::Px(3.0)),
+                    border: UiRect::left(Val::Px(2.0)),
+                    border_radius: BorderRadius::all(Val::Px(4.0)),
+                    flex_wrap: FlexWrap::Wrap,
+                    ..default()
+                },
+                BackgroundColor(Color::NONE),
+                BorderColor::all(Color::NONE),
+                // Zero-width baseline; `highlight_selected_system_row` widens it
+                // to the FOCUS_RING while keyboard focus sits on the rows.
+                Outline::new(Val::Px(0.0), Val::Px(1.0), Color::NONE),
+            ));
+            if unbound {
+                row_cmds.insert(UnboundRow);
+            }
+            row_cmds.with_children(|r| {
+                r.spawn((
+                    Text::new(verb.label()),
+                    dtx_ui::theme::Theme::font(11.0),
+                    TextColor(t.text_primary),
+                    Node {
+                        min_width: Val::Px(60.0),
+                        ..default()
+                    },
+                ));
+                for chip in &row.chips {
+                    let chip_id = panel_kit::spawn_chip(r, &chip.label, false, ());
+                    r.commands_mut().entity(chip_id).with_children(|cc| {
+                        cc.spawn((
+                            BindSystemChipRemove {
+                                verb,
+                                index: chip.index,
+                            },
+                            Button,
+                            Pickable {
+                                should_block_lower: false,
+                                is_hoverable: true,
+                            },
+                            Node {
+                                padding: UiRect::axes(Val::Px(3.0), Val::Px(0.0)),
+                                margin: UiRect::left(Val::Px(2.0)),
+                                ..default()
+                            },
+                            children![(
+                                Text::new("\u{00d7}"),
+                                dtx_ui::theme::Theme::font(11.0),
+                                TextColor(chrome::TEXT_MUTED),
+                            )],
+                        ));
+                    });
+                }
+                if unbound {
+                    r.spawn((
+                        Text::new("unbound"),
+                        dtx_ui::theme::Theme::font(10.0),
+                        TextColor(chrome::TEXT_MUTED),
+                    ));
+                }
+                r.spawn((
+                    BindSystemCaptureStart(verb),
+                    Button,
+                    Node {
+                        padding: UiRect::axes(Val::Px(5.0), Val::Px(1.0)),
+                        border_radius: BorderRadius::all(Val::Px(3.0)),
+                        ..default()
+                    },
+                    BackgroundColor(chrome::CHIP_BG),
+                    children![(
+                        Text::new("+"),
+                        dtx_ui::theme::Theme::font(11.0),
+                        TextColor(t.text_primary),
+                    )],
+                ));
+            });
+        }
+    });
+}
+
 /// ◂ / ▸ on the velocity-threshold row: clamp-adjust in `[0, 127]`.
 fn handle_velocity_adjust(
     q: Query<(&Interaction, &VelocityThresholdAdjust), Changed<Interaction>>,
@@ -717,8 +931,13 @@ fn handle_velocity_adjust(
 /// device fields (port, velocity threshold).
 fn reset_segment(live: &mut LiveBindings, rev: &mut BindingsRev, segment: ControlsSegment) {
     let defaults = dtx_input::InputBindings::default();
-    let channels: std::collections::HashSet<_> =
-        live.0.map.keys().chain(defaults.map.keys()).copied().collect();
+    let channels: std::collections::HashSet<_> = live
+        .0
+        .map
+        .keys()
+        .chain(defaults.map.keys())
+        .copied()
+        .collect();
     let mut map = std::collections::HashMap::new();
     for ch in channels {
         let mut sources: Vec<_> = live
@@ -824,6 +1043,46 @@ fn handle_capture_start(
     }
 }
 
+/// The `×` button on a system chip: drop that source from the verb's list.
+fn handle_system_chip_remove(
+    q: Query<(&Interaction, &BindSystemChipRemove), Changed<Interaction>>,
+    mut live: ResMut<LiveBindings>,
+    mut rev: ResMut<BindingsRev>,
+) {
+    for (interaction, chip) in &q {
+        if *interaction == Interaction::Pressed {
+            if let Some(sources) = live.0.system.get_mut(&chip.verb) {
+                if chip.index < sources.len() {
+                    sources.remove(chip.index);
+                    rev.0 = rev.0.wrapping_add(1);
+                }
+            }
+        }
+    }
+}
+
+/// `+` on a system row: arm segment-specific capture for that verb.
+fn handle_system_capture_start(
+    q: Query<(&Interaction, &BindSystemCaptureStart), Changed<Interaction>>,
+    segment: Res<ControlsSegment>,
+    mut capture: ResMut<CaptureState>,
+) {
+    for (interaction, start) in &q {
+        if *interaction == Interaction::Pressed {
+            *capture = match *segment {
+                ControlsSegment::Keyboard => CaptureState::SystemKey {
+                    verb: start.0,
+                    refused: None,
+                },
+                ControlsSegment::Midi => CaptureState::SystemMidi {
+                    verb: start.0,
+                    refused: None,
+                },
+            };
+        }
+    }
+}
+
 /// `Keyboard` / `MIDI` segment button click: switches the active segment.
 /// Gated (in `plugin`) by both `editor_open` and `profile_dialog_closed` so a
 /// segment can never switch while a profile dialog is open.
@@ -856,7 +1115,9 @@ fn update_chip_hover_highlight(
                 BindSource::Key(k) => live.0.channels_for_key(k),
                 BindSource::Midi { note } => live.0.channels_for_note(note),
             };
-            all.into_iter().filter(|c| *c != chip.channel).collect::<Vec<_>>()
+            all.into_iter()
+                .filter(|c| *c != chip.channel)
+                .collect::<Vec<_>>()
         })
         .unwrap_or_default();
     if highlighted.0 != owners {
@@ -1070,14 +1331,26 @@ mod tests {
         use dtx_input::{BindSource, InputBindings};
 
         let mut b = InputBindings::default();
-        b.bind_shared(dtx_core::EChannel::LeftBassDrum, BindSource::Key(KeyCode::Space));
+        b.bind_shared(
+            dtx_core::EChannel::LeftBassDrum,
+            BindSource::Key(KeyCode::Space),
+        );
         let rows = segment_rows(&b, ControlsSegment::Keyboard, &dtx_layout::classic());
 
-        let bd = rows.iter().find(|r| r.channel == dtx_core::EChannel::BassDrum).unwrap();
-        assert!(bd.chips.iter().all(|c| matches!(c.source, BindSource::Key(_))));
+        let bd = rows
+            .iter()
+            .find(|r| r.channel == dtx_core::EChannel::BassDrum)
+            .unwrap();
+        assert!(bd
+            .chips
+            .iter()
+            .all(|c| matches!(c.source, BindSource::Key(_))));
         assert!(bd.chips.iter().any(|c| c.shared), "Space now on BD+LBD");
 
-        let hh = rows.iter().find(|r| r.channel == dtx_core::EChannel::HiHatClose).unwrap();
+        let hh = rows
+            .iter()
+            .find(|r| r.channel == dtx_core::EChannel::HiHatClose)
+            .unwrap();
         assert!(hh.chips.iter().all(|c| !c.shared));
     }
 
@@ -1216,7 +1489,8 @@ mod tests {
             Some(3)
         );
         // No source in the segment → None (Backspace no-ops).
-        b.map.insert(EChannel::HighTom, vec![BindSource::Midi { note: 48 }]);
+        b.map
+            .insert(EChannel::HighTom, vec![BindSource::Midi { note: 48 }]);
         assert_eq!(
             last_segment_source_index(&b, EChannel::HighTom, ControlsSegment::Keyboard),
             None
@@ -1226,6 +1500,63 @@ mod tests {
         assert_eq!(
             last_segment_source_index(&b, EChannel::LowTom, ControlsSegment::Keyboard),
             None
+        );
+    }
+
+    #[test]
+    fn system_rows_are_segment_filtered_and_flag_unbound() {
+        use dtx_input::{BindSource, InputBindings, SystemVerb};
+
+        let mut b = InputBindings::default();
+        b.bind_system(SystemVerb::Pause, BindSource::Midi { note: 37 });
+        b.bind_system(SystemVerb::Pause, BindSource::Key(KeyCode::F9));
+
+        let midi_rows = system_segment_rows(&b, ControlsSegment::Midi);
+        let pause = midi_rows
+            .iter()
+            .find(|r| r.verb == SystemVerb::Pause)
+            .expect("Pause row exists");
+        assert_eq!(pause.chips.len(), 1);
+        assert_eq!(pause.chips[0].label, "N37");
+        assert_eq!(pause.chips[0].index, 0, "index into the FULL source list");
+        assert!(!pause.chips[0].shared, "a verb source is never a lane's");
+
+        let restart = midi_rows
+            .iter()
+            .find(|r| r.verb == SystemVerb::Restart)
+            .expect("Restart row exists");
+        assert!(restart.unbound, "unbound by default");
+
+        let kb_rows = system_segment_rows(&b, ControlsSegment::Keyboard);
+        let pause = kb_rows
+            .iter()
+            .find(|r| r.verb == SystemVerb::Pause)
+            .expect("Pause row exists");
+        assert_eq!(pause.chips.len(), 1);
+        assert_eq!(pause.chips[0].index, 1, "full-list index, not filtered");
+    }
+
+    #[test]
+    fn last_system_source_index_picks_last_in_segment() {
+        use dtx_input::{BindSource, InputBindings, SystemVerb};
+
+        let mut b = InputBindings::default();
+        b.bind_system(SystemVerb::Pause, BindSource::Key(KeyCode::F9));
+        b.bind_system(SystemVerb::Pause, BindSource::Midi { note: 37 });
+        b.bind_system(SystemVerb::Pause, BindSource::Midi { note: 53 });
+
+        assert_eq!(
+            last_system_source_index(&b, SystemVerb::Pause, ControlsSegment::Midi),
+            Some(2)
+        );
+        assert_eq!(
+            last_system_source_index(&b, SystemVerb::Pause, ControlsSegment::Keyboard),
+            Some(0)
+        );
+        assert_eq!(
+            last_system_source_index(&b, SystemVerb::Restart, ControlsSegment::Midi),
+            None,
+            "unbound verb: Backspace no-ops"
         );
     }
 

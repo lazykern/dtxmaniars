@@ -133,7 +133,9 @@ fn flash_key_caps_on_hit(
         }
     }
     for hit in input_hits.read() {
-        let Some(&lane) = hit.lanes.first() else { continue };
+        let Some(&lane) = hit.lanes.first() else {
+            continue;
+        };
         let Some(col) = to_col(lane) else { continue };
         for (cap, mut bg) in &mut caps {
             if cap.col as usize == col {

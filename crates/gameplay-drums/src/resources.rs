@@ -5,7 +5,7 @@ use std::path::PathBuf;
 
 use bevy::prelude::*;
 use bevy_kira_audio::prelude::*;
-use dtx_core::{Chart, Metadata, beat_lines::TimingLine};
+use dtx_core::{beat_lines::TimingLine, Chart, Metadata};
 
 /// Expanded bar/beat timing lines for the active chart.
 ///

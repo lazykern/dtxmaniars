@@ -42,6 +42,18 @@ pub enum CaptureState {
     Keyboard(dtx_core::EChannel),
     /// `Learn pad`: listening for the next new NoteOn for this channel.
     Midi(dtx_core::EChannel),
+    /// System-verb key capture. `refused` names whoever owns the last key tried
+    /// (a lane, or another verb) — the bind is refused in place and the capture
+    /// stays armed.
+    SystemKey {
+        verb: dtx_input::SystemVerb,
+        refused: Option<Refusal>,
+    },
+    /// System-verb pad capture. `refused` as above.
+    SystemMidi {
+        verb: dtx_input::SystemVerb,
+        refused: Option<Refusal>,
+    },
     /// A captured key awaits confirm; `owners` = OTHER channels already
     /// holding it (empty = no conflict, Enter just adds it shared).
     KeyArrived {
@@ -133,7 +145,9 @@ pub fn plugin(app: &mut App) {
                 select_channel_on_row_click,
                 midi_hit_autoselect,
                 sync_selected_channel_on_capture,
+                sync_selected_system_on_capture,
                 highlight_selected_row,
+                highlight_selected_system_row,
             )
                 .run_if(in_state(game_shell::AppState::Performance))
                 .run_if(super::editor_open),
@@ -217,6 +231,67 @@ pub fn midi_capture_step(escape: bool, new_note: Option<u8>) -> MidiCaptureStep 
         Some(note) => MidiCaptureStep::Bind(note),
         None => MidiCaptureStep::Pending,
     }
+}
+
+/// Who already holds a source a system capture just saw. Both cases are
+/// refused in place, naming the owner — unlike NX, which silently auto-unbinds
+/// the lane (`CConfigIni.cs:1524`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Refusal {
+    /// A lane owns it: the same hit would both judge and fire the verb.
+    Lane(dtx_core::EChannel),
+    /// ANOTHER system verb owns it. One source on both Pause and Restart puts
+    /// two conflicting `NextState<PauseState>` writes in one frame
+    /// (last-writer-wins), so the second verb is refused.
+    Verb(dtx_input::SystemVerb),
+}
+
+/// Outcome of one system-verb capture step.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SystemCaptureStep {
+    Pending,
+    Cancelled,
+    Refused(Refusal),
+    Bind(BindSource),
+}
+
+/// Pure system-capture decision. Esc cancels; a source a lane owns is refused,
+/// never stolen (lanes win ties), and so is one another verb already holds; a
+/// free source binds immediately — there is nothing to share or move, so no
+/// `Arrived` stage. `verb_owner` must exclude the verb being bound: re-binding
+/// a source that verb already has is a harmless no-op, not a conflict.
+pub fn system_capture_step(
+    escape: bool,
+    src: Option<BindSource>,
+    lane_owner: Option<dtx_core::EChannel>,
+    verb_owner: Option<dtx_input::SystemVerb>,
+) -> SystemCaptureStep {
+    if escape {
+        return SystemCaptureStep::Cancelled;
+    }
+    let Some(src) = src else {
+        return SystemCaptureStep::Pending;
+    };
+    // Lanes win ties, so the lane owner is named first when both hold it.
+    if let Some(channel) = lane_owner {
+        return SystemCaptureStep::Refused(Refusal::Lane(channel));
+    }
+    if let Some(verb) = verb_owner {
+        return SystemCaptureStep::Refused(Refusal::Verb(verb));
+    }
+    SystemCaptureStep::Bind(src)
+}
+
+/// The OTHER system verb already bound to `src`, if any. `verb` (the capture's
+/// own target) is excluded — re-binding a source it already holds is a no-op.
+fn other_verb_owner(
+    bindings: &dtx_input::InputBindings,
+    verb: dtx_input::SystemVerb,
+    src: &BindSource,
+) -> Option<dtx_input::SystemVerb> {
+    dtx_input::SYSTEM_VERBS
+        .into_iter()
+        .find(|other| *other != verb && bindings.system_sources(*other).contains(src))
 }
 
 /// Input to the `Arrived` reducer.
@@ -374,7 +449,8 @@ pub(super) fn capture_binding(
             if new_note.is_some() {
                 *seen_midi_at = last_midi.at;
             }
-            let step = midi_capture_step(keys.just_pressed(KeyCode::Escape) || mouse_cancel, new_note);
+            let step =
+                midi_capture_step(keys.just_pressed(KeyCode::Escape) || mouse_cancel, new_note);
             match step {
                 MidiCaptureStep::Pending => CaptureState::Midi(channel),
                 MidiCaptureStep::Cancelled => CaptureState::Idle,
@@ -385,6 +461,70 @@ pub(super) fn capture_binding(
                     owners: other_owners(live.0.channels_for_note(note), channel),
                     choice: ArrivedChoice::default(),
                 },
+            }
+        }
+        CaptureState::SystemKey { verb, refused } => {
+            let key = if modifier_held(&keys) {
+                None
+            } else {
+                keys.get_just_pressed().copied().find(|k| !is_reserved(*k))
+            };
+            let src = key.map(BindSource::Key);
+            let step = system_capture_step(
+                keys.just_pressed(KeyCode::Escape) || mouse_cancel,
+                src,
+                src.and_then(|src| dtx_input::lane_owner(&live.0, &src)),
+                src.and_then(|src| other_verb_owner(&live.0, verb, &src)),
+            );
+            match step {
+                SystemCaptureStep::Pending => CaptureState::SystemKey { verb, refused },
+                SystemCaptureStep::Cancelled => CaptureState::Idle,
+                SystemCaptureStep::Refused(refusal) => CaptureState::SystemKey {
+                    verb,
+                    refused: Some(refusal),
+                },
+                SystemCaptureStep::Bind(src) => {
+                    // `bind_system` dedupes: only a real change dirties the profile.
+                    if live.0.bind_system(verb, src) {
+                        rev.0 = rev.0.wrapping_add(1);
+                    }
+                    CaptureState::Idle
+                }
+            }
+        }
+        CaptureState::SystemMidi { verb, refused } => {
+            // Advancing `seen_midi_at` dedupes a held/sustained note so it
+            // can't re-bind every frame.
+            let new_note = strictly_new_note(
+                last_midi.note,
+                last_midi.velocity,
+                last_midi.at,
+                *seen_midi_at,
+            );
+            if new_note.is_some() {
+                *seen_midi_at = last_midi.at;
+            }
+            let src = new_note.map(|note| BindSource::Midi { note });
+            let step = system_capture_step(
+                keys.just_pressed(KeyCode::Escape) || mouse_cancel,
+                src,
+                src.and_then(|src| dtx_input::lane_owner(&live.0, &src)),
+                src.and_then(|src| other_verb_owner(&live.0, verb, &src)),
+            );
+            match step {
+                SystemCaptureStep::Pending => CaptureState::SystemMidi { verb, refused },
+                SystemCaptureStep::Cancelled => CaptureState::Idle,
+                SystemCaptureStep::Refused(refusal) => CaptureState::SystemMidi {
+                    verb,
+                    refused: Some(refusal),
+                },
+                SystemCaptureStep::Bind(src) => {
+                    // `bind_system` dedupes: only a real change dirties the profile.
+                    if live.0.bind_system(verb, src) {
+                        rev.0 = rev.0.wrapping_add(1);
+                    }
+                    CaptureState::Idle
+                }
             }
         }
         CaptureState::KeyArrived {
@@ -409,11 +549,25 @@ pub(super) fn capture_binding(
                     choice,
                 },
                 ArrivedStep::CommitShared => {
-                    commit(&mut live, &mut rev, &mut hits, channel, BindSource::Key(key), false);
+                    commit(
+                        &mut live,
+                        &mut rev,
+                        &mut hits,
+                        channel,
+                        BindSource::Key(key),
+                        false,
+                    );
                     CaptureState::Idle
                 }
                 ArrivedStep::CommitMove => {
-                    commit(&mut live, &mut rev, &mut hits, channel, BindSource::Key(key), true);
+                    commit(
+                        &mut live,
+                        &mut rev,
+                        &mut hits,
+                        channel,
+                        BindSource::Key(key),
+                        true,
+                    );
                     CaptureState::Idle
                 }
             }
@@ -470,11 +624,25 @@ pub(super) fn capture_binding(
                         choice,
                     },
                     ArrivedStep::CommitShared => {
-                        commit(&mut live, &mut rev, &mut hits, channel, BindSource::Midi { note }, false);
+                        commit(
+                            &mut live,
+                            &mut rev,
+                            &mut hits,
+                            channel,
+                            BindSource::Midi { note },
+                            false,
+                        );
                         CaptureState::Idle
                     }
                     ArrivedStep::CommitMove => {
-                        commit(&mut live, &mut rev, &mut hits, channel, BindSource::Midi { note }, true);
+                        commit(
+                            &mut live,
+                            &mut rev,
+                            &mut hits,
+                            channel,
+                            BindSource::Midi { note },
+                            true,
+                        );
                         CaptureState::Idle
                     }
                 }
@@ -488,13 +656,24 @@ pub(super) fn capture_binding(
 /// capture target). This is the primary way to pick a channel — the old
 /// autoplay-driven `pad_hit_autoselect` made the selection chase whatever note
 /// the autoplay was judging, so a user could never hold a channel selected.
+/// One row cursor, so a mouse click moves it the same way Up/Down does:
+/// clicking a lane row hands the cursor back to `SelectedChannel`, clicking a
+/// System row parks it on that verb (`SelectedSystem` wins in `current_row`).
 fn select_channel_on_row_click(
     rows: Query<(&Interaction, &BindChannelRow), Changed<Interaction>>,
+    system_rows: Query<(&Interaction, &super::bindings_panel::BindSystemRow), Changed<Interaction>>,
     mut selected: ResMut<SelectedChannel>,
+    mut system: ResMut<super::controls_panel::SelectedSystem>,
 ) {
     for (interaction, row) in &rows {
         if *interaction == Interaction::Pressed {
             selected.0 = Some(row.0);
+            system.0 = None;
+        }
+    }
+    for (interaction, row) in &system_rows {
+        if *interaction == Interaction::Pressed {
+            system.0 = Some(row.0);
         }
     }
 }
@@ -527,9 +706,15 @@ fn midi_hit_autoselect(
 /// overlay (`bindings_spatial`) lights the target lane behind the capture
 /// modal even when capture was armed by clicking `+` directly (no prior row
 /// click or pad hit to have set the selection).
-fn sync_selected_channel_on_capture(capture: Res<CaptureState>, mut selected: ResMut<SelectedChannel>) {
+fn sync_selected_channel_on_capture(
+    capture: Res<CaptureState>,
+    mut selected: ResMut<SelectedChannel>,
+) {
+    // A system capture targets no channel — it leaves the lane selection alone.
     let channel = match &*capture {
-        CaptureState::Idle => return,
+        CaptureState::Idle | CaptureState::SystemKey { .. } | CaptureState::SystemMidi { .. } => {
+            return
+        }
         CaptureState::Keyboard(ch)
         | CaptureState::Midi(ch)
         | CaptureState::KeyArrived { channel: ch, .. }
@@ -537,6 +722,26 @@ fn sync_selected_channel_on_capture(capture: Res<CaptureState>, mut selected: Re
     };
     if selected.0 != Some(channel) {
         selected.0 = Some(channel);
+    }
+}
+
+/// The System-row mirror of `sync_selected_channel_on_capture`: a system capture
+/// armed by clicking `+` directly must move the row cursor onto that verb.
+/// Without this the Controls list kept highlighting the previously-selected LANE
+/// while the modal read "Press a key for Restart" — and the next Backspace
+/// deleted a source from that lane. `SelectedSystem` wins in `current_row`, so
+/// setting it is enough; the lane selection is left alone (the spatial display
+/// still points at it).
+fn sync_selected_system_on_capture(
+    capture: Res<CaptureState>,
+    mut system: ResMut<super::controls_panel::SelectedSystem>,
+) {
+    let verb = match &*capture {
+        CaptureState::SystemKey { verb, .. } | CaptureState::SystemMidi { verb, .. } => *verb,
+        _ => return,
+    };
+    if system.0 != Some(verb) {
+        system.0 = Some(verb);
     }
 }
 
@@ -548,6 +753,7 @@ fn sync_selected_channel_on_capture(capture: Res<CaptureState>, mut selected: Re
 /// every frame, so no repaint plumbing is needed.
 fn highlight_selected_row(
     selected: Res<SelectedChannel>,
+    system: Res<super::controls_panel::SelectedSystem>,
     focus: Res<super::controls_panel::ControlsFocus>,
     mut rows: Query<(
         &BindChannelRow,
@@ -557,7 +763,9 @@ fn highlight_selected_row(
         &mut Outline,
     )>,
 ) {
-    let rows_focused = *focus == super::controls_panel::ControlsFocus::Rows;
+    // One cursor: while it sits on a System row the lane keeps its selection
+    // tint (the spatial display still points at it) but surrenders the ring.
+    let rows_focused = *focus == super::controls_panel::ControlsFocus::Rows && system.0.is_none();
     for (row, unbound, mut bg, mut border, mut outline) in &mut rows {
         let on = selected.0 == Some(row.0);
         *bg = BackgroundColor(if on {
@@ -567,7 +775,50 @@ fn highlight_selected_row(
         } else {
             Color::NONE
         });
-        *border = BorderColor::all(if on { super::chrome::ACCENT } else { Color::NONE });
+        *border = BorderColor::all(if on {
+            super::chrome::ACCENT
+        } else {
+            Color::NONE
+        });
+        if on && rows_focused {
+            outline.width = Val::Px(2.0);
+            outline.color = super::panel::FOCUS_RING;
+        } else {
+            outline.width = Val::Px(0.0);
+            outline.color = Color::NONE;
+        }
+    }
+}
+
+/// Tint the selected System row and, while keyboard focus sits on the rows,
+/// ring it — the mirror of `highlight_selected_row` for the System card. Runs
+/// every frame, so no repaint plumbing is needed.
+fn highlight_selected_system_row(
+    system: Res<super::controls_panel::SelectedSystem>,
+    focus: Res<super::controls_panel::ControlsFocus>,
+    mut rows: Query<(
+        &super::bindings_panel::BindSystemRow,
+        Has<super::bindings_panel::UnboundRow>,
+        &mut BackgroundColor,
+        &mut BorderColor,
+        &mut Outline,
+    )>,
+) {
+    let rows_focused = *focus == super::controls_panel::ControlsFocus::Rows;
+    for (row, unbound, mut bg, mut border, mut outline) in &mut rows {
+        let on = system.0 == Some(row.0);
+        *bg = BackgroundColor(if on {
+            super::chrome::ROW_SELECTED_BG
+        } else if unbound {
+            super::chrome::WARN_TINT
+        } else {
+            Color::NONE
+        });
+        *border = BorderColor::all(if on {
+            super::chrome::ACCENT
+        } else {
+            Color::NONE
+        });
         if on && rows_focused {
             outline.width = Val::Px(2.0);
             outline.color = super::panel::FOCUS_RING;
@@ -656,8 +907,14 @@ mod tests {
         // The step machine no longer decides steal-vs-shared: any strictly
         // new note just captures. Conflict resolution moved to the Arrived
         // stage (`arrived_step`), tested below.
-        assert_eq!(midi_capture_step(false, Some(42)), MidiCaptureStep::Bind(42));
-        assert_eq!(midi_capture_step(true, Some(42)), MidiCaptureStep::Cancelled);
+        assert_eq!(
+            midi_capture_step(false, Some(42)),
+            MidiCaptureStep::Bind(42)
+        );
+        assert_eq!(
+            midi_capture_step(true, Some(42)),
+            MidiCaptureStep::Cancelled
+        );
     }
 
     #[test]
@@ -778,6 +1035,7 @@ mod tests {
         let mut app = App::new();
         app.insert_resource(SelectedChannel(Some(EChannel::Snare)))
             .insert_resource(ControlsFocus::Rows)
+            .init_resource::<crate::editor::controls_panel::SelectedSystem>()
             .add_systems(Update, highlight_selected_row);
         let sd = app
             .world_mut()
@@ -799,13 +1057,257 @@ mod tests {
             .id();
         app.update();
         let width = |app: &App, e: Entity| app.world().entity(e).get::<Outline>().map(|o| o.width);
-        assert_eq!(width(&app, sd), Some(Val::Px(2.0)), "selected row ringed at Rows");
+        assert_eq!(
+            width(&app, sd),
+            Some(Val::Px(2.0)),
+            "selected row ringed at Rows"
+        );
         assert_eq!(width(&app, hh), Some(Val::Px(0.0)));
 
         // Outside Rows the ring disappears (selection tint remains).
         app.insert_resource(ControlsFocus::SegmentSelector);
         app.update();
         assert_eq!(width(&app, sd), Some(Val::Px(0.0)));
+    }
+
+    #[test]
+    fn system_capture_refuses_a_lane_owned_source() {
+        use dtx_core::EChannel;
+        assert_eq!(
+            system_capture_step(
+                false,
+                Some(BindSource::Midi { note: 38 }),
+                Some(EChannel::Snare),
+                None
+            ),
+            SystemCaptureStep::Refused(Refusal::Lane(EChannel::Snare))
+        );
+    }
+
+    /// One source on BOTH Pause and Restart put two conflicting
+    /// `NextState<PauseState>` writes in one frame (last-writer-wins). The
+    /// second verb is refused in place, naming the verb that holds it.
+    #[test]
+    fn system_capture_refuses_a_source_another_verb_holds() {
+        use dtx_input::SystemVerb;
+        assert_eq!(
+            system_capture_step(
+                false,
+                Some(BindSource::Midi { note: 37 }),
+                None,
+                Some(SystemVerb::Pause)
+            ),
+            SystemCaptureStep::Refused(Refusal::Verb(SystemVerb::Pause))
+        );
+        // A lane owner wins the naming when both hold it (lanes win ties).
+        assert_eq!(
+            system_capture_step(
+                false,
+                Some(BindSource::Midi { note: 37 }),
+                Some(dtx_core::EChannel::Snare),
+                Some(SystemVerb::Pause)
+            ),
+            SystemCaptureStep::Refused(Refusal::Lane(dtx_core::EChannel::Snare))
+        );
+    }
+
+    /// The verb being bound is excluded from the conflict check — re-binding a
+    /// source it already holds is a dedupe no-op, not a refusal.
+    #[test]
+    fn other_verb_owner_ignores_the_capturing_verb() {
+        use dtx_input::SystemVerb;
+        let mut b = InputBindings::default();
+        let src = BindSource::Midi { note: 37 };
+        b.bind_system(SystemVerb::Pause, src);
+        assert_eq!(other_verb_owner(&b, SystemVerb::Pause, &src), None);
+        assert_eq!(
+            other_verb_owner(&b, SystemVerb::Restart, &src),
+            Some(SystemVerb::Pause)
+        );
+    }
+
+    #[test]
+    fn system_capture_binds_a_free_source() {
+        assert_eq!(
+            system_capture_step(false, Some(BindSource::Midi { note: 37 }), None, None),
+            SystemCaptureStep::Bind(BindSource::Midi { note: 37 })
+        );
+        assert_eq!(
+            system_capture_step(false, None, None, None),
+            SystemCaptureStep::Pending
+        );
+        assert_eq!(
+            system_capture_step(true, Some(BindSource::Midi { note: 37 }), None, None),
+            SystemCaptureStep::Cancelled
+        );
+    }
+
+    /// End-to-end through `capture_binding`: a key already on Pause cannot also
+    /// be bound to Restart.
+    #[test]
+    fn system_key_capture_refuses_a_key_another_verb_holds() {
+        use dtx_input::SystemVerb;
+        let mut app = system_key_app(SystemVerb::Restart);
+        app.world_mut()
+            .resource_mut::<LiveBindings>()
+            .0
+            .bind_system(SystemVerb::Pause, BindSource::Key(KeyCode::KeyP));
+        app.world_mut()
+            .resource_mut::<ButtonInput<KeyCode>>()
+            .press(KeyCode::KeyP);
+        app.update();
+
+        let live = app.world().resource::<LiveBindings>();
+        assert!(
+            live.0.system_sources(SystemVerb::Restart).is_empty(),
+            "a source another verb holds must not bind"
+        );
+        assert!(
+            matches!(
+                *app.world().resource::<CaptureState>(),
+                CaptureState::SystemKey {
+                    refused: Some(Refusal::Verb(SystemVerb::Pause)),
+                    ..
+                }
+            ),
+            "the capture stays armed, naming the owning verb"
+        );
+    }
+
+    /// `bind_system` dedupes, so re-binding a source the verb already holds
+    /// changes nothing — and must not dirty the profile.
+    #[test]
+    fn rebinding_an_existing_system_source_does_not_bump_rev() {
+        use dtx_input::SystemVerb;
+        let mut app = system_key_app(SystemVerb::Pause);
+        app.world_mut()
+            .resource_mut::<LiveBindings>()
+            .0
+            .bind_system(SystemVerb::Pause, BindSource::Key(KeyCode::KeyP));
+        let before = app.world().resource::<BindingsRev>().0;
+        app.world_mut()
+            .resource_mut::<ButtonInput<KeyCode>>()
+            .press(KeyCode::KeyP);
+        app.update();
+
+        assert_eq!(
+            app.world()
+                .resource::<LiveBindings>()
+                .0
+                .system_sources(SystemVerb::Pause),
+            [BindSource::Key(KeyCode::KeyP)],
+            "still bound exactly once"
+        );
+        assert_eq!(
+            app.world().resource::<BindingsRev>().0,
+            before,
+            "a no-op re-bind must not mark the profile dirty"
+        );
+    }
+
+    /// Arming a system capture by clicking `+` must move the row cursor onto
+    /// that verb — otherwise the list keeps highlighting the previously
+    /// selected LANE and a later Backspace deletes a source from it.
+    #[test]
+    fn selected_system_follows_a_system_capture() {
+        use dtx_core::EChannel;
+        use dtx_input::SystemVerb;
+        let mut app = App::new();
+        app.insert_resource(CaptureState::SystemKey {
+            verb: SystemVerb::Restart,
+            refused: None,
+        })
+        // A lane was selected before the `+` click.
+        .insert_resource(SelectedChannel(Some(EChannel::Snare)))
+        .init_resource::<super::super::controls_panel::SelectedSystem>()
+        .add_systems(
+            Update,
+            (
+                sync_selected_channel_on_capture,
+                sync_selected_system_on_capture,
+            ),
+        );
+        app.update();
+        assert_eq!(
+            app.world()
+                .resource::<super::super::controls_panel::SelectedSystem>()
+                .0,
+            Some(SystemVerb::Restart),
+            "the row cursor parks on the verb being captured"
+        );
+        assert_eq!(
+            app.world().resource::<SelectedChannel>().0,
+            Some(EChannel::Snare),
+            "a system capture leaves the lane selection alone"
+        );
+    }
+
+    /// Build an app wired like the plugin, armed on a system-verb key capture.
+    fn system_key_app(verb: dtx_input::SystemVerb) -> App {
+        let mut app = App::new();
+        app.init_resource::<ButtonInput<KeyCode>>()
+            .init_resource::<CaptureState>()
+            .init_resource::<LiveBindings>()
+            .init_resource::<BindingsRev>()
+            .init_resource::<crate::LastMidiHit>()
+            .init_resource::<GameplayClock>()
+            .init_resource::<MouseArrivedInput>()
+            .add_message::<LaneHit>()
+            .insert_resource(CaptureState::SystemKey {
+                verb,
+                refused: None,
+            })
+            .add_systems(Update, capture_binding);
+        app
+    }
+
+    #[test]
+    fn system_key_capture_commits_a_free_key() {
+        use dtx_input::SystemVerb;
+        // KeyP: not a lane default, and not reserved (function keys are).
+        let mut app = system_key_app(SystemVerb::Pause);
+        app.world_mut()
+            .resource_mut::<ButtonInput<KeyCode>>()
+            .press(KeyCode::KeyP);
+        app.update();
+
+        let live = app.world().resource::<LiveBindings>();
+        assert_eq!(
+            live.0.system_sources(SystemVerb::Pause),
+            [BindSource::Key(KeyCode::KeyP)]
+        );
+        assert!(matches!(
+            *app.world().resource::<CaptureState>(),
+            CaptureState::Idle
+        ));
+    }
+
+    #[test]
+    fn system_key_capture_refuses_a_lane_key_in_place() {
+        use dtx_core::EChannel;
+        use dtx_input::SystemVerb;
+        let mut app = system_key_app(SystemVerb::Pause);
+        // Space is the BassDrum default.
+        app.world_mut()
+            .resource_mut::<ButtonInput<KeyCode>>()
+            .press(KeyCode::Space);
+        app.update();
+
+        let live = app.world().resource::<LiveBindings>();
+        assert!(
+            live.0.system_sources(SystemVerb::Pause).is_empty(),
+            "a lane key must not bind a verb"
+        );
+        assert!(
+            matches!(
+                *app.world().resource::<CaptureState>(),
+                CaptureState::SystemKey {
+                    refused: Some(Refusal::Lane(EChannel::BassDrum)),
+                    ..
+                }
+            ),
+            "the capture stays armed, naming the owning lane"
+        );
     }
 
     /// A capture armed by clicking `+` directly (no prior row click/pad hit)

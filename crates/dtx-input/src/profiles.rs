@@ -12,7 +12,9 @@ use dtx_persistence::{
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use thiserror::Error;
 
-use crate::bindings::{BindSource, BindingsFile, InputBindings, BINDABLE_CHANNELS};
+use crate::bindings::{
+    BindSource, BindingsFile, InputBindings, SystemVerb, BINDABLE_CHANNELS, SYSTEM_VERBS,
+};
 
 pub const KEYBOARD_DEFAULT_NAME: &str = "DTXMania default";
 pub const MIDI_DEFAULT_NAME: &str = "General MIDI drums";
@@ -73,6 +75,9 @@ pub enum RegistryStartup<T> {
 #[derive(Debug, Clone, PartialEq)]
 pub struct KeyboardProfile {
     pub map: HashMap<EChannel, Vec<KeyCode>>,
+    /// System verbs bound to keys. Serialized under the profile's `system`
+    /// table; absent in older files (`old_profile_without_system_table_loads_empty`).
+    pub system: HashMap<SystemVerb, Vec<KeyCode>>,
 }
 
 impl Default for KeyboardProfile {
@@ -99,6 +104,15 @@ impl KeyboardProfile {
             })
             .collect()
     }
+
+    /// Bind `key` to `verb`. Never steals from a lane — the caller refuses a
+    /// lane-owned key up front (`bindings::lane_owner`).
+    pub fn add_system_key(&mut self, verb: SystemVerb, key: KeyCode) {
+        let keys = self.system.entry(verb).or_default();
+        if !keys.contains(&key) {
+            keys.push(key);
+        }
+    }
 }
 
 impl Serialize for KeyboardProfile {
@@ -106,7 +120,21 @@ impl Serialize for KeyboardProfile {
     where
         S: Serializer,
     {
-        channel_map(&self.map).serialize(serializer)
+        use serde::ser::SerializeMap;
+        // Channel arrays, then the `system` sub-table — the order the file reads
+        // best in. Cosmetic only: toml emits a table's values before its
+        // sub-tables whatever order they are serialized in.
+        let channels = channel_map(&self.map);
+        let system = verb_map(&self.system);
+        let mut map =
+            serializer.serialize_map(Some(channels.len() + usize::from(!system.is_empty())))?;
+        for (name, keys) in &channels {
+            map.serialize_entry(name, keys)?;
+        }
+        if !system.is_empty() {
+            map.serialize_entry("system", &system)?;
+        }
+        map.end()
     }
 }
 
@@ -115,8 +143,35 @@ impl<'de> Deserialize<'de> for KeyboardProfile {
     where
         D: Deserializer<'de>,
     {
+        /// A profile entry is either a channel's key array or the `system` table.
+        #[derive(Deserialize)]
+        #[serde(untagged)]
+        enum Entry {
+            Keys(Vec<KeyCode>),
+            System(BTreeMap<String, Vec<KeyCode>>),
+        }
+        let raw = BTreeMap::<String, Entry>::deserialize(deserializer)?;
+        let mut channels: BTreeMap<String, Vec<KeyCode>> = BTreeMap::new();
+        let mut system: BTreeMap<String, Vec<KeyCode>> = BTreeMap::new();
+        for (name, entry) in raw {
+            match (name.as_str(), entry) {
+                ("system", Entry::System(table)) => system = table,
+                // `system = ["F9"]` parses as a key array, so it would otherwise
+                // land in `channels` and be dropped as an unknown channel.
+                ("system", Entry::Keys(_)) => eprintln!(
+                    "dtx-input: keyboard profile `system` must be a table of verb = [keys]; dropped"
+                ),
+                (_, Entry::Keys(keys)) => {
+                    channels.insert(name, keys);
+                }
+                (_, Entry::System(_)) => {
+                    eprintln!("dtx-input: keyboard profile unknown table {name:?}; skipped")
+                }
+            }
+        }
         Ok(Self {
-            map: parse_channel_map(BTreeMap::<String, Vec<KeyCode>>::deserialize(deserializer)?),
+            map: parse_channel_map(channels),
+            system: parse_verb_map(system),
         })
     }
 }
@@ -126,6 +181,9 @@ pub struct MidiProfile {
     pub port: Option<String>,
     pub velocity_threshold: u8,
     pub map: HashMap<EChannel, Vec<u8>>,
+    /// System verbs bound to MIDI notes. A spare zone note (xstick 37, ride
+    /// bell 53, HH edge 22/26) costs no gameplay pad.
+    pub system: HashMap<SystemVerb, Vec<u8>>,
 }
 
 impl Default for MidiProfile {
@@ -161,6 +219,15 @@ impl MidiProfile {
             notes.push(note);
         }
     }
+
+    /// Bind `note` to `verb`. Never steals from a lane — the caller refuses a
+    /// lane-owned note up front (`bindings::lane_owner`).
+    pub fn bind_system_note(&mut self, verb: SystemVerb, note: u8) {
+        let notes = self.system.entry(verb).or_default();
+        if !notes.contains(&note) {
+            notes.push(note);
+        }
+    }
 }
 
 #[derive(Default, Serialize, Deserialize)]
@@ -169,6 +236,8 @@ struct MidiProfileDto {
     port: Option<String>,
     velocity_threshold: u8,
     map: BTreeMap<String, Vec<u8>>,
+    #[serde(skip_serializing_if = "BTreeMap::is_empty")]
+    system: BTreeMap<String, Vec<u8>>,
 }
 
 impl Serialize for MidiProfile {
@@ -180,6 +249,7 @@ impl Serialize for MidiProfile {
             port: self.port.clone(),
             velocity_threshold: self.velocity_threshold,
             map: channel_map(&self.map),
+            system: verb_map(&self.system),
         }
         .serialize(serializer)
     }
@@ -195,6 +265,7 @@ impl<'de> Deserialize<'de> for MidiProfile {
             port: dto.port.filter(|port| !port.is_empty()),
             velocity_threshold: dto.velocity_threshold,
             map: parse_channel_map(dto.map),
+            system: parse_verb_map(dto.system),
         })
     }
 }
@@ -213,21 +284,53 @@ fn channel_map<T: Clone>(map: &HashMap<EChannel, Vec<T>>) -> BTreeMap<String, Ve
         .collect()
 }
 
-/// Deserialize a channel map, dropping unknown channel names and deduping
+/// Deserialize a channel map, warning on unknown channel names and deduping
 /// values within each channel (a key/note bound twice to one channel must
 /// fire that lane once). Cross-channel sharing is preserved.
 fn parse_channel_map<T: PartialEq>(map: BTreeMap<String, Vec<T>>) -> HashMap<EChannel, Vec<T>> {
     map.into_iter()
         .filter_map(|(name, values)| {
-            EChannel::from_short_name(&name).map(|channel| {
-                let mut unique = Vec::with_capacity(values.len());
-                for value in values {
-                    if !unique.contains(&value) {
-                        unique.push(value);
-                    }
-                }
-                (channel, unique)
-            })
+            let Some(channel) = EChannel::from_short_name(&name) else {
+                eprintln!("dtx-input: profile unknown channel {name:?}; skipped");
+                return None;
+            };
+            Some((channel, dedup(values)))
+        })
+        .collect()
+}
+
+/// Deserialize a verb map, warning on unknown verb keys and deduping within
+/// each verb (a key/note bound twice to one verb must fire it once).
+fn parse_verb_map<T: PartialEq>(map: BTreeMap<String, Vec<T>>) -> HashMap<SystemVerb, Vec<T>> {
+    map.into_iter()
+        .filter_map(|(name, values)| {
+            let Some(verb) = SystemVerb::from_key(&name) else {
+                eprintln!("dtx-input: profile unknown system verb {name:?}; skipped");
+                return None;
+            };
+            Some((verb, dedup(values)))
+        })
+        .collect()
+}
+
+fn dedup<T: PartialEq>(values: Vec<T>) -> Vec<T> {
+    let mut unique = Vec::with_capacity(values.len());
+    for value in values {
+        if !unique.contains(&value) {
+            unique.push(value);
+        }
+    }
+    unique
+}
+
+/// Serialize a verb map with stable, brand-independent keys (`SystemVerb::key`).
+fn verb_map<T: Clone>(map: &HashMap<SystemVerb, Vec<T>>) -> BTreeMap<String, Vec<T>> {
+    SYSTEM_VERBS
+        .into_iter()
+        .filter_map(|verb| {
+            map.get(&verb)
+                .filter(|values| !values.is_empty())
+                .map(|values| (verb.key().to_owned(), values.clone()))
         })
         .collect()
 }
@@ -310,11 +413,13 @@ fn split_default_bindings() -> (KeyboardProfile, MidiProfile) {
 pub fn split_bindings(bindings: &InputBindings) -> (KeyboardProfile, MidiProfile) {
     let mut keyboard = KeyboardProfile {
         map: HashMap::new(),
+        system: HashMap::new(),
     };
     let mut midi = MidiProfile {
         port: bindings.midi.port.clone(),
         velocity_threshold: bindings.midi.velocity_threshold,
         map: HashMap::new(),
+        system: HashMap::new(),
     };
 
     for (channel, sources) in &bindings.map {
@@ -322,6 +427,14 @@ pub fn split_bindings(bindings: &InputBindings) -> (KeyboardProfile, MidiProfile
             match source {
                 BindSource::Key(key) => keyboard.add_key(*channel, *key),
                 BindSource::Midi { note } => midi.bind_note_shared(*channel, *note),
+            }
+        }
+    }
+    for (verb, sources) in &bindings.system {
+        for source in sources {
+            match source {
+                BindSource::Key(key) => keyboard.add_system_key(*verb, *key),
+                BindSource::Midi { note } => midi.bind_system_note(*verb, *note),
             }
         }
     }
@@ -734,6 +847,9 @@ mod tests {
                 map: [(EChannel::HiHatClose, vec![KeyCode::KeyX, KeyCode::KeyC])]
                     .into_iter()
                     .collect(),
+                system: [(SystemVerb::Pause, vec![KeyCode::F9])]
+                    .into_iter()
+                    .collect(),
             },
         );
 
@@ -742,6 +858,14 @@ mod tests {
         let profile = &value["profiles"]["Desk"];
         assert_eq!(profile["HH"].as_array().expect("HH is an array").len(), 2);
         assert!(profile.get("map").is_none());
+        // The on-disk shape is nested: [profiles.Desk] + [profiles.Desk.system].
+        assert_eq!(
+            profile["system"]["pause"]
+                .as_array()
+                .expect("pause is an array")
+                .len(),
+            1
+        );
         assert!(!raw.contains("Midi"));
         let parsed: ProfileRegistry<KeyboardProfile> =
             toml::from_str(&raw).expect("registry parses");
@@ -762,6 +886,7 @@ mod tests {
                 map: [(EChannel::Snare, vec![38]), (EChannel::HiHatOpen, vec![46])]
                     .into_iter()
                     .collect(),
+                system: [(SystemVerb::Restart, vec![37])].into_iter().collect(),
             },
         );
 
@@ -774,6 +899,14 @@ mod tests {
             profile["map"]["SD"]
                 .as_array()
                 .expect("SD is an array")
+                .len(),
+            1
+        );
+        // The on-disk shape is nested: [profiles."Roland TD-17".system].
+        assert_eq!(
+            profile["system"]["restart"]
+                .as_array()
+                .expect("restart is an array")
                 .len(),
             1
         );
@@ -847,6 +980,73 @@ mod tests {
     }
 
     #[test]
+    fn keyboard_profile_round_trips_system_binds() {
+        let mut profile = KeyboardProfile::default();
+        profile.add_system_key(SystemVerb::Pause, KeyCode::F9);
+        let raw = toml::to_string_pretty(&profile).expect("profile serializes");
+        let back: KeyboardProfile = toml::from_str(&raw).expect("profile parses");
+        assert_eq!(back.system[&SystemVerb::Pause], vec![KeyCode::F9]);
+        assert_eq!(back.map, profile.map, "channel map survives");
+    }
+
+    #[test]
+    fn midi_profile_round_trips_system_binds() {
+        let mut profile = MidiProfile::default();
+        profile.bind_system_note(SystemVerb::Pause, 37);
+        let raw = toml::to_string_pretty(&profile).expect("profile serializes");
+        let back: MidiProfile = toml::from_str(&raw).expect("profile parses");
+        assert_eq!(back.system[&SystemVerb::Pause], vec![37]);
+        assert_eq!(back.map, profile.map, "channel map survives");
+    }
+
+    #[test]
+    fn old_profile_without_system_table_loads_empty() {
+        let profile: KeyboardProfile =
+            toml::from_str("HH = [\"KeyX\"]").expect("legacy keyboard profile parses");
+        assert!(profile.system.is_empty());
+        assert_eq!(profile.map[&EChannel::HiHatClose], vec![KeyCode::KeyX]);
+
+        let profile: MidiProfile = toml::from_str("velocity_threshold = 0\n[map]\nHH = [42]")
+            .expect("legacy MIDI profile parses");
+        assert!(profile.system.is_empty());
+        assert_eq!(profile.map[&EChannel::HiHatClose], vec![42]);
+    }
+
+    /// A hand-edited `system = ["F9"]` (array, not a verb table) is the wrong
+    /// shape: it is dropped with a warning, and must not leak into the channel
+    /// map — a bogus "system" channel would be erased on the next write anyway.
+    #[test]
+    fn malformed_system_array_is_dropped_not_taken_as_a_channel() {
+        let profile: KeyboardProfile = toml::from_str("HH = [\"KeyX\"]\nsystem = [\"F9\"]")
+            .expect("malformed system still parses");
+        assert!(profile.system.is_empty());
+        assert_eq!(profile.map[&EChannel::HiHatClose], vec![KeyCode::KeyX]);
+        assert_eq!(profile.map.len(), 1, "no bogus channel from `system`");
+    }
+
+    #[test]
+    fn unknown_system_verb_key_is_dropped() {
+        let profile: KeyboardProfile =
+            toml::from_str("[system]\nnope = [\"F9\"]\npause = [\"F8\"]")
+                .expect("unknown verb still parses");
+        assert_eq!(profile.system[&SystemVerb::Pause], vec![KeyCode::F8]);
+        assert_eq!(profile.system.len(), 1);
+    }
+
+    #[test]
+    fn split_bindings_partitions_system_binds_by_device() {
+        use crate::{BindSource, InputBindings};
+        let mut b = InputBindings::default();
+        b.bind_system(SystemVerb::Pause, BindSource::Midi { note: 37 });
+        b.bind_system(SystemVerb::Restart, BindSource::Key(KeyCode::F9));
+        let (keyboard, midi) = split_bindings(&b);
+        assert_eq!(midi.system[&SystemVerb::Pause], vec![37]);
+        assert_eq!(keyboard.system[&SystemVerb::Restart], vec![KeyCode::F9]);
+        assert!(!keyboard.system.contains_key(&SystemVerb::Pause));
+        assert!(!midi.system.contains_key(&SystemVerb::Restart));
+    }
+
+    #[test]
     fn save_builtin_is_rejected() {
         let registry = keyboard_registry();
         let error = reduce_registry(
@@ -902,6 +1102,7 @@ mod tests {
             map: [(EChannel::Snare, vec![KeyCode::KeyD])]
                 .into_iter()
                 .collect(),
+            system: HashMap::new(),
         };
         registry.profiles.insert("Desk".to_owned(), saved.clone());
 

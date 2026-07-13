@@ -45,7 +45,7 @@ use bevy::prelude::*;
 use bevy_kira_audio::prelude::*;
 use dtx_audio::{BgmHandle, DrumPolyphony};
 use dtx_core::chart::Chart;
-use game_shell::{AppState, TransitionRequest, request_transition};
+use game_shell::{request_transition, AppState, TransitionRequest};
 
 use crate::components::LastJudgment;
 use crate::derived::ChartDerived;

@@ -31,6 +31,59 @@ pub const BINDABLE_CHANNELS: [EChannel; 12] = [
     EChannel::LeftBassDrum,
 ];
 
+/// A non-lane action a key or pad can trigger.
+///
+/// System verbs are **not** DTX chart channels, so `EChannel` gains no pseudo-
+/// variants; they live in a parallel map on `InputBindings`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum SystemVerb {
+    /// Toggle the pause overlay during a performance.
+    Pause,
+    /// Restart the current song from the top.
+    Restart,
+}
+
+/// Every bindable system verb, in Controls-tab row order.
+pub const SYSTEM_VERBS: [SystemVerb; 2] = [SystemVerb::Pause, SystemVerb::Restart];
+
+impl SystemVerb {
+    /// Stable on-disk key (the TOML table key under `[system]`). Mirrors the
+    /// channel short-name scheme: the file never depends on Rust variant names.
+    pub fn key(self) -> &'static str {
+        match self {
+            SystemVerb::Pause => "pause",
+            SystemVerb::Restart => "restart",
+        }
+    }
+
+    /// Inverse of [`SystemVerb::key`]; unknown keys are skipped on load.
+    pub fn from_key(key: &str) -> Option<Self> {
+        SYSTEM_VERBS.into_iter().find(|verb| verb.key() == key)
+    }
+
+    /// Human label for the Controls-tab row.
+    pub fn label(self) -> &'static str {
+        match self {
+            SystemVerb::Pause => "Pause",
+            SystemVerb::Restart => "Restart",
+        }
+    }
+}
+
+/// The lane channel that already owns `src`, if any. A system verb may not
+/// share an input with a lane: the same hit would both judge and fire the verb.
+///
+/// One-directional: lane binds are never refused — lanes win ties. This is the
+/// single place the rule lives: `BindResolver::from_bindings` is its only
+/// caller, and every resolver path (including `from_profiles`, which composes
+/// `InputBindings` first) routes through it.
+pub fn lane_owner(bindings: &InputBindings, src: &BindSource) -> Option<EChannel> {
+    BINDABLE_CHANNELS
+        .into_iter()
+        .find(|ch| bindings.map.get(ch).is_some_and(|v| v.contains(src)))
+}
+
 /// One input source bound to a channel.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
@@ -61,6 +114,9 @@ pub struct BindingsFile {
     pub midi: MidiDeviceConfig,
     /// Channel short name → sources. BTreeMap for stable file output.
     pub map: BTreeMap<String, Vec<BindSource>>,
+    /// System-verb key (`SystemVerb::key`) → sources. Empty by default; an
+    /// older file with no `[system]` table loads clean (container `serde(default)`).
+    pub system: BTreeMap<String, Vec<BindSource>>,
 }
 
 impl Default for BindingsFile {
@@ -77,6 +133,9 @@ pub struct InputBindings {
     /// Channel → sources. Keyboard and MIDI sources may each appear under
     /// multiple channels (`bind_shared`); every owning channel's lane fires.
     pub map: HashMap<EChannel, Vec<BindSource>>,
+    /// System verb → sources. Empty by default: Escape keeps working, and note
+    /// maps vary by brand, so we never guess a pad on the user's behalf.
+    pub system: HashMap<SystemVerb, Vec<BindSource>>,
 }
 
 impl Default for InputBindings {
@@ -168,6 +227,7 @@ impl Default for InputBindings {
         Self {
             midi: MidiDeviceConfig::default(),
             map,
+            system: HashMap::new(),
         }
     }
 }
@@ -222,6 +282,24 @@ impl InputBindings {
         }
     }
 
+    /// Sources bound to `verb` (empty when unbound).
+    pub fn system_sources(&self, verb: SystemVerb) -> &[BindSource] {
+        self.system.get(&verb).map(Vec::as_slice).unwrap_or(&[])
+    }
+
+    /// Bind `src` to `verb`. Never steals; a lane-owned source is refused by the
+    /// caller (`lane_owner`), not here. Returns whether the bindings actually
+    /// changed — re-binding a source the verb already holds is a no-op, and the
+    /// caller must not mark the profile dirty for it.
+    pub fn bind_system(&mut self, verb: SystemVerb, src: BindSource) -> bool {
+        let entry = self.system.entry(verb).or_default();
+        if entry.contains(&src) {
+            return false;
+        }
+        entry.push(src);
+        true
+    }
+
     /// Serialize to the on-disk schema.
     pub fn to_file(&self) -> BindingsFile {
         let mut map = BTreeMap::new();
@@ -234,6 +312,15 @@ impl InputBindings {
             version: BINDINGS_VERSION,
             midi: self.midi.clone(),
             map,
+            system: SYSTEM_VERBS
+                .into_iter()
+                .filter_map(|verb| {
+                    self.system
+                        .get(&verb)
+                        .filter(|sources| !sources.is_empty())
+                        .map(|sources| (verb.key().to_owned(), sources.clone()))
+                })
+                .collect(),
         }
     }
 }
@@ -256,9 +343,23 @@ impl BindingsFile {
                 }
             }
         }
+        let mut system: HashMap<SystemVerb, Vec<BindSource>> = HashMap::new();
+        for (name, sources) in &self.system {
+            let Some(verb) = SystemVerb::from_key(name) else {
+                eprintln!("dtx-input: bindings.toml unknown system verb {name:?}; skipped");
+                continue;
+            };
+            let entry = system.entry(verb).or_default();
+            for src in sources {
+                if !entry.contains(src) {
+                    entry.push(*src);
+                }
+            }
+        }
         InputBindings {
             midi: self.midi.clone(),
             map,
+            system,
         }
     }
 }
@@ -482,6 +583,95 @@ SD = [{ midi = { note = 36 } }]
         assert_eq!(
             default_bindings_path().file_name().unwrap(),
             "bindings.toml"
+        );
+    }
+
+    #[test]
+    fn old_file_without_system_table_loads_empty_system_map() {
+        let raw = r#"
+version = 1
+[midi]
+velocity_threshold = 10
+[map]
+HH = [{ key = "KeyX" }]
+"#;
+        let b = parse_with_migrations(raw).resolve();
+        assert!(b.system.is_empty(), "no [system] table → empty system map");
+        assert_eq!(b.channel_for_key(KeyCode::KeyX), Some(EChannel::HiHatClose));
+    }
+
+    #[test]
+    fn system_binds_round_trip_through_the_file() {
+        let mut b = InputBindings::default();
+        b.bind_system(SystemVerb::Pause, BindSource::Midi { note: 37 });
+        b.bind_system(SystemVerb::Restart, BindSource::Key(KeyCode::F9));
+        let s = toml::to_string_pretty(&b.to_file()).expect("bindings serialize");
+        // `toml` emits no bare `[system]` parent header (nor a bare `[map]` one):
+        // a table whose every value is a table is written only via its children.
+        assert!(s.contains("[[system.pause]]"), "{s}");
+        assert!(s.contains("[[system.restart]]"), "{s}");
+        let back = parse_with_migrations(&s).resolve();
+        assert_eq!(back, b);
+        assert_eq!(
+            back.system_sources(SystemVerb::Pause),
+            [BindSource::Midi { note: 37 }]
+        );
+    }
+
+    #[test]
+    fn system_verb_file_keys_are_stable() {
+        assert_eq!(SystemVerb::Pause.key(), "pause");
+        assert_eq!(SystemVerb::Restart.key(), "restart");
+        assert_eq!(SystemVerb::from_key("pause"), Some(SystemVerb::Pause));
+        assert_eq!(SystemVerb::from_key("nope"), None);
+        assert_eq!(SYSTEM_VERBS.len(), 2);
+    }
+
+    #[test]
+    fn lane_owner_names_the_channel_holding_the_source() {
+        let b = InputBindings::default();
+        assert_eq!(
+            lane_owner(&b, &BindSource::Midi { note: 38 }),
+            Some(EChannel::Snare)
+        );
+        assert_eq!(
+            lane_owner(&b, &BindSource::Key(KeyCode::Space)),
+            Some(EChannel::BassDrum)
+        );
+    }
+
+    #[test]
+    fn lane_owner_is_none_for_a_free_source() {
+        let b = InputBindings::default();
+        // Zone notes a 12-channel chart cannot address: xstick 37, ride bell 53.
+        assert_eq!(lane_owner(&b, &BindSource::Midi { note: 37 }), None);
+        assert_eq!(lane_owner(&b, &BindSource::Midi { note: 53 }), None);
+        assert_eq!(lane_owner(&b, &BindSource::Key(KeyCode::F9)), None);
+    }
+
+    #[test]
+    fn lane_owner_ignores_system_binds_lanes_win_ties() {
+        // A source bound ONLY to a verb has no lane owner — the rule is
+        // one-directional: it never refuses a lane bind.
+        let mut b = InputBindings::default();
+        b.bind_system(SystemVerb::Pause, BindSource::Midi { note: 37 });
+        assert_eq!(lane_owner(&b, &BindSource::Midi { note: 37 }), None);
+        // ...and once a lane takes it, the lane is reported.
+        b.bind_shared(EChannel::Snare, BindSource::Midi { note: 37 });
+        assert_eq!(
+            lane_owner(&b, &BindSource::Midi { note: 37 }),
+            Some(EChannel::Snare)
+        );
+    }
+
+    #[test]
+    fn lane_owner_returns_the_first_owner_in_lane_order() {
+        let mut b = InputBindings::default();
+        b.bind_shared(EChannel::Snare, BindSource::Midi { note: 42 }); // 42 = HH default
+                                                                       // HiHatClose precedes Snare in BINDABLE_CHANNELS.
+        assert_eq!(
+            lane_owner(&b, &BindSource::Midi { note: 42 }),
+            Some(EChannel::HiHatClose)
         );
     }
 }

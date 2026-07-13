@@ -36,6 +36,8 @@ pub enum NavContext {
     Paused,
     /// Customize (settings) overlay during a performance.
     Editor,
+    /// Chart/audio load in progress. Pads may cancel it (SD = Back).
+    Loading,
 }
 
 /// GITADORA-ish convention. Lane ids per [`crate::lane_map::LANE_ORDER`].
@@ -113,6 +115,7 @@ fn active_context(
         AppState::Title => Some(NavContext::Title),
         AppState::SongSelect => Some(NavContext::SongSelect),
         AppState::Result => Some(NavContext::Result),
+        AppState::SongLoading => Some(NavContext::Loading),
         AppState::Performance => {
             if editor_open {
                 Some(NavContext::Editor)
@@ -292,7 +295,25 @@ mod tests {
                 false,
                 false
             ),
-            None
+            Some(NavContext::Loading)
         );
+    }
+
+    /// The BD that confirmed a song must not also cancel the load it started:
+    /// entering `Loading` resets the grace window, so the next pad hit is only
+    /// accepted 500 ms later.
+    #[test]
+    fn confirm_hit_cannot_cancel_the_load_it_started() {
+        let mut g = NavGuard::default();
+        let t0 = std::time::Instant::now();
+        g.enter_context(NavContext::SongSelect, t0);
+        let confirm = t0 + std::time::Duration::from_millis(600);
+        assert!(g.accept(confirm), "BD confirms the song");
+
+        // Next frame: SongLoading is active.
+        g.enter_context(NavContext::Loading, confirm);
+        assert!(!g.accept(confirm), "same-instant hit is inside the grace");
+        assert!(!g.accept(confirm + std::time::Duration::from_millis(499)));
+        assert!(g.accept(confirm + std::time::Duration::from_millis(500)));
     }
 }

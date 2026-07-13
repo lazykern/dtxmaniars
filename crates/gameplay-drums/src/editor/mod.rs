@@ -124,6 +124,7 @@ pub fn plugin(app: &mut App) {
         .init_resource::<undo::UndoStack>()
         .init_resource::<controls_panel::ControlsSegment>()
         .init_resource::<controls_panel::ControlsFocus>()
+        .init_resource::<controls_panel::SelectedSystem>()
         .init_resource::<profile_state::LaneProfileDraft>()
         .init_resource::<profile_state::CustomizeSession>()
         .init_resource::<profile_state::PendingCloseState>()
@@ -272,7 +273,9 @@ pub(super) fn commit_registry_actions<T: Clone + PartialEq>(
     registry_startup: dtx_input::profiles::RegistryStartup<dtx_input::profiles::ProfileRegistry<T>>,
     builtins: &std::collections::BTreeMap<String, T>,
     actions: Vec<dtx_input::profiles::RegistryAction<T>>,
-    save: impl FnOnce(&dtx_input::profiles::ProfileRegistry<T>) -> Result<(), dtx_input::profiles::RegistryIoError>,
+    save: impl FnOnce(
+        &dtx_input::profiles::ProfileRegistry<T>,
+    ) -> Result<(), dtx_input::profiles::RegistryIoError>,
 ) -> Result<dtx_input::profiles::ProfileRegistry<T>, String> {
     use dtx_input::profiles::RegistryStartup;
     let mut registry = match registry_startup {
@@ -289,18 +292,18 @@ pub(super) fn commit_registry_actions<T: Clone + PartialEq>(
     Ok(registry)
 }
 
-pub(super) fn load_keyboard_startup(
-) -> dtx_input::profiles::RegistryStartup<dtx_input::profiles::ProfileRegistry<dtx_input::profiles::KeyboardProfile>>
-{
+pub(super) fn load_keyboard_startup() -> dtx_input::profiles::RegistryStartup<
+    dtx_input::profiles::ProfileRegistry<dtx_input::profiles::KeyboardProfile>,
+> {
     dtx_input::profiles::load_keyboard_registry(
         &crate::bindings::keyboard_registry_path(),
         &dtx_input::default_bindings_path(),
     )
 }
 
-pub(super) fn load_midi_startup(
-) -> dtx_input::profiles::RegistryStartup<dtx_input::profiles::ProfileRegistry<dtx_input::profiles::MidiProfile>>
-{
+pub(super) fn load_midi_startup() -> dtx_input::profiles::RegistryStartup<
+    dtx_input::profiles::ProfileRegistry<dtx_input::profiles::MidiProfile>,
+> {
     dtx_input::profiles::load_midi_registry(
         &crate::bindings::midi_registry_path(),
         &dtx_input::default_bindings_path(),
@@ -308,7 +311,10 @@ pub(super) fn load_midi_startup(
 }
 
 pub(super) fn load_lane_startup() -> dtx_layout::profiles::LaneRegistryStartup {
-    dtx_layout::profiles::load_lane_registry(&crate::lanes::lane_registry_path(), &dtx_layout::default_path())
+    dtx_layout::profiles::load_lane_registry(
+        &crate::lanes::lane_registry_path(),
+        &dtx_layout::default_path(),
+    )
 }
 
 /// The lane registry has no generic `RegistryAction`/`reduce_registry` (its
@@ -411,7 +417,9 @@ pub(super) fn save_lane_to_disk(
 pub(super) fn commit_lane_actions(
     registry_startup: dtx_layout::profiles::LaneRegistryStartup,
     actions: Vec<LaneRegAction>,
-    save: impl FnOnce(&dtx_layout::profiles::LaneProfileRegistry) -> Result<(), dtx_layout::profiles::LaneRegistryError>,
+    save: impl FnOnce(
+        &dtx_layout::profiles::LaneProfileRegistry,
+    ) -> Result<(), dtx_layout::profiles::LaneRegistryError>,
 ) -> Result<dtx_layout::profiles::LaneProfileRegistry, String> {
     use dtx_layout::profiles::LaneRegistryStartup;
     let mut registry = match registry_startup {
@@ -637,7 +645,10 @@ mod tests {
 
     // ===== Profile registry engine (pure reducers + closure-injected I/O) =====
 
-    fn lane_user_registry(active: &str, users: &[(&str, dtx_layout::LaneArrangement)]) -> dtx_layout::profiles::LaneProfileRegistry {
+    fn lane_user_registry(
+        active: &str,
+        users: &[(&str, dtx_layout::LaneArrangement)],
+    ) -> dtx_layout::profiles::LaneProfileRegistry {
         let mut registry = dtx_layout::profiles::lane_registry();
         registry.active = active.to_owned();
         for (name, arrangement) in users {
@@ -657,7 +668,9 @@ mod tests {
         let err = reduce_lane_registry(
             &registry,
             &builtins,
-            LaneRegAction::Save(dtx_layout::profiles::LaneProfile::from_arrangement(dtx_layout::nx_type_b())),
+            LaneRegAction::Save(dtx_layout::profiles::LaneProfile::from_arrangement(
+                dtx_layout::nx_type_b(),
+            )),
         )
         .expect_err("built-in cannot be saved in place");
         assert!(err.contains("built-in"), "{err}");
@@ -669,10 +682,17 @@ mod tests {
         let builtins = dtx_layout::profiles::lane_builtins();
         let registry = lane_user_registry(
             "Desk",
-            &[("Desk", dtx_layout::classic()), ("Studio", dtx_layout::nx_type_b())],
+            &[
+                ("Desk", dtx_layout::classic()),
+                ("Studio", dtx_layout::nx_type_b()),
+            ],
         );
-        let err = reduce_lane_registry(&registry, &builtins, LaneRegAction::Rename("Studio".to_owned()))
-            .expect_err("rename onto existing name collides");
+        let err = reduce_lane_registry(
+            &registry,
+            &builtins,
+            LaneRegAction::Rename("Studio".to_owned()),
+        )
+        .expect_err("rename onto existing name collides");
         assert!(err.contains("already exists"), "{err}");
     }
 
@@ -682,8 +702,12 @@ mod tests {
         // default, not whatever BTreeMap ordering happens to surface first.
         let builtins = dtx_layout::profiles::lane_builtins();
         let registry = lane_user_registry("Desk", &[("Desk", dtx_layout::nx_type_b())]);
-        let next = reduce_lane_registry(&registry, &builtins, LaneRegAction::Delete).expect("delete succeeds");
-        assert!(!next.profiles.contains_key("Desk"), "deleted profile is gone");
+        let next = reduce_lane_registry(&registry, &builtins, LaneRegAction::Delete)
+            .expect("delete succeeds");
+        assert!(
+            !next.profiles.contains_key("Desk"),
+            "deleted profile is gone"
+        );
         assert_eq!(next.active, dtx_layout::profiles::LANE_DEFAULT_NAME);
     }
 
@@ -694,10 +718,19 @@ mod tests {
         use dtx_input::profiles as cfg;
         let mut registry = cfg::keyboard_registry();
         registry.active = "Desk".to_owned();
-        registry.profiles.insert("Desk".to_owned(), cfg::KeyboardProfile::default());
-        registry.profiles.insert("Studio".to_owned(), cfg::KeyboardProfile::default());
-        let name = dtx_persistence::validate_profile_name("Studio", [cfg::KEYBOARD_DEFAULT_NAME], [], None)
-            .expect("valid name");
+        registry
+            .profiles
+            .insert("Desk".to_owned(), cfg::KeyboardProfile::default());
+        registry
+            .profiles
+            .insert("Studio".to_owned(), cfg::KeyboardProfile::default());
+        let name = dtx_persistence::validate_profile_name(
+            "Studio",
+            [cfg::KEYBOARD_DEFAULT_NAME],
+            [],
+            None,
+        )
+        .expect("valid name");
         let mut saved = false;
         let result = commit_registry_actions(
             cfg::RegistryStartup::Ready(registry),
@@ -715,8 +748,9 @@ mod tests {
     #[test]
     fn commit_registry_actions_propagates_save_failure() {
         use dtx_input::profiles as cfg;
-        let name = dtx_persistence::validate_profile_name("Desk", [cfg::KEYBOARD_DEFAULT_NAME], [], None)
-            .expect("valid name");
+        let name =
+            dtx_persistence::validate_profile_name("Desk", [cfg::KEYBOARD_DEFAULT_NAME], [], None)
+                .expect("valid name");
         let err = commit_registry_actions(
             cfg::RegistryStartup::Ready(cfg::keyboard_registry()),
             &cfg::keyboard_builtins(),
@@ -724,10 +758,17 @@ mod tests {
                 name,
                 value: cfg::KeyboardProfile::default(),
             }],
-            |_| Err(cfg::RegistryIoError::ConfirmationRequired { path: "disk".into() }),
+            |_| {
+                Err(cfg::RegistryIoError::ConfirmationRequired {
+                    path: "disk".into(),
+                })
+            },
         )
         .expect_err("save failure propagates");
-        assert!(err.contains("disk") || err.contains("confirmation"), "{err}");
+        assert!(
+            err.contains("disk") || err.contains("confirmation"),
+            "{err}"
+        );
     }
 
     #[test]
@@ -754,10 +795,19 @@ mod tests {
                 name: "Desk".to_owned(),
                 value: dtx_layout::profiles::LaneProfile::from_arrangement(dtx_layout::nx_type_b()),
             }],
-            |_| Err(dtx_layout::profiles::LaneRegistryError::ConfirmationRequired { path: "disk".into() }),
+            |_| {
+                Err(
+                    dtx_layout::profiles::LaneRegistryError::ConfirmationRequired {
+                        path: "disk".into(),
+                    },
+                )
+            },
         )
         .expect_err("save failure propagates");
-        assert!(err.contains("disk") || err.contains("confirmation"), "{err}");
+        assert!(
+            err.contains("disk") || err.contains("confirmation"),
+            "{err}"
+        );
     }
 
     #[test]
@@ -782,8 +832,9 @@ mod tests {
         // Happy path with an injected no-op save: SaveAs on the keyboard
         // registry inserts the profile and selects it.
         use dtx_input::profiles as cfg;
-        let name = dtx_persistence::validate_profile_name("Desk", [cfg::KEYBOARD_DEFAULT_NAME], [], None)
-            .expect("valid name");
+        let name =
+            dtx_persistence::validate_profile_name("Desk", [cfg::KEYBOARD_DEFAULT_NAME], [], None)
+                .expect("valid name");
         let registry = commit_registry_actions(
             cfg::RegistryStartup::Ready(cfg::keyboard_registry()),
             &cfg::keyboard_builtins(),
@@ -812,7 +863,10 @@ mod tests {
         )
         .expect("commit succeeds");
         assert_eq!(registry.active, "Desk");
-        assert_eq!(registry.profiles["Desk"].arrangement, dtx_layout::nx_type_d());
+        assert_eq!(
+            registry.profiles["Desk"].arrangement,
+            dtx_layout::nx_type_d()
+        );
     }
 
     #[test]
