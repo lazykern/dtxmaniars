@@ -1,7 +1,8 @@
 //! Integration tests for BGA chip detection from DTX files.
 
 use dtx_core::bga::{bga_events, BgaLayer};
-use dtx_core::parser::parse;
+use dtx_core::parser::{parse, parse_with_options, ParseOptions};
+use dtx_core::{DiagnosticKind, EChannel};
 use std::fs::File;
 
 #[test]
@@ -61,4 +62,41 @@ fn bga_events_timing_with_fixture_bpm() {
     // Spot-check timing
     let event_at_21 = events.iter().find(|e| e.measure == 21).unwrap();
     assert_eq!(event_at_21.approx_ms(bpm), 42000);
+}
+
+#[test]
+fn pan_definition_requires_asset_plus_thirteen_numeric_fields() {
+    let f = File::open("tests/fixtures/compatibility/visual_pan_swap.dtx").expect("fixture exists");
+    let report = parse_with_options(f, ParseOptions::default()).expect("fixture parses");
+    let pan = report.chart.assets.bga_pan.get(&1).expect("BGAPAN01");
+
+    assert_eq!(pan.asset_slot, 2);
+    assert_eq!(pan.source_start.width, 100);
+    assert_eq!(pan.source_end.height, 50);
+    assert_eq!(pan.destination_start.x, 20);
+    assert_eq!(pan.destination_end.y, 30);
+    assert_eq!(pan.duration_ticks, 96);
+    assert!(report.diagnostics.iter().any(|diagnostic| {
+        diagnostic.line == Some(7) && diagnostic.kind == DiagnosticKind::MalformedVisual
+    }));
+}
+
+#[test]
+fn parser_preserves_all_eight_bga_swap_channels() {
+    let chart = parse(
+        File::open("tests/fixtures/compatibility/visual_pan_swap.dtx").expect("fixture exists"),
+    )
+    .expect("fixture parses");
+    for channel in [
+        EChannel::BGALayer1Swap,
+        EChannel::BGALayer2Swap,
+        EChannel::BGALayer3Swap,
+        EChannel::BGALayer4Swap,
+        EChannel::BGALayer5Swap,
+        EChannel::BGALayer6Swap,
+        EChannel::BGALayer7Swap,
+        EChannel::BGALayer8Swap,
+    ] {
+        assert!(chart.chips.iter().any(|chip| chip.channel == channel));
+    }
 }

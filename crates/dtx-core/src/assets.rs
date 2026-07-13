@@ -14,6 +14,118 @@ use std::collections::HashMap;
 
 use crate::base36;
 
+/// Integer pixel rectangle used by authored BGA/AVI pan definitions.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct PixelRect {
+    pub x: i32,
+    pub y: i32,
+    pub width: i32,
+    pub height: i32,
+}
+
+/// Full NX `#BGAPANxx` / `#AVIPANxx` definition.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct PanDefinition {
+    pub asset_slot: u32,
+    pub source_start: PixelRect,
+    pub source_end: PixelRect,
+    pub destination_start: PixelRect,
+    pub destination_end: PixelRect,
+    pub duration_ticks: u32,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PanTarget {
+    Image,
+    Movie,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PanDefinitionError {
+    pub detail: String,
+}
+
+/// Parse a pan directive while retaining malformed directives for diagnostics.
+pub fn parse_visual_pan_directive(
+    line: &str,
+) -> Option<Result<(PanTarget, u32, PanDefinition), PanDefinitionError>> {
+    let body = line.trim().strip_prefix('#')?;
+    let (head, value) = body.split_once(':')?;
+    let upper = head.trim().to_ascii_uppercase();
+    let (target, suffix) = if let Some(suffix) = upper.strip_prefix("BGAPAN") {
+        (PanTarget::Image, suffix)
+    } else if let Some(suffix) = upper.strip_prefix("AVIPAN") {
+        (PanTarget::Movie, suffix)
+    } else {
+        return None;
+    };
+
+    let invalid = |detail: String| Err(PanDefinitionError { detail });
+    if suffix.len() != 2 {
+        return Some(invalid(
+            "pan definition id must be two base36 digits".into(),
+        ));
+    }
+    let Some(id) = base36::parse_id_suffix(suffix) else {
+        return Some(invalid("pan definition id is not base36".into()));
+    };
+    let fields = value
+        .split(|character: char| {
+            character.is_whitespace()
+                || matches!(character, ',' | '(' | ')' | '[' | ']' | 'x' | '|')
+        })
+        .filter(|field| !field.is_empty())
+        .collect::<Vec<_>>();
+    if fields.len() != 14 {
+        return Some(invalid(format!(
+            "pan definition requires 14 fields, found {}",
+            fields.len()
+        )));
+    }
+    let Some(asset_slot) = base36::parse_id_suffix(fields[0]).filter(|slot| *slot > 0) else {
+        return Some(invalid("pan asset id must be 01 through ZZ".into()));
+    };
+    let mut numbers = [0_i32; 13];
+    for (index, field) in fields[1..].iter().enumerate() {
+        let Ok(number) = field.parse::<i32>() else {
+            return Some(invalid(format!(
+                "pan field {} is not an integer",
+                index + 2
+            )));
+        };
+        numbers[index] = number;
+    }
+    let definition = PanDefinition {
+        asset_slot,
+        source_start: PixelRect {
+            x: numbers[4],
+            y: numbers[5],
+            width: numbers[0],
+            height: numbers[1],
+        },
+        source_end: PixelRect {
+            x: numbers[6],
+            y: numbers[7],
+            width: numbers[2],
+            height: numbers[3],
+        },
+        destination_start: PixelRect {
+            x: numbers[8],
+            y: numbers[9],
+            width: numbers[0],
+            height: numbers[1],
+        },
+        destination_end: PixelRect {
+            x: numbers[10],
+            y: numbers[11],
+            width: numbers[2],
+            height: numbers[3],
+        },
+        duration_ticks: numbers[12].max(0) as u32,
+    };
+    Some(Ok((target, id, definition)))
+}
+
 /// WAV asset registry (BocuD `listWAV`).
 ///
 /// Maps WAV #id (1..256, encoded as hex 0x01..0xFF in chip channels) →
@@ -267,16 +379,13 @@ pub fn parse_avi_directive(line: &str) -> Option<(u32, String)> {
     Some((id, value.trim().to_string()))
 }
 
-/// Parse `#BGAxx: <filename>` or `#BGAPANxx: <filename>` line.
+/// Parse `#BGAxx: <filename>` line.
 pub fn parse_bga_directive(line: &str) -> Option<(u32, String)> {
     let body = line.trim().strip_prefix('#')?;
     let (head, value) = body.split_once(':')?;
     let head = head.trim();
     let upper = head.to_ascii_uppercase();
-    if let Some(suffix) = upper.strip_prefix("BGAPAN") {
-        let id = base36::parse_id_suffix(suffix)?;
-        Some((id, value.trim().to_string()))
-    } else if let Some(suffix) = upper.strip_prefix("BGA") {
+    if let Some(suffix) = upper.strip_prefix("BGA") {
         if suffix.is_empty() || suffix.len() > 2 {
             return None;
         }
@@ -313,6 +422,10 @@ pub struct DtxAssets {
     pub avi: AviRegistry,
     /// BGA registry.
     pub bga: BgaRegistry,
+    /// `#BGAPANxx` definitions, later definitions replacing earlier ones.
+    pub bga_pan: HashMap<u32, PanDefinition>,
+    /// `#AVIPANxx` definitions, later definitions replacing earlier ones.
+    pub avi_pan: HashMap<u32, PanDefinition>,
     /// `#BPMxx` definition table (BocuD `listBPM`): slot id → BPM value.
     /// Referenced by BPMEx (channel 0x08) chips.
     pub bpm: HashMap<u32, f32>,
@@ -327,6 +440,15 @@ impl DtxAssets {
     /// Process one DTX text line, dispatching to the appropriate registry.
     /// Returns true if the line was an asset directive.
     pub fn process_line(&mut self, line: &str) -> bool {
+        if let Some(result) = parse_visual_pan_directive(line) {
+            if let Ok((target, id, definition)) = result {
+                match target {
+                    PanTarget::Image => self.bga_pan.insert(id, definition),
+                    PanTarget::Movie => self.avi_pan.insert(id, definition),
+                };
+            }
+            return true;
+        }
         if let Some((id, filename)) = parse_wav_directive(line) {
             self.wav.insert(id, filename);
             return true;
@@ -550,9 +672,14 @@ mod tests {
 
     #[test]
     fn parse_bgapan_basic() {
-        let (id, name) = parse_bga_directive("#BGAPAN03: pan.bmp").unwrap();
+        let (target, id, pan) =
+            parse_visual_pan_directive("#BGAPAN03: 02,100,100,50,50,0,0,10,10,20,20,30,30,96")
+                .expect("pan directive")
+                .expect("valid pan");
+        assert_eq!(target, PanTarget::Image);
         assert_eq!(id, 3);
-        assert_eq!(name, "pan.bmp");
+        assert_eq!(pan.asset_slot, 2);
+        assert_eq!(pan.duration_ticks, 96);
     }
 
     // === BPM directive ===

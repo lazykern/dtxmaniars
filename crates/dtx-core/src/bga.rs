@@ -57,6 +57,21 @@ impl BgaLayer {
         })
     }
 
+    /// Target layer for a BGA scope-swap channel.
+    pub fn from_swap_channel(channel: EChannel) -> Option<Self> {
+        Some(match channel {
+            EChannel::BGALayer1Swap => Self::Layer1,
+            EChannel::BGALayer2Swap => Self::Layer2,
+            EChannel::BGALayer3Swap => Self::Layer3,
+            EChannel::BGALayer4Swap => Self::LayerN(4),
+            EChannel::BGALayer5Swap => Self::LayerN(5),
+            EChannel::BGALayer6Swap => Self::LayerN(6),
+            EChannel::BGALayer7Swap => Self::LayerN(7),
+            EChannel::BGALayer8Swap => Self::LayerN(8),
+            _ => return None,
+        })
+    }
+
     /// True if this layer requires real video decoding (M7.1+).
     pub fn is_movie(&self) -> bool {
         matches!(self, BgaLayer::Movie | BgaLayer::MovieFull)

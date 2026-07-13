@@ -24,7 +24,10 @@ use thiserror::Error;
 pub mod chart;
 pub mod video;
 
-pub use chart::{ActiveChartRes, TimedVisualEvent};
+pub use chart::{
+    ActiveChartRes, LayerVisualState, MovieVisualState, RectF32, TimedVisualEvent, VisualEventKind,
+    VisualGeometry, VisualState,
+};
 pub use video::{DecodedFrame, MovieWorker};
 
 /// Gameplay-clock bridge: `gameplay-drums` copies the authoritative chart time
@@ -210,19 +213,26 @@ fn validate_frame_len(width: u32, height: u32, len: usize) -> Result<(), BgaErro
 
 /// For a seek to `now_ms`, the last image event per layer and the last movie
 /// event, both at or before `now_ms`. Used to reconstruct visible state.
+#[cfg(test)]
 fn rebuild_state(
     events: &[TimedVisualEvent],
     now_ms: i64,
 ) -> (std::collections::HashMap<BgaLayer, u32>, Option<(u32, i64)>) {
-    let mut images: std::collections::HashMap<BgaLayer, u32> = std::collections::HashMap::new();
-    let mut movie: Option<(u32, i64)> = None;
-    for event in events.iter().filter(|e| e.target_ms <= now_ms) {
-        if event.layer.is_movie() {
-            movie = Some((event.asset_id, event.target_ms));
-        } else {
-            images.insert(event.layer, event.asset_id);
-        }
-    }
+    rebuild_state_with_motion(events, now_ms, true)
+}
+
+fn rebuild_state_with_motion(
+    events: &[TimedVisualEvent],
+    now_ms: i64,
+    motion_enabled: bool,
+) -> (std::collections::HashMap<BgaLayer, u32>, Option<(u32, i64)>) {
+    let state = chart::visual_state_at_with_motion(events, now_ms, motion_enabled);
+    let images = state
+        .layers
+        .into_iter()
+        .map(|(layer, visual)| (layer, visual.asset_id))
+        .collect();
+    let movie = state.movie.map(|visual| (visual.asset_id, visual.start_ms));
     (images, movie)
 }
 
@@ -235,7 +245,12 @@ pub fn plugin(app: &mut App) {
         .init_resource::<MovieRuntime>()
         .add_systems(
             Update,
-            (tick_bga_visuals, apply_image_settings, drive_movie)
+            (
+                tick_bga_visuals,
+                apply_visual_geometry,
+                apply_image_settings,
+                drive_movie,
+            )
                 .chain()
                 .in_set(BgaSystems),
         );
@@ -301,10 +316,12 @@ fn tick_bga_visuals(
             break;
         }
         player.next_event_idx += 1;
-        if event.layer.is_movie() {
+        if event.layer().is_movie() {
             // Hand the movie subsystem the newest movie to play.
-            player.active_movie = Some(event.asset_id);
-            player.movie_start_ms = event.target_ms;
+            if settings.motion_enabled {
+                player.active_movie = Some(event.asset_id());
+                player.movie_start_ms = event.target_ms;
+            }
             continue;
         }
         apply_image_event(
@@ -342,14 +359,11 @@ fn rebuild_on_seek(
         commands.entity(entity).despawn();
     }
 
-    let (images, movie) = rebuild_state(&chart_res.events, now_ms);
+    let (images, movie) =
+        rebuild_state_with_motion(&chart_res.events, now_ms, settings.motion_enabled);
     for (layer, asset_id) in images {
         spawn_image_overlay(
-            &TimedVisualEvent {
-                target_ms: now_ms,
-                layer,
-                asset_id,
-            },
+            &TimedVisualEvent::replace(now_ms, layer, asset_id),
             chart_res,
             settings,
             player,
@@ -367,6 +381,84 @@ fn rebuild_on_seek(
     }
 }
 
+/// Apply the pure chart-time pan reconstruction to live image/movie nodes.
+#[allow(clippy::type_complexity)]
+fn apply_visual_geometry(
+    clock: Res<BgaClock>,
+    settings: Res<BgaSettings>,
+    chart_res: Option<Res<ActiveChartRes>>,
+    images: Res<Assets<Image>>,
+    mut image_overlays: Query<
+        (&BgaLayerOverlay, &mut Node, &mut ImageNode),
+        (Without<MovieImage>, Without<MovieOverlay>),
+    >,
+    mut movie_roots: Query<
+        &mut Node,
+        (
+            With<MovieOverlay>,
+            Without<MovieImage>,
+            Without<BgaLayerOverlay>,
+        ),
+    >,
+    mut movie_images: Query<&mut ImageNode, With<MovieImage>>,
+) {
+    let Some(chart_res) = chart_res else {
+        return;
+    };
+    let state = chart::visual_state_at_with_motion(
+        &chart_res.events,
+        clock.current_ms,
+        settings.motion_enabled,
+    );
+    for (overlay, mut node, mut image) in &mut image_overlays {
+        let Some(geometry) = state
+            .layers
+            .get(&overlay.layer)
+            .filter(|visual| visual.asset_id == overlay.asset_id)
+            .and_then(|visual| visual.geometry)
+        else {
+            continue;
+        };
+        apply_destination(&mut node, geometry.destination);
+        image.rect = Some(clamped_source_rect(
+            geometry.source,
+            images.get(&image.image).map(Image::size_f32),
+        ));
+    }
+    let Some(geometry) = state.movie.and_then(|movie| movie.geometry) else {
+        return;
+    };
+    for mut node in &mut movie_roots {
+        apply_destination(&mut node, geometry.destination);
+    }
+    for mut image in &mut movie_images {
+        image.rect = Some(clamped_source_rect(
+            geometry.source,
+            images.get(&image.image).map(Image::size_f32),
+        ));
+    }
+}
+
+fn clamped_source_rect(source: chart::RectF32, media_size: Option<Vec2>) -> bevy::math::Rect {
+    let min = Vec2::new(source.x.max(0.0), source.y.max(0.0));
+    let mut max = Vec2::new(
+        min.x + source.width.max(0.0),
+        min.y + source.height.max(0.0),
+    );
+    if let Some(media_size) = media_size {
+        max = max.min(media_size);
+    }
+    bevy::math::Rect::from_corners(min.min(max), max)
+}
+
+fn apply_destination(node: &mut Node, destination: chart::RectF32) {
+    node.position_type = PositionType::Absolute;
+    node.left = Val::Px(destination.x);
+    node.top = Val::Px(destination.y);
+    node.width = Val::Px(destination.width);
+    node.height = Val::Px(destination.height);
+}
+
 /// Spawn (replacing any prior entity on the same layer) the image overlay for
 /// a static visual event. Missing assets warn once and leave the layer as-is.
 fn apply_image_event(
@@ -380,7 +472,7 @@ fn apply_image_event(
     bga_parent: &BgaParent,
 ) {
     for (entity, overlay) in overlays.iter() {
-        if overlay.layer == event.layer {
+        if overlay.layer == event.layer() {
             commands.entity(entity).despawn();
         }
     }
@@ -406,18 +498,21 @@ fn spawn_image_overlay(
     asset_server: &AssetServer,
     bga_parent: &BgaParent,
 ) {
-    let Some(path) = chart_res.bmp_path(event.asset_id) else {
-        if player.warned_missing.insert((event.layer, event.asset_id)) {
+    let Some(path) = chart_res.bmp_path(event.asset_id()) else {
+        if player
+            .warned_missing
+            .insert((event.layer(), event.asset_id()))
+        {
             warn!(
                 "BGA: missing image asset id={} for layer={}",
-                event.asset_id,
-                event.layer.label()
+                event.asset_id(),
+                event.layer().label()
             );
         }
         return;
     };
 
-    let (x, y, w, h) = image_layer_geometry(event.layer);
+    let (x, y, w, h) = image_layer_geometry(event.layer());
     let visibility = if settings.images_enabled {
         Visibility::Inherited
     } else {
@@ -426,8 +521,8 @@ fn spawn_image_overlay(
     let overlay = commands
         .spawn((
             BgaLayerOverlay {
-                layer: event.layer,
-                asset_id: event.asset_id,
+                layer: event.layer(),
+                asset_id: event.asset_id(),
             },
             Node {
                 position_type: PositionType::Absolute,
@@ -788,31 +883,11 @@ mod tests {
     #[test]
     fn rebuild_state_picks_last_image_per_layer_and_last_movie() {
         let events = vec![
-            TimedVisualEvent {
-                target_ms: 0,
-                layer: BgaLayer::Layer3,
-                asset_id: 1,
-            },
-            TimedVisualEvent {
-                target_ms: 100,
-                layer: BgaLayer::Movie,
-                asset_id: 7,
-            },
-            TimedVisualEvent {
-                target_ms: 200,
-                layer: BgaLayer::Layer3,
-                asset_id: 2,
-            },
-            TimedVisualEvent {
-                target_ms: 300,
-                layer: BgaLayer::Movie,
-                asset_id: 8,
-            },
-            TimedVisualEvent {
-                target_ms: 500,
-                layer: BgaLayer::Layer3,
-                asset_id: 9,
-            },
+            TimedVisualEvent::replace(0, BgaLayer::Layer3, 1),
+            TimedVisualEvent::replace(100, BgaLayer::Movie, 7),
+            TimedVisualEvent::replace(200, BgaLayer::Layer3, 2),
+            TimedVisualEvent::replace(300, BgaLayer::Movie, 8),
+            TimedVisualEvent::replace(500, BgaLayer::Layer3, 9),
         ];
         let (images, movie) = rebuild_state(&events, 350);
         assert_eq!(images.get(&BgaLayer::Layer3), Some(&2));

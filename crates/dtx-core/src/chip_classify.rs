@@ -164,7 +164,15 @@ pub const fn classify(ch: EChannel) -> ChipClass {
         | EChannel::BGALayer5
         | EChannel::BGALayer6
         | EChannel::BGALayer7
-        | EChannel::BGALayer8 => ChipClass::BGA,
+        | EChannel::BGALayer8
+        | EChannel::BGALayer1Swap
+        | EChannel::BGALayer2Swap
+        | EChannel::BGALayer3Swap
+        | EChannel::BGALayer4Swap
+        | EChannel::BGALayer5Swap
+        | EChannel::BGALayer6Swap
+        | EChannel::BGALayer7Swap
+        | EChannel::BGALayer8Swap => ChipClass::BGA,
 
         // Movie
         EChannel::Movie | EChannel::MovieFull => ChipClass::Movie,

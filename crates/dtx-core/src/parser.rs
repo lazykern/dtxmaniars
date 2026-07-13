@@ -156,6 +156,26 @@ fn process_line(
         return Ok(());
     }
 
+    if let Some(result) = crate::assets::parse_visual_pan_directive(trimmed) {
+        match result {
+            Ok((target, id, definition)) => match target {
+                crate::assets::PanTarget::Image => {
+                    chart.assets.bga_pan.insert(id, definition);
+                }
+                crate::assets::PanTarget::Movie => {
+                    chart.assets.avi_pan.insert(id, definition);
+                }
+            },
+            Err(error) => diagnostics.push(crate::diagnostic::ChartDiagnostic {
+                line: Some(line_no),
+                kind: crate::diagnostic::DiagnosticKind::MalformedVisual,
+                detail: error.detail,
+                recovery: Some("The malformed optional pan definition was skipped.".into()),
+            }),
+        }
+        return Ok(());
+    }
+
     if chart.assets.process_line(trimmed) {
         return Ok(());
     }
@@ -457,7 +477,10 @@ fn parse_chip_line(
         return Ok(());
     }
 
-    if is_binary_only(&data) && !binary_pairs_reference_defined_wav(&data, context.wav) {
+    if !channel.is_bga()
+        && is_binary_only(&data)
+        && !binary_pairs_reference_defined_wav(&data, context.wav)
+    {
         push_single_char_chips(measure, channel, &data, chips);
         return Ok(());
     }

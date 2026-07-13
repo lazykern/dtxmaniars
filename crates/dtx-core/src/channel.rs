@@ -80,6 +80,14 @@ pub enum EChannel {
     FillIn = 0x53,
     BeatLineShift = 0xC1,
     BeatLineDisplay = 0xC2,
+    BGALayer1Swap = 0xC4,
+    BGALayer2Swap = 0xC7,
+    BGALayer3Swap = 0xD5,
+    BGALayer4Swap = 0xD6,
+    BGALayer5Swap = 0xD7,
+    BGALayer6Swap = 0xD8,
+    BGALayer7Swap = 0xD9,
+    BGALayer8Swap = 0xE0,
 
     // SE / sfx
     SE01 = 0x61,
@@ -193,6 +201,14 @@ impl EChannel {
             0x53 => Self::FillIn,
             0xC1 => Self::BeatLineShift,
             0xC2 => Self::BeatLineDisplay,
+            0xC4 => Self::BGALayer1Swap,
+            0xC7 => Self::BGALayer2Swap,
+            0xD5 => Self::BGALayer3Swap,
+            0xD6 => Self::BGALayer4Swap,
+            0xD7 => Self::BGALayer5Swap,
+            0xD8 => Self::BGALayer6Swap,
+            0xD9 => Self::BGALayer7Swap,
+            0xE0 => Self::BGALayer8Swap,
             0x54 => Self::Movie,
             0x55 => Self::BGALayer3,
             0x5A => Self::MovieFull,
@@ -368,6 +384,14 @@ impl EChannel {
                 | Self::BGALayer8
                 | Self::Movie
                 | Self::MovieFull
+                | Self::BGALayer1Swap
+                | Self::BGALayer2Swap
+                | Self::BGALayer3Swap
+                | Self::BGALayer4Swap
+                | Self::BGALayer5Swap
+                | Self::BGALayer6Swap
+                | Self::BGALayer7Swap
+                | Self::BGALayer8Swap
         )
     }
 }
