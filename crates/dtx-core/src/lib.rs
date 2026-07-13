@@ -19,6 +19,7 @@ pub mod channel;
 pub mod chart;
 pub mod chip_classify;
 pub mod chip_transform;
+pub mod conditional;
 pub mod constants;
 pub mod cscore_ini;
 pub mod enum_converter;
@@ -35,8 +36,9 @@ pub use beat_lines::{expand_timing_lines, TimingLine, TimingLineKind};
 pub use channel::EChannel;
 pub use chart::{display_dlevel, Chart, Chip, EmptyHitEvent, Metadata};
 pub use chip_transform::{apply_mirror, apply_random, RandomMode};
+pub use conditional::{ParseWarning, ParseWarningKind};
 pub use error::DtxError;
-pub use parser::parse;
+pub use parser::{parse, parse_with_options, ParseOptions, ParseReport};
 
 /// Parse a DTX file from a string slice.
 ///

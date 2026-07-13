@@ -17,26 +17,55 @@ use crate::chart::{Chart, Chip, EmptyHitEvent, Metadata};
 use crate::chip_classify::{is_bad_note_byte, nosound_byte_to_lane};
 use crate::error::{DtxError, Result};
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ParseOptions {
+    pub random_seed: u64,
+}
+
+impl Default for ParseOptions {
+    fn default() -> Self {
+        use std::sync::atomic::{AtomicU64, Ordering};
+        static COUNTER: AtomicU64 = AtomicU64::new(0);
+        let time = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|duration| duration.as_nanos() as u64)
+            .unwrap_or(0);
+        Self {
+            random_seed: time ^ COUNTER.fetch_add(1, Ordering::Relaxed),
+        }
+    }
+}
+
+#[derive(Debug)]
+pub struct ParseReport {
+    pub chart: Chart,
+    pub warnings: Vec<crate::conditional::ParseWarning>,
+}
+
 /// Parse a DTX stream.
 ///
 /// DTX text is encoded in Shift-JIS (Japanese Windows standard, used by
 /// DTXManiaNX). Some tooling exports UTF-8; we try UTF-8 first and fall
 /// back to Shift-JIS if that fails. Binary data (chip lines, #MMMCC) is
 /// ASCII-only so encoding doesn't matter for them.
-pub fn parse<R: Read>(mut reader: R) -> Result<Chart> {
+pub fn parse<R: Read>(reader: R) -> Result<Chart> {
+    parse_with_options(reader, ParseOptions::default()).map(|report| report.chart)
+}
+
+pub fn parse_with_options<R: Read>(mut reader: R, options: ParseOptions) -> Result<ParseReport> {
     let mut bytes = Vec::new();
     reader.read_to_end(&mut bytes)?;
     let text = decode_dtx_text(&bytes);
+    let (lines, warnings) = crate::conditional::select_active_lines(&text, options.random_seed);
     let mut chart = Chart::default();
 
-    for (idx, line) in text.lines().enumerate() {
-        let line_no = idx + 1;
+    for (line_no, line) in lines {
         process_line(line, line_no, &mut chart)?;
     }
 
     resolve_bpm_ex_chips(&mut chart);
 
-    Ok(chart)
+    Ok(ParseReport { chart, warnings })
 }
 
 /// Resolve BPMEx (channel 0x08) chips: fill `value` with the BPM from the
