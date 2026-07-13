@@ -1,4 +1,4 @@
-use dtx_scoring::score_ini::{DrumScoreIni, parse_score_ini_text};
+use dtx_scoring::score_ini::{parse_score_ini_text, DrumScoreIni};
 use dtx_scoring::store::{ScoreSource, ScoreStore};
 
 fn sample_score_ini() -> &'static str {
@@ -97,7 +97,7 @@ fn rendered_score_ini_keeps_history_fields() {
 
 #[test]
 fn import_nx_scores_adds_best_and_last_play_once() {
-    use dtx_scoring::nx_import::{ImportOptions, import_nx_scores};
+    use dtx_scoring::nx_import::{import_nx_scores, ImportOptions};
 
     let root = std::env::temp_dir().join(format!("dtx_nx_import_{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&root);
@@ -124,18 +124,14 @@ fn import_nx_scores_adds_best_and_last_play_once() {
     assert_eq!(report.imported_entries, 2);
     assert_eq!(report2.imported_entries, 0);
     assert_eq!(store.entries.len(), 2);
-    assert!(
-        store
-            .entries
-            .iter()
-            .any(|e| e.source == ScoreSource::ImportedNxHiScore)
-    );
-    assert!(
-        store
-            .entries
-            .iter()
-            .any(|e| e.source == ScoreSource::ImportedNxLastPlay)
-    );
+    assert!(store
+        .entries
+        .iter()
+        .any(|e| e.source == ScoreSource::ImportedNxHiScore));
+    assert!(store
+        .entries
+        .iter()
+        .any(|e| e.source == ScoreSource::ImportedNxLastPlay));
     assert_eq!(store.nx_imports.len(), 1);
     assert_eq!(store.nx_imports[0].history.len(), 2);
 
@@ -144,7 +140,7 @@ fn import_nx_scores_adds_best_and_last_play_once() {
 
 #[test]
 fn import_nx_scores_reports_missing_chart_without_crashing() {
-    use dtx_scoring::nx_import::{ImportOptions, import_nx_scores};
+    use dtx_scoring::nx_import::{import_nx_scores, ImportOptions};
 
     let root = std::env::temp_dir().join(format!("dtx_nx_missing_{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&root);

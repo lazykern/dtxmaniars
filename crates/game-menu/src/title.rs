@@ -204,9 +204,7 @@ fn title_input(
             }
             None => warn!("layout editor: no songs available (empty SongDb)"),
         }
-    } else if keys.just_pressed(KeyCode::Escape)
-        && arm.press(time.elapsed_secs_f64())
-    {
+    } else if keys.just_pressed(KeyCode::Escape) && arm.press(time.elapsed_secs_f64()) {
         request_transition(&mut requests, AppState::End);
     }
 }

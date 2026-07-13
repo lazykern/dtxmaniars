@@ -1,8 +1,8 @@
-use dtx_scoring::Rank;
 use dtx_scoring::identity::ChartIdentity;
 use dtx_scoring::store::{
-    JudgmentTotals, STORE_VERSION, ScoreEntry, ScoreSource, ScoreStore, ScoreStoreError,
+    JudgmentTotals, ScoreEntry, ScoreSource, ScoreStore, ScoreStoreError, STORE_VERSION,
 };
+use dtx_scoring::Rank;
 
 fn entry(hash: &str, score: u32, source: ScoreSource) -> ScoreEntry {
     ScoreEntry {

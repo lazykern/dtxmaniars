@@ -6,10 +6,10 @@ use std::path::{Path, PathBuf};
 
 use thiserror::Error;
 
-use crate::Rank;
-use crate::identity::{ChartIdentity, canonical_chart_hash, raw_file_sha256};
-use crate::score_ini::{DrumScoreIni, parse_score_ini_text};
+use crate::identity::{canonical_chart_hash, raw_file_sha256, ChartIdentity};
+use crate::score_ini::{parse_score_ini_text, DrumScoreIni};
 use crate::store::{JudgmentTotals, NxImportRecord, ScoreEntry, ScoreSource, ScoreStore};
+use crate::Rank;
 
 /// Import options.
 #[derive(Debug, Clone)]

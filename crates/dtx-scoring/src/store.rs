@@ -5,9 +5,9 @@ use std::path::{Path, PathBuf};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
-use crate::Rank;
 use crate::identity::ChartIdentity;
 use crate::replay::ReplayRef;
+use crate::Rank;
 
 /// Current native store version.
 pub const STORE_VERSION: u32 = 2;

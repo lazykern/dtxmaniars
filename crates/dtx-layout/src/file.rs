@@ -161,7 +161,11 @@ impl LanesSection {
                     })
                     .collect(),
             ),
-            hidden: if hidden.is_empty() { None } else { Some(hidden) },
+            hidden: if hidden.is_empty() {
+                None
+            } else {
+                Some(hidden)
+            },
         }
     }
 }

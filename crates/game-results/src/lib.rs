@@ -9,8 +9,8 @@ mod input;
 mod ui;
 
 use bevy::prelude::*;
-use dtx_scoring::identity::{ChartIdentity, canonical_chart_hash, raw_file_sha256};
-use dtx_scoring::skill::{DrumAutoPlay, drum_performance_skill, drum_song_skill};
+use dtx_scoring::identity::{canonical_chart_hash, raw_file_sha256, ChartIdentity};
+use dtx_scoring::skill::{drum_performance_skill, drum_song_skill, DrumAutoPlay};
 use dtx_scoring::{JudgmentTotals, Rank, ScoreEntry, ScoreSource};
 use game_shell::{AppState, ScoreStoreResource};
 use gameplay_drums::resources::{ActiveChart, Combo, DrumScoring, JudgmentCounts, Score};

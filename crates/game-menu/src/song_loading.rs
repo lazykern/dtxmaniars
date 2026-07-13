@@ -701,7 +701,10 @@ mod tests {
 
     #[test]
     fn pad_confirm_does_not_cancel_the_load() {
-        assert!(!run_cancel_watch(Some(NavVerb::Confirm), LoadPhase::Parsing));
+        assert!(!run_cancel_watch(
+            Some(NavVerb::Confirm),
+            LoadPhase::Parsing
+        ));
     }
 
     #[test]

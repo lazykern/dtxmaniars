@@ -337,7 +337,10 @@ mod tests {
         while arr.lanes.len() > 1 {
             hide_lane(&mut arr, 0);
         }
-        assert!(hide_lane(&mut arr, 0).is_empty(), "cannot hide the only lane");
+        assert!(
+            hide_lane(&mut arr, 0).is_empty(),
+            "cannot hide the only lane"
+        );
         assert_eq!(arr.lanes.len(), 1);
     }
 

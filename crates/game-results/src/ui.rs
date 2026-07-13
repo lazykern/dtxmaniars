@@ -4,8 +4,8 @@ use bevy::prelude::*;
 use dtx_scoring::Rank;
 use dtx_ui::easing::EaseFunction;
 use dtx_ui::motion::EnterChoreo;
-use dtx_ui::{ThemeResource, theme::Theme};
-use game_shell::{SelectedDifficulty, despawn_stage};
+use dtx_ui::{theme::Theme, ThemeResource};
+use game_shell::{despawn_stage, SelectedDifficulty};
 use gameplay_drums::resources::{ActiveChart, Combo, DrumScoring, JudgmentCounts, Score};
 use gameplay_drums::stage_end::LastStageOutcome;
 

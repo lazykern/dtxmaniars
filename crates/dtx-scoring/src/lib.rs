@@ -364,7 +364,7 @@ mod tests {
         let p = PathBuf::from("/nonexistent/never/read.txt");
         let h = compute_chart_hash(&p);
         assert_eq!(h.len(), 64); // SHA-256 hex
-        // Same path → same hash (deterministic).
+                                 // Same path → same hash (deterministic).
         assert_eq!(h, compute_chart_hash(&p));
     }
 

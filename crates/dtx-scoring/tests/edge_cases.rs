@@ -3,14 +3,14 @@
 //! Covers score entry, rank thresholds, hit range boundary values,
 //! and gauge state transitions.
 
-use dtx_scoring::JudgmentKind;
 use dtx_scoring::gauge::{
-    ComboState, GAUGE_EXCELLENT, GAUGE_GOOD, GAUGE_START, GaugeState, gauge_delta,
+    gauge_delta, ComboState, GaugeState, GAUGE_EXCELLENT, GAUGE_GOOD, GAUGE_START,
 };
 use dtx_scoring::hit_ranges::{
-    Difficulty, HitRanges, classify_with_difficulty, classify_with_ranges,
+    classify_with_difficulty, classify_with_ranges, Difficulty, HitRanges,
 };
 use dtx_scoring::identity::ChartIdentity;
+use dtx_scoring::JudgmentKind;
 use dtx_scoring::{JudgmentTotals, Rank, ScoreEntry, ScoreSource, ScoreStore};
 
 #[test]
