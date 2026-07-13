@@ -50,6 +50,7 @@ pub mod phrase;
 pub(crate) mod playback_rate;
 pub mod practice;
 pub mod resources;
+pub mod results_analysis;
 pub mod score;
 pub mod scroll;
 pub mod se_scheduler;
@@ -205,6 +206,7 @@ pub fn plugin(app: &mut App) {
         bgm_scheduler::plugin,
         interp::plugin,
     ))
+    .add_plugins(results_analysis::plugin)
     .add_plugins((
         bindings::plugin,
         beat_lines::plugin,
@@ -806,5 +808,50 @@ mod tests {
         assert_eq!(stamp_audio_ms(None, 0), 0);
         assert_eq!(stamp_audio_ms(Some(5000), 0), 5000);
         assert_eq!(stamp_audio_ms(Some(5000), 123), 123);
+    }
+
+    #[test]
+    fn normal_play_analysis_reports_timing_lane_and_loop() {
+        use super::results_analysis::{analyze_normal_play, RecordedJudgment};
+        use dtx_scoring::JudgmentKind;
+
+        let events = vec![
+            RecordedJudgment::new(3, JudgmentKind::Poor, -25, 0, 2_100),
+            RecordedJudgment::new(3, JudgmentKind::Miss, 0, 1, 2_200),
+            RecordedJudgment::new(3, JudgmentKind::Poor, -20, 2, 2_300),
+            RecordedJudgment::new(1, JudgmentKind::Perfect, -15, 3, 4_100),
+            RecordedJudgment::new(1, JudgmentKind::Great, -20, 4, 4_200),
+            RecordedJudgment::new(1, JudgmentKind::Perfect, -10, 5, 4_300),
+        ];
+
+        let report = analyze_normal_play(&events, &[0, 2_000, 4_000, 6_000, 8_000]);
+        assert_eq!(report.bias_ms, Some(-20));
+        assert_eq!(report.spread_ms, Some(5));
+        assert_eq!(report.weakest_lane.expect("weak lane").lane, 3);
+        let section = report.weakest_section.expect("weak section");
+        assert_eq!(section.loop_start_ms, 0);
+        assert_eq!(section.loop_end_ms, 6_000);
+    }
+
+    #[test]
+    fn normal_play_stream_keeps_a_bounded_prefix() {
+        use super::results_analysis::{NormalPlayEventStream, RecordedJudgment};
+        use dtx_scoring::JudgmentKind;
+
+        let mut stream = NormalPlayEventStream::default();
+        for chip_idx in 0..=8_192 {
+            stream.push(RecordedJudgment::new(
+                1,
+                JudgmentKind::Perfect,
+                0,
+                chip_idx,
+                chip_idx as i64,
+            ));
+        }
+
+        assert_eq!(stream.events.len(), 8_192);
+        assert_eq!(stream.events[0].chip_idx, 0);
+        assert_eq!(stream.events.last().expect("kept event").chip_idx, 8_191);
+        assert!(stream.truncated);
     }
 }
