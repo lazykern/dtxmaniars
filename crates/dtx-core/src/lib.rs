@@ -27,6 +27,7 @@ pub mod enum_converter;
 pub mod error;
 pub mod fdk_sub_acts;
 pub mod format;
+pub mod legacy_gda;
 pub mod parser;
 pub mod random_mode;
 pub mod score_song;
@@ -42,6 +43,7 @@ pub use conditional::{ParseWarning, ParseWarningKind};
 pub use diagnostic::{ChartDiagnostic, DiagnosticKind};
 pub use error::DtxError;
 pub use format::{ChartFormat, ChartLevel};
+pub use legacy_gda::{normalize_gda_head, LegacyChannelError};
 pub use parser::{parse, parse_source, parse_with_options, ParseOptions, ParseReport};
 
 /// Parse a DTX file from a string slice.

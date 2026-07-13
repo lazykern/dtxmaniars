@@ -1,6 +1,9 @@
 use std::path::PathBuf;
 
-use dtx_core::{parse, parse_str, parse_with_options, EChannel, ParseOptions};
+use dtx_core::{
+    parse, parse_source, parse_str, parse_with_options, ChartFormat, DiagnosticKind, EChannel,
+    ParseOptions,
+};
 
 fn fixture(name: &str) -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -43,4 +46,58 @@ fn fixtures_cover_conditionals_mp3_high_se_and_missing_assets() {
     assert!(mp3.chips.iter().any(|chip| chip.channel == EChannel::SE32));
     let missing = parse_str("#WAV01: absent.wav\n#00013: 01\n").expect("missing asset parses");
     assert_eq!(missing.drum_chips().count(), 1);
+}
+
+fn legacy_fixture(name: &str, format: ChartFormat) -> dtx_core::ParseReport {
+    parse_source(
+        std::fs::File::open(fixture(name)).expect("compatibility fixture exists"),
+        format,
+        ParseOptions { random_seed: 0 },
+    )
+    .expect("legacy chart parses")
+}
+
+fn gameplay_signature(chart: &dtx_core::Chart) -> Vec<(u32, u8, u32, u32)> {
+    chart
+        .chips
+        .iter()
+        .filter(|chip| {
+            chip.channel.is_drum() || matches!(chip.channel, EChannel::BPM | EChannel::BarLength)
+        })
+        .map(|chip| {
+            (
+                chip.measure,
+                chip.channel as u8,
+                chip.value.to_bits(),
+                chip.wav_slot,
+            )
+        })
+        .collect()
+}
+
+#[test]
+fn dtx_gda_and_g2d_normalize_to_equal_drum_gameplay() {
+    let dtx = legacy_fixture("compatibility/equivalent.dtx", ChartFormat::Dtx);
+    let gda = legacy_fixture("compatibility/equivalent.gda", ChartFormat::Gda);
+    let g2d = legacy_fixture("compatibility/equivalent.g2d", ChartFormat::G2d);
+    assert_eq!(
+        gameplay_signature(&dtx.chart),
+        gameplay_signature(&gda.chart)
+    );
+    assert_eq!(
+        gameplay_signature(&dtx.chart),
+        gameplay_signature(&g2d.chart)
+    );
+    assert_eq!(
+        dtx.chart.drum_chips().count(),
+        gda.chart.drum_chips().count()
+    );
+}
+
+#[test]
+fn malformed_gda_channel_has_line_diagnostic() {
+    let report = legacy_fixture("compatibility/malformed.gda", ChartFormat::Gda);
+    assert!(report.diagnostics.iter().any(|diagnostic| {
+        diagnostic.line == Some(4) && diagnostic.kind == DiagnosticKind::UnsupportedChannel
+    }));
 }

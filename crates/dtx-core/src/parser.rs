@@ -169,14 +169,16 @@ fn process_line(
     }
 
     parse_chip_line(
+        chart.format,
         head,
         value,
         line_no,
         &chart.assets.wav,
         &mut chart.chips,
         &mut chart.empty_hit_events,
+        diagnostics,
     )?;
-    if !is_chip_head(head) {
+    if !is_chip_head(head, chart.format) {
         diagnostics.push(crate::diagnostic::ChartDiagnostic {
             line: Some(line_no),
             kind: crate::diagnostic::DiagnosticKind::UnknownOptional,
@@ -187,11 +189,14 @@ fn process_line(
     Ok(())
 }
 
-fn is_chip_head(head: &str) -> bool {
+fn is_chip_head(head: &str, format: ChartFormat) -> bool {
     let bytes = head.as_bytes();
     bytes.len() == 5
         && bytes[..3].iter().all(u8::is_ascii_digit)
-        && bytes[3..].iter().all(u8::is_ascii_hexdigit)
+        && match format {
+            ChartFormat::Dtx => bytes[3..].iter().all(u8::is_ascii_hexdigit),
+            ChartFormat::Gda | ChartFormat::G2d => bytes[3..].iter().all(u8::is_ascii_alphanumeric),
+        }
 }
 
 /// Strip trailing DTX inline comment / tab-separated annotation.
@@ -307,12 +312,14 @@ fn apply_metadata(
 /// that share the `#XXXX:` prefix shape. We silently skip those rather
 /// than erroring out — they're definitions we don't model yet.
 fn parse_chip_line(
+    format: ChartFormat,
     head: &str,
     value: &str,
     line_no: usize,
     wav: &crate::assets::WavRegistry,
     chips: &mut Vec<Chip>,
     empty_hits: &mut Vec<EmptyHitEvent>,
+    diagnostics: &mut Vec<crate::diagnostic::ChartDiagnostic>,
 ) -> Result<()> {
     if head.len() != 5 {
         // Other commands like `#WAV01:`, `#VOLUME02:`, `#PAN03:` are not chip lines.
@@ -334,26 +341,44 @@ fn parse_chip_line(
     // `#000xx` therefore lands at chart measure 1, not measure 0.
     let measure = raw_measure + 1;
 
-    // Channel is hex (uppercase). If not, skip silently — many DTX commands
-    // happen to be 5 chars but aren't chip lines.
-    let Ok(channel_byte) = u8::from_str_radix(channel_str, 16) else {
-        let _ = value;
-        return Ok(());
-    };
+    let channel = match format {
+        ChartFormat::Dtx => {
+            // Channel is hex (uppercase). If not, skip silently — many DTX commands
+            // happen to be 5 chars but aren't chip lines.
+            let Ok(channel_byte) = u8::from_str_radix(channel_str, 16) else {
+                let _ = value;
+                return Ok(());
+            };
 
-    // NoChip templates (0xB1–0xBE): empty-hit sound definitions.
-    if is_bad_note_byte(channel_byte) {
-        let Some(lane) = nosound_byte_to_lane(channel_byte) else {
-            return Ok(());
-        };
-        push_empty_hit_events(measure, lane, value, wav, empty_hits);
-        return Ok(());
-    }
+            // NoChip templates (0xB1–0xBE): empty-hit sound definitions.
+            if is_bad_note_byte(channel_byte) {
+                let Some(lane) = nosound_byte_to_lane(channel_byte) else {
+                    return Ok(());
+                };
+                push_empty_hit_events(measure, lane, value, wav, empty_hits);
+                return Ok(());
+            }
 
-    let Some(channel) = EChannel::from_byte(channel_byte) else {
-        // Unknown channel: skip silently. DTX files have many extension channels
-        // we don't care about yet (e.g. SE06+, BGA layers).
-        return Ok(());
+            let Some(channel) = EChannel::from_byte(channel_byte) else {
+                return Ok(());
+            };
+            channel
+        }
+        ChartFormat::Gda | ChartFormat::G2d => {
+            match crate::legacy_gda::normalize_gda_head(channel_str) {
+                Ok(Some(channel)) => channel,
+                Ok(None) => return Ok(()),
+                Err(crate::legacy_gda::LegacyChannelError::Unsupported(name)) => {
+                    diagnostics.push(crate::diagnostic::ChartDiagnostic {
+                        line: Some(line_no),
+                        kind: crate::diagnostic::DiagnosticKind::UnsupportedChannel,
+                        detail: format!("Unsupported GDA/G2D channel {name}"),
+                        recovery: Some("Remove or replace the unsupported legacy channel.".into()),
+                    });
+                    return Ok(());
+                }
+            }
+        }
     };
 
     // BarLength (0x02): value is a single decimal fraction of a whole note.
