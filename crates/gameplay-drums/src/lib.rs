@@ -238,7 +238,10 @@ fn resolve_startup_lane_arrangement(
     };
     let registry = match startup {
         dtx_layout::LaneRegistryStartup::Ready(registry) => registry,
-        dtx_layout::LaneRegistryStartup::LegacySession { registry, write_error } => {
+        dtx_layout::LaneRegistryStartup::LegacySession {
+            registry,
+            write_error,
+        } => {
             error!("lane profile registry migration write failed: {write_error}");
             registry
         }
@@ -251,7 +254,8 @@ fn resolve_startup_lane_arrangement(
 }
 
 fn load_lane_arrangement(mut lanes: ResMut<lanes::Lanes>) {
-    lanes.0 = resolve_startup_lane_arrangement(&dtx_layout::default_path(), &lanes::lane_registry_path());
+    lanes.0 =
+        resolve_startup_lane_arrangement(&dtx_layout::default_path(), &lanes::lane_registry_path());
 }
 
 #[cfg(test)]
@@ -654,7 +658,10 @@ mod midi_consumer {
         fn shared_note_emits_one_atomic_hit() {
             use dtx_input::{BindSource, InputBindings};
             let mut b = InputBindings::default();
-            b.bind_shared(dtx_core::EChannel::LeftBassDrum, BindSource::Midi { note: 36 });
+            b.bind_shared(
+                dtx_core::EChannel::LeftBassDrum,
+                BindSource::Midi { note: 36 },
+            );
             let resolver = crate::bindings::BindResolver::from_bindings(&b);
             let mut last = LastMidiHit::default();
             let captured_at = std::time::Instant::now();

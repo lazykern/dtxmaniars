@@ -287,13 +287,17 @@ impl InputBindings {
         self.system.get(&verb).map(Vec::as_slice).unwrap_or(&[])
     }
 
-    /// Bind `src` to `verb`. Never steals: one source may drive several verbs,
-    /// and a lane-owned source is refused by the caller (`lane_owner`), not here.
-    pub fn bind_system(&mut self, verb: SystemVerb, src: BindSource) {
+    /// Bind `src` to `verb`. Never steals; a lane-owned source is refused by the
+    /// caller (`lane_owner`), not here. Returns whether the bindings actually
+    /// changed — re-binding a source the verb already holds is a no-op, and the
+    /// caller must not mark the profile dirty for it.
+    pub fn bind_system(&mut self, verb: SystemVerb, src: BindSource) -> bool {
         let entry = self.system.entry(verb).or_default();
-        if !entry.contains(&src) {
-            entry.push(src);
+        if entry.contains(&src) {
+            return false;
         }
+        entry.push(src);
+        true
     }
 
     /// Serialize to the on-disk schema.
@@ -664,7 +668,7 @@ HH = [{ key = "KeyX" }]
     fn lane_owner_returns_the_first_owner_in_lane_order() {
         let mut b = InputBindings::default();
         b.bind_shared(EChannel::Snare, BindSource::Midi { note: 42 }); // 42 = HH default
-        // HiHatClose precedes Snare in BINDABLE_CHANNELS.
+                                                                       // HiHatClose precedes Snare in BINDABLE_CHANNELS.
         assert_eq!(
             lane_owner(&b, &BindSource::Midi { note: 42 }),
             Some(EChannel::HiHatClose)

@@ -216,7 +216,8 @@ pub struct SegmentRow {
 fn segment_matches(segment: ControlsSegment, source: &BindSource) -> bool {
     matches!(
         (segment, source),
-        (ControlsSegment::Keyboard, BindSource::Key(_)) | (ControlsSegment::Midi, BindSource::Midi { .. })
+        (ControlsSegment::Keyboard, BindSource::Key(_))
+            | (ControlsSegment::Midi, BindSource::Midi { .. })
     )
 }
 
@@ -237,7 +238,11 @@ pub(super) fn last_segment_source_index(
 /// Rows for the active segment: only that segment's sources; `shared` = the
 /// source is also held by another channel; `unbound` = the channel has no
 /// source in this segment.
-pub fn segment_rows(b: &InputBindings, segment: ControlsSegment, lanes: &LaneArrangement) -> Vec<SegmentRow> {
+pub fn segment_rows(
+    b: &InputBindings,
+    segment: ControlsSegment,
+    lanes: &LaneArrangement,
+) -> Vec<SegmentRow> {
     bindable_channels_in_order(lanes)
         .into_iter()
         .map(|channel| {
@@ -257,7 +262,11 @@ pub fn segment_rows(b: &InputBindings, segment: ControlsSegment, lanes: &LaneArr
                 })
                 .collect();
             let unbound = chips.is_empty();
-            SegmentRow { channel, chips, unbound }
+            SegmentRow {
+                channel,
+                chips,
+                unbound,
+            }
         })
         .collect()
 }
@@ -376,11 +385,19 @@ fn spawn_segment_selector(
                         border_radius: BorderRadius::all(Val::Px(4.0)),
                         ..default()
                     },
-                    BackgroundColor(if active { chrome::ACCENT } else { chrome::CHIP_BG }),
+                    BackgroundColor(if active {
+                        chrome::ACCENT
+                    } else {
+                        chrome::CHIP_BG
+                    }),
                     children![(
                         Text::new(seg.label()),
                         dtx_ui::theme::Theme::font(11.0),
-                        TextColor(if active { Color::WHITE } else { chrome::TEXT_MUTED }),
+                        TextColor(if active {
+                            Color::WHITE
+                        } else {
+                            chrome::TEXT_MUTED
+                        }),
                     )],
                 ));
             }
@@ -472,7 +489,12 @@ fn spawn_reset_controls(
 
 /// Small ◂/▸ stepper button sharing one style across the port cycler and the
 /// velocity-threshold stepper.
-fn spawn_stepper_button(parent: &mut ChildSpawnerCommands, t: &dtx_ui::theme::Theme, bundle: impl Bundle, label: &str) {
+fn spawn_stepper_button(
+    parent: &mut ChildSpawnerCommands,
+    t: &dtx_ui::theme::Theme,
+    bundle: impl Bundle,
+    label: &str,
+) {
     parent.spawn((
         bundle,
         Button,
@@ -492,7 +514,12 @@ fn spawn_stepper_button(parent: &mut ChildSpawnerCommands, t: &dtx_ui::theme::Th
 
 /// MIDI-segment-only Device card: live status dot, port cycler + Rescan,
 /// velocity threshold stepper + meter.
-fn spawn_device_card(p: &mut ChildSpawnerCommands, t: &dtx_ui::theme::Theme, live: &LiveBindings, ports: &MidiPortList) {
+fn spawn_device_card(
+    p: &mut ChildSpawnerCommands,
+    t: &dtx_ui::theme::Theme,
+    live: &LiveBindings,
+    ports: &MidiPortList,
+) {
     let threshold = live.0.midi.velocity_threshold;
     let port_label = port_display_label(&live.0.midi.port, &ports.0);
     let mark_pct = threshold as f32 / 127.0 * 100.0;
@@ -518,7 +545,10 @@ fn spawn_device_card(p: &mut ChildSpawnerCommands, t: &dtx_ui::theme::Theme, liv
                 ..default()
             })
             .with_children(|label_row| {
-                panel_kit::spawn_channel_dot(label_row, if connected { chrome::OK } else { chrome::ERR });
+                panel_kit::spawn_channel_dot(
+                    label_row,
+                    if connected { chrome::OK } else { chrome::ERR },
+                );
                 label_row.spawn((
                     Text::new("Port"),
                     dtx_ui::theme::Theme::font(11.0),
@@ -657,7 +687,10 @@ fn spawn_pads_card(
     p.commands_mut().entity(body).with_children(|card| {
         for row in rows {
             let ch = row.channel;
-            let swatch = lanes.col_of(ch).map(|c| lanes.column_color(c)).unwrap_or(Color::WHITE);
+            let swatch = lanes
+                .col_of(ch)
+                .map(|c| lanes.column_color(c))
+                .unwrap_or(Color::WHITE);
             let name = ch.short_name().unwrap_or("?");
             let is_selected = selected == Some(ch);
             let unbound = row.unbound;
@@ -681,7 +714,11 @@ fn spawn_pads_card(
                 } else {
                     Color::NONE
                 }),
-                BorderColor::all(if is_selected { chrome::ACCENT } else { Color::NONE }),
+                BorderColor::all(if is_selected {
+                    chrome::ACCENT
+                } else {
+                    Color::NONE
+                }),
                 // Zero-width baseline; `highlight_selected_row` widens it to
                 // the FOCUS_RING while keyboard focus sits on the rows.
                 Outline::new(Val::Px(0.0), Val::Px(1.0), Color::NONE),
@@ -709,11 +746,20 @@ fn spawn_pads_card(
                         r,
                         &chip.label,
                         chip.shared,
-                        (ChipSource { channel: ch, source: chip.source }, Button),
+                        (
+                            ChipSource {
+                                channel: ch,
+                                source: chip.source,
+                            },
+                            Button,
+                        ),
                     );
                     r.commands_mut().entity(chip_id).with_children(|cc| {
                         cc.spawn((
-                            BindChipRemove { channel: ch, index: chip.index },
+                            BindChipRemove {
+                                channel: ch,
+                                index: chip.index,
+                            },
                             Button,
                             // Clickable but does NOT block the chip body below
                             // it from hovering — so hovering the × keeps the
@@ -885,8 +931,13 @@ fn handle_velocity_adjust(
 /// device fields (port, velocity threshold).
 fn reset_segment(live: &mut LiveBindings, rev: &mut BindingsRev, segment: ControlsSegment) {
     let defaults = dtx_input::InputBindings::default();
-    let channels: std::collections::HashSet<_> =
-        live.0.map.keys().chain(defaults.map.keys()).copied().collect();
+    let channels: std::collections::HashSet<_> = live
+        .0
+        .map
+        .keys()
+        .chain(defaults.map.keys())
+        .copied()
+        .collect();
     let mut map = std::collections::HashMap::new();
     for ch in channels {
         let mut sources: Vec<_> = live
@@ -1064,7 +1115,9 @@ fn update_chip_hover_highlight(
                 BindSource::Key(k) => live.0.channels_for_key(k),
                 BindSource::Midi { note } => live.0.channels_for_note(note),
             };
-            all.into_iter().filter(|c| *c != chip.channel).collect::<Vec<_>>()
+            all.into_iter()
+                .filter(|c| *c != chip.channel)
+                .collect::<Vec<_>>()
         })
         .unwrap_or_default();
     if highlighted.0 != owners {
@@ -1278,14 +1331,26 @@ mod tests {
         use dtx_input::{BindSource, InputBindings};
 
         let mut b = InputBindings::default();
-        b.bind_shared(dtx_core::EChannel::LeftBassDrum, BindSource::Key(KeyCode::Space));
+        b.bind_shared(
+            dtx_core::EChannel::LeftBassDrum,
+            BindSource::Key(KeyCode::Space),
+        );
         let rows = segment_rows(&b, ControlsSegment::Keyboard, &dtx_layout::classic());
 
-        let bd = rows.iter().find(|r| r.channel == dtx_core::EChannel::BassDrum).unwrap();
-        assert!(bd.chips.iter().all(|c| matches!(c.source, BindSource::Key(_))));
+        let bd = rows
+            .iter()
+            .find(|r| r.channel == dtx_core::EChannel::BassDrum)
+            .unwrap();
+        assert!(bd
+            .chips
+            .iter()
+            .all(|c| matches!(c.source, BindSource::Key(_))));
         assert!(bd.chips.iter().any(|c| c.shared), "Space now on BD+LBD");
 
-        let hh = rows.iter().find(|r| r.channel == dtx_core::EChannel::HiHatClose).unwrap();
+        let hh = rows
+            .iter()
+            .find(|r| r.channel == dtx_core::EChannel::HiHatClose)
+            .unwrap();
         assert!(hh.chips.iter().all(|c| !c.shared));
     }
 
@@ -1424,7 +1489,8 @@ mod tests {
             Some(3)
         );
         // No source in the segment → None (Backspace no-ops).
-        b.map.insert(EChannel::HighTom, vec![BindSource::Midi { note: 48 }]);
+        b.map
+            .insert(EChannel::HighTom, vec![BindSource::Midi { note: 48 }]);
         assert_eq!(
             last_segment_source_index(&b, EChannel::HighTom, ControlsSegment::Keyboard),
             None

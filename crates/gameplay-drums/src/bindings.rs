@@ -88,7 +88,10 @@ impl BindResolver {
                         key_to_lanes.entry(*k).or_insert_with(Vec::new).push(lane);
                     }
                     BindSource::Midi { note } => {
-                        note_to_lanes.entry(*note).or_insert_with(Vec::new).push(lane);
+                        note_to_lanes
+                            .entry(*note)
+                            .or_insert_with(Vec::new)
+                            .push(lane);
                     }
                 }
             }
@@ -105,7 +108,9 @@ impl BindResolver {
                 }
                 match src {
                     BindSource::Key(k) => key_to_system.entry(*k).or_default().push(verb),
-                    BindSource::Midi { note } => note_to_system.entry(*note).or_default().push(verb),
+                    BindSource::Midi { note } => {
+                        note_to_system.entry(*note).or_default().push(verb)
+                    }
                 }
             }
         }
@@ -202,7 +207,9 @@ fn startup_registry<T>(
 /// Look up a registry's active profile value, falling back to built-ins then
 /// the code default. Shared with the profile bar (Select/SaveAs/Rename/
 /// Delete all need the resulting active value to refresh the session draft).
-pub(crate) fn active_keyboard_profile(registry: &ProfileRegistry<KeyboardProfile>) -> KeyboardProfile {
+pub(crate) fn active_keyboard_profile(
+    registry: &ProfileRegistry<KeyboardProfile>,
+) -> KeyboardProfile {
     registry
         .profiles
         .get(&registry.active)

@@ -847,7 +847,9 @@ mod tests {
                 map: [(EChannel::HiHatClose, vec![KeyCode::KeyX, KeyCode::KeyC])]
                     .into_iter()
                     .collect(),
-                system: [(SystemVerb::Pause, vec![KeyCode::F9])].into_iter().collect(),
+                system: [(SystemVerb::Pause, vec![KeyCode::F9])]
+                    .into_iter()
+                    .collect(),
             },
         );
 
@@ -1024,8 +1026,9 @@ mod tests {
 
     #[test]
     fn unknown_system_verb_key_is_dropped() {
-        let profile: KeyboardProfile = toml::from_str("[system]\nnope = [\"F9\"]\npause = [\"F8\"]")
-            .expect("unknown verb still parses");
+        let profile: KeyboardProfile =
+            toml::from_str("[system]\nnope = [\"F9\"]\npause = [\"F8\"]")
+                .expect("unknown verb still parses");
         assert_eq!(profile.system[&SystemVerb::Pause], vec![KeyCode::F8]);
         assert_eq!(profile.system.len(), 1);
     }

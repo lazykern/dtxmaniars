@@ -117,6 +117,16 @@ fn spawn_footer_on_open(
     });
 }
 
+/// Who already drives a source a system capture refused — a lane, or the other
+/// system verb.
+fn refusal_owner(refusal: super::bindings_capture::Refusal) -> &'static str {
+    use super::bindings_capture::Refusal;
+    match refusal {
+        Refusal::Lane(ch) => ch.short_name().unwrap_or("a lane"),
+        Refusal::Verb(verb) => verb.label(),
+    }
+}
+
 /// Footer text while a capture is armed; None outside capture.
 pub fn capture_footer_text(state: &super::bindings_capture::CaptureState) -> Option<String> {
     use super::bindings_capture::CaptureState;
@@ -132,15 +142,15 @@ pub fn capture_footer_text(state: &super::bindings_capture::CaptureState) -> Opt
         )),
         // Refusal first: it must win over the plain "press a key/hit a pad" line.
         CaptureState::SystemKey {
-            refused: Some(owner),
+            refused: Some(refusal),
             ..
         }
         | CaptureState::SystemMidi {
-            refused: Some(owner),
+            refused: Some(refusal),
             ..
         } => Some(format!(
             "{} already drives that input — pick another",
-            owner.short_name().unwrap_or("a lane")
+            refusal_owner(*refusal)
         )),
         CaptureState::SystemKey { verb, .. } => {
             Some(format!("Press a key for {} — Esc cancels", verb.label()))

@@ -172,12 +172,17 @@ fn modal_lines(state: &CaptureState) -> Option<ModalLines> {
     }
 }
 
-/// Why a system capture refused the source it just saw.
-fn refusal_caption(ch: dtx_core::EChannel) -> String {
-    format!(
-        "already bound to the {} lane — pick another",
-        channel_name(ch)
-    )
+/// Why a system capture refused the source it just saw — a lane owns it, or
+/// another system verb does.
+fn refusal_caption(refusal: super::bindings_capture::Refusal) -> String {
+    use super::bindings_capture::Refusal;
+    match refusal {
+        Refusal::Lane(ch) => format!(
+            "already bound to the {} lane — pick another",
+            channel_name(ch)
+        ),
+        Refusal::Verb(verb) => format!("already bound to {} — pick another", verb.label()),
+    }
 }
 
 /// Live "note N · velocity V" line for the `Midi(ch)` listening state.

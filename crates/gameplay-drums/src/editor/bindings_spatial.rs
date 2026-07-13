@@ -101,7 +101,14 @@ fn spawn_overlay_on_open(
     mut commands: Commands,
     open: Res<super::EditorOpen>,
     roots: Query<Entity, With<crate::hud::HudRoot>>,
-    existing: Query<Entity, Or<(With<BindLaneOutline>, With<BindSourceLabel>, With<HoverOutline>)>>,
+    existing: Query<
+        Entity,
+        Or<(
+            With<BindLaneOutline>,
+            With<BindSourceLabel>,
+            With<HoverOutline>,
+        )>,
+    >,
 ) {
     if !open.is_changed() {
         return;
@@ -180,7 +187,14 @@ fn spawn_overlay_on_open(
 
 fn despawn_overlay(
     mut commands: Commands,
-    existing: Query<Entity, Or<(With<BindLaneOutline>, With<BindSourceLabel>, With<HoverOutline>)>>,
+    existing: Query<
+        Entity,
+        Or<(
+            With<BindLaneOutline>,
+            With<BindSourceLabel>,
+            With<HoverOutline>,
+        )>,
+    >,
 ) {
     for e in &existing {
         commands.entity(e).despawn();
@@ -213,7 +227,9 @@ fn sync_bind_overlay(
     let col = if peeking {
         None
     } else if state.tab == game_shell::CustomizeTab::Controls {
-        selected.0.and_then(|ch| lanes.col_of(ch).map(|c| (Some(ch), c)))
+        selected
+            .0
+            .and_then(|ch| lanes.col_of(ch).map(|c| (Some(ch), c)))
     } else if state.tab == game_shell::CustomizeTab::Lanes {
         lane_selected
             .0
@@ -289,10 +305,7 @@ fn sync_hover_outlines(
 ) {
     let show = state.tab == game_shell::CustomizeTab::Controls && !state.peeking;
     for (slot, mut node, mut vis, mut border) in &mut pool {
-        let channel = show
-            .then(|| highlighted.0.get(slot.0))
-            .flatten()
-            .copied();
+        let channel = show.then(|| highlighted.0.get(slot.0)).flatten().copied();
         let Some(col) = channel.and_then(|ch| lanes.col_of(ch)) else {
             *vis = Visibility::Hidden;
             continue;

@@ -16,9 +16,9 @@ use crate::components::LastJudgment;
 use crate::derived::ChartDerived;
 use crate::events::{JudgmentEvent, NoteMissed};
 use crate::resources::{Combo, DrumScoring, FastSlowCount, JudgmentCounts, Score, SkillValue};
-use dtx_scoring::JudgmentKind;
-use dtx_scoring::skill::{DrumAutoPlay, drum_performance_skill, drum_song_skill};
+use dtx_scoring::skill::{drum_performance_skill, drum_song_skill, DrumAutoPlay};
 use dtx_scoring::xg_score::xg_drum_score_delta;
+use dtx_scoring::JudgmentKind;
 
 pub(super) fn plugin(app: &mut App) {
     app.init_resource::<LastJudgment>().add_systems(
@@ -147,7 +147,7 @@ fn update_skill_value(
 mod tests {
     #![allow(unused)]
     use super::*;
-    use crate::lane_map::{LANE_ORDER, LaneId, lane_of};
+    use crate::lane_map::{lane_of, LaneId, LANE_ORDER};
 
     #[test]
     fn poor_breaks_combo() {
