@@ -1,47 +1,46 @@
-# crates/dtx-core — agent scope
+# crates/dtx-core
 
-**Layer:** Pure (no bevy).
-**Milestone:** M0.
-**Status:** Active.
+Pure layer: chart parser, normalized chart/chip/channel model, timing math, and
+reference-derived mechanics data. It must remain Bevy-free.
 
-## Purpose
+## Current contract
 
-Parse `.dtx` files into [`Chart`] / [`Chip`] / [`EChannel`].
-Testable in isolation, no GPU, no bevy.
+- Parse DTX, GDA, and G2D from UTF-8, Shift-JIS, UTF-16LE BOM, or UTF-16BE BOM.
+- Normalize legacy GDA/G2D drum aliases into the DTX model and retain the
+  source `ChartFormat`.
+- Parse metadata, drum/system/hidden channels, BPM and bar changes,
+  WAV/BMP/AVI/BGA registrations, pan definitions, mixer events, and SE01–SE32.
+- Resolve deterministic RANDOM/IF/ENDIF branches through `ParseOptions`.
+- Return structured line diagnostics for recoverable input and hard errors for
+  non-recoverable parsing. Discovery/rejection policy lives in callers.
+- Provide chart timing, chip classification/transforms, asset resolution, and
+  compatibility structures without runtime I/O dependencies beyond parser
+  input.
 
-## Test
+Long-note and full guitar/bass semantics are outside the maintained drums
+compatibility contract. Do not advertise enum presence as playable support.
+
+## Reference evidence
+
+- `references/DTXmaniaNX/DTXMania/Score,Song/CDTX.cs` — parser and playback data
+- `references/DTXmaniaNX/DTXMania/Score,Song/EChannel.cs` — channel mapping
+- `references/DTXmaniaNX/DTXMania/Score,Song/CChip.cs` — chip model/timing
+- `references/DTXmaniaNX/DTXMania/Score,Song/CChartData.cs` — chart container
+- `references/DTXmaniaNX/DTXMania/Core/CConstants.cs` — instrument constants
+
+Follow [ADR-0004](../../docs/decisions/0004-reference-first-mechanics-workflow.md)
+and [ADR-0010](../../docs/decisions/0010-port-mechanics-redesign-ux.md). Keep
+`references/` read-only and cite exact reference lines for ported behavior.
+
+## Verify
 
 ```sh
-cargo test -p dtx-core
+cargo test -p dtx-core --lib
+cargo test -p dtx-core --test compatibility_matrix
+cargo test -p dtx-core --tests
+cargo check -p dtx-core
 ```
 
-## Reference files
-
-- `references/DTXmaniaNX/DTXMania/Score,Song/CDTX.cs:1` — original parser (7295 LOC)
-- `references/DTXmaniaNX/DTXMania/Score,Song/EChannel.cs:1` — channel enum
-- `references/DTXmaniaNX/DTXMania/Score,Song/CChip.cs:1` — chip data model
-- `references/DTXmaniaNX/DTXMania/Score,Song/CChartData.cs:1` — chart container
-
-## v1 scope (M0 → M2)
-
-- Header commands: TITLE, ARTIST, GENRE, MAKER, COMMENT, BPM, DLEVEL/GLEVEL/BLEVEL, PREVIEW, PREIMAGE
-- Chip lines `#MMMCC:` for all channels in `EChannel`
-- BGM channel emits a marker chip (no WAV filename binding yet)
-- BPM/BPMEx/BarLength parse as `f32`
-- Skip unknown channels silently (forward compatibility)
-
-## Deferred (later milestones)
-
-- BPM base64 decoding (M1)
-- Long-note (`#LNTYPE`/`#LNOBJ`) tracking (M6+)
-- Guitar wailing channels (M6+)
-- BGA / AVI bindings (M6+)
-
-## Rules
-
-- No `bevy` dependency.
-- Errors via `DtxError` (`thiserror`).
-- Public API stable; internal refactors free.
-- **Port-first (ADR-0010):** parser semantics must match DTXManiaNX's
-  `CDTX.cs` and `EChannel.cs` verbatim. Do not invent commands or simplify
-  away edge cases (BPM base64, BGM markers, etc.) without a documented reason.
+`compatibility_matrix` is the primary executable format/encoding/channel
+contract; update [Compatibility](../../docs/compatibility.md) when its public
+support boundary changes.

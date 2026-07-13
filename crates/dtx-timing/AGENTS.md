@@ -1,59 +1,37 @@
-# crates/dtx-timing — agent scope
+# crates/dtx-timing
 
-**Layer:** Engine (bevy + kira position polling).
-**Milestone:** M1.
-**Status:** Active.
+Engine-layer bridge from the active Kira BGM instance to the authoritative
+`AudioClock`. Pure chart-time math remains owned by and re-exported from
+`dtx-core::timing`.
 
-## Purpose
+## Current contract
 
-Owns the authoritative `AudioClock` resource. Hit-window judgment reads this
-— never `Time::delta()`. See ADR-0002.
+- `AudioClock.current_ms` is `None` when no BGM is active and `Some(ms)` while
+  the tracked instance is playing or paused.
+- `update_audio_clock_system` polls `dtx_audio::BgmHandle` every update; it does
+  not accumulate `Time::delta()`.
+- Gameplay may define explicit no-BGM behavior, but BGM-backed judgment waits
+  for this clock. Practice pause/seek/rate behavior must preserve the same
+  chart-time authority.
+- `math` covers BPM segments, fractional changes, bar-length changes, and
+  monotonic chip-time conversion. Parser semantics belong in `dtx-core`.
 
-## API
+Input offset is a judgment-layer correction, not an alternate clock. Sub-frame
+render interpolation is owned by gameplay and must not feed back into judgment.
 
-```rust
-use dtx_timing::{plugin, AudioClock};
+## Reference evidence
 
-app.add_plugins((dtx_audio::plugin, dtx_timing::plugin));
+- `references/DTXmaniaNX/FDK/Sound/CSoundTimer.cs`
+- `references/DTXmaniaNX/DTXMania/Score,Song/CChip.cs`
 
-// In a system:
-fn judge_lane(clock: Res<AudioClock>, lane_hit: EventReader<LaneHit>) {
-    for hit in lane_hit.read() {
-        let delta = clock.ms_or_zero() - hit.target_ms;
-        let kind = dtx_scoring::classify(delta); // ← see crates/dtx-scoring
-    }
-}
+[ADR-0002](../../docs/decisions/0002-gameplay-audio-clock-authority.md) owns
+the cross-crate clock decision.
+
+## Verify
+
+```sh
+cargo test -p dtx-timing --lib
+cargo test -p dtx-timing --test bpm_segment
+cargo test -p dtx-timing --test compatibility_timing
+cargo check -p dtx-timing
 ```
-
-## Reference files
-
-- `references/DTXmaniaNX/FDK/Sound/CSoundTimer.cs:1` — original wall-clock-based timing (92 LOC). Our approach: kira gives position-in-seconds directly.
-
-## Design decisions
-
-- `AudioClock.current_ms: Option<i64>` — None means "no BGM / not playing".
-- `gameplay-drums::GameplayClock` only falls back to wall-clock for explicit
-  no-BGM charts; BGM-backed charts wait for audio position.
-- Update system runs every Update; cost = 2 Res reads + match. No allocations.
-- Time-math helpers are defined in `dtx_core::timing` and re-exported as `dtx_timing::math`.
-
-## v1 scope (M1)
-
-- `AudioClock` resource
-- `update_audio_clock_system` 
-- `plugin` to register
-- Pure helpers: `delta_ms`, `chip_time_ms`
-
-## Deferred
-
-- BPM-change chip handling (M2)
-- Audio latency compensation (M2, after measuring kira + output buffer)
-- Sub-frame interpolation between kira position callbacks (M2 if jitter visible)
-
-## Rules
-
-- `dtx-timing` depends on `dtx-audio` (Engine → Engine, allowed).
-- Pure math lives in `dtx-core`; keep the `dtx_timing::math` re-export for API compatibility.
-- **Port-first (ADR-0010):** AudioClock approach must match DTXManiaNX's
-  `CSoundTimer` semantics (BocuD simplified via kira position, that's fine).
-  But do not introduce your own frame-based fallback.

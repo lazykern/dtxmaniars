@@ -1,41 +1,47 @@
 # crates/dtx-bga
 
-Engine-layer crate. BGA / video playback for DTXManiaNX charts.
+Engine-layer chart visual renderer. It converts parsed visual registrations and
+chips into deterministic chart-time state, renders image layers, and decodes
+movies with `video-rs`/system FFmpeg.
 
-## Reference (READ BEFORE IMPLEMENTING per ADR-0008)
+## Current contract
 
-- `references/DTXmaniaNX/DTXMania/Stage/06.Performance/CActPerfBGA.cs` (305 lines)
-- `references/DTXmaniaNX/DTXMania/Stage/06.Performance/CActPerfVideo.cs` (520 lines)
-- `references/DTXmaniaNX/DTXMania/Core/Video/FFmpegCore.cs` (FFmpeg wrapper, M7.1+)
+- `ActiveChartRes::from_chart` resolves BMP/AVI registries and builds timed
+  replace, eight-scope swap, BGAPAN, and AVIPAN events with BPM/bar timing.
+- `visual_state_at*` reconstructs the exact image/movie state after forward or
+  backward seeks, loop restarts, and song restarts.
+- Pan state interpolates bounded source/destination rectangles on the authored
+  1280x720 stage. With Background Motion disabled, pans resolve to their end
+  state and movies do not start.
+- Static images render as layer-specific `ImageNode`s. A bounded movie worker
+  decodes off-thread, reuses one RGBA texture, follows `BgaClock`, and seeks on
+  discontinuity. Movie audio is ignored.
+- `BgaSettings` gates images/movies and applies alpha live; `BgaParent` lets the
+  Game layer attach visuals to its stage root.
+
+## Ownership boundary
+
+Depends on Pure chart/config data and Engine timing. `gameplay-drums` bridges
+its authoritative `GameplayClock` into `BgaClock`; do not create a second
+visual clock. Invalid optional visuals degrade with a warning and must not alter
+the playable drum timeline. Windowed movie modes, embedded movie audio,
+hardware zero-copy, and bundled FFmpeg packaging are not implemented.
+
+## Reference evidence
+
+- `references/DTXmaniaNX/DTXMania/Stage/06.Performance/CActPerfBGA.cs`
+- `references/DTXmaniaNX/DTXMania/Stage/06.Performance/CActPerfVideo.cs`
+- `references/DTXmaniaNX/DTXMania/Core/Video/FFmpegCore.cs`
 - `references/DTXmaniaNX/DTXMania/Core/Video/VideoPlayerController.cs`
-- `references/DTXmaniaNX/DTXMania/Core/Video/UINewVideoRenderer.cs`
-- `references/DTXmaniaNX/DTXMania/Score,Song/EChannel.cs` (BGA channels)
+- `references/DTXmaniaNX/DTXMania/Score,Song/EChannel.cs`
 
-## M7.1 scope (implemented)
+## Verify
 
-- `chart::ActiveChartRes::from_chart` resolves `#BMP`/`#BGA`/`#AVI` registries
-  to absolute paths (case-insensitive) and builds BPM/bar-length-aware
-  `TimedVisualEvent`s on the same timeline drum chips use.
-- Static `#BMP` image layers render as real `ImageNode`s (`BgaLayerOverlay`),
-  replacing colored placeholders; each event replaces only its target layer.
-- `#AVI` movies decode through `video-rs`/FFmpeg on a `MovieWorker` thread with
-  a bounded (capacity two) frame queue; the newest due RGBA frame uploads into
-  one reusable `Image` texture shown aspect-fit fullscreen behind lanes/HUD
-  (`MovieOverlay`), synced to `BgaClock` (mirrored from `GameplayClock`), with a
-  100 ms drift-seek threshold. Movie audio is ignored.
-- `BgaSettings` (from `dtx_config::SystemConfig`) gates images/movie and applies
-  opacity live; toggling and alpha update without respawn.
-- Practice seek / restart rebuild the event cursor, static layers, and movie
-  target; `clear_visuals` tears down workers, texture, and overlays on exit.
+```sh
+cargo test -p dtx-bga --lib
+cargo test -p dtx-bga --test integration_bga
+cargo check -p dtx-bga
+```
 
-## Deferred
-
-- `BGAPAN` / `AVIPAN` pan+zoom animation
-- Windowed (non-fullscreen) movie mode
-- Movie embedded-audio playback
-- Hardware zero-copy texture import
-- FFmpeg bundling for Windows/macOS release packaging
-
-## Layer
-
-Engine. Sits between `dtx-core` (Pure) and gameplay crates (Game).
+Actual movie presentation and installed FFmpeg codecs require a manual GUI
+check.

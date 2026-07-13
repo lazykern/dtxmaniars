@@ -1,62 +1,44 @@
 # crates/gameplay-guitar
 
-Game-layer crate. Guitar mode vertical slice (M6b).
+Game-layer experimental Guitar scaffold. It is compiled and tested, but it is
+not part of the maintained drums-first player compatibility contract and there
+is currently no player-facing mode-selection workflow.
 
-## Reference files (READ BEFORE IMPLEMENTING per ADR-0008)
+## Implemented scaffold
 
-- `references/DTXmaniaNX/DTXMania/Stage/06.Performance/GuitarScreen/CStagePerfGuitarScreen.cs` (29KB)
-- `references/DTXmaniaNX/DTXMania/Score,Song/EChannel.cs` (guitar channels 0x21-0x27 / 0x93-0x9A / 0xA2-0xAA)
+- Five logical lanes R/G/B/Y/P with default A/S/D/F/G keyboard input.
+- Mode-gated input, scroll, nearest-note judgment, score/combo resources, a
+  minimal HUD, and end-of-chart orchestration.
+- Reference-derived state reducers for lane flush, RGB, danger, gauge,
+  wailing-bonus, bonus, and a `HoldNote` data type.
+- `EGameMode::Guitar` allows tests/embedding code to select the path; the
+  desktop application defaults to Drums.
+
+This is not faithful full Guitar gameplay. Chord channels collapse to one
+lowest lane, hold/wailing state types are not a complete playable pipeline,
+Bass is absent, and Results/persistence/product discovery are drums-owned. Do
+not advertise Guitar as Supported or extend the player guide without a new
+approved product scope and executable compatibility contract.
+
+## Ownership boundary
+
+Mirrors drums only where useful for isolated mechanics. Shared primitives
+belong in existing Pure/Engine crates; do not make drums depend on this
+experimental scaffold. Cross-screen state remains in `game-shell`.
+
+## Reference evidence
+
+- `references/DTXmaniaNX/DTXMania/Stage/06.Performance/GuitarScreen/CStagePerfGuitarScreen.cs`
 - `references/DTXmaniaNX/DTXMania/Stage/06.Performance/GuitarScreen/CActPerfGuitarLaneFlushGB.cs`
 - `references/DTXmaniaNX/DTXMania/Stage/06.Performance/GuitarScreen/CActPerfGuitarScore.cs`
+- `references/DTXmaniaNX/DTXMania/Score,Song/EChannel.cs`
 
-## Lane layout (M6b minimum)
+The product-scope decision is [ADR-0001](../../docs/decisions/0001-drums-first-product-scope.md).
 
-5-lane standard (BocuD CStagePerfGuitarScreen.cs:99-105 positions [107,146,185,224,264]):
+## Verify
 
+```sh
+cargo test -p gameplay-guitar --lib
+cargo test -p gameplay-guitar --test guitar_play
+cargo check -p gameplay-guitar
 ```
-Lane 0: R  (red,   low E)
-Lane 1: G  (green, A)
-Lane 2: B  (blue,  D)
-Lane 3: Y  (yellow, G)
-Lane 4: P  (pick/pink, B)
-```
-
-Open (0x20) and chord channels (0x23, 0x25-0x27, etc.) are NOT mapped in M6b —
-they require multi-lane judgment (chord = hit multiple lanes at once) which is
-M6.1+. For M6b only the single-note channels trigger the corresponding lane.
-
-## EChannel mapping (single notes only)
-
-DTXManiaNX guitar single-note channels:
-- 0x24 → R lane
-- 0x22 → G lane
-- 0x21 → B lane
-- 0x93 → Y lane (M6b: ship after EChannel.rs extension)
-- 0xA3 → P lane (M6b: ship after EChannel.rs extension)
-
-For M6b we ship the LANE MAP + input + scoring plumbing. The chord→multi-lane
-judge is deferred to M6.1.
-
-## Layer
-
-Game. Depends on `dtx-core`, `dtx-scoring`, `dtx-timing`, `game-shell`.
-MIRRORS `gameplay-drums/` structure so that M6.1 can extract shared bits.
-
-## M6b scope (deliverables)
-
-- `lane_map.rs` — LaneMap with 5 lanes, default keys A/S/D/F/G
-- `events.rs` — LaneHit, JudgmentEvent, NoteMissed (mirror drums)
-- `resources.rs` — ActiveChart, Score, Combo, GameStartMs, JudgmentCounts
-- `input.rs` — keyboard → LaneHit system
-- `hud.rs` — minimal text: score + combo
-- `lib.rs` — plugin assembly
-- `EGameMode` enum in `game-shell/src/states.rs`
-- `game-shell::performance` branches on `EGameMode` to add the right plugin
-- `game-menu::song_select` shows mode, F2 to toggle
-
-## OUT OF SCOPE (deferred)
-
-- Hold notes (CStagePerfGuitarScreen `HoldNote` class) — M6.1
-- Open notes / chord judgment — M6.1
-- Wailing / RGB effects — M6.1
-- Bass mode — M6.2

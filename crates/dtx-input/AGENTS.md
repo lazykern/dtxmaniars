@@ -1,40 +1,45 @@
 # crates/dtx-input
 
-Engine-layer crate. Keyboard + MIDI input sources for all gameplay modes.
+Engine-layer input vocabulary and persistence for keyboard and MIDI sources.
+Gameplay crates own the mapping from emitted raw sources to their visual/judge
+lanes.
 
-## Reference / context
+## Current contract
 
-- **ADR-0009** (this crate's originating decision): `docs/decisions/0009-dtx-input-deferred.md`
-- NX input: `references/DTXmaniaNX/FDK/Input/` (no consolidated
-  file — M6c ports the Rust API only; full port of CInputManager.cs is M6.1)
+- `LaneHit`, `LaneHitKind`, and opaque `LaneId` are shared event types.
+- `InputBindings` covers 12 drum channels plus the independent Pause and
+  Restart system verbs. A lane source may be shared by lanes, but a lane-owned
+  source cannot also fire a system verb.
+- Defaults match the reference keyboard layout and General MIDI percussion
+  notes. System verbs are intentionally unbound.
+- `keyboard-profiles.toml` and `midi-profiles.toml` are separate version-1,
+  atomically replaced registries with built-ins, user profiles, copy/rename,
+  migration, backup, and reset behavior.
+- `bindings.toml` is the version-1 legacy migration source.
+- The optional `midi` feature enables real `midir` ports. `MidiSource` and
+  `VirtualSource` remain available for hardware-free tests; the desktop binary
+  enables MIDI by default.
 
-## Why now (M6c)
+## Ownership boundary
 
-ADR-0009 deferred this crate from M2 to M6. M6c extracts
-`gameplay-drums/src/input.rs` (keyboard → LaneHit) here and adds a MIDI
-abstraction. Per ADR-0009 the gameplay crate consumes `dtx-input::LaneHit`
-instead of defining its own.
+`dtx-core` and configuration/persistence crates are Pure dependencies. This
+crate must not depend on Game crates or decide drum grouping, judgment, menus,
+or hardware-specific pad meaning beyond stored note bindings. Input profiles
+are the source of truth under
+[ADR-0009](../../docs/decisions/0009-input-profiles-source-of-truth.md).
 
-## MIDI
+## Reference evidence
 
-The `midi` feature enables the `midir` crate. We ship it as optional so the
-default build stays small (no libasound/libcoremidi headers required). The
-`MidiSource` trait is always available; the real-device impl requires the
-feature.
+- `references/DTXmaniaNX/FDK/Input/` — device/input architecture
+- `references/DTXmaniaNX/DTXMania/Core/Config/CConfigIni.cs` — legacy key assignments
 
-`VirtualSource` (in this crate) provides an in-memory event queue used by
-tests. It is the verification vehicle for "virtual device smoke test" in
-M6c's task contract.
+## Verify
 
-## MIDI drum note mapping (5-pin standard)
-
+```sh
+cargo test -p dtx-input --lib
+cargo check -p dtx-input
+cargo check -p dtx-input --features midi
 ```
-36 = BD          42 = CH (closed HH)  46 = HH open
-38 = SD          49 = HH (closed alt) 51 = RD
-```
 
-These are user-rebindable later via `dtx-config`. M6c ships hardcoded defaults.
-
-## Layer
-
-Engine. Sits between dtx-core (Engine) and gameplay-* (Game) crates.
+The feature build is mechanical evidence only; real port enumeration and pad
+NoteOn behavior require a manual hardware check.

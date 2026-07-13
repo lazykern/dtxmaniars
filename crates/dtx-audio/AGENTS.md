@@ -1,60 +1,45 @@
-# crates/dtx-audio — agent scope
+# crates/dtx-audio
 
-**Layer:** Engine (bevy + bevy_kira_audio).
-**Milestone:** M1.
-**Status:** Active.
+Engine-layer wrapper around `bevy_kira_audio`. It owns runtime audio handles,
+chart-sound caching and polyphony, preview crossfades, and the BGM position
+polled by `dtx-timing`.
 
-## Purpose
+## Current contract
 
-Thin wrapper around `bevy_kira_audio`. Owns the [`BgmHandle`] resource.
-`dtx-timing` reads it each frame to populate `AudioClock`.
+- `BgmHandle` tracks the single authoritative BGM instance and asset path.
+- BGM helpers support start offsets, volume/mix, pause/resume, stop, and
+  playback-rate changes. Non-`1.00x` playback changes pitch.
+- `ChartSoundBank` resolves Windows separators and path components
+  case-insensitively, caches OGG/WAV/MP3 handles by WAV slot, and retains chart
+  volume/pan.
+- `DrumPolyphony` owns 1–8 round-robin voices per WAV slot; gameplay owns lane
+  selection, choke, and hit-sound priority.
+- `PreviewPlayer` and `AudioHandleCache` own song-select preview fade/swap
+  behavior. Screen transitions publish intent; audio owns preview fade state
+  per [ADR-0015](../../docs/decisions/0015-preview-crossfade-ownership.md).
+- XA classification/substitution policy is decided by loading/import callers;
+  this crate deliberately has no XA decoder.
 
-## API
+## Ownership boundary
 
-```rust
-use dtx_audio::{plugin, play_bgm, stop_bgm, position_ms, BgmHandle};
+Never derive judgment time from frame delta. Expose playback position for
+`dtx-timing`; do not move game-specific lane or result policy here. Movie audio
+is not part of this crate's current chart-movie path.
 
-app.add_plugins((DefaultPlugins, dtx_audio::plugin));
+## Reference evidence
 
-// In a system:
-fn start_bgm(audio: Res<Audio>, mut bgm: ResMut<BgmHandle>) {
-    play_bgm(&audio, &mut bgm, "songs/track1.ogg");
-}
+- `references/DTXmaniaNX/FDK/Sound/CSoundTimer.cs` — timer semantics
+- `references/DTXmaniaNX/DTXMania/Score,Song/CDTX.cs` — chart WAV playback and polyphony
 
-// Query playback position:
-fn tick(audio: Res<Audio>, bgm: Res<BgmHandle>) {
-    if let Some(ms) = position_ms(&audio, &bgm) { /* ... */ }
-}
+Audio-clock authority is [ADR-0002](../../docs/decisions/0002-gameplay-audio-clock-authority.md).
+
+## Verify
+
+```sh
+cargo test -p dtx-audio
+cargo test -p dtx-audio --test mp3_decode
+cargo check -p dtx-audio
 ```
 
-## Reference files
-
-- `references/DTXmaniaNX/FDK/Sound/CSoundTimer.cs` — original wall-clock-based timing reference (92 LOC). Our approach is cleaner: kira position is already ms-accurate.
-- bevy_kira_audio docs via `npx ctx7@latest docs /niklasei/bevy_kira_audio "<q>"`
-
-## Design decisions
-
-- One BGM stream at a time. Multi-track layering deferred (M6+ if needed).
-- `BgmHandle` is `Option<Handle<AudioInstance>>` — None means "no BGM".
-- `ChartSoundBank` caches chart WAV handles by slot; chart-specific slot
-  collection lives in `gameplay-drums`.
-- Hit-sound resolution (per-lane SEs, choke rules) lives in `gameplay-drums`.
-
-## v1 scope (M1)
-
-- `AudioPlugin` registration
-- `BgmHandle` resource
-- `play_bgm`, `stop_bgm`, `position_ms` helpers
-- handle-based BGM/SFX/drum-hit helpers for preloaded chart WAVs
-- `ChartSoundBank` + case-insensitive chart audio path resolution
-- Looping BGM by default
-
-## Deferred
-
-- BGM fade-in/out (M3 with shell transitions)
-- Async/background decode pool (M14+ polish)
-
-## Rules
-
-- Re-export kira/bevy_kira_audio types only when the wrapper adds value.
-- Never use `Time::delta()` for audio-clock-equivalent decisions (see ADR-0002).
+Audible output, output latency, and device switching require a manual hardware
+check.
