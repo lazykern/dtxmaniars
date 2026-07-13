@@ -140,6 +140,13 @@ pub enum ScanError {
     },
 }
 
+/// True if `path` names a DTX chart, regardless of extension letter case.
+pub fn is_dtx_path(path: &Path) -> bool {
+    path.extension()
+        .and_then(|extension| extension.to_str())
+        .is_some_and(|extension| extension.eq_ignore_ascii_case("dtx"))
+}
+
 /// Walk a directory recursively, parse each .dtx file, return SongInfo list.
 ///
 /// Errors on individual files are logged and skipped (so one bad DTX
@@ -160,7 +167,7 @@ fn walk_dtx(dir: &Path, songs: &mut Vec<SongInfo>) -> Result<(), ScanError> {
         let path = entry.path();
         if path.is_dir() {
             walk_dtx(&path, songs)?;
-        } else if path.extension().and_then(|e| e.to_str()) == Some("dtx") {
+        } else if is_dtx_path(&path) {
             match fs::File::open(&path) {
                 Ok(file) => match parse(file) {
                     Ok(chart) => songs.push(SongInfo::from_chart(&path, &chart)),
@@ -436,6 +443,26 @@ mod tests {
             "fixture dir should have at least one .dtx"
         );
         assert!(songs.iter().any(|s| s.path.ends_with("drums_basic.dtx")));
+    }
+
+    #[test]
+    fn scan_directory_finds_uppercase_dtx_extension() {
+        let dir = std::env::temp_dir().join(format!(
+            "dtx-library-uppercase-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .expect("clock after epoch")
+                .as_nanos()
+        ));
+        fs::create_dir_all(&dir).expect("create fixture directory");
+        fs::write(dir.join("UPPER.DTX"), b"#TITLE: Uppercase\n").expect("write uppercase chart");
+
+        let songs = scan_directory(&dir).expect("scan uppercase chart");
+
+        assert_eq!(songs.len(), 1);
+        assert_eq!(songs[0].title, "Uppercase");
+        fs::remove_dir_all(dir).expect("remove fixture directory");
     }
 
     #[test]

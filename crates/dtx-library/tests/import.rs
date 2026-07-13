@@ -128,6 +128,19 @@ fn zip_single_wrapper_no_double_nest() {
 }
 
 #[test]
+fn zip_uppercase_dtx_counts_as_chart() {
+    let dir = test_dir("uppercase");
+    let archive = dir.join("Uppercase.zip");
+    make_zip(&archive, &[("Song/MASTER.DTX", DTX)]);
+    let root = dir.join("songs");
+
+    let out = import_archive(&archive, &root).expect("uppercase chart imports");
+
+    assert_eq!(out.chart_count, 1);
+    assert!(root.join("Song/MASTER.DTX").is_file());
+}
+
+#[test]
 fn zip_bare_files_get_archive_name_folder() {
     let dir = test_dir("bare");
     let archive = dir.join("MySong.zip");

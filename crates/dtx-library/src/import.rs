@@ -209,16 +209,15 @@ fn collapse_wrappers(mut dir: PathBuf) -> io::Result<(PathBuf, Option<String>)> 
     }
 }
 
-/// Count `.dtx` files recursively. Same extension rule as the scanner's
-/// `walk_dtx` (lowercase, case-sensitive) so the count matches what a
-/// rescan will actually pick up.
+/// Count `.dtx` files recursively. Shares the scanner's case-insensitive
+/// extension rule so archive counts match a later rescan.
 fn count_dtx(dir: &Path) -> io::Result<usize> {
     let mut n = 0;
     for entry in fs::read_dir(dir)?.flatten() {
         let path = entry.path();
         if path.is_dir() {
             n += count_dtx(&path)?;
-        } else if path.extension().and_then(|e| e.to_str()) == Some("dtx") {
+        } else if crate::is_dtx_path(&path) {
             n += 1;
         }
     }
