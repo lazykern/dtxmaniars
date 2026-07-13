@@ -52,6 +52,8 @@ pub struct BgaSettings {
     pub images_enabled: bool,
     /// Whether `#AVI` movie playback is shown.
     pub movie_enabled: bool,
+    /// Whether authored pan/swap animation may advance.
+    pub motion_enabled: bool,
     /// Image layer alpha (0.0..=1.0).
     pub image_alpha: f32,
     /// Movie alpha (0.0..=1.0).
@@ -63,6 +65,7 @@ impl Default for BgaSettings {
         Self {
             images_enabled: true,
             movie_enabled: true,
+            motion_enabled: true,
             image_alpha: 1.0,
             movie_alpha: 1.0,
         }
@@ -71,11 +74,23 @@ impl Default for BgaSettings {
 
 impl From<&dtx_config::SystemConfig> for BgaSettings {
     fn from(value: &dtx_config::SystemConfig) -> Self {
+        Self::from_configs(value, &dtx_config::AccessibilityConfig::default())
+    }
+}
+
+impl BgaSettings {
+    /// Resolve effective visual capabilities from chart-display and
+    /// accessibility settings. Static images remain available when motion is off.
+    pub fn from_configs(
+        system: &dtx_config::SystemConfig,
+        accessibility: &dtx_config::AccessibilityConfig,
+    ) -> Self {
         Self {
-            images_enabled: value.bga_enabled,
-            movie_enabled: value.movie_enabled,
-            image_alpha: value.bg_alpha as f32 / 255.0,
-            movie_alpha: value.movie_alpha as f32 / 255.0,
+            images_enabled: system.bga_enabled,
+            movie_enabled: system.movie_enabled && accessibility.background_motion,
+            motion_enabled: accessibility.background_motion,
+            image_alpha: system.bg_alpha as f32 / 255.0,
+            movie_alpha: system.movie_alpha as f32 / 255.0,
         }
     }
 }
@@ -488,6 +503,16 @@ fn drive_movie(
     };
     let now = clock.current_ms;
 
+    if !settings.movie_enabled {
+        if runtime.worker.is_some() || runtime.texture.is_some() {
+            runtime.stop_movie();
+        }
+        for entity in &root_q {
+            commands.entity(entity).despawn();
+        }
+        return;
+    }
+
     // (Re)start the worker when the chart selects a different movie; stop and
     // tear down the overlay when a seek lands before any movie event.
     match player.active_movie {
@@ -665,6 +690,19 @@ pub fn clear_visuals(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn background_motion_off_keeps_static_images_only() {
+        let accessibility = dtx_config::AccessibilityConfig {
+            background_motion: false,
+            ..Default::default()
+        };
+        let settings =
+            BgaSettings::from_configs(&dtx_config::SystemConfig::default(), &accessibility);
+        assert!(settings.images_enabled);
+        assert!(!settings.movie_enabled);
+        assert!(!settings.motion_enabled);
+    }
 
     #[test]
     fn bga_player_default_is_idle() {

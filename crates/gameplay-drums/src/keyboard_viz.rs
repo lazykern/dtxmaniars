@@ -119,7 +119,11 @@ fn flash_key_caps_on_hit(
     mut events: MessageReader<JudgmentEvent>,
     mut caps: Query<(&KeyCap, &mut BackgroundColor)>,
     lanes: Res<Lanes>,
+    policy: Option<Res<dtx_ui::AccessibilityPolicy>>,
 ) {
+    let reduced = policy
+        .as_deref()
+        .is_some_and(|policy| policy.flash_decision() == dtx_ui::FlashDecision::Reduced);
     let to_col = |lane: u8| lane_channel(lane).and_then(|ch| lanes.col_of(ch));
     // Immediate feedback on key press (input lane), mapped to its visual column.
     for hit in lane_hits.read() {
@@ -152,7 +156,9 @@ fn flash_key_caps_on_hit(
         };
         for (cap, mut bg) in &mut caps {
             if cap.col as usize == col {
-                bg.0 = lanes.column_color(col).with_alpha(0.85);
+                bg.0 = lanes
+                    .column_color(col)
+                    .with_alpha(if reduced { 0.35 } else { 0.85 });
             }
         }
     }

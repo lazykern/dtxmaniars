@@ -456,6 +456,7 @@ fn sync_hud_judgment(
     last: Res<LastJudgment>,
     theme: Res<ThemeResource>,
     time: Res<Time>,
+    policy: Res<dtx_ui::AccessibilityPolicy>,
     mut prev: Local<Option<(JudgmentKind, i64)>>,
     mut q: Query<(
         &mut judgment_popup::JudgmentPopup,
@@ -484,7 +485,7 @@ fn sync_hud_judgment(
     }
     let delta = time.delta_secs() * 1000.0;
     for (mut popup, _, mut color, mut vis, mut transform) in &mut q {
-        let (alpha, scale) = popup.tick(delta);
+        let (alpha, scale) = popup.tick_with_flash(delta, policy.flash_decision());
         color.0 = color.0.with_alpha(alpha);
         transform.scale = Vec2::splat(scale);
         if !popup.is_active() && alpha <= 0.01 {

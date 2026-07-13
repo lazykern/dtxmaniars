@@ -167,11 +167,20 @@ impl EnterChoreo {
 /// when finished so idle nodes cost nothing.
 pub fn enter_choreo_system(
     time: Res<Time>,
+    policy: Option<Res<crate::AccessibilityPolicy>>,
     mut commands: Commands,
     mut q: Query<(Entity, &mut EnterChoreo, &mut UiTransform)>,
 ) {
     let dt_ms = (time.delta_secs() * 1000.0).min(50.0);
     for (entity, mut choreo, mut tf) in &mut q {
+        if policy
+            .as_deref()
+            .is_some_and(|policy| policy.motion_decision() == crate::MotionDecision::Reduced)
+        {
+            tf.translation = Val2::ZERO;
+            commands.entity(entity).remove::<EnterChoreo>();
+            continue;
+        }
         choreo.tick(dt_ms);
         let off = choreo.current_offset();
         tf.translation = Val2::px(off.x, off.y);
@@ -183,8 +192,19 @@ pub fn enter_choreo_system(
 }
 
 /// Drives every standalone `BeatPulse` + `UiTransform` scale.
-pub fn beat_pulse_system(time: Res<Time>, mut q: Query<(&mut BeatPulse, &mut UiTransform)>) {
+pub fn beat_pulse_system(
+    time: Res<Time>,
+    policy: Option<Res<crate::AccessibilityPolicy>>,
+    mut q: Query<(&mut BeatPulse, &mut UiTransform)>,
+) {
     for (mut pulse, mut tf) in &mut q {
+        if policy
+            .as_deref()
+            .is_some_and(|policy| policy.motion_decision() == crate::MotionDecision::Reduced)
+        {
+            tf.scale = Vec2::ONE;
+            continue;
+        }
         pulse.tick(time.delta_secs());
         let s = pulse.scale();
         tf.scale = Vec2::splat(s);

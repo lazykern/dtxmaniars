@@ -18,7 +18,10 @@ use bevy::asset::Handle;
 use bevy::prelude::*;
 use bevy::text::Font;
 
-pub use accessibility::{AccessibilityPolicy, FlashDecision, MotionDecision, StartupConfigWarning};
+pub use accessibility::{
+    danger_effect, entrance_effect, hit_effect, AccessibilityPolicy, DangerEffect, EntranceEffect,
+    FlashDecision, HitEffect, MotionDecision, StartupConfigWarning,
+};
 pub use theme::{Theme, ThemeResource, REF_HEIGHT, REF_WIDTH, SCREEN_TRANSITION_MS};
 pub use transition::{FadePhase, ScreenFade, TransitionOverlay};
 pub use typography::{InteractionTone, SpacingRole, StateMarker, Typography, TypographyRole};

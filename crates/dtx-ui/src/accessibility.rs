@@ -15,6 +15,45 @@ pub enum FlashDecision {
     Reduced,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum EntranceEffect {
+    FullMotion { duration_ms: u32 },
+    OpacityOnly { duration_ms: u32 },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum HitEffect {
+    FullFlash { duration_ms: u32 },
+    StableOutline { duration_ms: u32 },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DangerEffect {
+    PulsingBorder,
+    ConstantBorder,
+}
+
+pub const fn entrance_effect(policy: AccessibilityPolicy) -> EntranceEffect {
+    match policy.motion_decision() {
+        MotionDecision::Full => EntranceEffect::FullMotion { duration_ms: 300 },
+        MotionDecision::Reduced => EntranceEffect::OpacityOnly { duration_ms: 120 },
+    }
+}
+
+pub const fn hit_effect(policy: AccessibilityPolicy) -> HitEffect {
+    match policy.flash_decision() {
+        FlashDecision::Full => HitEffect::FullFlash { duration_ms: 180 },
+        FlashDecision::Reduced => HitEffect::StableOutline { duration_ms: 120 },
+    }
+}
+
+pub const fn danger_effect(policy: AccessibilityPolicy) -> DangerEffect {
+    match policy.flash_decision() {
+        FlashDecision::Full => DangerEffect::PulsingBorder,
+        FlashDecision::Reduced => DangerEffect::ConstantBorder,
+    }
+}
+
 /// Runtime accessibility decisions derived once from persisted configuration.
 #[derive(Resource, Debug, Clone, Copy, PartialEq)]
 pub struct AccessibilityPolicy {
@@ -112,5 +151,24 @@ mod tests {
         assert_eq!(policy.motion_decision(), MotionDecision::Full);
         assert_eq!(policy.flash_decision(), FlashDecision::Full);
         assert!(policy.background_motion());
+    }
+
+    #[test]
+    fn reduced_effects_keep_feedback_but_remove_oscillation() {
+        let policy = AccessibilityPolicy::from(&AccessibilityConfig {
+            reduce_motion: true,
+            reduce_flashes: true,
+            background_motion: false,
+            ..Default::default()
+        });
+        assert_eq!(
+            entrance_effect(policy),
+            EntranceEffect::OpacityOnly { duration_ms: 120 }
+        );
+        assert_eq!(
+            hit_effect(policy),
+            HitEffect::StableOutline { duration_ms: 120 }
+        );
+        assert_eq!(danger_effect(policy), DangerEffect::ConstantBorder);
     }
 }

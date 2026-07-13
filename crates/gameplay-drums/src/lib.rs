@@ -351,7 +351,7 @@ fn apply_config_on_enter(
 ) {
     use dtx_config::{default_path, load};
     let cfg = load(&default_path());
-    *bga_settings = dtx_bga::BgaSettings::from(&cfg.system);
+    *bga_settings = dtx_bga::BgaSettings::from_configs(&cfg.system, &cfg.accessibility);
     *scroll = resources::ScrollSettings::from_scroll_speed(cfg.gameplay.scroll_speed);
     audio.bgm_enabled = cfg.audio.bgm_enabled;
     audio.drum_enabled = cfg.audio.drum_sound_enabled;

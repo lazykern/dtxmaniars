@@ -159,7 +159,7 @@ fn apply_draft_live(
     mut instances: ResMut<Assets<AudioInstance>>,
     mut bga_settings: ResMut<dtx_bga::BgaSettings>,
 ) {
-    let next_bga = dtx_bga::BgaSettings::from(&draft.0.system);
+    let next_bga = dtx_bga::BgaSettings::from_configs(&draft.0.system, &draft.0.accessibility);
     if *bga_settings != next_bga {
         *bga_settings = next_bga;
     }

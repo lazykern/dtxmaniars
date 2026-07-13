@@ -48,7 +48,9 @@ fn drive_transition_fade(
     mut next: ResMut<NextState<AppState>>,
     mut fade_events: MessageWriter<ScreenFadeTransition>,
     time: Res<Time>,
+    policy: Res<dtx_ui::AccessibilityPolicy>,
 ) {
+    fade.set_duration_ms(policy.screen_transition_ms() as f32);
     let delta_ms = time.delta_secs() * 1000.0;
 
     match fade.phase {

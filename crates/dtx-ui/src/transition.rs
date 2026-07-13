@@ -26,6 +26,7 @@ pub struct ScreenFade {
     pub alpha: f32,
     pub overlay: Option<Entity>,
     tween: ScalarTween,
+    duration_ms: f32,
 }
 
 impl Default for ScreenFade {
@@ -35,33 +36,29 @@ impl Default for ScreenFade {
             alpha: 0.0,
             overlay: None,
             tween: ScalarTween::new(0.0, 0.0, SCREEN_TRANSITION_MS, EaseFunction::OutQuint),
+            duration_ms: SCREEN_TRANSITION_MS,
         }
     }
 }
 
 impl ScreenFade {
+    pub fn set_duration_ms(&mut self, duration_ms: f32) {
+        self.duration_ms = duration_ms.max(1.0);
+    }
     pub fn is_busy(&self) -> bool {
         self.phase != FadePhase::Idle
     }
 
     pub fn start_fade_out(&mut self) {
         self.phase = FadePhase::FadeOut;
-        self.tween.reset(
-            self.alpha,
-            1.0,
-            SCREEN_TRANSITION_MS,
-            EaseFunction::OutQuint,
-        );
+        self.tween
+            .reset(self.alpha, 1.0, self.duration_ms, EaseFunction::OutQuint);
     }
 
     pub fn start_fade_in(&mut self) {
         self.phase = FadePhase::FadeIn;
-        self.tween.reset(
-            self.alpha,
-            0.0,
-            SCREEN_TRANSITION_MS,
-            EaseFunction::OutQuint,
-        );
+        self.tween
+            .reset(self.alpha, 0.0, self.duration_ms, EaseFunction::OutQuint);
     }
 
     pub fn finish(&mut self) {

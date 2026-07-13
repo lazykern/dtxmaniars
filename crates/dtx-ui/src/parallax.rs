@@ -43,13 +43,20 @@ const SLIDE_TOTAL_MS: u32 = SLIDE_OUT_MS + SLIDE_IN_MS;
 /// over `SLIDE_TOTAL_MS`. Apply the offset to the node's top.
 pub fn parallax_info_tween_system(
     time: Res<Time>,
+    policy: Option<Res<crate::AccessibilityPolicy>>,
     mut events: MessageReader<PreviewSwapEvent>,
     mut query: Query<(&mut ParallaxInfo, &mut Node)>,
 ) {
     let delta_ms = (time.delta_secs() * 1000.0) as u32;
+    let motion_allowed = policy
+        .as_deref()
+        .is_none_or(|policy| policy.background_motion());
 
     // Apply incoming events.
     for event in events.read() {
+        if !motion_allowed {
+            continue;
+        }
         let dir = match event.direction {
             PreviewSwapDirection::Next => 1i8,
             PreviewSwapDirection::Prev => -1i8,
@@ -68,6 +75,13 @@ pub fn parallax_info_tween_system(
     // single linear interpolation across SLIDE_TOTAL_MS. Close
     // enough visually; a frame counter would be the "true" out-then-in.
     for (mut info, mut node) in &mut query {
+        if !motion_allowed {
+            info.offset_px = 0.0;
+            info.is_flying = false;
+            info.direction = 0;
+            node.top = Val::Px(info.rest_top_px);
+            continue;
+        }
         if !info.is_flying {
             if info.offset_px != 0.0 {
                 info.offset_px = 0.0;

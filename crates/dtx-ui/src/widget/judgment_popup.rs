@@ -38,13 +38,20 @@ impl JudgmentPopup {
     }
 
     pub fn tick(&mut self, delta_ms: f32) -> (f32, f32) {
+        self.tick_with_flash(delta_ms, crate::FlashDecision::Full)
+    }
+
+    pub fn tick_with_flash(&mut self, delta_ms: f32, decision: crate::FlashDecision) -> (f32, f32) {
         if !self.active {
             return (0.0, 0.0);
         }
         self.elapsed_ms += delta_ms;
         self.alpha_tween.tick(delta_ms);
         let alpha = self.alpha_tween.value();
-        let scale = 1.0 + 0.2 * (1.0 - alpha);
+        let scale = match decision {
+            crate::FlashDecision::Full => 1.0 + 0.2 * (1.0 - alpha),
+            crate::FlashDecision::Reduced => 1.0,
+        };
         if self.alpha_tween.finished {
             self.active = false;
         }
