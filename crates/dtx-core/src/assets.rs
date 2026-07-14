@@ -140,6 +140,8 @@ pub struct WavRegistry {
     pub volumes: HashMap<u32, i32>,
     /// Per-WAV pan -100..100 (default 0). From `#PAN` / `#WAVPAN`.
     pub pans: HashMap<u32, i32>,
+    /// Per-WAV chip size 0..100 percent (default 100). From `#SIZExx`.
+    pub sizes: HashMap<u32, i32>,
 }
 
 impl WavRegistry {
@@ -169,6 +171,11 @@ impl WavRegistry {
     /// Pan for a WAV id (-100..100). Default 0.
     pub fn pan(&self, id: u32) -> i32 {
         self.pans.get(&id).copied().unwrap_or(0)
+    }
+
+    /// Chip size percent for a WAV id (0..100). Default 100.
+    pub fn size(&self, id: u32) -> i32 {
+        self.sizes.get(&id).copied().unwrap_or(100)
     }
 
     /// Total registered WAVs.
@@ -312,6 +319,17 @@ pub fn parse_pan_directive(line: &str) -> Option<(u32, i32)> {
     parse_wav_id_directive(line, &["PAN", "WAVPAN"]).and_then(|(id, value)| {
         let v: i32 = value.trim().parse().ok()?;
         Some((id, v.clamp(-100, 100)))
+    })
+}
+
+/// Parse `#SIZE01:` line. Returns (id, chip size percent 0..100) or None.
+///
+/// DTXManiaNX scales a chip's sprite by this percentage (`CChip.dbChipSizeRatio`,
+/// clamped to 0..100 in `t入力_行解析_SIZE`).
+pub fn parse_size_directive(line: &str) -> Option<(u32, i32)> {
+    parse_wav_id_directive(line, &["SIZE"]).and_then(|(id, value)| {
+        let v: i32 = value.parse().ok()?;
+        Some((id, v.clamp(0, 100)))
     })
 }
 
@@ -459,6 +477,10 @@ impl DtxAssets {
         }
         if let Some((id, pan)) = parse_pan_directive(line) {
             self.wav.pans.insert(id, pan);
+            return true;
+        }
+        if let Some((id, size)) = parse_size_directive(line) {
+            self.wav.sizes.insert(id, size);
             return true;
         }
         if let Some((id, filename)) = parse_bmp_directive(line) {
@@ -612,6 +634,20 @@ pub fn resolve_chart_asset_path(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // === SIZE directive ===
+
+    #[test]
+    fn parse_size_clamps_and_defaults() {
+        assert_eq!(parse_size_directive("#SIZE07: 80").unwrap(), (7, 80));
+        assert_eq!(parse_size_directive("#size0I: 140").unwrap(), (18, 100));
+        assert!(parse_size_directive("#SIZE: 80").is_none());
+
+        let mut assets = DtxAssets::new();
+        assert!(assets.process_line("#SIZE07: 80"));
+        assert_eq!(assets.wav.size(7), 80);
+        assert_eq!(assets.wav.size(8), 100);
+    }
 
     // === WAV directive ===
 
