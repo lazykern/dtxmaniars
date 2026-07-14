@@ -22,7 +22,7 @@ brp = ["dep:bevy_brp_extras"]
 midi = ["gameplay-drums/midi"]
 
 [dependencies]
-bevy = { workspace = true, features = ["default_app", "bevy_winit", "x11", "wayland", "multi_threaded", "default_font", "2d_bevy_render", "ui_bevy_render", "jpeg"] }
+bevy = { workspace = true, features = ["default_app", "bevy_winit", "x11", "wayland", "multi_threaded", "default_font", "system_font_discovery", "2d_bevy_render", "ui_bevy_render", "jpeg"] }
 bevy_framepace = { workspace = true }
 icu_provider = { version = "2.2", default-features = false, features = ["logging"] }
 bevy_brp_extras = { version = "0.20.1", optional = true }
