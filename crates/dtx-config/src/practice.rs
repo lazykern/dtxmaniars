@@ -428,7 +428,7 @@ fn validate_config(config: &PracticePresetConfig) -> Result<(), PracticePresetEr
     if let PracticeTrainerPreset::Ramp(ramp) = config.trainer {
         if !in_finite_range(ramp.start_tempo, TEMPO_MIN, TEMPO_MAX)
             || !in_finite_range(ramp.target_tempo, TEMPO_MIN, TEMPO_MAX)
-            || ramp.target_tempo < ramp.start_tempo + RAMP_TEMPO_GAP
+            || ramp.target_tempo + f32::EPSILON < ramp.start_tempo + RAMP_TEMPO_GAP
             || !in_finite_range(ramp.step, RAMP_STEP_MIN, RAMP_STEP_MAX)
             || !in_finite_range(ramp.threshold_pct, RAMP_THRESHOLD_MIN, RAMP_THRESHOLD_MAX)
             || !(RAMP_SUCCESSES_MIN..=RAMP_SUCCESSES_MAX).contains(&ramp.required_successes)
@@ -712,6 +712,20 @@ mod tests {
         let mut negative = config();
         negative.loop_start_ms = Some(-1);
         assert!(registry.create(key, None, None, negative).is_err());
+    }
+
+    #[test]
+    fn practice_ramp_accepts_exact_ui_step_gap() {
+        let mut valid = config();
+        valid.trainer = PracticeTrainerPreset::Ramp(RampPreset {
+            start_tempo: 0.60,
+            target_tempo: 0.65,
+            ..ramp_config()
+        });
+
+        PracticePresetRegistry::default()
+            .create(PracticeChartKey::new("dtx1:abc", 2), None, None, valid)
+            .expect("one 0.05 UI step is valid");
     }
 
     #[test]
