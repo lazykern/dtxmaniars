@@ -46,8 +46,8 @@ pub(crate) struct ResultAnalysis {
 }
 
 /// Result-owned copy of every completed-run value used by the presentation.
-#[derive(Resource, Debug, Clone, Default, PartialEq)]
-pub(crate) struct ResultDisplaySnapshot {
+#[derive(Debug, Clone, Default, PartialEq)]
+pub(crate) struct ResultDisplay {
     pub title: String,
     pub artist: String,
     pub drum_level: Option<f32>,
@@ -59,6 +59,17 @@ pub(crate) struct ResultDisplaySnapshot {
     pub failed: bool,
     pub status: SaveStatus,
     pub analysis: ResultAnalysis,
+}
+
+/// A display snapshot exists only after a fresh Result entry completes.
+#[derive(Resource, Debug, Clone, Default, PartialEq)]
+pub(crate) struct ResultDisplaySnapshot(pub(crate) Option<ResultDisplay>);
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ResultEntry {
+    Fresh,
+    Preserved,
+    InvalidReturn,
 }
 
 pub struct GameResultsPlugin;
@@ -81,7 +92,7 @@ pub fn plugin(app: &mut App) {
                 save_result.run_if(process_result_entry),
                 snapshot_result_display_system.run_if(process_result_entry),
                 finish_result_entry_system,
-                ui::spawn_result,
+                ui::spawn_result.run_if(result_display_available),
             )
                 .chain(),
         )
@@ -96,28 +107,72 @@ pub fn plugin(app: &mut App) {
                 ui::animate_staggered_reveal,
             )
                 .chain()
-                .run_if(in_state(AppState::Result)),
+                .run_if(in_state(AppState::Result))
+                .run_if(result_display_available),
         );
 }
 
-pub(crate) fn should_process_result(state: &ResultReturnState) -> bool {
-    !state.skip_processing_once
-}
-
-fn process_result_entry(state: Res<ResultReturnState>) -> bool {
-    should_process_result(&state)
-}
-
-pub(crate) fn finish_result_entry(state: &mut ResultReturnState) {
-    if state.skip_processing_once {
-        state.skip_processing_once = false;
+fn result_entry(state: &ResultReturnState, display: &ResultDisplaySnapshot) -> ResultEntry {
+    if !state.skip_processing_once {
+        ResultEntry::Fresh
+    } else if state.available && display.0.is_some() {
+        ResultEntry::Preserved
     } else {
-        state.available = true;
+        ResultEntry::InvalidReturn
     }
 }
 
-fn finish_result_entry_system(mut state: ResMut<ResultReturnState>) {
-    finish_result_entry(&mut state);
+pub(crate) fn should_process_result(
+    state: &ResultReturnState,
+    display: &ResultDisplaySnapshot,
+) -> bool {
+    result_entry(state, display) == ResultEntry::Fresh
+}
+
+fn process_result_entry(
+    state: Res<ResultReturnState>,
+    display: Res<ResultDisplaySnapshot>,
+) -> bool {
+    should_process_result(&state, &display)
+}
+
+pub(crate) fn finish_result_entry(
+    state: &mut ResultReturnState,
+    display: &mut ResultDisplaySnapshot,
+) -> Option<AppState> {
+    match result_entry(state, display) {
+        ResultEntry::Fresh => {
+            state.available = display.0.is_some();
+            (!state.available).then_some(AppState::SongSelect)
+        }
+        ResultEntry::Preserved => {
+            state.skip_processing_once = false;
+            None
+        }
+        ResultEntry::InvalidReturn => {
+            state.available = false;
+            state.skip_processing_once = false;
+            display.0 = None;
+            Some(AppState::SongSelect)
+        }
+    }
+}
+
+fn finish_result_entry_system(
+    mut state: ResMut<ResultReturnState>,
+    mut display: ResMut<ResultDisplaySnapshot>,
+    mut requests: MessageWriter<game_shell::TransitionRequest>,
+) {
+    if let Some(target) = finish_result_entry(&mut state, &mut display) {
+        game_shell::request_transition(&mut requests, target);
+    }
+}
+
+fn result_display_available(
+    state: Res<ResultReturnState>,
+    display: Res<ResultDisplaySnapshot>,
+) -> bool {
+    state.available && display.0.is_some()
 }
 
 pub(crate) fn result_rank(counts: &JudgmentCounts, max_combo: u32, total: u32) -> Rank {
@@ -335,7 +390,7 @@ fn snapshot_result_display_system(
     analysis: Res<ResultAnalysis>,
     mut display: ResMut<ResultDisplaySnapshot>,
 ) {
-    *display = ResultDisplaySnapshot {
+    display.0 = Some(ResultDisplay {
         title: chart
             .metadata()
             .title
@@ -355,7 +410,7 @@ fn snapshot_result_display_system(
         failed: !outcome.cleared,
         status: *status,
         analysis: analysis.clone(),
-    };
+    });
 }
 
 fn snapshot_result_analysis(
@@ -601,6 +656,93 @@ mod tests {
         );
         assert!(!dtx_scoring::score_ini::score_ini_path(&chart_path).exists());
         std::fs::remove_dir_all(dir).expect("remove fixture directory");
+    }
+
+    fn invalid_return_app(available: bool, display: ResultDisplaySnapshot) -> App {
+        use bevy::input::mouse::MouseWheel;
+
+        let mut app = App::new();
+        app.add_plugins((MinimalPlugins, bevy::state::app::StatesPlugin))
+            .init_state::<AppState>()
+            .init_resource::<ButtonInput<KeyCode>>()
+            .init_resource::<game_shell::PracticeIntent>()
+            .add_message::<game_shell::NavAction>()
+            .add_message::<game_shell::TransitionRequest>()
+            .add_message::<MouseWheel>()
+            .insert_resource(dtx_ui::ThemeResource::default())
+            .insert_resource(ActiveChart::default())
+            .insert_resource(ScoreStoreResource::default())
+            .insert_resource(ResultReturnState {
+                available,
+                skip_processing_once: true,
+            })
+            .insert_resource(display);
+        plugin(&mut app);
+        app
+    }
+
+    #[test]
+    fn invalid_result_returns_fall_back_without_rendering_a_default_or_stale_snapshot() {
+        let stale = ResultDisplaySnapshot(Some(ResultDisplay {
+            title: "Stale result".into(),
+            score: 777,
+            ..Default::default()
+        }));
+
+        for (case, available, display) in [
+            (
+                "availability and snapshot absent",
+                false,
+                ResultDisplaySnapshot::default(),
+            ),
+            ("availability absent with stale snapshot", false, stale),
+            (
+                "available flag set but snapshot absent",
+                true,
+                ResultDisplaySnapshot::default(),
+            ),
+        ] {
+            let mut app = invalid_return_app(available, display);
+            app.world_mut()
+                .resource_mut::<NextState<AppState>>()
+                .set(AppState::Result);
+            app.update();
+
+            let return_state = app.world().resource::<ResultReturnState>();
+            assert!(!return_state.available, "{case}");
+            assert!(!return_state.skip_processing_once, "{case}");
+            assert!(
+                app.world().resource::<ResultDisplaySnapshot>().0.is_none(),
+                "{case}: stale or absent snapshots remain invalid"
+            );
+            assert!(
+                app.world()
+                    .resource::<ScoreStoreResource>()
+                    .entries
+                    .is_empty(),
+                "{case}: invalid returns must not analyze or save fresh gameplay state"
+            );
+            let mut entities = app.world_mut().query::<&ResultEntity>();
+            assert_eq!(
+                entities.iter(app.world()).count(),
+                0,
+                "{case}: invalid returns must not spawn Results UI"
+            );
+            let requests = app
+                .world_mut()
+                .resource_mut::<Messages<game_shell::TransitionRequest>>()
+                .drain()
+                .map(|request| request.0)
+                .collect::<Vec<_>>();
+            assert_eq!(requests, vec![AppState::SongSelect], "{case}");
+            assert!(
+                matches!(
+                    app.world().resource::<NextState<AppState>>(),
+                    NextState::Unchanged
+                ),
+                "{case}: only the transition director may mutate AppState"
+            );
+        }
     }
 
     #[test]

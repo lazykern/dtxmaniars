@@ -213,6 +213,10 @@ pub(crate) fn spawn_result(
     display: Res<ResultDisplaySnapshot>,
     midi: Option<Res<game_shell::MidiConnected>>,
 ) {
+    let Some(display) = display.0.as_ref() else {
+        return;
+    };
+
     commands.insert_resource(RevealState::new(LAST_SLOT));
     commands.insert_resource(ResultVerb::default());
     commands.insert_resource(ResultDetailsOpen::default());
@@ -715,6 +719,10 @@ pub(crate) fn sync_verb_row(
     display: Res<ResultDisplaySnapshot>,
     mut q: Query<(&VerbLabel, &mut Text, &mut TextColor)>,
 ) {
+    let Some(display) = display.0.as_ref() else {
+        return;
+    };
+
     let t = theme.0;
     for (label, mut text, mut color) in &mut q {
         let selected = label.0 == *cursor;
@@ -814,7 +822,7 @@ mod tests {
     fn spawn_world() -> World {
         let mut world = World::new();
         world.insert_resource(ThemeResource::default());
-        world.insert_resource(ResultDisplaySnapshot {
+        world.insert_resource(ResultDisplaySnapshot(Some(crate::ResultDisplay {
             title: "Unknown".into(),
             artist: "Unknown".into(),
             difficulty: 2,
@@ -830,7 +838,7 @@ mod tests {
             total_notes: 500,
             status: SaveStatus::Saved,
             ..Default::default()
-        });
+        })));
         world
     }
 
@@ -875,8 +883,12 @@ mod tests {
     fn spawn_result_explains_modified_speed_is_not_saved() {
         use bevy::ecs::system::RunSystemOnce;
         let mut world = spawn_world();
-        world.resource_mut::<ResultDisplaySnapshot>().status =
-            SaveStatus::ModifiedSpeed { rate: 0.75 };
+        world
+            .resource_mut::<ResultDisplaySnapshot>()
+            .0
+            .as_mut()
+            .expect("display snapshot")
+            .status = SaveStatus::ModifiedSpeed { rate: 0.75 };
         world
             .run_system_once(spawn_result)
             .expect("spawn_result runs");
@@ -908,6 +920,7 @@ mod tests {
         use bevy::ecs::system::RunSystemOnce;
         let mut world = spawn_world();
         let mut display = world.resource_mut::<ResultDisplaySnapshot>();
+        let display = display.0.as_mut().expect("display snapshot");
         display.failed = true;
         display.total_notes = 0;
         world
@@ -995,7 +1008,7 @@ mod tests {
             total_ms: 1_130.0,
             done: true,
         });
-        world.insert_resource(ResultDisplaySnapshot::default());
+        world.insert_resource(ResultDisplaySnapshot(Some(crate::ResultDisplay::default())));
         let t = Theme::default();
         let retry = world
             .spawn((

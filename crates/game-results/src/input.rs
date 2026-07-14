@@ -93,6 +93,10 @@ pub(crate) fn result_nav(
     )>,
     mut sliding: Query<&mut EnterChoreo>,
 ) {
+    let Some(display) = display.0.as_ref() else {
+        return;
+    };
+
     // Pads (mapper's screen-enter grace already filters the song's last
     // notes) + keyboard, folded onto the same verbs. ←/→ are the natural
     // axis for a horizontal row; pads reuse Up/Down.
@@ -236,9 +240,10 @@ mod tests {
             available: true,
             skip_processing_once: true,
         };
-        assert!(!crate::should_process_result(&state));
-        crate::finish_result_entry(&mut state);
-        assert!(crate::should_process_result(&state));
+        let mut display = ResultDisplaySnapshot(Some(crate::ResultDisplay::default()));
+        assert!(!crate::should_process_result(&state, &display));
+        assert_eq!(crate::finish_result_entry(&mut state, &mut display), None);
+        assert!(crate::should_process_result(&state, &display));
     }
 
     #[test]
@@ -313,7 +318,7 @@ mod tests {
         world.insert_resource(ButtonInput::<KeyCode>::default());
         world.insert_resource(ResultVerb::default());
         world.insert_resource(PracticeIntent::default());
-        world.insert_resource(ResultDisplaySnapshot::default());
+        world.insert_resource(ResultDisplaySnapshot(Some(crate::ResultDisplay::default())));
         world.insert_resource(ResultDetailsOpen::default());
         world.insert_resource(RevealState {
             elapsed_ms: 2_000.0,
