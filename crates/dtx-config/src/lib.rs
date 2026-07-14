@@ -22,8 +22,15 @@ use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 pub mod drums;
+pub mod practice;
 
 pub use drums::{BdGroup, CyGroup, DrumsConfig, FtGroup, HhGroup, HitSoundPriority};
+pub use practice::{
+    load_practice_presets, practice_presets_path, save_practice_presets, LastUsedPractice,
+    PracticeChartKey, PracticePrerollPreset, PracticePreset, PracticePresetConfig,
+    PracticePresetError, PracticePresetRegistry, PracticePresetStartup, PracticeSnapPreset,
+    PracticeTrainerPreset, RampPreset, PRACTICE_PRESET_VERSION,
+};
 
 /// Top-level persisted configuration. Each BocuD section becomes a sub-struct.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
