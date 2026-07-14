@@ -200,6 +200,7 @@ git commit -m "feat(config): persist practice presets"
 ### Task 2: Origin-aware practice requests
 
 **Files:**
+- Modify: `crates/game-shell/Cargo.toml`
 - Modify: `crates/game-shell/src/states.rs`
 - Modify: `crates/game-shell/src/lib.rs`
 - Modify: `crates/game-menu/src/song_select.rs`
@@ -274,7 +275,7 @@ pub enum PracticeIntent {
 }
 ~~~
 
-Add `manual(origin)`, `recommended(origin, recommendation)`, `is_requested`, `request`, and `recommendation` helpers. Export all new types from `game-shell::lib` and initialize `ResultReturnState` in `GameShellPlugin`.
+Add `features = ["bevy_state"]` to the direct `game-shell` Bevy dependency so the crate's isolated tests compile without relying on workspace feature unification. Add `manual(origin)`, `recommended(origin, recommendation)`, `is_requested`, `request`, and `recommendation` helpers. Export all new types from `game-shell::lib` and initialize `ResultReturnState` in `GameShellPlugin`.
 
 Song Select creates `PracticeIntent::manual(PracticeOrigin::SongSelect)`. Results creates either manual or recommended intent with `PracticeOrigin::Results`. Retry keeps the existing intent. Normal play continues to set `None`.
 
@@ -289,7 +290,7 @@ Expected: PASS after mechanically updating existing pattern matches in `gameplay
 - [ ] **Step 5: Commit**
 
 ~~~bash
-git add crates/game-shell/src/states.rs crates/game-shell/src/lib.rs crates/game-menu/src/song_select.rs crates/game-results/src/lib.rs crates/game-results/src/input.rs crates/gameplay-drums/src/practice/mod.rs crates/gameplay-drums/src/playback_rate.rs
+git add crates/game-shell/Cargo.toml crates/game-shell/src/states.rs crates/game-shell/src/lib.rs crates/game-menu/src/song_select.rs crates/game-results/src/lib.rs crates/game-results/src/input.rs crates/gameplay-drums/src/practice/mod.rs crates/gameplay-drums/src/playback_rate.rs
 git commit -m "refactor(practice): track request origin"
 ~~~
 
