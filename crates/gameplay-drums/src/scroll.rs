@@ -92,6 +92,8 @@ fn spawn_notes_system(
     layout: Res<PlayfieldLayout>,
     scroll: Res<ScrollSettings>,
     judged: Res<JudgedChips>,
+    preview_skipped: Res<crate::seek::PreviewSkippedChips>,
+    practice_flow: Option<Res<crate::practice::PracticeFlow>>,
     lanes: Res<Lanes>,
     existing: Query<&Note>,
     hud_root: Query<Entity, With<HudRoot>>,
@@ -121,8 +123,17 @@ fn spawn_notes_system(
     let px_per_ms = scroll.pixels_per_ms * layout.scale;
     let spawn_window_ms = lookahead_ms(&layout, &scroll);
 
+    let skipped = if practice_flow
+        .as_ref()
+        .is_some_and(|flow| flow.phase != crate::practice::PracticePhase::Running)
+    {
+        &preview_skipped.0
+    } else {
+        &judged.0
+    };
+
     for (idx, chip) in chart.chart.chips.iter().enumerate() {
-        if existing_ids.contains(&idx) || judged.0.contains(&idx) {
+        if existing_ids.contains(&idx) || skipped.contains(&idx) {
             continue;
         }
         let Some(lane) = lane_of(chip.channel) else {
@@ -265,7 +276,7 @@ fn despawn_passed_preview_notes_system(
     clock: Res<GameplayClock>,
     mode: Res<EGameMode>,
     flow: Res<crate::practice::PracticeFlow>,
-    judged: Res<JudgedChips>,
+    mut skipped: ResMut<crate::seek::PreviewSkippedChips>,
     notes: Query<(Entity, &Note), With<NoteVisual>>,
     mut commands: Commands,
 ) {
@@ -277,9 +288,10 @@ fn despawn_passed_preview_notes_system(
     }
     let now = clock.current_ms;
     for (entity, note) in &notes {
-        if should_emit_miss_for_note(note.chip_id, now, note.target_ms, &judged.0)
-            || judged.0.contains(&note.chip_id)
+        if should_emit_miss_for_note(note.chip_id, now, note.target_ms, &skipped.0)
+            || skipped.0.contains(&note.chip_id)
         {
+            skipped.0.insert(note.chip_id);
             commands.entity(entity).despawn();
         }
     }

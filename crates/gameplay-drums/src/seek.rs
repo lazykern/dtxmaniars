@@ -55,6 +55,15 @@ pub struct PendingBgm {
 #[derive(Resource, Default, Debug, Clone, Copy)]
 pub struct LastSeekFrom(pub Option<i64>);
 
+/// Chip indices already passed by non-judged Setup/Editing preview playback.
+/// This keeps preview reconstruction independent from gameplay judgment state.
+#[derive(Resource, Default, Debug, Clone)]
+pub struct PreviewSkippedChips(pub HashSet<usize>);
+
+pub(crate) fn reset_preview_skipped_chips(mut skipped: ResMut<PreviewSkippedChips>) {
+    skipped.0.clear();
+}
+
 /// Rebuild all skip-sets for playback positioned at `target_ms`.
 ///
 /// - `judged`: every chip strictly before the target in the judgement
@@ -120,6 +129,8 @@ pub struct SeekAudio<'w> {
 #[derive(SystemParam)]
 pub struct SeekState<'w> {
     pub judged: ResMut<'w, JudgedChips>,
+    pub preview_skipped: ResMut<'w, PreviewSkippedChips>,
+    pub practice_flow: Option<Res<'w, crate::practice::PracticeFlow>>,
     pub played_bgm: ResMut<'w, crate::bgm_scheduler::PlayedBgmChips>,
     pub played_se: ResMut<'w, crate::se_scheduler::PlayedSeChips>,
     pub crossed: ResMut<'w, TimingLineCrossed>,
@@ -163,14 +174,30 @@ pub fn apply_seek_system(
     dtx_audio::stop_polyphony(&mut audio.instances, &audio.polyphony);
 
     // 2. Rebuild skip-sets from scratch.
-    seed_skip_sets(
-        &timeline,
-        resolved,
-        &mut state.judged.0,
-        &mut state.played_bgm.0,
-        &mut state.played_se.0,
-        &mut state.crossed.0,
-    );
+    if state
+        .practice_flow
+        .as_ref()
+        .is_some_and(|flow| flow.phase != crate::practice::PracticePhase::Running)
+    {
+        seed_skip_sets(
+            &timeline,
+            resolved,
+            &mut state.preview_skipped.0,
+            &mut state.played_bgm.0,
+            &mut state.played_se.0,
+            &mut state.crossed.0,
+        );
+    } else {
+        seed_skip_sets(
+            &timeline,
+            resolved,
+            &mut state.judged.0,
+            &mut state.played_bgm.0,
+            &mut state.played_se.0,
+            &mut state.crossed.0,
+        );
+        state.preview_skipped.0.clone_from(&state.judged.0);
+    }
 
     // 3. Despawn live notes; the spawner refills from the new `now`.
     for entity in &notes {

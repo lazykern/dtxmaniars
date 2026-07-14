@@ -80,6 +80,7 @@ fn build_app() -> App {
     .init_resource::<gameplay_drums::timeline::ChipTimeline>()
     .init_resource::<gameplay_drums::seek::PendingBgmStart>()
     .init_resource::<gameplay_drums::seek::LastSeekFrom>()
+    .init_resource::<gameplay_drums::seek::PreviewSkippedChips>()
     .init_resource::<gameplay_drums::pause::PracticePauseSurface>()
     .init_resource::<game_shell::EditorSession>()
     .add_message::<game_shell::TransitionRequest>()
@@ -138,6 +139,26 @@ fn chart_with_scheduled_audio() -> Chart {
             Chip::with_wav(0, EChannel::BGM, 0.0, 1),
             Chip::with_wav(0, EChannel::SE01, 0.0, 2),
             Chip::new(1, EChannel::BassDrum, 0.0),
+        ],
+        assets,
+        ..Default::default()
+    }
+}
+
+fn chart_for_preview_seek() -> Chart {
+    let mut assets = DtxAssets::default();
+    assets.wav.insert(1, "preview-bgm.wav".into());
+    assets.wav.insert(2, "preview-se.wav".into());
+    Chart {
+        metadata: Metadata {
+            bpm: Some(120.0),
+            ..Default::default()
+        },
+        chips: vec![
+            Chip::with_wav(0, EChannel::BGM, 0.0, 1),
+            Chip::with_wav(0, EChannel::SE01, 0.0, 2),
+            Chip::new(0, EChannel::BassDrum, 0.5),
+            Chip::new(1, EChannel::Snare, 0.0),
         ],
         assets,
         ..Default::default()
@@ -666,6 +687,177 @@ fn setup_preview_seek_does_not_schedule_or_fire_count_in() {
         4,
         "Start creates the committed attempt's one-bar count-in"
     );
+}
+
+fn assert_preview_seek_preserves_gameplay_reconstruction(phase: PracticePhase) {
+    use gameplay_drums::practice::metronome::{ActiveClickSchedule, CountdownDisplay};
+
+    let mut app = build_lifecycle_app(PracticeIntent::manual(PracticeOrigin::SongSelect));
+    enter_performance(&mut app, chart_for_preview_seek());
+    {
+        let mut flow = app.world_mut().resource_mut::<PracticeFlow>();
+        flow.phase = phase;
+        flow.preview = PreviewState::Playing;
+    }
+    {
+        let mut session = app.world_mut().resource_mut::<PracticeSession>();
+        session.current_attempt.start_ms = 321;
+        session.current_attempt.counts.perfect = 7;
+        session.current_attempt_eligible = false;
+    }
+    app.world_mut().resource_mut::<JudgedChips>().0 = [3, 99].into();
+    ready_clock(&mut app, 250);
+    app.world_mut().spawn((
+        Note {
+            chip_id: 77,
+            lane: 2,
+            target_ms: 250,
+        },
+        NoteVisual,
+        Node::default(),
+    ));
+
+    send_seek(&mut app, 1_500);
+    app.world_mut().run_schedule(FixedUpdate);
+
+    assert_eq!(
+        app.world().resource::<JudgedChips>().0,
+        std::collections::HashSet::from([3, 99]),
+        "{phase:?} preview seek must preserve gameplay judgment state"
+    );
+    assert_eq!(
+        app.world()
+            .resource::<gameplay_drums::bgm_scheduler::PlayedBgmChips>()
+            .0,
+        std::collections::HashSet::from([0])
+    );
+    assert_eq!(
+        app.world().resource::<PlayedSeChips>().0,
+        std::collections::HashSet::from([1])
+    );
+    assert!(!app.world().resource::<TimingLineCrossed>().0.is_empty());
+    assert!(app.world().resource::<GameplayClock>().current_ms >= 1_500);
+    assert_eq!(
+        app.world()
+            .resource::<PracticeSession>()
+            .current_attempt
+            .counts
+            .perfect,
+        7
+    );
+    assert_eq!(
+        app.world()
+            .resource::<PracticeSession>()
+            .current_attempt
+            .start_ms,
+        321
+    );
+    assert!(
+        !app.world()
+            .resource::<PracticeSession>()
+            .current_attempt_eligible
+    );
+    assert!(app
+        .world()
+        .resource::<PracticeSession>()
+        .attempt_history
+        .is_empty());
+    assert!(app
+        .world()
+        .resource::<ActiveClickSchedule>()
+        .schedule
+        .clicks
+        .is_empty());
+    assert!(app.world().resource::<CountdownDisplay>().current.is_none());
+
+    app.world_mut().run_schedule(Update);
+
+    assert_eq!(
+        app.world().resource::<dtx_bga::BgaClock>().current_ms,
+        app.world().resource::<GameplayClock>().current_ms
+    );
+    let visible_ids = {
+        let world = app.world_mut();
+        let mut notes = world.query_filtered::<&Note, With<NoteVisual>>();
+        notes
+            .iter(world)
+            .map(|note| note.chip_id)
+            .collect::<Vec<_>>()
+    };
+    assert!(
+        visible_ids.contains(&3),
+        "{phase:?} preview visuals must not inherit the gameplay sentinel"
+    );
+    assert!(!visible_ids.contains(&77), "seek must clear stale visuals");
+
+    send_seek(&mut app, 500);
+    app.world_mut().run_schedule(FixedUpdate);
+    app.world_mut().run_schedule(Update);
+
+    assert_eq!(
+        app.world().resource::<JudgedChips>().0,
+        std::collections::HashSet::from([3, 99])
+    );
+    let visible_ids = {
+        let world = app.world_mut();
+        let mut notes = world.query_filtered::<&Note, With<NoteVisual>>();
+        notes
+            .iter(world)
+            .map(|note| note.chip_id)
+            .collect::<Vec<_>>()
+    };
+    assert!(
+        visible_ids.contains(&2),
+        "backward preview seek must rebuild visual eligibility"
+    );
+}
+
+#[test]
+fn setup_preview_seek_preserves_gameplay_reconstruction() {
+    assert_preview_seek_preserves_gameplay_reconstruction(PracticePhase::Setup);
+}
+
+#[test]
+fn editing_preview_seek_preserves_gameplay_reconstruction() {
+    assert_preview_seek_preserves_gameplay_reconstruction(PracticePhase::Editing);
+}
+
+fn assert_gameplay_seek_rebuilds_judged(intent: PracticeIntent) {
+    let mut app = build_lifecycle_app(intent);
+    enter_performance(&mut app, chart_for_preview_seek());
+    if let Some(mut flow) = app.world_mut().get_resource_mut::<PracticeFlow>() {
+        flow.phase = PracticePhase::Running;
+    }
+    app.world_mut().resource_mut::<JudgedChips>().0 = [99].into();
+    app.world_mut()
+        .resource_mut::<gameplay_drums::seek::PreviewSkippedChips>()
+        .0 = [3, 99].into();
+    ready_clock(&mut app, 250);
+
+    send_seek(&mut app, 1_500);
+    app.world_mut().run_schedule(FixedUpdate);
+
+    assert_eq!(
+        app.world().resource::<JudgedChips>().0,
+        std::collections::HashSet::from([0, 1, 2])
+    );
+    assert_eq!(
+        app.world()
+            .resource::<gameplay_drums::seek::PreviewSkippedChips>()
+            .0,
+        std::collections::HashSet::from([0, 1, 2]),
+        "a gameplay seek must leave future preview reconstruction at the same position"
+    );
+}
+
+#[test]
+fn running_practice_seek_rebuilds_gameplay_judged() {
+    assert_gameplay_seek_rebuilds_judged(PracticeIntent::manual(PracticeOrigin::SongSelect));
+}
+
+#[test]
+fn normal_play_seek_rebuilds_gameplay_judged() {
+    assert_gameplay_seek_rebuilds_judged(PracticeIntent::None);
 }
 
 #[test]

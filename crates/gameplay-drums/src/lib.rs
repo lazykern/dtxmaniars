@@ -124,6 +124,7 @@ pub fn plugin(app: &mut App) {
     .init_resource::<timeline::ChipTimeline>()
     .init_resource::<seek::PendingBgmStart>()
     .init_resource::<seek::LastSeekFrom>()
+    .init_resource::<seek::PreviewSkippedChips>()
     .init_resource::<dtx_bga::BgaClock>()
     .init_resource::<dtx_bga::BgaSettings>()
     .add_systems(
@@ -137,6 +138,10 @@ pub fn plugin(app: &mut App) {
     .add_systems(
         OnEnter(game_shell::AppState::Performance),
         apply_config_on_enter.before(orchestrator::DrumsEnterSet),
+    )
+    .add_systems(
+        OnEnter(game_shell::AppState::Performance),
+        seek::reset_preview_skipped_chips,
     )
     .add_systems(
         OnEnter(game_shell::AppState::Performance),
