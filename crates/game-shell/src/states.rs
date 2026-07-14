@@ -87,9 +87,14 @@ impl PauseState {
 pub struct StageEntity(pub AppState);
 
 /// Generic despawn-by-component helper. Used by each stage's OnExit.
+///
+/// Another deferred command may have removed an entity before exit cleanup
+/// applies, so a stale entity here is expected and needs no error report.
 pub fn despawn_stage<T: Component>(mut commands: Commands, query: Query<Entity, With<T>>) {
     for entity in &query {
-        commands.entity(entity).despawn();
+        commands
+            .entity(entity)
+            .queue_silenced(bevy::ecs::system::entity_command::despawn());
     }
 }
 
@@ -389,5 +394,19 @@ mod tests {
         assert_eq!(recommendation.loop_start_ms, 1_000);
         assert_eq!(recommendation.loop_end_ms, 5_000);
         assert_eq!(recommendation.reason.lane(), Some(3));
+    }
+
+    #[test]
+    fn stage_cleanup_tolerates_entity_despawned_before_commands_apply() {
+        let mut app = App::new();
+        let entity = app.world_mut().spawn(StageEntity(AppState::Title)).id();
+        let mut system = IntoSystem::into_system(despawn_stage::<StageEntity>);
+        system.initialize(app.world_mut());
+
+        assert!(system.run((), app.world_mut()).is_ok());
+        app.world_mut().despawn(entity);
+        system.apply_deferred(app.world_mut());
+
+        assert!(app.world().get_entity(entity).is_err());
     }
 }
