@@ -90,14 +90,19 @@ pub fn plugin(app: &mut App) {
         .add_systems(OnExit(AppState::SongSelect), despawn_toast_node)
         .add_systems(
             Update,
-            (
-                dropped_files,
-                import_picker,
-                poll_imports,
-                jump_to_imported,
-                update_toast,
-            )
-                .run_if(in_state(AppState::SongSelect)),
+            (dropped_files, import_picker)
+                .run_if(in_state(AppState::SongSelect))
+                .run_if(crate::song_ready::song_ready_closed),
+        )
+        .add_systems(
+            Update,
+            (poll_imports, update_toast).run_if(in_state(AppState::SongSelect)),
+        )
+        .add_systems(
+            Update,
+            jump_to_imported
+                .run_if(in_state(AppState::SongSelect))
+                .run_if(crate::song_ready::song_ready_closed),
         );
 }
 
