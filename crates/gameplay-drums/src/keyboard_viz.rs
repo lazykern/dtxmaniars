@@ -21,7 +21,7 @@ pub(super) fn plugin(app: &mut App) {
     app.add_systems(
         Update,
         (
-            flash_key_caps_on_hit,
+            flash_key_caps_on_hit.run_if(crate::practice::gameplay_input_active),
             respawn_key_caps_on_lanes_change
                 .after(crate::layout::PlayfieldLayoutSync)
                 .run_if(resource_changed::<crate::lanes::Lanes>),

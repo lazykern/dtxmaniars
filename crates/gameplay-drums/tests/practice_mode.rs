@@ -19,8 +19,8 @@ use gameplay_drums::practice::{
     PracticeFlow, PracticePhase, PresetCommand, PreviewState,
 };
 use gameplay_drums::resources::{
-    ActiveChart, BgmAdjustState, Combo, EffectivePlaybackRate, GameStartMs, GameplayClock,
-    JudgmentCounts, MetronomeEnabled, PlaybackRateSource, Score, ShowTimingLines,
+    AccuracyHistory, ActiveChart, BgmAdjustState, Combo, EffectivePlaybackRate, GameStartMs,
+    GameplayClock, JudgmentCounts, MetronomeEnabled, PlaybackRateSource, Score, ShowTimingLines,
     TimingLineCrossed,
 };
 use gameplay_drums::se_scheduler::PlayedSeChips;
@@ -156,6 +156,48 @@ fn queue_bass_drum_midi(app: &mut App) {
     app.world_mut()
         .resource_mut::<dtx_input::midi::VirtualSource>()
         .note_on(36, 100, 0);
+}
+
+fn queue_key_cap_flash_messages(app: &mut App) {
+    app.world_mut().write_message(LaneHit {
+        lane: 2,
+        audio_ms: 2_000,
+    });
+    app.world_mut().write_message(InputHit {
+        lanes: vec![2],
+        audio_ms: 2_000,
+        captured_at: std::time::Instant::now(),
+    });
+    app.world_mut().write_message(JudgmentEvent {
+        lane: 2,
+        kind: dtx_scoring::JudgmentKind::Perfect,
+        delta_ms: 0,
+        chip_idx: 0,
+    });
+}
+
+fn bass_drum_key_cap_color(app: &mut App) -> Color {
+    let col = app
+        .world()
+        .resource::<gameplay_drums::lanes::Lanes>()
+        .col_of(EChannel::BassDrum)
+        .expect("Bass Drum has a visual column");
+    let world = app.world_mut();
+    let mut caps = world.query::<(&gameplay_drums::keyboard_viz::KeyCap, &BackgroundColor)>();
+    caps.iter(world)
+        .find_map(|(cap, background)| (cap.col as usize == col).then_some(background.0))
+        .expect("Bass Drum key cap exists")
+}
+
+fn phrase_playhead_top(app: &mut App) -> f32 {
+    let world = app.world_mut();
+    let mut playhead =
+        world.query_filtered::<&Node, With<dtx_ui::widget::phrase_meter::PhrasePlayhead>>();
+    let node = playhead.single(world).expect("phrase playhead exists");
+    match node.top {
+        Val::Px(top) => top,
+        other => panic!("phrase playhead top must use pixels, got {other:?}"),
+    }
 }
 
 #[test]
@@ -318,6 +360,94 @@ fn setup_ready_midi_keeps_raw_hit_and_pad_navigation() {
         .collect::<Vec<_>>();
     assert_eq!(nav_hits.len(), 1);
     assert_eq!(nav_hits[0].lane, 2);
+}
+
+fn assert_stale_gameplay_messages_do_not_flash_key_caps(phase: PracticePhase) {
+    let rest = Color::srgb(0.11, 0.11, 0.13);
+    let mut app = build_lifecycle_app(PracticeIntent::manual(PracticeOrigin::SongSelect));
+    enter_performance(&mut app, chart_with_measures(1));
+    app.world_mut().resource_mut::<PracticeFlow>().phase = phase;
+    assert_eq!(bass_drum_key_cap_color(&mut app), rest, "{phase:?}");
+
+    queue_key_cap_flash_messages(&mut app);
+    app.world_mut().run_schedule(Update);
+
+    assert_eq!(bass_drum_key_cap_color(&mut app), rest, "{phase:?}");
+}
+
+#[test]
+fn setup_stale_gameplay_messages_do_not_flash_key_caps() {
+    assert_stale_gameplay_messages_do_not_flash_key_caps(PracticePhase::Setup);
+}
+
+#[test]
+fn editing_stale_gameplay_messages_do_not_flash_key_caps() {
+    assert_stale_gameplay_messages_do_not_flash_key_caps(PracticePhase::Editing);
+}
+
+#[test]
+fn running_and_normal_play_gameplay_messages_flash_key_caps() {
+    let rest = Color::srgb(0.11, 0.11, 0.13);
+    for intent in [
+        PracticeIntent::manual(PracticeOrigin::SongSelect),
+        PracticeIntent::None,
+    ] {
+        let mut app = build_lifecycle_app(intent);
+        enter_performance(&mut app, chart_with_measures(1));
+        if let Some(mut flow) = app.world_mut().get_resource_mut::<PracticeFlow>() {
+            flow.phase = PracticePhase::Running;
+        }
+
+        queue_key_cap_flash_messages(&mut app);
+        app.world_mut().run_schedule(Update);
+
+        assert_ne!(bass_drum_key_cap_color(&mut app), rest);
+    }
+}
+
+#[test]
+fn preview_clock_movement_does_not_sample_accuracy_but_moves_playhead() {
+    let mut app = build_lifecycle_app(PracticeIntent::manual(PracticeOrigin::SongSelect));
+    enter_performance(&mut app, chart_with_measures(4));
+    *app.world_mut().resource_mut::<AccuracyHistory>() = AccuracyHistory::default();
+    app.world_mut().resource_mut::<PracticeFlow>().preview = PreviewState::Playing;
+    let playhead_before = phrase_playhead_top(&mut app);
+    ready_clock(&mut app, 2_000);
+
+    app.world_mut().run_schedule(Update);
+
+    assert!(app
+        .world()
+        .resource::<AccuracyHistory>()
+        .samples
+        .iter()
+        .all(Option::is_none));
+    assert_ne!(phrase_playhead_top(&mut app), playhead_before);
+}
+
+#[test]
+fn running_and_normal_play_clock_movement_samples_accuracy_history() {
+    for intent in [
+        PracticeIntent::manual(PracticeOrigin::SongSelect),
+        PracticeIntent::None,
+    ] {
+        let mut app = build_lifecycle_app(intent);
+        enter_performance(&mut app, chart_with_measures(4));
+        *app.world_mut().resource_mut::<AccuracyHistory>() = AccuracyHistory::default();
+        if let Some(mut flow) = app.world_mut().get_resource_mut::<PracticeFlow>() {
+            flow.phase = PracticePhase::Running;
+        }
+        ready_clock(&mut app, 2_000);
+
+        app.world_mut().run_schedule(Update);
+
+        assert!(app
+            .world()
+            .resource::<AccuracyHistory>()
+            .samples
+            .iter()
+            .any(Option::is_some));
+    }
 }
 
 #[test]

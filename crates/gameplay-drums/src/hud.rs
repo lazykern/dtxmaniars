@@ -133,7 +133,7 @@ pub fn plugin(app: &mut App) {
             sync_phrase_playhead,
             sync_hud_judgment,
             keyboard_viz::decay_key_cap_flashes,
-            sample_accuracy_history,
+            sample_accuracy_history.run_if(crate::practice::gameplay_input_active),
             sync_live_graph,
         )
             .run_if(in_state(AppState::Performance)),
