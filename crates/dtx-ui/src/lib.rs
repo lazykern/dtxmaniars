@@ -70,13 +70,6 @@ pub fn load_texture_handle(asset_server: &AssetServer, path: &str) -> Handle<bev
     asset_server.load(path.to_string())
 }
 
-pub fn load_audio_handle(
-    asset_server: &AssetServer,
-    path: &str,
-) -> Handle<bevy::audio::AudioSource> {
-    asset_server.load(path.to_string())
-}
-
 pub fn stage_label_color(state: &str) -> Color {
     let theme = Theme::default();
     match state {

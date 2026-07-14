@@ -10,7 +10,7 @@
 //!
 //! Layer: Engine (bevy + bevy_kira_audio). No Pure or Game deps.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::path::{Path, PathBuf};
 
 use bevy::asset::Handle;
@@ -28,13 +28,16 @@ use crate::crossfade::{
 // Phase 1: AudioHandleCache
 // =====================================================================
 
-/// Cache of loaded Kira audio source handles keyed by resolved file path.
+/// Cache of recently selected preview sources.
 ///
-/// Use [`get_or_load`] to look up a path; cache hits return the existing
-/// handle, misses load via `AssetServer` and insert.
+/// Kira clones decoded sound data into playback before this cache releases its
+/// handle. Two entries cover current playback plus its crossfade predecessor.
+pub const MAX_CACHED_PREVIEW_SOURCES: usize = 2;
+
 #[derive(Resource, Default, Debug)]
 pub struct AudioHandleCache {
     by_path: HashMap<PathBuf, Handle<KiraAudioSource>>,
+    recency: VecDeque<PathBuf>,
 }
 
 impl AudioHandleCache {
@@ -43,9 +46,20 @@ impl AudioHandleCache {
         self.by_path.get(path)
     }
 
-    /// Insert a handle into the cache, replacing any existing entry.
+    /// Insert a handle, retaining only recent preview sources.
     pub fn put(&mut self, path: PathBuf, handle: Handle<KiraAudioSource>) {
-        self.by_path.insert(path, handle);
+        self.by_path.insert(path.clone(), handle);
+        self.touch(&path);
+        while self.recency.len() > MAX_CACHED_PREVIEW_SOURCES {
+            if let Some(stale) = self.recency.pop_front() {
+                self.by_path.remove(&stale);
+            }
+        }
+    }
+
+    fn touch(&mut self, path: &Path) {
+        self.recency.retain(|cached| cached != path);
+        self.recency.push_back(path.to_path_buf());
     }
 
     /// Number of cached entries.
@@ -62,6 +76,7 @@ impl AudioHandleCache {
     /// cache needs to be reset (e.g. audio device change).
     pub fn clear(&mut self) {
         self.by_path.clear();
+        self.recency.clear();
     }
 }
 
@@ -75,8 +90,9 @@ pub fn get_or_load(
     asset_server: &AssetServer,
     path: &Path,
 ) -> Handle<KiraAudioSource> {
-    if let Some(handle) = cache.get(path) {
-        return handle.clone();
+    if let Some(handle) = cache.get(path).cloned() {
+        cache.touch(path);
+        return handle;
     }
     let path_str = path.to_string_lossy().into_owned();
     let handle = asset_server
@@ -558,6 +574,40 @@ mod tests {
         cache.put(path.clone(), second.clone());
         assert_eq!(cache.len(), 1);
         assert_eq!(cache.get(&path).unwrap(), &second);
+    }
+
+    #[test]
+    fn cache_evicts_oldest_preview() {
+        let mut cache = AudioHandleCache::default();
+        let paths = [
+            PathBuf::from("/songs/a/preview.ogg"),
+            PathBuf::from("/songs/b/preview.ogg"),
+            PathBuf::from("/songs/c/preview.ogg"),
+        ];
+        for path in &paths {
+            cache.put(path.clone(), Handle::<KiraAudioSource>::default());
+        }
+        assert_eq!(cache.len(), MAX_CACHED_PREVIEW_SOURCES);
+        assert!(cache.get(&paths[0]).is_none());
+        assert!(cache.get(&paths[1]).is_some());
+        assert!(cache.get(&paths[2]).is_some());
+    }
+
+    #[test]
+    fn cache_hit_promotes_preview_before_eviction() {
+        let mut cache = AudioHandleCache::default();
+        let paths = [
+            PathBuf::from("/songs/a/preview.ogg"),
+            PathBuf::from("/songs/b/preview.ogg"),
+            PathBuf::from("/songs/c/preview.ogg"),
+        ];
+        cache.put(paths[0].clone(), Handle::<KiraAudioSource>::default());
+        cache.put(paths[1].clone(), Handle::<KiraAudioSource>::default());
+        cache.touch(&paths[0]);
+        cache.put(paths[2].clone(), Handle::<KiraAudioSource>::default());
+        assert!(cache.get(&paths[0]).is_some());
+        assert!(cache.get(&paths[1]).is_none());
+        assert!(cache.get(&paths[2]).is_some());
     }
 
     #[test]

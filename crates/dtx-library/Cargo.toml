@@ -9,7 +9,7 @@ license = "MIT OR Apache-2.0"
 workspace = true
 
 [dependencies]
-bevy = { workspace = true, features = ["default"] }
+bevy = { workspace = true, features = ["ui_api"] }
 dtx-core = { path = "../dtx-core" }
 dtx-audio = { path = "../dtx-audio" }
 thiserror = { workspace = true }

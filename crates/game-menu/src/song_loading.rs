@@ -34,7 +34,6 @@ use game_shell::{
     AppState, NavAction, NavVerb, TransitionRequest, despawn_stage, request_transition,
 };
 use gameplay_drums::resources::ActiveChart as DrumsActiveChart;
-use gameplay_guitar::resources::ActiveChart as GuitarActiveChart;
 
 use crate::song_select::{SelectedSong, Selection, SongSelectSelection};
 
@@ -245,7 +244,12 @@ pub fn plugin(app: &mut App) {
         .add_systems(OnEnter(AppState::SongLoading), persist_last_played)
         .add_systems(
             OnExit(AppState::SongLoading),
-            (stop_nowloading, despawn_stage::<LoadingEntity>).chain(),
+            (
+                stop_nowloading,
+                clear_required_audio,
+                despawn_stage::<LoadingEntity>,
+            )
+                .chain(),
         )
         .add_systems(OnExit(AppState::Performance), dtx_bga::clear_visuals)
         .add_systems(
@@ -270,6 +274,7 @@ fn start_load(
     mut phase: ResMut<LoadPhase>,
     mut task: ResMut<ChartParseTask>,
     mut bank: ResMut<dtx_audio::ChartSoundBank>,
+    mut required: ResMut<RequiredAudio>,
     mut progress: ResMut<LoadingProgress>,
     mut cancel: ResMut<CancelRequested>,
     mut diagnostics: ResMut<LoadDiagnostics>,
@@ -280,6 +285,7 @@ fn start_load(
     diagnostics.warnings.clear();
     diagnostics.advance_not_before = None;
     bank.clear();
+    required.0.clear();
     if let Some(path) = selected.0.as_ref() {
         *phase = LoadPhase::Parsing;
         // Header parse (synchronous header peek) is what BocuD does in
@@ -311,7 +317,6 @@ fn poll_chart_parse(
     cancel: Res<CancelRequested>,
     mut phase: ResMut<LoadPhase>,
     mut drums_chart: ResMut<DrumsActiveChart>,
-    mut guitar_chart: ResMut<GuitarActiveChart>,
     mut bga_player: ResMut<BgaPlayer>,
     mut bank: ResMut<dtx_audio::ChartSoundBank>,
     mut required: ResMut<RequiredAudio>,
@@ -374,9 +379,6 @@ fn poll_chart_parse(
             );
             drums_chart.chart = chart.clone();
             drums_chart.source_path = path.clone();
-            // M6b: also load into the guitar crate so Guitar mode is playable.
-            guitar_chart.chart = chart.clone();
-            guitar_chart.source_path = path.clone();
             // M7.1: publish prepared visual events + resolved asset paths.
             let active_visuals = ActiveChartRes::from_chart(&chart, path.as_deref());
             record_missing_visuals(&chart, &active_visuals, &mut diagnostics);
@@ -479,7 +481,7 @@ fn record_missing_visuals(
 /// or Failed). Progress reflects the real decoded fraction.
 fn wait_for_audio(
     mut phase: ResMut<LoadPhase>,
-    required: Res<RequiredAudio>,
+    mut required: ResMut<RequiredAudio>,
     asset_server: Res<AssetServer>,
     mut progress: ResMut<LoadingProgress>,
     mut diagnostics: ResMut<LoadDiagnostics>,
@@ -543,7 +545,12 @@ fn wait_for_audio(
                         warning_hold_seconds(&diagnostics.warnings)
                     })
             });
+        required.0.clear();
     }
+}
+
+fn clear_required_audio(mut required: ResMut<RequiredAudio>) {
+    required.0.clear();
 }
 
 fn reset_advance_gate(mut gate: ResMut<LoadingAdvanceGate>) {

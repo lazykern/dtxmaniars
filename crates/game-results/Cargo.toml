@@ -11,7 +11,7 @@ description = "CStageResult port — post-play results screen + CScoreIni save"
 workspace = true
 
 [dependencies]
-bevy = { workspace = true, features = ["default"] }
+bevy = { workspace = true, features = ["ui_api"] }
 dtx-core = { workspace = true }
 dtx-scoring = { workspace = true }
 dtx-ui = { workspace = true }

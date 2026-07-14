@@ -9,7 +9,7 @@ license = "MIT OR Apache-2.0"
 workspace = true
 
 [dependencies]
-bevy = { workspace = true, features = ["default"] }
+bevy = { workspace = true, features = ["default_app", "2d_bevy_render", "ui_bevy_render"] }
 bevy_kira_audio = { workspace = true }
 dtx-core = { path = "../dtx-core" }
 dtx-config = { path = "../dtx-config" }
@@ -20,6 +20,5 @@ dtx-bga = { path = "../dtx-bga" }
 dtx-library = { path = "../dtx-library" }
 dtx-ui = { workspace = true }
 gameplay-drums = { path = "../gameplay-drums" }
-gameplay-guitar = { path = "../gameplay-guitar" }
 game-shell = { path = "../game-shell" }
 rfd = "0.17"

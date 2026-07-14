@@ -17,7 +17,7 @@ default = []
 midi = ["dtx-input/midi"]
 
 [dependencies]
-bevy = { workspace = true, default-features = true }
+bevy = { workspace = true, features = ["2d_api", "ui_api", "bevy_picking", "ui_picking"] }
 bevy_kira_audio = { workspace = true }
 dtx-core = { workspace = true }
 dtx-config = { workspace = true }

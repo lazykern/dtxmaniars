@@ -14,7 +14,6 @@ use game_menu::GameMenuPlugin;
 use game_results::GameResultsPlugin;
 use game_shell::{AppState, EGameMode, GameShellPlugin, ScoreStoreResource};
 use gameplay_drums::DrumsPlugin;
-use gameplay_guitar::GuitarPlugin;
 
 #[cfg(feature = "brp")]
 use bevy_brp_extras::BrpExtrasPlugin;
@@ -72,7 +71,6 @@ fn main() {
     .add_plugins(GameResultsPlugin)
     .add_plugins(DtxInputPlugin)
     .add_plugins(DrumsPlugin)
-    .add_plugins(GuitarPlugin)
     .init_resource::<EGameMode>()
     .init_resource::<ScoreStoreResource>()
     .add_systems(

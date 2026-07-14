@@ -11,7 +11,7 @@ description = "Guitar mode vertical slice (M6b). Mirror of gameplay-drums but st
 workspace = true
 
 [dependencies]
-bevy = { workspace = true, features = ["default"] }
+bevy = { workspace = true, features = ["ui_api"] }
 dtx-config = { workspace = true }
 dtx-core = { workspace = true }
 dtx-input = { workspace = true }
