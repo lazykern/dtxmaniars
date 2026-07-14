@@ -53,8 +53,7 @@ use dtx_ui::widget::song_wheel::{SongWheel, VISIBLE_HALF, WheelRow, WheelSpring,
 use dtx_ui::widget::stage_background::spawn_stage_background;
 use dtx_ui::widget::stage_panel::{BadgeValueText, panel, set_panel_selected, spawn_badge_row};
 use game_shell::{
-    AppState, NavAction, PracticeIntent, ScoreStoreResource, TransitionRequest, despawn_stage,
-    request_transition,
+    AppState, NavAction, ScoreStoreResource, TransitionRequest, despawn_stage, request_transition,
 };
 
 use crate::chart_stats::ChartStatsMeasurement;
@@ -500,6 +499,14 @@ struct DiscoverySummary;
 /// Big art panel in the left column.
 #[derive(Component)]
 struct BigAlbumArt;
+#[derive(Component)]
+struct DifficultyFocusRegion;
+#[derive(Component)]
+struct SongSelectFocusText;
+#[derive(Component)]
+struct ReadyActionButton;
+#[derive(Component)]
+struct ReadyActionText;
 
 /// Cursor into the song-select list. Two-level: which song folder,
 /// which chart inside it (the latter is the difficulty index).
@@ -591,7 +598,7 @@ pub fn plugin(app: &mut App) {
         .init_resource::<SongSelectSelection>()
         .init_resource::<CommandHistory>()
         .init_resource::<Selection>()
-        .init_resource::<PadWheelLevel>()
+        .init_resource::<SongSelectFocus>()
         .init_resource::<DiscoveryFilters>()
         .init_resource::<DiscoveryRandom>()
         .add_systems(
@@ -602,7 +609,7 @@ pub fn plugin(app: &mut App) {
                 recompute_visible,
                 restore_last_selection_on_enter,
                 reset_wheel_spring,
-                reset_pad_wheel_level,
+                reset_song_select_focus,
                 spawn_song_select,
             )
                 .chain(),
@@ -628,6 +635,9 @@ pub fn plugin(app: &mut App) {
                 )
                     .chain(),
                 update_song_select_legend,
+                install_song_select_pointer_targets,
+                song_select_pointer_input,
+                render_song_select_focus,
                 update_scan_problem_summary,
                 update_discovery_summary,
                 (search_input, render_search_on_change).chain(),
@@ -974,6 +984,20 @@ fn spawn_song_select(
                         TextColor(t.text_secondary),
                     ));
 
+                    root.spawn((
+                        SongSelectFocusText,
+                        Node {
+                            position_type: PositionType::Absolute,
+                            top: Val::Px(76.0),
+                            left: Val::Percent(51.0),
+                            ..default()
+                        },
+                        Text::new("▶ SONGS"),
+                        Theme::font(13.0),
+                        dtx_ui::SemanticText(dtx_ui::TypographyRole::Label),
+                        TextColor(t.select_yellow),
+                    ));
+
                     // ---- far-left column: skill + bpm
                     root.spawn((
                         Node {
@@ -1094,12 +1118,46 @@ fn spawn_song_select(
                             ))
                             .with_children(|p| spawn_density_graph(p, &t));
                         bottom
-                            .spawn(Node {
-                                flex_grow: 1.0,
-                                flex_direction: FlexDirection::Column,
-                                ..default()
-                            })
+                            .spawn((
+                                DifficultyFocusRegion,
+                                Node {
+                                    flex_grow: 1.0,
+                                    flex_direction: FlexDirection::Column,
+                                    border: UiRect::all(Val::Px(1.0)),
+                                    padding: UiRect::all(Val::Px(3.0)),
+                                    ..default()
+                                },
+                                BorderColor::all(t.stage_panel_border),
+                                UiTransform::default(),
+                            ))
                             .with_children(|p| spawn_difficulty_grid(p, &t));
+                    });
+
+                    root.spawn((
+                        Button,
+                        ReadyActionButton,
+                        Node {
+                            position_type: PositionType::Absolute,
+                            left: Val::Px(430.0),
+                            bottom: Val::Px(42.0),
+                            width: Val::Px(180.0),
+                            height: Val::Px(44.0),
+                            justify_content: JustifyContent::Center,
+                            align_items: AlignItems::Center,
+                            border: UiRect::all(Val::Px(2.0)),
+                            ..default()
+                        },
+                        BackgroundColor(t.select_yellow),
+                        BorderColor::all(t.text_primary),
+                    ))
+                    .with_children(|button| {
+                        button.spawn((
+                            ReadyActionText,
+                            Text::new("READY"),
+                            Theme::font(16.0),
+                            dtx_ui::SemanticText(dtx_ui::TypographyRole::Heading),
+                            TextColor(Color::BLACK),
+                        ));
                     });
 
                     // ---- right: song wheel container (rows spawned separately)
@@ -1116,8 +1174,10 @@ fn spawn_song_select(
                             // row leftward and must not be horizontally
                             // clipped (else its jacket gets cut off).
                             overflow: Overflow::clip_y(),
+                            border: UiRect::all(Val::Px(1.0)),
                             ..default()
                         },
+                        BorderColor::all(t.stage_panel_border),
                     ))
                     .with_children(|wheel| {
                         spawn_wheel_rows(wheel, &selection_state, &db, &assets, &t, &filters);
@@ -1143,9 +1203,10 @@ fn spawn_song_select(
                     .with_children(|bar| {
                         for (label, hot) in [
                             ("↑↓ SELECT", false),
-                            ("←→ DIFFICULTY", false),
-                            ("ENTER PLAY", true),
-                            ("SHIFT+ENTER PRACTICE", false),
+                            ("←→ FOCUS", false),
+                            ("↑↓ MOVE", false),
+                            ("ENTER READY", true),
+                            ("SHIFT+ENTER PRACTICE READY", false),
                             ("TAB SORT", false),
                             ("F5 RESCAN", false),
                             ("F7 FAVORITE", false),
@@ -1692,30 +1753,39 @@ fn format_song_detail(song: &dtx_library::SongInfo) -> String {
     detail
 }
 
-/// Pad two-level song select: the wheel (folders), then difficulty. Keyboard
-/// stays flat (Up/Down = folder, Left/Right = difficulty) and never reads this.
+/// Explicit focus regions shared by keyboard, current pad actions, and mouse.
 #[derive(Resource, Debug, Default, Clone, Copy, PartialEq, Eq)]
-pub enum PadWheelLevel {
-    /// HH/CY move folders, BD descends to difficulty, SD leaves for Title.
+pub enum SongSelectFocus {
+    /// Song wheel/list.
     #[default]
-    Wheel,
-    /// HH/CY cycle difficulty, BD plays, FT practices, SD returns to the wheel.
+    Songs,
+    /// Difficulty ladder for the highlighted song.
     Difficulty,
 }
 
-impl PadWheelLevel {
-    fn on_verb(self, verb: game_shell::NavVerb) -> Self {
+impl SongSelectFocus {
+    fn on_keyboard_verb(self, verb: game_shell::NavVerb) -> Self {
         use game_shell::NavVerb;
         match (self, verb) {
-            (PadWheelLevel::Wheel, NavVerb::Confirm) => PadWheelLevel::Difficulty,
-            (PadWheelLevel::Difficulty, NavVerb::Back) => PadWheelLevel::Wheel,
-            (level, _) => level,
+            (Self::Songs, NavVerb::Dec) => Self::Difficulty,
+            (Self::Difficulty, NavVerb::Inc) => Self::Songs,
+            (Self::Difficulty, NavVerb::Back) => Self::Songs,
+            _ => self,
+        }
+    }
+
+    fn on_pad_verb(self, verb: game_shell::NavVerb) -> Self {
+        use game_shell::NavVerb;
+        match (self, verb) {
+            (Self::Songs, NavVerb::Confirm) => Self::Difficulty,
+            (Self::Difficulty, NavVerb::Back) => Self::Songs,
+            _ => self,
         }
     }
 }
 
-fn reset_pad_wheel_level(mut level: ResMut<PadWheelLevel>) {
-    *level = PadWheelLevel::Wheel;
+fn reset_song_select_focus(mut focus: ResMut<SongSelectFocus>) {
+    *focus = SongSelectFocus::Songs;
 }
 
 /// Wrapper holding the pad legend, so rebuilds despawn the whole bar and never
@@ -1727,10 +1797,10 @@ struct SongSelectLegendBar;
 fn update_song_select_legend(
     mut commands: Commands,
     midi: Option<Res<game_shell::MidiConnected>>,
-    level: Res<PadWheelLevel>,
+    level: Res<SongSelectFocus>,
     theme: Res<dtx_ui::ThemeResource>,
     bars: Query<Entity, With<SongSelectLegendBar>>,
-    mut last_sig: Local<Option<(PadWheelLevel, bool)>>,
+    mut last_sig: Local<Option<(SongSelectFocus, bool)>>,
 ) {
     let connected = midi.is_some_and(|m| m.0);
     let sig = (*level, connected);
@@ -1746,16 +1816,16 @@ fn update_song_select_legend(
         return;
     }
     let items: &[(&str, &str)] = match *level {
-        PadWheelLevel::Wheel => &[
+        SongSelectFocus::Songs => &[
             ("HH", "up"),
             ("CY", "down"),
             ("BD", "difficulty"),
             ("SD", "title"),
         ],
-        PadWheelLevel::Difficulty => &[
+        SongSelectFocus::Difficulty => &[
             ("HH", "prev diff"),
             ("CY", "next diff"),
-            ("BD", "play"),
+            ("BD", "ready"),
             ("FT", "practice"),
             ("SD", "songs"),
         ],
@@ -1778,9 +1848,204 @@ fn update_song_select_legend(
         });
 }
 
+fn install_song_select_pointer_targets(
+    mut commands: Commands,
+    rows: Query<Entity, Added<WheelRow>>,
+    difficulties: Query<Entity, Added<DifficultySlotPanel>>,
+) {
+    for entity in &rows {
+        commands.entity(entity).insert(Button);
+    }
+    for entity in &difficulties {
+        commands.entity(entity).insert(Button);
+    }
+}
+
+fn difficulty_ordinal_for_slot(
+    selection: &Selection,
+    selection_state: &SongSelectSelection,
+    db: &SongDb,
+    slot: usize,
+) -> Option<u8> {
+    let folder = selection_state.visible.get(selection.folder)?;
+    let set_difficulties = read_set_def_difficulties(&folder.folder);
+    folder
+        .chart_indices
+        .iter()
+        .enumerate()
+        .find_map(|(ordinal, chart_index)| {
+            let song = db.songs.get(*chart_index)?;
+            (resolve_difficulty_slot(&set_difficulties, &song.path, ordinal as u8) == slot)
+                .then_some(ordinal as u8)
+        })
+}
+
+fn open_song_ready(
+    mode: crate::song_ready::ReadyMode,
+    selection: &Selection,
+    selection_state: &SongSelectSelection,
+    db: &SongDb,
+    ready: &mut crate::song_ready::SongReadyState,
+    draft: &mut crate::song_ready::ReadyConfigDraft,
+) -> bool {
+    if selection
+        .chart_index(selection_state)
+        .and_then(|chart_index| db.songs.get(chart_index))
+        .is_none()
+    {
+        return false;
+    }
+    draft.config = dtx_config::load(&dtx_config::default_path());
+    ready.open(mode);
+    true
+}
+
+fn song_select_pointer_input(
+    mut wheel_events: MessageReader<bevy::input::mouse::MouseWheel>,
+    rows: Query<(&Interaction, &WheelRow), Changed<Interaction>>,
+    row_hover: Query<&Interaction, With<WheelRow>>,
+    difficulties: Query<(&Interaction, &DifficultySlotPanel), Changed<Interaction>>,
+    difficulty_hover: Query<&Interaction, With<DifficultySlotPanel>>,
+    ready_button: Query<&Interaction, (With<ReadyActionButton>, Changed<Interaction>)>,
+    mut focus: ResMut<SongSelectFocus>,
+    mut selection: ResMut<Selection>,
+    selection_state: Res<SongSelectSelection>,
+    db: Res<SongDb>,
+    mut ready: ResMut<crate::song_ready::SongReadyState>,
+    mut draft: ResMut<crate::song_ready::ReadyConfigDraft>,
+    capture: Res<crate::song_ready::ReadyActionCapture>,
+) {
+    if ready.layer != crate::song_ready::SongReadyLayer::Closed || capture.0 {
+        wheel_events.clear();
+        return;
+    }
+    for (interaction, row) in &rows {
+        if *interaction == Interaction::Pressed {
+            selection.folder = row.index;
+            selection.clamp_to_visible(&selection_state);
+            *focus = SongSelectFocus::Songs;
+        } else if *interaction == Interaction::Hovered {
+            *focus = SongSelectFocus::Songs;
+        }
+    }
+    for (interaction, slot) in &difficulties {
+        if *interaction == Interaction::Pressed
+            && let Some(ordinal) =
+                difficulty_ordinal_for_slot(&selection, &selection_state, &db, slot.0)
+        {
+            selection.difficulty = ordinal;
+            *focus = SongSelectFocus::Difficulty;
+        } else if *interaction == Interaction::Hovered {
+            *focus = SongSelectFocus::Difficulty;
+        }
+    }
+    if ready_button
+        .iter()
+        .any(|interaction| *interaction == Interaction::Pressed)
+    {
+        open_song_ready(
+            crate::song_ready::ReadyMode::Normal,
+            &selection,
+            &selection_state,
+            &db,
+            &mut ready,
+            &mut draft,
+        );
+    }
+
+    let wheel_hovered = row_hover
+        .iter()
+        .any(|interaction| *interaction == Interaction::Hovered);
+    let difficulty_hovered = difficulty_hover
+        .iter()
+        .any(|interaction| *interaction == Interaction::Hovered);
+    for event in wheel_events.read() {
+        let delta = if event.y > 0.0 {
+            -1
+        } else if event.y < 0.0 {
+            1
+        } else {
+            0
+        };
+        if delta == 0 {
+            continue;
+        }
+        if difficulty_hovered {
+            if delta < 0 {
+                selection.difficulty = selection.difficulty.saturating_sub(1);
+            } else if let Some(folder) = selection_state.visible.get(selection.folder)
+                && folder.difficulty_count() > 0
+            {
+                selection.difficulty =
+                    (selection.difficulty + 1).min((folder.difficulty_count() - 1) as u8);
+            }
+            *focus = SongSelectFocus::Difficulty;
+        } else if wheel_hovered {
+            if delta < 0 {
+                selection.folder = selection.folder.saturating_sub(1);
+            } else if !selection_state.visible.is_empty() {
+                selection.folder = (selection.folder + 1).min(selection_state.visible.len() - 1);
+            }
+            selection.clamp_to_visible(&selection_state);
+            *focus = SongSelectFocus::Songs;
+        }
+    }
+}
+
+fn render_song_select_focus(
+    focus: Res<SongSelectFocus>,
+    ready: Res<crate::song_ready::SongReadyState>,
+    theme: Res<ThemeResource>,
+    mut labels: Query<&mut Text, With<SongSelectFocusText>>,
+    mut wheel: Query<
+        (&mut Node, &mut BorderColor),
+        (With<SongWheel>, Without<DifficultyFocusRegion>),
+    >,
+    mut difficulty: Query<
+        (&mut Node, &mut BorderColor, &mut UiTransform),
+        (With<DifficultyFocusRegion>, Without<SongWheel>),
+    >,
+) {
+    if !focus.is_changed() && !ready.is_changed() {
+        return;
+    }
+    let t = theme.0;
+    let active = ready.layer == crate::song_ready::SongReadyLayer::Closed;
+    for mut label in &mut labels {
+        label.0 = match *focus {
+            SongSelectFocus::Songs => "▶ SONGS   ◁ DIFFICULTY".into(),
+            SongSelectFocus::Difficulty => "SONGS ▷   ▶ DIFFICULTY".into(),
+        };
+    }
+    for (mut node, mut border) in &mut wheel {
+        let selected = active && *focus == SongSelectFocus::Songs;
+        node.border = UiRect::all(Val::Px(if selected { 3.0 } else { 1.0 }));
+        border.set_all(if selected {
+            t.select_yellow
+        } else {
+            t.stage_panel_border
+        });
+    }
+    for (mut node, mut border, mut transform) in &mut difficulty {
+        let selected = active && *focus == SongSelectFocus::Difficulty;
+        node.border = UiRect::all(Val::Px(if selected { 3.0 } else { 1.0 }));
+        border.set_all(if selected {
+            t.select_yellow
+        } else {
+            t.stage_panel_border
+        });
+        transform.scale = if selected {
+            Vec2::splat(1.02)
+        } else {
+            Vec2::ONE
+        };
+    }
+}
+
 /// Raw keyboard affordances with no pad equivalent: sort, customize, rescan.
 fn song_select_hotkeys(
     keys: Res<ButtonInput<KeyCode>>,
+    ready: Res<crate::song_ready::SongReadyState>,
     mut db: ResMut<SongDb>,
     mut selection: ResMut<Selection>,
     mut selection_state: ResMut<SongSelectSelection>,
@@ -1792,6 +2057,9 @@ fn song_select_hotkeys(
     mut preferences: ResMut<LibraryPreferences>,
     mut random: ResMut<DiscoveryRandom>,
 ) {
+    if ready.layer != crate::song_ready::SongReadyLayer::Closed {
+        return;
+    }
     let ctrl = keys.pressed(KeyCode::ControlLeft) || keys.pressed(KeyCode::ControlRight);
     if keys.just_pressed(KeyCode::F5) {
         if let Err(e) = db.rescan(&default_song_dir()) {
@@ -1865,27 +2133,27 @@ fn song_select_hotkeys(
     if keys.just_pressed(KeyCode::Tab) {
         selection_state.sort_mode = selection_state.sort_mode.next();
         selection_state.dirty = true;
-    } else if keys.just_pressed(KeyCode::F1) {
-        if let Some(chart_idx) = selection.chart_index(&selection_state)
-            && let Some(song) = db.songs.get(chart_idx)
-        {
-            pending.0 = Some(game_shell::CustomizeTab::Gameplay);
-            session.0 = true;
-            selected_song.0 = Some(song.path.clone());
-            request_transition(&mut requests, AppState::SongLoading);
-        } else {
-            warn!("customize: no song highlighted");
-        }
+    } else if keys.just_pressed(KeyCode::F1)
+        && !crate::title::request_gameplay_settings(
+            &mut db,
+            &mut pending,
+            &mut session,
+            &mut selected_song,
+            &mut requests,
+        )
+    {
+        warn!("customize: no song highlighted");
     }
 }
 
 /// Keyboard → `NavAction`. Shift+Enter is Practice, plain Enter is Confirm.
 /// Esc clears a non-empty search instead of backing out (pads unaffected:
 /// pad Back still emits regardless of the query).
-fn song_select_kb_emit(
+pub(crate) fn song_select_kb_emit(
     keys: Res<ButtonInput<KeyCode>>,
     mut out: MessageWriter<NavAction>,
     mut selection_state: ResMut<SongSelectSelection>,
+    ready: Res<crate::song_ready::SongReadyState>,
 ) {
     use game_shell::{NavSource, NavVerb};
     let shift = keys.pressed(KeyCode::ShiftLeft) || keys.pressed(KeyCode::ShiftRight);
@@ -1906,7 +2174,9 @@ fn song_select_kb_emit(
     } else if keys.just_pressed(KeyCode::Escape) {
         // Immutable reborrow for the read: `ResMut` change detection is
         // write-triggered, so this doesn't dirty the resource each frame.
-        if esc_clears_search_first(&selection_state.search_query) {
+        if ready.layer == crate::song_ready::SongReadyLayer::Closed
+            && esc_clears_search_first(&selection_state.search_query)
+        {
             selection_state.search_query.clear();
             selection_state.dirty = true;
             return;
@@ -1924,30 +2194,29 @@ fn song_select_kb_emit(
 
 fn song_select_nav_consumer(
     mut actions: MessageReader<NavAction>,
-    mut level: ResMut<PadWheelLevel>,
+    mut focus: ResMut<SongSelectFocus>,
     db: Res<SongDb>,
     mut selection: ResMut<Selection>,
     selection_state: Res<SongSelectSelection>,
-    mut selected_song: ResMut<SelectedSong>,
     mut requests: MessageWriter<TransitionRequest>,
-    mut practice_intent: ResMut<PracticeIntent>,
+    mut ready: ResMut<crate::song_ready::SongReadyState>,
+    mut draft: ResMut<crate::song_ready::ReadyConfigDraft>,
 ) {
     use game_shell::{NavSource, NavVerb};
+    if ready.layer != crate::song_ready::SongReadyLayer::Closed {
+        actions.clear();
+        return;
+    }
     if selection_state.visible.is_empty() {
         actions.clear();
         return;
     }
     for action in actions.read() {
-        // Keyboard is flat; pads move whichever axis the current level owns.
-        let (folder_step, diff_step) = match (action.source, *level, action.verb) {
-            (_, _, NavVerb::Dec) => (0, -1),
-            (_, _, NavVerb::Inc) => (0, 1),
-            (NavSource::Keyboard, _, NavVerb::Up) => (-1, 0),
-            (NavSource::Keyboard, _, NavVerb::Down) => (1, 0),
-            (NavSource::Pad, PadWheelLevel::Wheel, NavVerb::Up) => (-1, 0),
-            (NavSource::Pad, PadWheelLevel::Wheel, NavVerb::Down) => (1, 0),
-            (NavSource::Pad, PadWheelLevel::Difficulty, NavVerb::Up) => (0, -1),
-            (NavSource::Pad, PadWheelLevel::Difficulty, NavVerb::Down) => (0, 1),
+        let (folder_step, diff_step) = match (*focus, action.verb) {
+            (SongSelectFocus::Songs, NavVerb::Up) => (-1, 0),
+            (SongSelectFocus::Songs, NavVerb::Down) => (1, 0),
+            (SongSelectFocus::Difficulty, NavVerb::Up) => (0, -1),
+            (SongSelectFocus::Difficulty, NavVerb::Down) => (0, 1),
             _ => (0, 0),
         };
         if folder_step > 0 {
@@ -1969,45 +2238,55 @@ fn song_select_nav_consumer(
             selection.difficulty = selection.difficulty.saturating_sub(1);
         }
 
-        // Pads only start a song from the difficulty level; keyboard from anywhere.
-        let pad_at_difficulty =
-            action.source == NavSource::Keyboard || *level == PadWheelLevel::Difficulty;
-        let start = match action.verb {
-            NavVerb::Confirm if pad_at_difficulty => Some(false),
-            NavVerb::Practice if pad_at_difficulty => Some(true),
+        let open_mode = match (action.source, *focus, action.verb) {
+            (NavSource::Keyboard, _, NavVerb::Confirm) => {
+                Some(crate::song_ready::ReadyMode::Normal)
+            }
+            (NavSource::Keyboard, _, NavVerb::Practice) => {
+                Some(crate::song_ready::ReadyMode::Practice)
+            }
+            (NavSource::Pad, SongSelectFocus::Difficulty, NavVerb::Confirm) => {
+                Some(crate::song_ready::ReadyMode::Normal)
+            }
+            (NavSource::Pad, SongSelectFocus::Difficulty, NavVerb::Practice) => {
+                Some(crate::song_ready::ReadyMode::Practice)
+            }
             _ => None,
         };
-        if let Some(practice) = start
-            && let Some(chart_idx) = selection.chart_index(&selection_state)
-            && let Some(song) = db.songs.get(chart_idx)
+        if let Some(mode) = open_mode
+            && open_song_ready(
+                mode,
+                &selection,
+                &selection_state,
+                &db,
+                &mut ready,
+                &mut draft,
+            )
         {
-            *practice_intent = if practice {
-                PracticeIntent::Manual
-            } else {
-                PracticeIntent::None
-            };
             info!(
-                "SongSelect: selected {} ({}){}",
-                song.title,
-                SongFolderView::difficulty_label_for(&song.path, selection.difficulty),
-                if practice { " [practice]" } else { "" }
+                "SongSelect: opened Ready at difficulty {}{}",
+                selection.difficulty,
+                if mode == crate::song_ready::ReadyMode::Practice {
+                    " [practice]"
+                } else {
+                    ""
+                }
             );
-            selected_song.0 = Some(song.path.clone());
-            request_transition(&mut requests, AppState::SongLoading);
         }
 
         let leaves = matches!(
-            (action.source, *level, action.verb),
-            (NavSource::Keyboard, _, NavVerb::Back)
-                | (NavSource::Pad, PadWheelLevel::Wheel, NavVerb::Back)
+            (action.source, *focus, action.verb),
+            (NavSource::Keyboard, SongSelectFocus::Songs, NavVerb::Back)
+                | (NavSource::Pad, SongSelectFocus::Songs, NavVerb::Back)
         );
         if leaves {
             request_transition(&mut requests, AppState::Title);
         }
 
-        if action.source == NavSource::Pad {
-            *level = level.on_verb(action.verb);
-        }
+        *focus = match action.source {
+            NavSource::Keyboard => focus.on_keyboard_verb(action.verb),
+            NavSource::Pad => focus.on_pad_verb(action.verb),
+        };
     }
 }
 
@@ -2017,7 +2296,12 @@ fn song_select_nav_consumer(
 fn search_input(
     mut chars: MessageReader<bevy::input::keyboard::KeyboardInput>,
     mut selection_state: ResMut<SongSelectSelection>,
+    ready: Res<crate::song_ready::SongReadyState>,
 ) {
+    if ready.layer != crate::song_ready::SongReadyLayer::Closed {
+        chars.clear();
+        return;
+    }
     use bevy::input::keyboard::Key;
     let mut changed = false;
     for ev in chars.read() {
@@ -2265,7 +2549,11 @@ fn maybe_recompute_visible(
     preferences: Res<LibraryPreferences>,
     scores: Res<ScoreStoreResource>,
     filters: Res<DiscoveryFilters>,
+    ready: Res<crate::song_ready::SongReadyState>,
 ) {
+    if ready.layer != crate::song_ready::SongReadyLayer::Closed {
+        return;
+    }
     if sel.dirty || db.is_changed() || filters.is_changed() || preferences.is_changed() {
         recompute_with_discovery(
             &mut sel,
@@ -2364,27 +2652,34 @@ mod tests {
     }
 
     #[test]
-    fn pad_wheel_levels() {
+    fn song_select_focus_regions_follow_keyboard_geometry() {
         use game_shell::NavVerb;
-        let mut level = PadWheelLevel::Wheel;
-        level = level.on_verb(NavVerb::Confirm);
-        assert_eq!(level, PadWheelLevel::Difficulty);
-        level = level.on_verb(NavVerb::Back);
-        assert_eq!(level, PadWheelLevel::Wheel);
-        // Back at the wheel exits to Title; the level itself is unchanged.
+        let mut focus = SongSelectFocus::Songs;
+        focus = focus.on_keyboard_verb(NavVerb::Dec);
+        assert_eq!(focus, SongSelectFocus::Difficulty);
+        focus = focus.on_keyboard_verb(NavVerb::Dec);
+        assert_eq!(focus, SongSelectFocus::Difficulty);
+        focus = focus.on_keyboard_verb(NavVerb::Inc);
+        assert_eq!(focus, SongSelectFocus::Songs);
+        focus = SongSelectFocus::Difficulty.on_keyboard_verb(NavVerb::Back);
+        assert_eq!(focus, SongSelectFocus::Songs);
         assert_eq!(
-            PadWheelLevel::Wheel.on_verb(NavVerb::Back),
-            PadWheelLevel::Wheel
+            SongSelectFocus::Songs.on_keyboard_verb(NavVerb::Inc),
+            SongSelectFocus::Songs
         );
-        // Moves never change level.
+    }
+
+    #[test]
+    fn song_select_focus_preserves_two_level_pad_model() {
+        use game_shell::NavVerb;
+        let mut focus = SongSelectFocus::Songs;
+        focus = focus.on_pad_verb(NavVerb::Confirm);
+        assert_eq!(focus, SongSelectFocus::Difficulty);
+        focus = focus.on_pad_verb(NavVerb::Back);
+        assert_eq!(focus, SongSelectFocus::Songs);
         assert_eq!(
-            PadWheelLevel::Difficulty.on_verb(NavVerb::Down),
-            PadWheelLevel::Difficulty
-        );
-        // Confirm at difficulty starts the song, staying put.
-        assert_eq!(
-            PadWheelLevel::Difficulty.on_verb(NavVerb::Confirm),
-            PadWheelLevel::Difficulty
+            SongSelectFocus::Songs.on_pad_verb(NavVerb::Back),
+            SongSelectFocus::Songs
         );
     }
 
@@ -2910,5 +3205,21 @@ mod tests {
     fn esc_clears_before_backing_out() {
         assert!(esc_clears_search_first("abc"));
         assert!(!esc_clears_search_first(""));
+    }
+
+    #[test]
+    fn song_select_plugin_registers_without_query_conflicts() {
+        let mut app = App::new();
+        app.add_plugins((bevy::MinimalPlugins, bevy::state::app::StatesPlugin));
+        app.init_state::<AppState>()
+            .add_message::<NavAction>()
+            .add_message::<TransitionRequest>()
+            .add_message::<bevy::input::keyboard::KeyboardInput>()
+            .add_message::<bevy::input::mouse::MouseWheel>()
+            .init_resource::<crate::song_ready::SongReadyState>()
+            .init_resource::<crate::song_ready::ReadyConfigDraft>();
+        plugin(&mut app);
+
+        app.update();
     }
 }

@@ -15,8 +15,10 @@ use bevy::prelude::*;
 pub mod chart_stats;
 pub mod discovery;
 pub mod end;
+pub mod home;
 pub mod import_ui;
 pub mod song_loading;
+pub mod song_ready;
 pub mod song_select;
 pub mod startup;
 pub mod title;
@@ -31,7 +33,8 @@ impl Plugin for GameMenuPlugin {
         app.init_resource::<SelectedSong>().add_plugins((
             dtx_bga::plugin,
             startup::plugin,
-            title::plugin,
+            home::plugin,
+            song_ready::plugin,
             song_select::plugin,
             import_ui::plugin,
             chart_stats::plugin,
