@@ -165,6 +165,25 @@ fn chart_for_preview_seek() -> Chart {
     }
 }
 
+fn chart_with_mixer_limited_bgm() -> Chart {
+    let mut assets = DtxAssets::default();
+    assets.wav.insert(1, "mixer-bgm.wav".into());
+    Chart {
+        metadata: Metadata {
+            bpm: Some(120.0),
+            ..Default::default()
+        },
+        chips: vec![
+            Chip::with_wav(0, EChannel::MixerAdd, 0.0, 1),
+            Chip::with_wav(0, EChannel::BGM, 0.0, 1),
+            Chip::with_wav(1, EChannel::MixerRemove, 0.0, 1),
+            Chip::new(2, EChannel::BassDrum, 0.0),
+        ],
+        assets,
+        ..Default::default()
+    }
+}
+
 fn ready_clock(app: &mut App, current_ms: i64) {
     let mut clock = app.world_mut().resource_mut::<GameplayClock>();
     clock.start();
@@ -820,6 +839,98 @@ fn setup_preview_seek_preserves_gameplay_reconstruction() {
 #[test]
 fn editing_preview_seek_preserves_gameplay_reconstruction() {
     assert_preview_seek_preserves_gameplay_reconstruction(PracticePhase::Editing);
+}
+
+fn assert_seek_past_mixer_remove_stops_bgm(intent: PracticeIntent, phase: Option<PracticePhase>) {
+    let mut app = build_lifecycle_app(intent);
+    enter_performance(&mut app, chart_with_mixer_limited_bgm());
+    if let Some(phase) = phase {
+        let mut flow = app.world_mut().resource_mut::<PracticeFlow>();
+        flow.phase = phase;
+        if phase != PracticePhase::Running {
+            flow.preview = PreviewState::Playing;
+        }
+    }
+    ready_clock(&mut app, 500);
+    {
+        let mut bgm = app.world_mut().resource_mut::<BgmHandle>();
+        bgm.instance = Some(Handle::default());
+        bgm.path = Some("mixer-bgm.wav".into());
+    }
+
+    send_seek(&mut app, 2_500);
+    app.world_mut().run_schedule(FixedUpdate);
+
+    let bgm = app.world().resource::<BgmHandle>();
+    assert!(
+        bgm.instance.is_none(),
+        "the pre-seek BGM handle must be stopped"
+    );
+    assert!(bgm.path.is_none(), "ineligible BGM must not be restarted");
+    assert!(app
+        .world()
+        .resource::<gameplay_drums::seek::PendingBgmStart>()
+        .0
+        .is_none());
+    assert!(!app
+        .world()
+        .resource::<gameplay_drums::mixer_events::MixerEligibility>()
+        .is_slot_eligible(1));
+    assert!(app.world().resource::<GameplayClock>().current_ms >= 2_500);
+}
+
+#[test]
+fn setup_preview_seek_past_mixer_remove_stops_bgm() {
+    assert_seek_past_mixer_remove_stops_bgm(
+        PracticeIntent::manual(PracticeOrigin::SongSelect),
+        Some(PracticePhase::Setup),
+    );
+}
+
+#[test]
+fn editing_preview_seek_past_mixer_remove_stops_bgm() {
+    assert_seek_past_mixer_remove_stops_bgm(
+        PracticeIntent::manual(PracticeOrigin::SongSelect),
+        Some(PracticePhase::Editing),
+    );
+}
+
+#[test]
+fn running_practice_seek_past_mixer_remove_stops_bgm() {
+    assert_seek_past_mixer_remove_stops_bgm(
+        PracticeIntent::manual(PracticeOrigin::SongSelect),
+        Some(PracticePhase::Running),
+    );
+}
+
+#[test]
+fn normal_play_seek_past_mixer_remove_stops_bgm() {
+    assert_seek_past_mixer_remove_stops_bgm(PracticeIntent::None, None);
+}
+
+#[test]
+fn eligible_seek_restarts_bgm_at_resolved_position() {
+    let mut app = build_lifecycle_app(PracticeIntent::None);
+    enter_performance(&mut app, chart_with_mixer_limited_bgm());
+    ready_clock(&mut app, 500);
+    {
+        let mut bgm = app.world_mut().resource_mut::<BgmHandle>();
+        bgm.instance = Some(Handle::default());
+        bgm.path = Some("stale-bgm.wav".into());
+    }
+
+    send_seek(&mut app, 1_000);
+    app.world_mut().run_schedule(FixedUpdate);
+
+    let bgm = app.world().resource::<BgmHandle>();
+    assert!(bgm.instance.is_some());
+    assert_eq!(bgm.path.as_deref(), Some("mixer-bgm.wav"));
+    assert_eq!(app.world().resource::<GameStartMs>().0, 0);
+    assert!(app
+        .world()
+        .resource::<gameplay_drums::mixer_events::MixerEligibility>()
+        .is_slot_eligible(1));
+    assert!(app.world().resource::<GameplayClock>().current_ms >= 1_000);
 }
 
 fn assert_gameplay_seek_rebuilds_judged(intent: PracticeIntent) {

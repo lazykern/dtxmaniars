@@ -207,6 +207,7 @@ pub fn apply_seek_system(
     // 4. Queue the BGM restart (started by `start_pending_bgm` while
     //    running — a paused seek must not emit audio).
     audio.pending.0 = None;
+    dtx_audio::stop_bgm(&audio.audio, &mut audio.bgm, &mut audio.instances);
     let source_dir = chart.source_path.as_ref().and_then(|p| p.parent());
     match timeline.governing_bgm_chip(resolved) {
         Some((idx, chip_ms)) => {
@@ -230,7 +231,6 @@ pub fn apply_seek_system(
                 .map(|src| start_seconds < src.sound.duration().as_secs_f64())
                 // Duration unknown (asset still decoding): try anyway.
                 .unwrap_or(true);
-            dtx_audio::stop_bgm(&audio.audio, &mut audio.bgm, &mut audio.instances);
             if within_slice {
                 if let Some(path) = chip_wav_path(&chart.chart, idx, source_dir) {
                     audio.pending.0 = Some(PendingBgm {
@@ -244,7 +244,6 @@ pub fn apply_seek_system(
             // silent; the next BGM chip schedules normally.
         }
         None => {
-            dtx_audio::stop_bgm(&audio.audio, &mut audio.bgm, &mut audio.instances);
             if !crate::bgm_scheduler::chart_has_bgm_chips(&chart.chart) {
                 // Whole-file fallback BGM (no BGM chips): stream position 0
                 // is chart time 0.
