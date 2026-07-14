@@ -557,6 +557,7 @@ mod midi_consumer {
         resolver: Res<crate::bindings::BindResolver>,
         chart: Res<crate::resources::ActiveChart>,
         clock: Res<GameplayClock>,
+        flow: Option<Res<crate::practice::PracticeFlow>>,
         mut hits: MessageWriter<InputHit>,
         mut nav_hits: MessageWriter<PadNavHit>,
         mut verb_hits: MessageWriter<super::events::SystemVerbHit>,
@@ -567,7 +568,9 @@ mod midi_consumer {
         }
         let mut buf: Vec<dtx_input::midi::MidiEvent> = Vec::new();
         (*source).poll(&mut buf);
-        let gameplay_ready = !chart.chart.chips.is_empty() && clock.is_ready();
+        let gameplay_ready = !chart.chart.chips.is_empty()
+            && clock.is_ready()
+            && crate::practice::gameplay_input_active(flow);
         let consumed =
             consume_midi_events(buf, &resolver, gameplay_ready, clock.current_ms, &mut last);
         for hit in consumed.hits {

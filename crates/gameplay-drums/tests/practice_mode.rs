@@ -7,7 +7,7 @@ use dtx_core::channel::EChannel;
 use dtx_core::chart::{Chart, Chip, Metadata};
 use game_shell::{AppState, PracticeIntent, PracticeOrigin};
 use gameplay_drums::components::{LastJudgment, Note, NoteVisual};
-use gameplay_drums::events::{JudgmentEvent, LaneHit, NoteMissed};
+use gameplay_drums::events::{InputHit, JudgmentEvent, LaneHit, NoteMissed};
 use gameplay_drums::judge::{BarLengthChangeList, BpmChangeList, JudgedChips};
 use gameplay_drums::orchestrator::{
     detect_end_of_stage, enter_derive_from_chart, enter_reset_run_state, enter_seed_bgm_state,
@@ -20,7 +20,8 @@ use gameplay_drums::practice::{
 };
 use gameplay_drums::resources::{
     ActiveChart, BgmAdjustState, Combo, EffectivePlaybackRate, GameStartMs, GameplayClock,
-    JudgmentCounts, PlaybackRateSource, Score,
+    JudgmentCounts, MetronomeEnabled, PlaybackRateSource, Score, ShowTimingLines,
+    TimingLineCrossed,
 };
 use gameplay_drums::se_scheduler::PlayedSeChips;
 use gameplay_drums::seek::SeekToChartTime;
@@ -143,6 +144,20 @@ fn chart_with_scheduled_audio() -> Chart {
     }
 }
 
+fn ready_clock(app: &mut App, current_ms: i64) {
+    let mut clock = app.world_mut().resource_mut::<GameplayClock>();
+    clock.start();
+    clock.sync(Some(current_ms));
+}
+
+fn queue_bass_drum_midi(app: &mut App) {
+    app.world_mut()
+        .insert_resource(gameplay_drums::bindings::BindResolver::default());
+    app.world_mut()
+        .resource_mut::<dtx_input::midi::VirtualSource>()
+        .note_on(36, 100, 0);
+}
+
 #[test]
 fn setup_every_practice_intent_enters_stopped_without_seeking_or_attempting() {
     for origin in [
@@ -235,6 +250,74 @@ fn setup_stopped_gates_chart_audio_schedulers_until_preview() {
         app.world().resource::<BgmHandle>().path.as_deref(),
         Some("chart-bgm.wav")
     );
+}
+
+#[test]
+fn setup_stopped_gates_global_beat_metronome_but_normal_play_still_clicks() {
+    let mut setup = build_lifecycle_app(PracticeIntent::manual(PracticeOrigin::SongSelect));
+    enter_performance(&mut setup, chart_with_measures(1));
+    setup.world_mut().resource_mut::<ShowTimingLines>().0 = true;
+    setup.world_mut().resource_mut::<MetronomeEnabled>().0 = true;
+    ready_clock(&mut setup, 100);
+
+    setup.world_mut().run_schedule(FixedUpdate);
+
+    assert!(setup.world().resource::<TimingLineCrossed>().0.is_empty());
+
+    let mut normal = build_lifecycle_app(PracticeIntent::None);
+    enter_performance(&mut normal, chart_with_measures(1));
+    normal.world_mut().resource_mut::<ShowTimingLines>().0 = true;
+    normal.world_mut().resource_mut::<MetronomeEnabled>().0 = true;
+    ready_clock(&mut normal, 100);
+
+    normal.world_mut().run_schedule(FixedUpdate);
+
+    assert!(!normal.world().resource::<TimingLineCrossed>().0.is_empty());
+}
+
+#[test]
+fn setup_ready_midi_does_not_emit_gameplay_input() {
+    let mut app = build_lifecycle_app(PracticeIntent::manual(PracticeOrigin::SongSelect));
+    enter_performance(&mut app, chart_with_measures(1));
+    ready_clock(&mut app, 2_000);
+    queue_bass_drum_midi(&mut app);
+
+    app.world_mut().run_schedule(FixedUpdate);
+
+    assert!(app.world().resource::<Messages<InputHit>>().is_empty());
+}
+
+#[test]
+fn editing_ready_midi_does_not_emit_gameplay_input() {
+    let mut app = build_lifecycle_app(PracticeIntent::manual(PracticeOrigin::SongSelect));
+    enter_performance(&mut app, chart_with_measures(1));
+    app.world_mut().resource_mut::<PracticeFlow>().phase = PracticePhase::Editing;
+    ready_clock(&mut app, 2_000);
+    queue_bass_drum_midi(&mut app);
+
+    app.world_mut().run_schedule(FixedUpdate);
+
+    assert!(app.world().resource::<Messages<InputHit>>().is_empty());
+}
+
+#[test]
+fn setup_ready_midi_keeps_raw_hit_and_pad_navigation() {
+    let mut app = build_lifecycle_app(PracticeIntent::manual(PracticeOrigin::SongSelect));
+    enter_performance(&mut app, chart_with_measures(1));
+    ready_clock(&mut app, 2_000);
+    queue_bass_drum_midi(&mut app);
+
+    app.world_mut().run_schedule(FixedUpdate);
+
+    let last = app.world().resource::<gameplay_drums::LastMidiHit>();
+    assert_eq!((last.note, last.velocity), (36, 100));
+    let nav_hits = app
+        .world()
+        .resource::<Messages<gameplay_drums::PadNavHit>>()
+        .iter_current_update_messages()
+        .collect::<Vec<_>>();
+    assert_eq!(nav_hits.len(), 1);
+    assert_eq!(nav_hits[0].lane, 2);
 }
 
 #[test]

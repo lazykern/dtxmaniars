@@ -68,7 +68,8 @@ pub(super) fn plugin(app: &mut App) {
             tick_metronome_on_cross
                 .in_set(super::DrumsSets::NoteSpawn)
                 .run_if(in_state(AppState::Performance))
-                .run_if(in_state(PauseState::Running)),
+                .run_if(in_state(PauseState::Running))
+                .run_if(crate::practice::gameplay_input_active),
         );
 }
 
