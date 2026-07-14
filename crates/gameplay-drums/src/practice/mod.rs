@@ -90,27 +90,26 @@ fn enter_practice_session(
 }
 
 fn session_from_intent(intent: &PracticeIntent) -> Option<PracticeSession> {
-    let mut session = match *intent {
-        PracticeIntent::None => return None,
-        PracticeIntent::Manual => PracticeSession::default(),
-        PracticeIntent::Recommended(recommendation) => {
-            if !recommendation.has_valid_loop() {
-                return Some(PracticeSession::default());
-            }
-            let mut session = PracticeSession::default();
-            session.transport.loop_region = Some(session::LoopRegion {
-                start_ms: recommendation.loop_start_ms,
-                end_ms: recommendation.loop_end_ms,
-            });
-            session.transport.preroll = match recommendation.pre_roll {
-                game_shell::PracticePreRoll::OneBar => session::PrerollSetting::OneBar,
-            };
-            session.transport.user_tempo = recommendation
-                .initial_tempo
-                .clamp(session::RATE_MIN, session::RATE_MAX);
-            session
-        }
+    if !intent.is_requested() {
+        return None;
+    }
+    let Some(recommendation) = intent.recommendation() else {
+        return Some(PracticeSession::default());
     };
+    if !recommendation.has_valid_loop() {
+        return Some(PracticeSession::default());
+    }
+    let mut session = PracticeSession::default();
+    session.transport.loop_region = Some(session::LoopRegion {
+        start_ms: recommendation.loop_start_ms,
+        end_ms: recommendation.loop_end_ms,
+    });
+    session.transport.preroll = match recommendation.pre_roll {
+        game_shell::PracticePreRoll::OneBar => session::PrerollSetting::OneBar,
+    };
+    session.transport.user_tempo = recommendation
+        .initial_tempo
+        .clamp(session::RATE_MIN, session::RATE_MAX);
     session.transport.user_tempo = session
         .transport
         .user_tempo
@@ -160,7 +159,8 @@ mod tests {
 
     #[test]
     fn recommended_intent_seeds_the_existing_transport() {
-        let session = session_from_intent(&PracticeIntent::Recommended(
+        let session = session_from_intent(&PracticeIntent::recommended(
+            game_shell::PracticeOrigin::Results,
             game_shell::PracticeRecommendation::weak_section(1_000, 5_000, Some(3)),
         ))
         .expect("recommendation requests practice");

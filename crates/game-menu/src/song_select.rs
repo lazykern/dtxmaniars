@@ -53,8 +53,8 @@ use dtx_ui::widget::song_wheel::{SongWheel, VISIBLE_HALF, WheelRow, WheelSpring,
 use dtx_ui::widget::stage_background::spawn_stage_background;
 use dtx_ui::widget::stage_panel::{BadgeValueText, panel, set_panel_selected, spawn_badge_row};
 use game_shell::{
-    AppState, NavAction, NavSource, NavVerb, ScoreStoreResource, TransitionRequest, despawn_stage,
-    request_transition,
+    AppState, NavAction, NavSource, NavVerb, ResultReturnState, ScoreStoreResource,
+    TransitionRequest, despawn_stage, request_transition,
 };
 
 use crate::chart_stats::ChartStatsMeasurement;
@@ -605,6 +605,7 @@ pub fn plugin(app: &mut App) {
         .add_systems(
             OnEnter(AppState::SongSelect),
             (
+                clear_result_return_state,
                 ensure_song_db_loaded,
                 reset_search,
                 recompute_visible,
@@ -652,6 +653,10 @@ pub fn plugin(app: &mut App) {
             )
                 .run_if(in_state(AppState::SongSelect)),
         );
+}
+
+fn clear_result_return_state(mut state: ResMut<ResultReturnState>) {
+    *state = ResultReturnState::default();
 }
 
 /// Scale the reference stage to fill the window edge-to-edge:

@@ -156,6 +156,31 @@ impl PracticeRecommendation {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PracticeOrigin {
+    SongSelect,
+    Results,
+    NormalPause,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum PracticeSeed {
+    Manual,
+    Recommended(PracticeRecommendation),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct PracticeRequest {
+    pub origin: PracticeOrigin,
+    pub seed: PracticeSeed,
+}
+
+#[derive(Resource, Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct ResultReturnState {
+    pub available: bool,
+    pub skip_processing_once: bool,
+}
+
 /// Set by song select or Results and read on Performance enter to insert a
 /// practice session. Lives in game-shell so callers need no gameplay internals.
 #[derive(Resource, Debug, Clone, Copy, Default, PartialEq)]
@@ -163,21 +188,39 @@ pub enum PracticeIntent {
     /// Normal play.
     #[default]
     None,
-    /// The player explicitly entered practice with default transport settings.
-    Manual,
-    /// Results supplied an immediately usable practice transport.
-    Recommended(PracticeRecommendation),
+    Request(PracticeRequest),
 }
 
 impl PracticeIntent {
+    pub fn manual(origin: PracticeOrigin) -> Self {
+        Self::Request(PracticeRequest {
+            origin,
+            seed: PracticeSeed::Manual,
+        })
+    }
+
+    pub fn recommended(origin: PracticeOrigin, recommendation: PracticeRecommendation) -> Self {
+        Self::Request(PracticeRequest {
+            origin,
+            seed: PracticeSeed::Recommended(recommendation),
+        })
+    }
+
     pub fn is_requested(self) -> bool {
-        !matches!(self, Self::None)
+        self.request().is_some()
+    }
+
+    pub fn request(self) -> Option<PracticeRequest> {
+        match self {
+            Self::None => None,
+            Self::Request(request) => Some(request),
+        }
     }
 
     pub fn recommendation(self) -> Option<PracticeRecommendation> {
-        match self {
-            Self::Recommended(recommendation) => Some(recommendation),
-            Self::None | Self::Manual => None,
+        match self.request()?.seed {
+            PracticeSeed::Recommended(recommendation) => Some(recommendation),
+            PracticeSeed::Manual => None,
         }
     }
 }
@@ -383,17 +426,29 @@ mod tests {
 
     #[test]
     fn recommended_practice_intent_carries_its_loop() {
-        let intent = PracticeIntent::Recommended(PracticeRecommendation::weak_section(
-            1_000,
-            5_000,
-            Some(3),
-        ));
+        let intent = PracticeIntent::recommended(
+            PracticeOrigin::Results,
+            PracticeRecommendation::weak_section(1_000, 5_000, Some(3)),
+        );
 
         assert!(intent.is_requested());
         let recommendation = intent.recommendation().expect("recommendation retained");
         assert_eq!(recommendation.loop_start_ms, 1_000);
         assert_eq!(recommendation.loop_end_ms, 5_000);
         assert_eq!(recommendation.reason.lane(), Some(3));
+    }
+
+    #[test]
+    fn manual_request_remembers_song_select_origin() {
+        let intent = PracticeIntent::manual(PracticeOrigin::SongSelect);
+        assert_eq!(
+            intent.request().expect("request").origin,
+            PracticeOrigin::SongSelect
+        );
+        assert!(matches!(
+            intent.request().expect("request").seed,
+            PracticeSeed::Manual
+        ));
     }
 
     #[test]

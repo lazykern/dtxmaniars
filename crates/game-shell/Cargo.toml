@@ -9,7 +9,7 @@ license = "MIT OR Apache-2.0"
 workspace = true
 
 [dependencies]
-bevy = { workspace = true }
+bevy = { workspace = true, features = ["bevy_state"] }
 dtx-ui = { path = "../dtx-ui" }
 # ADR-0015 deferred item (c): game-shell publishes ScreenFadeTransition
 # events that dtx-audio consumes. Game→Engine is allowed.

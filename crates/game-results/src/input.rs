@@ -3,7 +3,8 @@
 use bevy::prelude::*;
 use dtx_ui::motion::EnterChoreo;
 use game_shell::{
-    request_transition, AppState, NavAction, NavVerb, PracticeIntent, TransitionRequest,
+    request_transition, AppState, NavAction, NavVerb, PracticeIntent, PracticeOrigin,
+    TransitionRequest,
 };
 use gameplay_drums::resources::ActiveChart;
 
@@ -190,9 +191,7 @@ fn apply(
         }
         ResultAction::PracticeNow | ResultAction::Activate(ResultVerb::Practice) => {
             if chart.source_path.is_some() {
-                *practice_intent = recommendation
-                    .map(PracticeIntent::Recommended)
-                    .unwrap_or(PracticeIntent::Manual);
+                *practice_intent = practice_intent_for_result(recommendation);
                 request_transition(requests, AppState::SongLoading);
             } else {
                 request_transition(requests, AppState::SongSelect);
@@ -202,9 +201,45 @@ fn apply(
     }
 }
 
+fn practice_intent_for_result(
+    recommendation: Option<game_shell::PracticeRecommendation>,
+) -> PracticeIntent {
+    recommendation
+        .map(|recommendation| PracticeIntent::recommended(PracticeOrigin::Results, recommendation))
+        .unwrap_or_else(|| PracticeIntent::manual(PracticeOrigin::Results))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn recommendation() -> game_shell::PracticeRecommendation {
+        game_shell::PracticeRecommendation::weak_section(1_000, 5_000, Some(3))
+    }
+
+    #[test]
+    fn result_practice_action_keeps_results_origin() {
+        let intent = practice_intent_for_result(Some(recommendation()));
+        assert_eq!(
+            intent.request().expect("request").origin,
+            game_shell::PracticeOrigin::Results
+        );
+        assert!(matches!(
+            intent.request().expect("request").seed,
+            game_shell::PracticeSeed::Recommended(_)
+        ));
+    }
+
+    #[test]
+    fn returning_from_setup_skips_result_processing_once() {
+        let mut state = game_shell::ResultReturnState {
+            available: true,
+            skip_processing_once: true,
+        };
+        assert!(!crate::should_process_result(&state));
+        crate::finish_result_entry(&mut state);
+        assert!(crate::should_process_result(&state));
+    }
 
     #[test]
     fn reduce_result_nav_moves_and_clamps() {
@@ -340,7 +375,10 @@ mod tests {
         world.write_message(pad(NavVerb::Practice));
         world.run_system_once(result_nav).expect("driver runs");
         assert_eq!(drain_requests(&mut world), vec![AppState::SongLoading]);
-        assert_eq!(*world.resource::<PracticeIntent>(), PracticeIntent::Manual);
+        assert_eq!(
+            *world.resource::<PracticeIntent>(),
+            PracticeIntent::manual(PracticeOrigin::Results)
+        );
     }
 
     #[test]

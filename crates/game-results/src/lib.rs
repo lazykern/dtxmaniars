@@ -13,7 +13,8 @@ use dtx_scoring::identity::{canonical_chart_hash, raw_file_sha256, ChartIdentity
 use dtx_scoring::skill::{drum_performance_skill, drum_song_skill, DrumAutoPlay};
 use dtx_scoring::{JudgmentTotals, Rank, ScoreEntry, ScoreSource};
 use game_shell::{
-    AppState, CompletedRunContext, PracticeRecommendation, RunKind, ScoreStoreResource,
+    AppState, CompletedRunContext, PracticeRecommendation, ResultReturnState, RunKind,
+    ScoreStoreResource,
 };
 use gameplay_drums::resources::{ActiveChart, Combo, DrumScoring, JudgmentCounts, Score};
 use gameplay_drums::results_analysis::{NormalPlayEventStream, PerformanceAnalysis};
@@ -59,8 +60,9 @@ pub fn plugin(app: &mut App) {
         .add_systems(
             OnEnter(AppState::Result),
             (
-                snapshot_result_analysis_system,
-                save_result,
+                snapshot_result_analysis_system.run_if(process_result_entry),
+                save_result.run_if(process_result_entry),
+                finish_result_entry_system,
                 ui::spawn_result,
             )
                 .chain(),
@@ -78,6 +80,26 @@ pub fn plugin(app: &mut App) {
                 .chain()
                 .run_if(in_state(AppState::Result)),
         );
+}
+
+pub(crate) fn should_process_result(state: &ResultReturnState) -> bool {
+    !state.skip_processing_once
+}
+
+fn process_result_entry(state: Res<ResultReturnState>) -> bool {
+    should_process_result(&state)
+}
+
+pub(crate) fn finish_result_entry(state: &mut ResultReturnState) {
+    if state.skip_processing_once {
+        state.skip_processing_once = false;
+    } else {
+        state.available = true;
+    }
+}
+
+fn finish_result_entry_system(mut state: ResMut<ResultReturnState>) {
+    finish_result_entry(&mut state);
 }
 
 pub(crate) fn result_rank(counts: &JudgmentCounts, max_combo: u32, total: u32) -> Rank {
