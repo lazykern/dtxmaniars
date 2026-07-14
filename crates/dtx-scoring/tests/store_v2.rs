@@ -26,6 +26,7 @@ fn entry(hash: &str, score: u32, source: ScoreSource) -> ScoreEntry {
         played_at: 123,
         source,
         replay_ref: None,
+        no_fail: false,
     }
 }
 

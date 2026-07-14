@@ -112,6 +112,7 @@ fn native_score_entry(
     counts: &JudgmentCounts,
     rank: Rank,
     played_at: u64,
+    no_fail: bool,
 ) -> ScoreEntry {
     let performance_skill = drum_performance_skill(
         total,
@@ -124,7 +125,11 @@ fn native_score_entry(
         DrumAutoPlay::default(),
     );
     ScoreEntry {
-        id: format!("native:{}:{score}:{played_at}", chart.canonical_hash),
+        id: format!(
+            "native:{}:{score}:{played_at}{}",
+            chart.canonical_hash,
+            if no_fail { ":nf" } else { "" }
+        ),
         chart,
         title,
         artist,
@@ -144,6 +149,7 @@ fn native_score_entry(
         played_at,
         source: ScoreSource::Native,
         replay_ref: None,
+        no_fail,
     }
 }
 
@@ -168,10 +174,7 @@ fn save_result(
         };
         return;
     }
-    if run.modifiers.no_fail {
-        *status = SaveStatus::NoFail;
-        return;
-    }
+    let no_fail = run.modifiers.no_fail;
     let title = chart
         .chart
         .metadata
@@ -218,15 +221,25 @@ fn save_result(
         &counts,
         rank,
         played_at,
+        no_fail,
     );
 
     store.add(entry);
     *status = if let Err(e) = store.save() {
         warn!("game-results: save failed: {e}");
         SaveStatus::Failed
+    } else if no_fail {
+        SaveStatus::NoFail
     } else {
         SaveStatus::Saved
     };
+
+    // A No Fail play is recorded in native history only: score.ini has no way
+    // to mark an assisted run, so writing it would poison the DTXManiaNX best
+    // score.
+    if no_fail {
+        return;
+    }
 
     // Also write a BocuD-compatible <chart>.score.ini next to the chart so
     // song select (and DTXManiaNX itself) can read the best score.
@@ -341,7 +354,7 @@ mod tests {
     }
 
     #[test]
-    fn no_fail_result_never_mutates_score_store_or_score_ini() {
+    fn no_fail_result_records_history_but_never_writes_score_ini() {
         use bevy::ecs::system::RunSystemOnce;
 
         let dir = std::env::temp_dir().join(format!("dtxmaniars-no-fail-{}", std::process::id()));
@@ -358,7 +371,15 @@ mod tests {
         world.run_system_once(save_result).unwrap();
 
         assert_eq!(*world.resource::<SaveStatus>(), SaveStatus::NoFail);
-        assert!(world.resource::<ScoreStoreResource>().entries.is_empty());
+        let store = world.resource::<ScoreStoreResource>();
+        assert_eq!(store.entries.len(), 1);
+        assert!(store.entries[0].no_fail);
+        assert!(store
+            .best_for_chart(&store.entries[0].chart.canonical_hash)
+            .is_none());
+        let hits = store.history_for_path(&chart_path, 8);
+        assert_eq!(hits.len(), 1);
+        assert!(hits[0].no_fail);
         assert!(!dtx_scoring::score_ini::score_ini_path(&chart_path).exists());
         std::fs::remove_dir_all(dir).unwrap();
     }
@@ -398,6 +419,7 @@ mod tests {
             &counts,
             Rank::A,
             42,
+            false,
         );
 
         assert_eq!(entry.chart.canonical_hash, "dtx1:test");
@@ -429,6 +451,7 @@ mod tests {
             &JudgmentCounts::default(),
             Rank::Unknown,
             1,
+            false,
         ));
         let events = NormalPlayEventStream {
             events: vec![

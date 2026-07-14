@@ -264,6 +264,7 @@ mod tests {
             played_at: 1700000000,
             source: ScoreSource::Native,
             replay_ref: None,
+            no_fail: false,
         }
     }
 
