@@ -34,7 +34,8 @@ pub(super) fn plugin(app: &mut App) {
                 .chain()
                 .in_set(super::DrumsSets::Score)
                 .run_if(in_state(AppState::Performance))
-                .run_if(in_state(PauseState::Running)),
+                .run_if(in_state(PauseState::Running))
+                .run_if(crate::practice::gameplay_input_active),
         );
 }
 

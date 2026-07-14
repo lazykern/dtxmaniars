@@ -20,7 +20,7 @@ pub mod toast;
 pub mod wait;
 
 use bevy::prelude::*;
-use game_shell::{AppState, PracticeIntent};
+use game_shell::{AppState, PracticeIntent, PracticeRequest};
 
 pub use draft::{
     PracticeDraft, PracticeDraftSource, PracticeTrainerDraft, PracticeTrainerMode, ValidatedDraft,
@@ -32,6 +32,13 @@ pub use flow::{
 pub use session::PracticeSession;
 
 use crate::gauge::StageGauge;
+use crate::seek::SeekToChartTime;
+use crate::timeline::ChipTimeline;
+
+#[derive(Message, Debug, Clone, PartialEq)]
+pub enum PresetCommand {
+    RecordLastUsed { draft: PracticeDraft },
+}
 
 /// The practice action chain and its full gating. Split out of `plugin` so the
 /// test can register the PRODUCTION wiring (notably the `editor_closed` gate)
@@ -50,23 +57,26 @@ fn add_action_systems(app: &mut App) {
                 .run_if(in_state(AppState::Performance))
                 .run_if(in_state(game_shell::PauseState::Running))
                 .run_if(resource_exists::<PracticeSession>)
+                .run_if(gameplay_input_active)
                 .run_if(crate::editor::editor_closed),
         );
 }
 
 pub(super) fn plugin(app: &mut App) {
     add_action_systems(app);
-    app.init_resource::<toast::ToastQueue>();
+    app.init_resource::<toast::ToastQueue>()
+        .add_message::<PresetCommand>();
     app.add_systems(
         OnEnter(AppState::Performance),
-        enter_practice_session.before(crate::orchestrator::DrumsEnterSet),
+        enter_practice_setup.before(crate::orchestrator::DrumsEnterSet),
     )
     .add_systems(OnEnter(AppState::SongSelect), remove_practice_session)
     .add_systems(
         FixedUpdate,
         freeze_gauge_in_practice
             .run_if(in_state(AppState::Performance))
-            .run_if(resource_exists::<PracticeSession>),
+            .run_if(resource_exists::<PracticeSession>)
+            .run_if(gameplay_input_active),
     )
     .add_plugins((
         ab_loop::plugin,
@@ -79,7 +89,7 @@ pub(super) fn plugin(app: &mut App) {
     ));
 }
 
-fn enter_practice_session(
+fn enter_practice_setup(
     intent: Res<PracticeIntent>,
     mut commands: Commands,
     mut wait_state: ResMut<wait::WaitState>,
@@ -91,39 +101,106 @@ fn enter_practice_session(
     wait_state.enabled_from_ms = None;
     chord_hits.0.clear();
     deferred.0.clear();
-    if let Some(session) = session_from_intent(&intent) {
+    if let Some(request) = intent.request() {
+        let mut session = PracticeSession::default();
+        let mut draft = PracticeDraft::default();
+        let mut flow = PracticeFlow::default();
+        begin_practice_setup(&request, &mut session, &mut draft, &mut flow);
         commands.insert_resource(session);
+        commands.insert_resource(draft);
+        commands.insert_resource(flow);
     } else {
         commands.remove_resource::<PracticeSession>();
+        commands.remove_resource::<PracticeDraft>();
+        commands.remove_resource::<PracticeFlow>();
     }
 }
 
-fn session_from_intent(intent: &PracticeIntent) -> Option<PracticeSession> {
-    if !intent.is_requested() {
-        return None;
+pub fn begin_practice_setup(
+    request: &PracticeRequest,
+    session: &mut PracticeSession,
+    draft: &mut PracticeDraft,
+    flow: &mut PracticeFlow,
+) {
+    *session = PracticeSession::default();
+    session.current_attempt_eligible = false;
+    *draft = PracticeDraft::from_request(request);
+    *flow = PracticeFlow::from_request(request);
+}
+
+pub fn start_or_continue_practice(
+    timeline: Res<ChipTimeline>,
+    mut draft: ResMut<PracticeDraft>,
+    mut session: ResMut<PracticeSession>,
+    mut flow: ResMut<PracticeFlow>,
+    mut seeks: MessageWriter<SeekToChartTime>,
+    mut preset_commands: MessageWriter<PresetCommand>,
+    mut toasts: ResMut<toast::ToastQueue>,
+    mut lane_hits: ResMut<Messages<crate::events::LaneHit>>,
+    mut input_hits: ResMut<Messages<crate::events::InputHit>>,
+) {
+    if !matches!(flow.phase, PracticePhase::Setup | PracticePhase::Editing) {
+        return;
     }
-    let Some(recommendation) = intent.recommendation() else {
-        return Some(PracticeSession::default());
+    let validated = match draft.validate(&timeline) {
+        Ok(validated) => validated,
+        Err(never) => match never {},
     };
-    if !recommendation.has_valid_loop() {
-        return Some(PracticeSession::default());
+    if let Some(warning) = &validated.warning {
+        toasts.push(warning.clone());
     }
-    let mut session = PracticeSession::default();
-    session.transport.loop_region = Some(session::LoopRegion {
-        start_ms: recommendation.loop_start_ms,
-        end_ms: recommendation.loop_end_ms,
+    let committed = validated.draft;
+    committed.apply_to_session(&mut session);
+    let attempt_start_ms = committed.loop_region.map_or(0, |region| region.start_ms);
+    session.current_attempt = session::AttemptStats {
+        start_ms: attempt_start_ms,
+        ..Default::default()
+    };
+    session.current_attempt_eligible = true;
+    lane_hits.clear();
+    input_hits.clear();
+    *draft = committed.clone();
+    preset_commands.write(PresetCommand::RecordLastUsed { draft: committed });
+    flow.preview = PreviewState::Stopped;
+    flow.edit_snapshot = None;
+    flow.phase = PracticePhase::Running;
+    seeks.write(SeekToChartTime {
+        target_ms: session::preroll_target(&timeline, session.transport.preroll, attempt_start_ms),
+        snap: None,
+        attempt_start_ms: Some(attempt_start_ms),
     });
-    session.transport.preroll = match recommendation.pre_roll {
-        game_shell::PracticePreRoll::OneBar => session::PrerollSetting::OneBar,
+}
+
+pub fn cancel_initial_setup(
+    flow: Res<PracticeFlow>,
+    mut result_return: ResMut<game_shell::ResultReturnState>,
+    mut requests: MessageWriter<game_shell::TransitionRequest>,
+    mut toasts: ResMut<toast::ToastQueue>,
+) {
+    if flow.phase != PracticePhase::Setup {
+        return;
+    }
+    let target = match flow.origin {
+        game_shell::PracticeOrigin::SongSelect | game_shell::PracticeOrigin::NormalPause => {
+            AppState::SongSelect
+        }
+        game_shell::PracticeOrigin::Results if result_return.available => {
+            result_return.skip_processing_once = true;
+            AppState::Result
+        }
+        game_shell::PracticeOrigin::Results => {
+            result_return.skip_processing_once = false;
+            toasts.push("Previous Results are unavailable — returning to Song Select");
+            AppState::SongSelect
+        }
     };
-    session.transport.user_tempo = recommendation
-        .initial_tempo
-        .clamp(session::RATE_MIN, session::RATE_MAX);
-    Some(session)
+    game_shell::request_transition(&mut requests, target);
 }
 
 fn remove_practice_session(mut commands: Commands, mut intent: ResMut<PracticeIntent>) {
     commands.remove_resource::<PracticeSession>();
+    commands.remove_resource::<PracticeDraft>();
+    commands.remove_resource::<PracticeFlow>();
     *intent = PracticeIntent::None;
 }
 
@@ -153,7 +230,7 @@ mod tests {
         });
         app.init_resource::<wait::ChordHitTimes>();
         app.init_resource::<wait::DeferredWaitJudgments>();
-        app.add_systems(Update, enter_practice_session);
+        app.add_systems(Update, enter_practice_setup);
         app.update();
 
         let state = app.world().resource::<WaitState>();
@@ -163,22 +240,33 @@ mod tests {
     }
 
     #[test]
-    fn recommended_intent_seeds_the_existing_transport() {
-        let session = session_from_intent(&PracticeIntent::recommended(
+    fn recommended_intent_seeds_the_setup_draft() {
+        let intent = PracticeIntent::recommended(
             game_shell::PracticeOrigin::Results,
             game_shell::PracticeRecommendation::weak_section(1_000, 5_000, Some(3)),
-        ))
-        .expect("recommendation requests practice");
+        );
+        let mut session = PracticeSession::default();
+        let mut draft = PracticeDraft::default();
+        let mut flow = PracticeFlow::default();
+        begin_practice_setup(
+            &intent.request().expect("recommendation requests practice"),
+            &mut session,
+            &mut draft,
+            &mut flow,
+        );
 
         assert_eq!(
-            session.transport.loop_region,
+            draft.loop_region,
             Some(session::LoopRegion {
                 start_ms: 1_000,
                 end_ms: 5_000,
             })
         );
-        assert_eq!(session.transport.preroll, session::PrerollSetting::OneBar);
-        assert_eq!(session.transport.user_tempo, 1.0);
+        assert_eq!(draft.preroll, session::PrerollSetting::OneBar);
+        assert_eq!(draft.user_tempo, 1.0);
+        assert_eq!(flow.phase, PracticePhase::Setup);
+        assert_eq!(flow.preview, PreviewState::Stopped);
+        assert!(session.attempt_history.is_empty());
     }
 
     /// Registers the PRODUCTION chain (`add_action_systems`, called by

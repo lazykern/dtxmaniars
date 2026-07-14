@@ -30,7 +30,8 @@ pub(super) fn plugin(app: &mut App) {
             .after(crate::judge::judge_lane_hit_system)
             .after(crate::practice::wait::wait_watcher)
             .run_if(in_state(AppState::Performance))
-            .run_if(resource_exists::<PracticeSession>),
+            .run_if(resource_exists::<PracticeSession>)
+            .run_if(super::gameplay_input_active),
     );
 }
 

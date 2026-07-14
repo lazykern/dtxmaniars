@@ -176,14 +176,16 @@ pub(super) fn plugin(app: &mut App) {
         // paused via the same message.
         handle_toggle_ramp
             .run_if(in_state(AppState::Performance))
-            .run_if(resource_exists::<PracticeSession>),
+            .run_if(resource_exists::<PracticeSession>)
+            .run_if(super::gameplay_input_active),
     )
     .add_systems(
         FixedUpdate,
         apply_ramp
             .after(crate::practice::stats::track_attempt_stats)
             .run_if(in_state(AppState::Performance))
-            .run_if(resource_exists::<PracticeSession>),
+            .run_if(resource_exists::<PracticeSession>)
+            .run_if(super::gameplay_input_active),
     );
 }
 

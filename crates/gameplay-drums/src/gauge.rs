@@ -136,7 +136,9 @@ pub(super) fn plugin(app: &mut App) {
         .add_systems(OnEnter(AppState::Performance), reset_gauge_on_enter)
         .add_systems(
             FixedUpdate,
-            apply_gauge_on_judgment.run_if(in_state(AppState::Performance)),
+            apply_gauge_on_judgment
+                .run_if(in_state(AppState::Performance))
+                .run_if(crate::practice::gameplay_input_active),
         );
 }
 

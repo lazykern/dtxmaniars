@@ -146,7 +146,8 @@ pub fn plugin(app: &mut App) {
         Update,
         sync_bga_clock
             .before(dtx_bga::BgaSystems)
-            .run_if(in_state(game_shell::AppState::Performance)),
+            .run_if(in_state(game_shell::AppState::Performance))
+            .run_if(practice::chart_clock_active),
     )
     .add_message::<events::LaneHit>()
     .add_message::<events::InputHit>()
@@ -177,7 +178,8 @@ pub fn plugin(app: &mut App) {
             .run_if(in_state(game_shell::AppState::Performance))
             // Freeze the gameplay clock while paused or wait-halted.
             .run_if(in_state(game_shell::PauseState::Running))
-            .run_if(practice::wait::wait_flowing),
+            .run_if(practice::wait::wait_flowing)
+            .run_if(practice::chart_clock_active),
     )
     .add_systems(
         FixedUpdate,
@@ -191,7 +193,8 @@ pub fn plugin(app: &mut App) {
             .after(seek::apply_seek_system)
             .before(dtx_timing::update_audio_clock_system)
             .run_if(in_state(game_shell::AppState::Performance))
-            .run_if(in_state(game_shell::PauseState::Running)),
+            .run_if(in_state(game_shell::PauseState::Running))
+            .run_if(practice::chart_clock_active),
     )
     .add_plugins(playback_rate::plugin)
     .add_plugins((

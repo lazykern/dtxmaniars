@@ -41,7 +41,8 @@ pub(super) fn plugin(app: &mut App) {
         (spawn_notes_system, scroll_notes_system)
             .chain()
             .run_if(in_state(AppState::Performance))
-            .run_if(in_state(PauseState::Running)),
+            .run_if(in_state(PauseState::Running))
+            .run_if(crate::practice::chart_clock_active),
     )
     .add_systems(
         Update,
@@ -51,7 +52,12 @@ pub(super) fn plugin(app: &mut App) {
     )
     .add_systems(
         FixedUpdate,
-        despawn_missed_notes_system
+        (
+            despawn_missed_notes_system.run_if(crate::practice::gameplay_input_active),
+            despawn_passed_preview_notes_system
+                .run_if(resource_exists::<crate::practice::PracticeFlow>)
+                .run_if(crate::practice::chart_clock_active),
+        )
             .in_set(super::DrumsSets::Judge)
             .run_if(in_state(game_shell::AppState::Performance)),
     );
@@ -250,6 +256,30 @@ fn despawn_missed_notes_system(
             }
             commands.entity(entity).despawn();
         } else if judged.0.contains(&note.chip_id) {
+            commands.entity(entity).despawn();
+        }
+    }
+}
+
+fn despawn_passed_preview_notes_system(
+    clock: Res<GameplayClock>,
+    mode: Res<EGameMode>,
+    flow: Res<crate::practice::PracticeFlow>,
+    judged: Res<JudgedChips>,
+    notes: Query<(Entity, &Note), With<NoteVisual>>,
+    mut commands: Commands,
+) {
+    if *mode != EGameMode::Drums
+        || flow.phase == crate::practice::PracticePhase::Running
+        || !clock.is_ready()
+    {
+        return;
+    }
+    let now = clock.current_ms;
+    for (entity, note) in &notes {
+        if should_emit_miss_for_note(note.chip_id, now, note.target_ms, &judged.0)
+            || judged.0.contains(&note.chip_id)
+        {
             commands.entity(entity).despawn();
         }
     }

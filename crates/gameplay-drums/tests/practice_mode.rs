@@ -4,14 +4,19 @@ use bevy::prelude::*;
 use dtx_audio::BgmHandle;
 use dtx_core::channel::EChannel;
 use dtx_core::chart::{Chart, Chip, Metadata};
-use game_shell::AppState;
-use gameplay_drums::components::LastJudgment;
+use game_shell::{AppState, PracticeIntent, PracticeOrigin};
+use gameplay_drums::components::{LastJudgment, Note, NoteVisual};
+use gameplay_drums::events::{JudgmentEvent, LaneHit, NoteMissed};
 use gameplay_drums::judge::{BarLengthChangeList, BpmChangeList, JudgedChips};
 use gameplay_drums::orchestrator::{
     detect_end_of_stage, enter_derive_from_chart, enter_reset_run_state, enter_seed_bgm_state,
     DrumsStageCompletion,
 };
 use gameplay_drums::practice::session::{LoopRegion, PracticeSession, PracticeTransport};
+use gameplay_drums::practice::{
+    cancel_initial_setup, start_or_continue_practice, PracticeDraft, PracticeEditSnapshot,
+    PracticeFlow, PracticePhase, PresetCommand, PreviewState,
+};
 use gameplay_drums::resources::{
     ActiveChart, BgmAdjustState, Combo, EffectivePlaybackRate, GameStartMs, GameplayClock,
     JudgmentCounts, PlaybackRateSource, Score,
@@ -102,6 +107,430 @@ fn enter_performance(app: &mut App, chart: Chart) {
         .resource_mut::<NextState<AppState>>()
         .set(AppState::Performance);
     app.update();
+}
+
+fn build_lifecycle_app(intent: PracticeIntent) -> App {
+    let mut app = App::new();
+    app.add_plugins((
+        MinimalPlugins,
+        bevy::asset::AssetPlugin::default(),
+        bevy::input::InputPlugin,
+        bevy::state::app::StatesPlugin,
+    ))
+    .add_plugins(dtx_audio::plugin)
+    .add_plugins(dtx_timing::plugin)
+    .add_plugins(game_shell::GameShellPlugin)
+    .insert_resource(intent)
+    .init_resource::<game_shell::EGameMode>()
+    .add_plugins(gameplay_drums::DrumsPlugin);
+    app
+}
+
+#[test]
+fn setup_every_practice_intent_enters_stopped_without_seeking_or_attempting() {
+    for origin in [
+        PracticeOrigin::SongSelect,
+        PracticeOrigin::Results,
+        PracticeOrigin::NormalPause,
+    ] {
+        let mut app = build_lifecycle_app(PracticeIntent::manual(origin));
+        enter_performance(&mut app, chart_with_measures(4));
+
+        let flow = app.world().resource::<PracticeFlow>();
+        assert_eq!(flow.phase, PracticePhase::Setup, "{origin:?}");
+        assert_eq!(flow.preview, PreviewState::Stopped, "{origin:?}");
+        assert_eq!(flow.origin, origin, "{origin:?}");
+        assert!(flow.edit_snapshot.is_none(), "{origin:?}");
+        assert!(app.world().contains_resource::<PracticeDraft>());
+        let session = app.world().resource::<PracticeSession>();
+        assert!(session.attempt_history.is_empty(), "{origin:?}");
+        assert_eq!(session.current_attempt.start_ms, 0, "{origin:?}");
+        assert!(!session.current_attempt_eligible, "{origin:?}");
+        assert!(app
+            .world()
+            .resource::<Messages<SeekToChartTime>>()
+            .is_empty());
+    }
+}
+
+#[test]
+fn setup_drops_judgment_and_miss_output() {
+    let mut app = build_lifecycle_app(PracticeIntent::manual(PracticeOrigin::SongSelect));
+    enter_performance(&mut app, chart_with_measures(4));
+    {
+        let mut clock = app.world_mut().resource_mut::<GameplayClock>();
+        clock.start();
+        clock.sync(Some(3_000));
+    }
+    app.world_mut().spawn((
+        Note {
+            chip_id: 0,
+            lane: 2,
+            target_ms: 2_000,
+        },
+        NoteVisual,
+        Node::default(),
+    ));
+    app.world_mut().write_message(LaneHit {
+        lane: 2,
+        audio_ms: 2_000,
+    });
+
+    app.world_mut().run_schedule(FixedUpdate);
+
+    assert!(app.world().resource::<Messages<JudgmentEvent>>().is_empty());
+    assert!(app.world().resource::<Messages<NoteMissed>>().is_empty());
+    assert!(app.world().resource::<JudgedChips>().0.is_empty());
+    assert_eq!(app.world().resource::<Score>().0, 0);
+    assert!(app
+        .world()
+        .resource::<PracticeSession>()
+        .attempt_history
+        .is_empty());
+}
+
+#[test]
+fn setup_preview_cleans_passed_visuals_without_gameplay_output() {
+    let mut app = build_lifecycle_app(PracticeIntent::manual(PracticeOrigin::SongSelect));
+    enter_performance(&mut app, chart_with_measures(4));
+    app.world_mut().resource_mut::<PracticeFlow>().preview = PreviewState::Playing;
+    {
+        let mut clock = app.world_mut().resource_mut::<GameplayClock>();
+        clock.start();
+        clock.sync(Some(3_000));
+    }
+    app.world_mut().spawn((
+        Note {
+            chip_id: 0,
+            lane: 2,
+            target_ms: 2_000,
+        },
+        NoteVisual,
+        Node::default(),
+    ));
+
+    app.world_mut().run_schedule(FixedUpdate);
+
+    assert_eq!(
+        app.world_mut()
+            .query_filtered::<Entity, With<NoteVisual>>()
+            .iter(app.world())
+            .count(),
+        0
+    );
+    assert!(app.world().resource::<JudgedChips>().0.is_empty());
+    assert!(app.world().resource::<Messages<NoteMissed>>().is_empty());
+}
+
+#[test]
+fn setup_normal_play_has_no_practice_resources_and_still_judges() {
+    let mut app = build_lifecycle_app(PracticeIntent::None);
+    enter_performance(&mut app, chart_with_measures(4));
+    assert!(!app.world().contains_resource::<PracticeSession>());
+    assert!(!app.world().contains_resource::<PracticeDraft>());
+    assert!(!app.world().contains_resource::<PracticeFlow>());
+    {
+        let mut clock = app.world_mut().resource_mut::<GameplayClock>();
+        clock.start();
+        clock.sync(Some(2_000));
+    }
+    app.world_mut().write_message(LaneHit {
+        lane: 2,
+        audio_ms: 2_000,
+    });
+
+    app.world_mut().run_schedule(FixedUpdate);
+
+    assert_eq!(app.world().resource::<JudgedChips>().0.len(), 1);
+    assert_eq!(
+        app.world()
+            .resource::<Messages<JudgmentEvent>>()
+            .iter_current_update_messages()
+            .count(),
+        1
+    );
+}
+
+#[test]
+fn setup_start_commits_draft_records_last_used_and_seeks_to_preroll() {
+    use bevy::ecs::system::RunSystemOnce;
+    use gameplay_drums::practice::session::{AttemptStats, PrerollSetting};
+
+    let mut app = build_lifecycle_app(PracticeIntent::manual(PracticeOrigin::SongSelect));
+    enter_performance(&mut app, chart_with_measures(8));
+    {
+        let mut draft = app.world_mut().resource_mut::<PracticeDraft>();
+        draft.loop_region = Some(LoopRegion {
+            start_ms: 4_000,
+            end_ms: 8_000,
+        });
+        draft.user_tempo = 0.8;
+        draft.preroll = PrerollSetting::OneBar;
+    }
+    let snapshot_session = app.world().resource::<PracticeSession>().clone();
+    {
+        let mut flow = app.world_mut().resource_mut::<PracticeFlow>();
+        flow.preview = PreviewState::Playing;
+        flow.edit_snapshot = Some(PracticeEditSnapshot {
+            chart_ms: 6_000,
+            session: snapshot_session,
+        });
+    }
+    {
+        let mut session = app.world_mut().resource_mut::<PracticeSession>();
+        session.current_attempt = AttemptStats {
+            start_ms: 1_000,
+            counts: JudgmentCounts {
+                perfect: 2,
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        session.current_attempt_eligible = false;
+    }
+    app.world_mut().write_message(LaneHit {
+        lane: 2,
+        audio_ms: 4_000,
+    });
+
+    app.world_mut()
+        .run_system_once(start_or_continue_practice)
+        .expect("start system runs");
+
+    let session = app.world().resource::<PracticeSession>();
+    assert_eq!(
+        session.transport.loop_region,
+        app.world().resource::<PracticeDraft>().loop_region
+    );
+    assert_eq!(session.transport.user_tempo, 0.8);
+    assert_eq!(session.current_attempt.start_ms, 4_000);
+    assert_eq!(session.current_attempt.counts.total(), 0);
+    assert!(session.current_attempt_eligible);
+    let flow = app.world().resource::<PracticeFlow>();
+    assert_eq!(flow.phase, PracticePhase::Running);
+    assert_eq!(flow.preview, PreviewState::Stopped);
+    assert!(flow.edit_snapshot.is_none());
+    let seeks = app
+        .world()
+        .resource::<Messages<SeekToChartTime>>()
+        .iter_current_update_messages()
+        .collect::<Vec<_>>();
+    assert_eq!(seeks.len(), 1);
+    assert_eq!(seeks[0].target_ms, 2_000);
+    assert_eq!(seeks[0].attempt_start_ms, Some(4_000));
+    let commands = app
+        .world()
+        .resource::<Messages<PresetCommand>>()
+        .iter_current_update_messages()
+        .collect::<Vec<_>>();
+    assert_eq!(commands.len(), 1);
+    assert!(matches!(
+        commands[0],
+        PresetCommand::RecordLastUsed { draft } if draft.user_tempo == 0.8
+    ));
+    app.world_mut().run_schedule(FixedUpdate);
+    assert!(
+        !app.world().resource::<JudgedChips>().0.contains(&1),
+        "the input that confirmed Start cannot become the first judged hit"
+    );
+}
+
+#[test]
+fn setup_cancel_routes_origins_and_defends_results_snapshot() {
+    use bevy::ecs::system::RunSystemOnce;
+
+    for (origin, available, expected, skips, warns) in [
+        (
+            PracticeOrigin::SongSelect,
+            false,
+            AppState::SongSelect,
+            false,
+            false,
+        ),
+        (
+            PracticeOrigin::NormalPause,
+            false,
+            AppState::SongSelect,
+            false,
+            false,
+        ),
+        (PracticeOrigin::Results, true, AppState::Result, true, false),
+        (
+            PracticeOrigin::Results,
+            false,
+            AppState::SongSelect,
+            false,
+            true,
+        ),
+    ] {
+        let mut app = build_lifecycle_app(PracticeIntent::manual(origin));
+        enter_performance(&mut app, chart_with_measures(4));
+        app.world_mut()
+            .resource_mut::<game_shell::ResultReturnState>()
+            .available = available;
+
+        app.world_mut()
+            .run_system_once(cancel_initial_setup)
+            .expect("cancel system runs");
+
+        let requests = app
+            .world()
+            .resource::<Messages<game_shell::TransitionRequest>>()
+            .iter_current_update_messages()
+            .collect::<Vec<_>>();
+        assert_eq!(requests.len(), 1, "{origin:?} available={available}");
+        assert_eq!(requests[0].0, expected, "{origin:?} available={available}");
+        assert_eq!(
+            app.world()
+                .resource::<game_shell::ResultReturnState>()
+                .skip_processing_once,
+            skips,
+            "{origin:?} available={available}"
+        );
+        assert_eq!(
+            !app.world()
+                .resource::<gameplay_drums::practice::toast::ToastQueue>()
+                .is_empty(),
+            warns,
+            "{origin:?} available={available}"
+        );
+    }
+}
+
+#[test]
+fn setup_stale_messages_cannot_mutate_outputs_or_attempts() {
+    let mut app = build_lifecycle_app(PracticeIntent::manual(PracticeOrigin::SongSelect));
+    enter_performance(&mut app, chart_with_measures(4));
+    app.world_mut()
+        .resource_mut::<ActiveChart>()
+        .chart
+        .empty_hit_events
+        .push(dtx_core::EmptyHitEvent {
+            lane: 2,
+            measure: 0,
+            value: 0.0,
+            wav_slot: 0,
+        });
+    {
+        let mut session = app.world_mut().resource_mut::<PracticeSession>();
+        session.trainer.arm_ramp();
+        session.trainer.ramp.step_tempo = 0.70;
+    }
+    app.world_mut()
+        .resource_mut::<gameplay_drums::practice::stats::LastFinalizedAttempt>()
+        .0 = Some(gameplay_drums::practice::session::AttemptRecord {
+        start_ms: 0,
+        end_ms: 8_000,
+        tempo: 0.70,
+        counts: JudgmentCounts {
+            perfect: 4,
+            ..Default::default()
+        },
+        max_combo: 4,
+        overhits: 0,
+        accuracy_pct: 100.0,
+        mean_error_ms: 0.0,
+        waited: 0,
+        flow_pct: 100.0,
+    });
+    let gauge_before = app
+        .world()
+        .resource::<gameplay_drums::gauge::StageGauge>()
+        .value;
+    app.world_mut().write_message(JudgmentEvent {
+        lane: 2,
+        kind: dtx_scoring::JudgmentKind::Perfect,
+        delta_ms: 0,
+        chip_idx: 0,
+    });
+    app.world_mut().write_message(NoteMissed {
+        lane: 2,
+        audio_ms: 8_500,
+        chip_idx: 1,
+    });
+    app.world_mut().write_message(EmptyHit {
+        lane: 2,
+        audio_ms: 8_500,
+    });
+    app.world_mut()
+        .write_message(gameplay_drums::practice::ab_loop::PracticeLoopCompleted {
+            region_start_ms: 0,
+            region_end_ms: 8_000,
+        });
+    {
+        let mut clock = app.world_mut().resource_mut::<GameplayClock>();
+        clock.start();
+        clock.sync(Some(9_000));
+    }
+
+    app.world_mut().run_schedule(FixedUpdate);
+
+    assert_eq!(app.world().resource::<Score>().0, 0);
+    assert_eq!(app.world().resource::<Combo>().current, 0);
+    assert_eq!(app.world().resource::<JudgmentCounts>().total(), 0);
+    assert_eq!(
+        app.world()
+            .resource::<gameplay_drums::gauge::StageGauge>()
+            .value,
+        gauge_before
+    );
+    let session = app.world().resource::<PracticeSession>();
+    assert_eq!(session.current_attempt.counts.total(), 0);
+    assert_eq!(session.current_attempt.overhits, 0);
+    assert!(session.attempt_history.is_empty());
+    assert_eq!(session.trainer.ramp.step_tempo, 0.70);
+    assert!(app
+        .world()
+        .resource::<Messages<SeekToChartTime>>()
+        .is_empty());
+    assert!(app
+        .world()
+        .resource::<gameplay_drums::resources::CurrentEmptyHitTemplates>()
+        .get(2)
+        .is_none());
+}
+
+#[test]
+fn setup_wait_watcher_cannot_halt() {
+    let mut app = build_lifecycle_app(PracticeIntent::manual(PracticeOrigin::SongSelect));
+    enter_performance(&mut app, chart_with_measures(4));
+    app.world_mut()
+        .resource_mut::<PracticeSession>()
+        .trainer
+        .enable_wait(true);
+    {
+        let mut clock = app.world_mut().resource_mut::<GameplayClock>();
+        clock.start();
+        clock.sync(Some(2_100));
+    }
+
+    app.world_mut().run_schedule(FixedUpdate);
+
+    assert!(!app
+        .world()
+        .resource::<gameplay_drums::practice::wait::WaitState>()
+        .halted());
+    assert!(app.world().resource::<JudgedChips>().0.is_empty());
+}
+
+#[test]
+fn setup_chart_clock_stays_frozen_until_preview_plays() {
+    let mut app = build_lifecycle_app(PracticeIntent::manual(PracticeOrigin::SongSelect));
+    enter_performance(&mut app, chart_with_measures(4));
+    app.world_mut().resource_mut::<GameplayClock>().start();
+
+    app.world_mut()
+        .resource_mut::<Time<Fixed>>()
+        .advance_by(std::time::Duration::from_millis(16));
+    app.world_mut().run_schedule(FixedUpdate);
+    assert_eq!(app.world().resource::<GameplayClock>().current_ms, 0);
+
+    app.world_mut().resource_mut::<PracticeFlow>().preview = PreviewState::Playing;
+    app.world_mut()
+        .resource_mut::<Time<Fixed>>()
+        .advance_by(std::time::Duration::from_millis(16));
+    app.world_mut().run_schedule(FixedUpdate);
+    assert!(app.world().resource::<GameplayClock>().current_ms > 0);
 }
 
 #[test]
@@ -411,7 +840,7 @@ fn restart_key_seeks_to_loop_start() {
     );
 }
 
-use gameplay_drums::events::{EmptyHit, JudgmentEvent, NoteMissed};
+use gameplay_drums::events::EmptyHit;
 
 fn add_ramp_wiring(app: &mut App) {
     if !app.world().contains_resource::<Messages<PracticeAction>>() {

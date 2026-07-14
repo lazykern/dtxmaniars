@@ -335,7 +335,8 @@ pub(crate) fn plugin(app: &mut App) {
                 .before(crate::DrumsSets::Score)
                 .run_if(in_state(AppState::Performance))
                 .run_if(in_state(PauseState::Running))
-                .run_if(resource_exists::<PracticeSession>),
+                .run_if(resource_exists::<PracticeSession>)
+                .run_if(super::gameplay_input_active),
         );
 }
 
