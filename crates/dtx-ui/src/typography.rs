@@ -1,4 +1,4 @@
-use bevy::prelude::{Commands, Component, Entity, Or, Query, Res, Resource, With};
+use bevy::prelude::{Commands, Component, Entity, Or, Query, Res, Resource, With, World};
 use bevy::text::{FontSize, TextFont};
 use dtx_config::TextScale;
 
@@ -78,9 +78,11 @@ pub(crate) fn apply_semantic_typography(
         };
         let base_px = baseline.map_or(current_px, |baseline| baseline.0);
         if baseline.is_none() {
-            commands
-                .entity(entity)
-                .insert(AccessibleTextBaseline(base_px));
+            commands.queue(move |world: &mut World| {
+                if let Ok(mut entity) = world.get_entity_mut(entity) {
+                    entity.insert(AccessibleTextBaseline(base_px));
+                }
+            });
         }
         let px = semantic.map_or(
             (base_px * policy.text_multiplier()).max(base_px),
@@ -242,5 +244,24 @@ mod tests {
             app.world().get::<TextFont>(entity).unwrap().font_size,
             FontSize::Px(240.0)
         );
+    }
+
+    #[test]
+    fn baseline_insert_tolerates_entity_despawn_before_commands_apply() {
+        let mut app = App::new();
+        app.init_resource::<Typography>()
+            .init_resource::<AccessibilityPolicy>();
+        let entity = app
+            .world_mut()
+            .spawn((TextFont::default(), SemanticText(TypographyRole::Body)))
+            .id();
+
+        let mut system = IntoSystem::into_system(apply_semantic_typography);
+        system.initialize(app.world_mut());
+        assert!(system.run((), app.world_mut()).is_ok());
+        app.world_mut().despawn(entity);
+        system.apply_deferred(app.world_mut());
+
+        assert!(app.world().get_entity(entity).is_err());
     }
 }
