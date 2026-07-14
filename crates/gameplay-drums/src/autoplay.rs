@@ -28,6 +28,7 @@ pub(super) fn plugin(app: &mut App) {
         autoplay_system
             .in_set(super::DrumsSets::Input)
             .run_if(autoplay_active)
+            .run_if(crate::practice::gameplay_input_active)
             .run_if(in_state(game_shell::AppState::Performance)),
     );
 }

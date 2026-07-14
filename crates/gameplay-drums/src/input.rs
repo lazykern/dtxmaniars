@@ -29,7 +29,8 @@ pub(super) fn plugin(app: &mut App) {
             capture_key_to_lane_input
                 .after(bevy::input::InputSystems)
                 .run_if(in_state(game_shell::AppState::Performance))
-                .run_if(in_state(game_shell::PauseState::Running)),
+                .run_if(in_state(game_shell::PauseState::Running))
+                .run_if(crate::practice::gameplay_input_active),
         )
         .add_systems(
             PreUpdate,
@@ -43,7 +44,8 @@ pub(super) fn plugin(app: &mut App) {
             emit_pending_lane_hits
                 .in_set(super::DrumsSets::Input)
                 .run_if(in_state(game_shell::AppState::Performance))
-                .run_if(in_state(game_shell::PauseState::Running)),
+                .run_if(in_state(game_shell::PauseState::Running))
+                .run_if(crate::practice::gameplay_input_active),
         );
 }
 
@@ -56,6 +58,10 @@ struct PendingLaneInputs {
 struct CapturedLaneInput {
     lanes: Vec<u8>,
     captured_at: Instant,
+}
+
+pub(crate) fn clear_pending_lane_inputs(commands: &mut Commands) {
+    commands.insert_resource(PendingLaneInputs::default());
 }
 
 fn capture_key_to_lane_input(

@@ -121,6 +121,14 @@ pub struct CountdownDisplay {
     pub current: Option<(u8, bool, f64)>,
 }
 
+fn reset_count_in_state(
+    mut active: ResMut<ActiveClickSchedule>,
+    mut display: ResMut<CountdownDisplay>,
+) {
+    *active = ActiveClickSchedule::default();
+    *display = CountdownDisplay::default();
+}
+
 /// Clicks whose time has come at `clock_ms`, advancing `cursor` past them.
 pub fn due_clicks<'a>(
     schedule: &'a ClickSchedule,
@@ -251,6 +259,7 @@ pub(crate) fn plugin(app: &mut App) {
     app.init_resource::<MetronomeSounds>()
         .init_resource::<ActiveClickSchedule>()
         .init_resource::<CountdownDisplay>()
+        .add_systems(OnEnter(AppState::Performance), reset_count_in_state)
         .add_systems(
             OnEnter(AppState::Performance),
             (build_metronome_sounds, spawn_countdown).run_if(resource_exists::<PracticeSession>),
@@ -265,14 +274,16 @@ pub(crate) fn plugin(app: &mut App) {
                 .chain()
                 .run_if(in_state(AppState::Performance))
                 .run_if(in_state(PauseState::Running))
-                .run_if(resource_exists::<PracticeSession>),
+                .run_if(resource_exists::<PracticeSession>)
+                .run_if(super::gameplay_input_active),
         )
         .add_systems(
             Update,
             update_countdown
                 .run_if(in_state(AppState::Performance))
                 .run_if(in_state(PauseState::Running))
-                .run_if(resource_exists::<PracticeSession>),
+                .run_if(resource_exists::<PracticeSession>)
+                .run_if(super::gameplay_input_active),
         );
 }
 

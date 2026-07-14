@@ -295,12 +295,16 @@ pub fn enter_seed_bgm_state(
 fn start_bgm_on_enter(
     chart: Res<ActiveChart>,
     settings: Res<DrumAudioSettings>,
+    practice_flow: Option<Res<crate::practice::PracticeFlow>>,
     audio: Res<Audio>,
     asset_server: Res<AssetServer>,
     mut bgm: ResMut<BgmHandle>,
     mut instances: ResMut<Assets<AudioInstance>>,
 ) {
-    if crate::bgm_scheduler::chart_has_bgm_chips(&chart.chart) || !settings.bgm_enabled {
+    if practice_flow.is_some()
+        || crate::bgm_scheduler::chart_has_bgm_chips(&chart.chart)
+        || !settings.bgm_enabled
+    {
         return;
     }
     let Some(source_path) = chart.source_path.as_ref() else {

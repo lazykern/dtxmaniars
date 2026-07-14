@@ -2,6 +2,7 @@
 
 use bevy::prelude::*;
 use dtx_audio::BgmHandle;
+use dtx_core::assets::DtxAssets;
 use dtx_core::channel::EChannel;
 use dtx_core::chart::{Chart, Chip, Metadata};
 use game_shell::{AppState, PracticeIntent, PracticeOrigin};
@@ -126,6 +127,22 @@ fn build_lifecycle_app(intent: PracticeIntent) -> App {
     app
 }
 
+fn chart_with_scheduled_audio() -> Chart {
+    let mut assets = DtxAssets::default();
+    assets.wav.insert(1, "chart-bgm.wav".into());
+    assets.wav.insert(2, "chart-se.wav".into());
+    Chart {
+        metadata: Metadata::default(),
+        chips: vec![
+            Chip::with_wav(0, EChannel::BGM, 0.0, 1),
+            Chip::with_wav(0, EChannel::SE01, 0.0, 2),
+            Chip::new(1, EChannel::BassDrum, 0.0),
+        ],
+        assets,
+        ..Default::default()
+    }
+}
+
 #[test]
 fn setup_every_practice_intent_enters_stopped_without_seeking_or_attempting() {
     for origin in [
@@ -151,6 +168,306 @@ fn setup_every_practice_intent_enters_stopped_without_seeking_or_attempting() {
             .resource::<Messages<SeekToChartTime>>()
             .is_empty());
     }
+}
+
+#[test]
+fn setup_stopped_suppresses_fallback_bgm_but_normal_play_starts_it() {
+    let dir = std::env::temp_dir().join(format!(
+        "dtxmaniars-setup-fallback-bgm-{}",
+        std::process::id()
+    ));
+    std::fs::create_dir_all(&dir).expect("create fixture directory");
+    let chart_path = dir.join("chart.dtx");
+    std::fs::write(&chart_path, b"#TITLE: Setup fallback\n").expect("write fixture chart");
+    std::fs::write(dir.join("bgm.wav"), b"").expect("write fallback BGM marker");
+
+    let mut practice = build_lifecycle_app(PracticeIntent::manual(PracticeOrigin::SongSelect));
+    practice
+        .world_mut()
+        .resource_mut::<ActiveChart>()
+        .source_path = Some(chart_path.clone());
+    enter_performance(&mut practice, chart_with_measures(4));
+    assert!(practice.world().resource::<BgmHandle>().path.is_none());
+
+    let mut normal = build_lifecycle_app(PracticeIntent::None);
+    normal.world_mut().resource_mut::<ActiveChart>().source_path = Some(chart_path);
+    enter_performance(&mut normal, chart_with_measures(4));
+    assert_eq!(
+        normal.world().resource::<BgmHandle>().path.as_deref(),
+        Some(dir.join("bgm.wav").to_string_lossy().as_ref())
+    );
+
+    std::fs::remove_dir_all(dir).expect("remove fixture directory");
+}
+
+#[test]
+fn setup_stopped_gates_chart_audio_schedulers_until_preview() {
+    let mut app = build_lifecycle_app(PracticeIntent::manual(PracticeOrigin::SongSelect));
+    enter_performance(&mut app, chart_with_scheduled_audio());
+    {
+        let mut clock = app.world_mut().resource_mut::<GameplayClock>();
+        clock.start();
+        clock.sync(Some(100));
+    }
+
+    app.world_mut().run_schedule(FixedUpdate);
+
+    assert!(app
+        .world()
+        .resource::<gameplay_drums::bgm_scheduler::PlayedBgmChips>()
+        .0
+        .is_empty());
+    assert!(app.world().resource::<PlayedSeChips>().0.is_empty());
+    assert!(app.world().resource::<BgmHandle>().path.is_none());
+
+    app.world_mut().resource_mut::<PracticeFlow>().preview = PreviewState::Playing;
+    app.world_mut().run_schedule(FixedUpdate);
+
+    assert_eq!(
+        app.world()
+            .resource::<gameplay_drums::bgm_scheduler::PlayedBgmChips>()
+            .0
+            .len(),
+        1
+    );
+    assert_eq!(app.world().resource::<PlayedSeChips>().0.len(), 1);
+    assert_eq!(
+        app.world().resource::<BgmHandle>().path.as_deref(),
+        Some("chart-bgm.wav")
+    );
+}
+
+#[test]
+fn setup_unready_clock_drops_bound_confirmation_key_before_start() {
+    use bevy::ecs::system::RunSystemOnce;
+
+    let mut assets = DtxAssets::default();
+    assets.wav.insert(1, "later-bgm.wav".into());
+    let chart = Chart {
+        metadata: Metadata::default(),
+        chips: vec![
+            Chip::new(0, EChannel::BassDrum, 0.0),
+            Chip::with_wav(2, EChannel::BGM, 0.0, 1),
+        ],
+        assets,
+        ..Default::default()
+    };
+    let mut app = build_lifecycle_app(PracticeIntent::manual(PracticeOrigin::SongSelect));
+    enter_performance(&mut app, chart);
+    assert!(app
+        .world()
+        .resource::<GameplayClock>()
+        .is_waiting_for_audio());
+    app.world_mut()
+        .insert_resource(gameplay_drums::bindings::BindResolver::default());
+
+    let window = app.world_mut().spawn_empty().id();
+    app.world_mut()
+        .write_message(bevy::input::keyboard::KeyboardInput {
+            key_code: KeyCode::Space,
+            logical_key: bevy::input::keyboard::Key::Space,
+            state: bevy::input::ButtonState::Pressed,
+            text: Some(" ".into()),
+            repeat: false,
+            window,
+        });
+    app.world_mut().run_schedule(PreUpdate);
+
+    app.world_mut()
+        .run_system_once(start_or_continue_practice)
+        .expect("start system runs");
+    {
+        let mut clock = app.world_mut().resource_mut::<GameplayClock>();
+        clock.start();
+        clock.sync(Some(0));
+    }
+    app.world_mut().run_schedule(FixedUpdate);
+
+    assert!(
+        app.world()
+            .resource::<Messages<gameplay_drums::events::InputHit>>()
+            .is_empty(),
+        "the stopped-Setup keyboard capture must not survive into Running"
+    );
+    assert!(
+        app.world().resource::<JudgedChips>().0.is_empty(),
+        "the bound Space confirmation captured while the clock was unready must not judge after Start"
+    );
+}
+
+#[test]
+fn setup_start_clears_a_preexisting_pending_keyboard_capture() {
+    use bevy::ecs::system::RunSystemOnce;
+
+    let mut assets = DtxAssets::default();
+    assets.wav.insert(1, "later-bgm.wav".into());
+    let chart = Chart {
+        metadata: Metadata::default(),
+        chips: vec![
+            Chip::new(0, EChannel::BassDrum, 0.0),
+            Chip::with_wav(2, EChannel::BGM, 0.0, 1),
+        ],
+        assets,
+        ..Default::default()
+    };
+    let mut app = build_lifecycle_app(PracticeIntent::manual(PracticeOrigin::SongSelect));
+    enter_performance(&mut app, chart);
+    app.world_mut()
+        .insert_resource(gameplay_drums::bindings::BindResolver::default());
+    app.world_mut().resource_mut::<PracticeFlow>().phase = PracticePhase::Running;
+
+    let window = app.world_mut().spawn_empty().id();
+    app.world_mut()
+        .write_message(bevy::input::keyboard::KeyboardInput {
+            key_code: KeyCode::Space,
+            logical_key: bevy::input::keyboard::Key::Space,
+            state: bevy::input::ButtonState::Pressed,
+            text: Some(" ".into()),
+            repeat: false,
+            window,
+        });
+    app.world_mut().run_schedule(PreUpdate);
+    app.world_mut().resource_mut::<PracticeFlow>().phase = PracticePhase::Setup;
+
+    app.world_mut()
+        .run_system_once(start_or_continue_practice)
+        .expect("start system runs");
+    {
+        let mut clock = app.world_mut().resource_mut::<GameplayClock>();
+        clock.start();
+        clock.sync(Some(0));
+    }
+    app.world_mut().run_schedule(FixedUpdate);
+
+    assert!(app
+        .world()
+        .resource::<Messages<gameplay_drums::events::InputHit>>()
+        .is_empty());
+    assert!(app.world().resource::<JudgedChips>().0.is_empty());
+}
+
+#[test]
+fn setup_preview_gates_autoplay_without_mutating_judged_chips() {
+    let mut chart = chart_with_measures(1);
+    chart.chips.push(Chip::new(0, EChannel::BGALayer1, 0.0));
+    let mut app = build_lifecycle_app(PracticeIntent::manual(PracticeOrigin::SongSelect));
+    enter_performance(&mut app, chart);
+    app.world_mut()
+        .resource_mut::<gameplay_drums::autoplay::AutoplayEnabled>()
+        .0 = true;
+    app.world_mut().resource_mut::<PracticeFlow>().preview = PreviewState::Playing;
+    {
+        let mut clock = app.world_mut().resource_mut::<GameplayClock>();
+        clock.start();
+        clock.sync(Some(3_000));
+    }
+
+    app.world_mut().run_schedule(FixedUpdate);
+
+    assert!(app.world().resource::<Messages<LaneHit>>().is_empty());
+    assert!(app.world().resource::<JudgedChips>().0.is_empty());
+}
+
+#[test]
+fn setup_entry_resets_count_in_state() {
+    use gameplay_drums::practice::metronome::{
+        ActiveClickSchedule, Click, ClickSchedule, CountdownDisplay,
+    };
+
+    let mut app = build_lifecycle_app(PracticeIntent::manual(PracticeOrigin::SongSelect));
+    app.world_mut()
+        .resource_mut::<ActiveClickSchedule>()
+        .schedule = ClickSchedule {
+        clicks: vec![Click {
+            at_ms: 0,
+            accent: true,
+            beats_remaining: 1,
+        }],
+    };
+    app.world_mut().resource_mut::<CountdownDisplay>().current = Some((1, true, 0.0));
+    enter_performance(&mut app, chart_with_measures(4));
+    assert!(app
+        .world()
+        .resource::<ActiveClickSchedule>()
+        .schedule
+        .clicks
+        .is_empty());
+    assert!(app.world().resource::<CountdownDisplay>().current.is_none());
+}
+
+#[test]
+fn setup_preview_seek_does_not_schedule_or_fire_count_in() {
+    use bevy::ecs::system::RunSystemOnce;
+    use gameplay_drums::practice::metronome::{ActiveClickSchedule, CountdownDisplay};
+
+    let mut app = build_lifecycle_app(PracticeIntent::manual(PracticeOrigin::SongSelect));
+    enter_performance(&mut app, chart_with_measures(4));
+
+    {
+        let mut session = app.world_mut().resource_mut::<PracticeSession>();
+        session.transport.metronome = true;
+        session.transport.preroll = gameplay_drums::practice::session::PrerollSetting::OneBar;
+    }
+    app.world_mut().resource_mut::<PracticeFlow>().preview = PreviewState::Playing;
+    {
+        let mut clock = app.world_mut().resource_mut::<GameplayClock>();
+        clock.start();
+        clock.sync(Some(0));
+    }
+    app.world_mut().write_message(SeekToChartTime {
+        target_ms: 4_000,
+        snap: None,
+        attempt_start_ms: None,
+    });
+
+    app.world_mut().run_schedule(FixedUpdate);
+
+    assert!(app
+        .world()
+        .resource::<ActiveClickSchedule>()
+        .schedule
+        .clicks
+        .is_empty());
+    assert!(app.world().resource::<CountdownDisplay>().current.is_none());
+
+    {
+        let mut draft = app.world_mut().resource_mut::<PracticeDraft>();
+        draft.loop_region = Some(LoopRegion {
+            start_ms: 4_000,
+            end_ms: 6_000,
+        });
+        draft.preroll = gameplay_drums::practice::session::PrerollSetting::OneBar;
+        draft.count_in = true;
+    }
+    app.world_mut()
+        .run_system_once(start_or_continue_practice)
+        .expect("start system runs");
+    app.world_mut().run_schedule(FixedUpdate);
+
+    assert_eq!(
+        app.world()
+            .resource::<ActiveClickSchedule>()
+            .schedule
+            .clicks
+            .len(),
+        4,
+        "Start creates the committed attempt's one-bar count-in"
+    );
+}
+
+#[test]
+fn leaving_performance_drops_practice_surface_but_preserves_session_for_results() {
+    let mut app = build_lifecycle_app(PracticeIntent::manual(PracticeOrigin::SongSelect));
+    enter_performance(&mut app, chart_with_measures(4));
+
+    app.world_mut()
+        .resource_mut::<NextState<AppState>>()
+        .set(AppState::Result);
+    app.update();
+
+    assert!(app.world().contains_resource::<PracticeSession>());
+    assert!(!app.world().contains_resource::<PracticeDraft>());
+    assert!(!app.world().contains_resource::<PracticeFlow>());
 }
 
 #[test]

@@ -24,7 +24,8 @@ pub(super) fn plugin(app: &mut App) {
         schedule_se_chips
             .in_set(super::DrumsSets::NoteSpawn)
             .run_if(in_state(AppState::Performance))
-            .run_if(in_state(PauseState::Running)),
+            .run_if(in_state(PauseState::Running))
+            .run_if(crate::practice::chart_clock_active),
     );
 }
 

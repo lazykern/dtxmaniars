@@ -70,6 +70,7 @@ pub(super) fn plugin(app: &mut App) {
         OnEnter(AppState::Performance),
         enter_practice_setup.before(crate::orchestrator::DrumsEnterSet),
     )
+    .add_systems(OnExit(AppState::Performance), remove_practice_surface)
     .add_systems(OnEnter(AppState::SongSelect), remove_practice_session)
     .add_systems(
         FixedUpdate,
@@ -129,6 +130,7 @@ pub fn begin_practice_setup(
 }
 
 pub fn start_or_continue_practice(
+    mut commands: Commands,
     timeline: Res<ChipTimeline>,
     mut draft: ResMut<PracticeDraft>,
     mut session: ResMut<PracticeSession>,
@@ -157,6 +159,7 @@ pub fn start_or_continue_practice(
         ..Default::default()
     };
     session.current_attempt_eligible = true;
+    crate::input::clear_pending_lane_inputs(&mut commands);
     lane_hits.clear();
     input_hits.clear();
     *draft = committed.clone();
@@ -202,6 +205,11 @@ fn remove_practice_session(mut commands: Commands, mut intent: ResMut<PracticeIn
     commands.remove_resource::<PracticeDraft>();
     commands.remove_resource::<PracticeFlow>();
     *intent = PracticeIntent::None;
+}
+
+fn remove_practice_surface(mut commands: Commands) {
+    commands.remove_resource::<PracticeDraft>();
+    commands.remove_resource::<PracticeFlow>();
 }
 
 /// Gauge is meaningless in practice: pin it full so it can never fail
