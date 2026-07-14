@@ -218,6 +218,7 @@ mod tests {
             played_at,
             source: ScoreSource::Native,
             replay_ref: None,
+            no_fail: false,
         }
     }
 }

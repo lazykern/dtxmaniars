@@ -21,6 +21,7 @@ fn entry(path: &str, score: u32, played_at: u64) -> ScoreEntry {
         played_at,
         source: ScoreSource::Native,
         replay_ref: None,
+        no_fail: false,
     }
 }
 

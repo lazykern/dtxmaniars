@@ -145,6 +145,14 @@ fn process_line(
         return Ok(());
     };
 
+    // `##WAV04: ...` — a definition an author disabled by prefixing a second
+    // hash. DTXManiaNX keeps the leading `#` in its command string, so the line
+    // matches no directive and is dropped; no directive name ever starts with
+    // `#`, so a `##` line is never a typo worth reporting.
+    if body.starts_with('#') {
+        return Ok(());
+    }
+
     let Some((head, value)) = body.split_once(':') else {
         return Ok(());
     };
@@ -188,6 +196,10 @@ fn process_line(
         return Ok(());
     }
 
+    if is_editor_only_head(head) {
+        return Ok(());
+    }
+
     let mut context = ChipParseContext {
         format: chart.format,
         line_no,
@@ -210,6 +222,13 @@ fn process_line(
         });
     }
     Ok(())
+}
+
+/// Directives written by DTXCreator/DTXViewer for their own editing state.
+/// Players ignore them, so they are not diagnostics-worthy.
+fn is_editor_only_head(head: &str) -> bool {
+    let upper = head.to_ascii_uppercase();
+    upper.starts_with("DTXC_") || upper.starts_with("DTXV")
 }
 
 fn is_chip_head(head: &str, format: ChartFormat) -> bool {
@@ -703,6 +722,22 @@ mod tests {
         let input = "#20061: 1011\n"; // SE01 channel, known — emits 3 chips (3 '1's)
         let chart = parse(Cursor::new(input)).unwrap();
         assert_eq!(chart.chips.len(), 3);
+    }
+
+    #[test]
+    fn disabled_and_size_directives_emit_no_diagnostics() {
+        // `##WAV04` is an author-disabled definition; `#SIZE07` is a real
+        // DTXManiaNX chip-size command. Neither is an unknown directive.
+        let input = "##WAV04: 55.ogg\n#WAV07: snare.ogg\n#SIZE07: 80\n";
+        let report =
+            parse_with_options(Cursor::new(input), ParseOptions::default()).expect("parses");
+        assert!(
+            report.diagnostics.is_empty(),
+            "unexpected diagnostics: {:?}",
+            report.diagnostics
+        );
+        assert_eq!(report.chart.assets.wav.size(7), 80);
+        assert!(report.chart.assets.wav.get(4).is_none());
     }
 
     #[test]

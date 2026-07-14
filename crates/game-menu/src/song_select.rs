@@ -1529,6 +1529,7 @@ fn update_left_cluster(
                     score: e.score,
                     achievement_pct: e.achievement_pct(),
                     played_at: format_unix_played_at(e.played_at),
+                    no_fail: e.no_fail,
                 })
                 .collect()
         })

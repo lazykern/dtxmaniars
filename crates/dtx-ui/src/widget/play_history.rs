@@ -23,6 +23,8 @@ pub struct HistoryRow {
     pub achievement_pct: f32,
     /// Pre-formatted local play time, `YYYY-MM-DD HH:MM`.
     pub played_at: String,
+    /// Played with No Fail: shown as an `NF` tag, never a record.
+    pub no_fail: bool,
 }
 
 /// Rows for the selected chart, best score first. Filled by the
@@ -76,10 +78,15 @@ pub fn spawn_play_history(parent: &mut ChildSpawnerCommands, theme: &Theme) {
 }
 
 /// Render one row as a single line: `S   982340   95.2%  2026-07-10 14:35`.
+/// A No Fail play carries a trailing `NF` tag.
 pub fn history_row_line(row: &HistoryRow) -> String {
     format!(
-        "{:<2} {:>7}  {:>5.1}%  {}",
-        row.rank, row.score, row.achievement_pct, row.played_at
+        "{:<2} {:>7}  {:>5.1}%  {}{}",
+        row.rank,
+        row.score,
+        row.achievement_pct,
+        row.played_at,
+        if row.no_fail { "  NF" } else { "" }
     )
 }
 
@@ -123,10 +130,26 @@ mod tests {
             score: 982_340,
             achievement_pct: 95.234,
             played_at: "2026-07-10 14:35".into(),
+            no_fail: false,
         };
         assert_eq!(
             history_row_line(&row),
             "S   982340   95.2%  2026-07-10 14:35"
+        );
+    }
+
+    #[test]
+    fn no_fail_row_is_tagged() {
+        let row = HistoryRow {
+            rank: "S".into(),
+            score: 982_340,
+            achievement_pct: 95.234,
+            played_at: "2026-07-10 14:35".into(),
+            no_fail: true,
+        };
+        assert_eq!(
+            history_row_line(&row),
+            "S   982340   95.2%  2026-07-10 14:35  NF"
         );
     }
 

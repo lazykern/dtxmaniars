@@ -167,6 +167,7 @@ fn make_entry(hash: &str, score: u32) -> ScoreEntry {
         played_at: 0,
         source: ScoreSource::Native,
         replay_ref: None,
+        no_fail: false,
     }
 }
 

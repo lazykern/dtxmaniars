@@ -75,6 +75,10 @@ pub struct ScoreEntry {
     /// Optional replay reference.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub replay_ref: Option<ReplayRef>,
+    /// Played with the No Fail modifier: kept in history, excluded from
+    /// personal-best and skill ranking.
+    #[serde(default)]
+    pub no_fail: bool,
 }
 
 impl ScoreEntry {
@@ -278,19 +282,19 @@ impl ScoreStore {
         }
     }
 
-    /// Best score for a canonical chart hash.
+    /// Best score for a canonical chart hash. No Fail plays never rank.
     pub fn best_for_chart(&self, canonical_hash: &str) -> Option<&ScoreEntry> {
         self.entries
             .iter()
-            .filter(|entry| entry.chart.canonical_hash == canonical_hash)
+            .filter(|entry| entry.chart.canonical_hash == canonical_hash && !entry.no_fail)
             .max_by_key(|entry| entry.score)
     }
 
-    /// Highest-performance result for a canonical chart hash.
+    /// Highest-performance result for a canonical chart hash. No Fail plays never rank.
     pub fn best_skill_for_chart(&self, canonical_hash: &str) -> Option<&ScoreEntry> {
         self.entries
             .iter()
-            .filter(|entry| entry.chart.canonical_hash == canonical_hash)
+            .filter(|entry| entry.chart.canonical_hash == canonical_hash && !entry.no_fail)
             .max_by(|a, b| {
                 a.effective_performance_skill()
                     .total_cmp(&b.effective_performance_skill())
@@ -304,7 +308,7 @@ impl ScoreStore {
     /// legacy entries without a source path remain independent.
     pub fn player_skill(&self) -> f64 {
         let mut by_song = std::collections::HashMap::<String, f64>::new();
-        for entry in &self.entries {
+        for entry in self.entries.iter().filter(|entry| !entry.no_fail) {
             let skill = entry.effective_song_skill();
             let song_key = entry
                 .chart
@@ -448,6 +452,7 @@ impl LegacyScoreEntry {
             played_at: self.played_at,
             source: ScoreSource::Native,
             replay_ref: None,
+            no_fail: false,
         }
     }
 }
@@ -476,6 +481,7 @@ mod tests {
                 played_at: 0,
                 source: ScoreSource::Native,
                 replay_ref: None,
+                no_fail: false,
             });
         }
         assert_eq!(store.player_skill(), 1325.0);
@@ -508,6 +514,7 @@ mod tests {
                 played_at: 0,
                 source: ScoreSource::Native,
                 replay_ref: None,
+                no_fail: false,
             });
         }
         assert_eq!(store.player_skill(), 50.0);

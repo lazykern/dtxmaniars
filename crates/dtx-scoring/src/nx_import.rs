@@ -192,6 +192,7 @@ fn entry_from_ini(
         played_at: 0,
         source,
         replay_ref: None,
+        no_fail: false,
     }
 }
 

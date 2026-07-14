@@ -450,7 +450,7 @@ fn spawn_stats_panel(
             SaveStatus::Practice => {}
             SaveStatus::NoFail => {
                 right.spawn(reveal_text(
-                    "NO FAIL · Not saved: No Fail enabled",
+                    "NO FAIL · saved to history — does not count as a record",
                     Theme::font(14.0),
                     t.text_secondary,
                     SLOT_SAVE,
