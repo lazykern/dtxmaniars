@@ -9,7 +9,7 @@ use game_shell::{
 use gameplay_drums::resources::ActiveChart;
 
 use crate::ui::{ResultDetailsOpen, RevealState, StatRow};
-use crate::ResultAnalysis;
+use crate::ResultDisplaySnapshot;
 
 /// The verb the cursor sits on. Resets to Continue on every Result enter.
 #[derive(Resource, Default, Clone, Copy, PartialEq, Eq, Debug)]
@@ -82,7 +82,7 @@ pub(crate) fn result_nav(
     mut cursor: ResMut<ResultVerb>,
     mut reveal: ResMut<RevealState>,
     mut practice_intent: ResMut<PracticeIntent>,
-    analysis: Res<ResultAnalysis>,
+    display: Res<ResultDisplaySnapshot>,
     mut details: ResMut<ResultDetailsOpen>,
     chart: Res<ActiveChart>,
     mut requests: MessageWriter<TransitionRequest>,
@@ -146,7 +146,7 @@ pub(crate) fn result_nav(
             action,
             &mut cursor,
             &mut practice_intent,
-            analysis.recommendation,
+            display.analysis.recommendation,
             &chart,
             &mut requests,
         );
@@ -156,7 +156,7 @@ pub(crate) fn result_nav(
             ResultAction::Activate(ResultVerb::Retry),
             &mut cursor,
             &mut practice_intent,
-            analysis.recommendation,
+            display.analysis.recommendation,
             &chart,
             &mut requests,
         );
@@ -313,7 +313,7 @@ mod tests {
         world.insert_resource(ButtonInput::<KeyCode>::default());
         world.insert_resource(ResultVerb::default());
         world.insert_resource(PracticeIntent::default());
-        world.insert_resource(ResultAnalysis::default());
+        world.insert_resource(ResultDisplaySnapshot::default());
         world.insert_resource(ResultDetailsOpen::default());
         world.insert_resource(RevealState {
             elapsed_ms: 2_000.0,

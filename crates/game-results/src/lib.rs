@@ -38,11 +38,27 @@ pub(crate) enum SaveStatus {
 }
 
 /// Ephemeral diagnostic context for the current Result entry.
-#[derive(Resource, Debug, Clone, Default)]
+#[derive(Resource, Debug, Clone, Default, PartialEq)]
 pub(crate) struct ResultAnalysis {
     pub report: PerformanceAnalysis,
     pub pb_delta: Option<i64>,
     pub recommendation: Option<PracticeRecommendation>,
+}
+
+/// Result-owned copy of every completed-run value used by the presentation.
+#[derive(Resource, Debug, Clone, Default, PartialEq)]
+pub(crate) struct ResultDisplaySnapshot {
+    pub title: String,
+    pub artist: String,
+    pub drum_level: Option<f32>,
+    pub difficulty: u8,
+    pub score: i64,
+    pub max_combo: u32,
+    pub counts: JudgmentCounts,
+    pub total_notes: u32,
+    pub failed: bool,
+    pub status: SaveStatus,
+    pub analysis: ResultAnalysis,
 }
 
 pub struct GameResultsPlugin;
@@ -56,12 +72,14 @@ impl Plugin for GameResultsPlugin {
 pub fn plugin(app: &mut App) {
     app.init_resource::<SaveStatus>()
         .init_resource::<ResultAnalysis>()
+        .init_resource::<ResultDisplaySnapshot>()
         .init_resource::<input::ResultVerb>()
         .add_systems(
             OnEnter(AppState::Result),
             (
                 snapshot_result_analysis_system.run_if(process_result_entry),
                 save_result.run_if(process_result_entry),
+                snapshot_result_display_system.run_if(process_result_entry),
                 finish_result_entry_system,
                 ui::spawn_result,
             )
@@ -303,6 +321,41 @@ fn snapshot_result_analysis_system(
     mut analysis: ResMut<ResultAnalysis>,
 ) {
     *analysis = snapshot_result_analysis(&run, score.0, &chart, &store, &events, &timeline);
+}
+
+fn snapshot_result_display_system(
+    score: Res<Score>,
+    combo: Res<Combo>,
+    counts: Res<JudgmentCounts>,
+    chart: Res<ActiveChart>,
+    scoring: Res<DrumScoring>,
+    difficulty: Res<game_shell::SelectedDifficulty>,
+    outcome: Res<LastStageOutcome>,
+    status: Res<SaveStatus>,
+    analysis: Res<ResultAnalysis>,
+    mut display: ResMut<ResultDisplaySnapshot>,
+) {
+    *display = ResultDisplaySnapshot {
+        title: chart
+            .metadata()
+            .title
+            .clone()
+            .unwrap_or_else(|| "Unknown".into()),
+        artist: chart
+            .metadata()
+            .artist
+            .clone()
+            .unwrap_or_else(|| "Unknown".into()),
+        drum_level: chart.metadata().display_drum_level(),
+        difficulty: difficulty.0,
+        score: score.0,
+        max_combo: combo.max,
+        counts: *counts,
+        total_notes: scoring.total_notes,
+        failed: !outcome.cleared,
+        status: *status,
+        analysis: analysis.clone(),
+    };
 }
 
 fn snapshot_result_analysis(
@@ -548,5 +601,120 @@ mod tests {
         );
         assert!(!dtx_scoring::score_ini::score_ini_path(&chart_path).exists());
         std::fs::remove_dir_all(dir).expect("remove fixture directory");
+    }
+
+    #[test]
+    fn returning_from_setup_uses_the_fresh_result_snapshot_once() {
+        use bevy::input::mouse::MouseWheel;
+        use gameplay_drums::results_analysis::{NormalPlayEventStream, RecordedJudgment};
+
+        let mut app = App::new();
+        app.add_plugins((MinimalPlugins, bevy::state::app::StatesPlugin))
+            .init_state::<AppState>()
+            .init_resource::<ButtonInput<KeyCode>>()
+            .init_resource::<game_shell::PracticeIntent>()
+            .init_resource::<ResultReturnState>()
+            .add_message::<game_shell::NavAction>()
+            .add_message::<game_shell::TransitionRequest>()
+            .add_message::<MouseWheel>()
+            .insert_resource(dtx_ui::ThemeResource::default())
+            .insert_resource(game_shell::SelectedDifficulty(2))
+            .insert_resource(CompletedRunContext::normal(
+                1.0,
+                game_shell::RunModifiers::default(),
+            ))
+            .insert_resource(Score(1234))
+            .insert_resource(Combo { current: 0, max: 9 })
+            .insert_resource(JudgmentCounts {
+                perfect: 3,
+                great: 0,
+                good: 0,
+                ok: 0,
+                miss: 0,
+            })
+            .insert_resource(DrumScoring {
+                total_notes: 3,
+                ..Default::default()
+            })
+            .insert_resource(LastStageOutcome { cleared: true })
+            .insert_resource(ScoreStoreResource::default())
+            .insert_resource(NormalPlayEventStream {
+                events: vec![
+                    RecordedJudgment::new(3, dtx_scoring::JudgmentKind::Miss, 0, 0, 2_100),
+                    RecordedJudgment::new(3, dtx_scoring::JudgmentKind::Poor, -20, 1, 2_200),
+                    RecordedJudgment::new(3, dtx_scoring::JudgmentKind::Poor, -25, 2, 2_300),
+                ],
+                truncated: false,
+            })
+            .insert_resource(ChipTimeline {
+                bar_ms: vec![0, 2_000, 4_000, 6_000],
+                ..Default::default()
+            });
+        let mut chart = ActiveChart::default();
+        chart.chart.metadata.title = Some("Original result".into());
+        app.insert_resource(chart);
+        plugin(&mut app);
+
+        app.world_mut()
+            .resource_mut::<NextState<AppState>>()
+            .set(AppState::Result);
+        app.update();
+
+        assert_eq!(
+            app.world().resource::<ScoreStoreResource>().entries.len(),
+            1
+        );
+        let original_analysis = app.world().resource::<ResultAnalysis>().clone();
+
+        app.world_mut()
+            .resource_mut::<NextState<AppState>>()
+            .set(AppState::Performance);
+        app.update();
+        *app.world_mut().resource_mut::<Score>() = Score::default();
+        *app.world_mut().resource_mut::<Combo>() = Combo::default();
+        *app.world_mut().resource_mut::<JudgmentCounts>() = JudgmentCounts::default();
+        *app.world_mut().resource_mut::<DrumScoring>() = DrumScoring::default();
+        *app.world_mut().resource_mut::<LastStageOutcome>() = LastStageOutcome { cleared: false };
+        app.world_mut()
+            .resource_mut::<ActiveChart>()
+            .chart
+            .metadata
+            .title = Some("Reset gameplay".into());
+        app.world_mut()
+            .resource_mut::<NormalPlayEventStream>()
+            .clear();
+        app.world_mut()
+            .resource_mut::<ResultReturnState>()
+            .skip_processing_once = true;
+
+        app.world_mut()
+            .resource_mut::<NextState<AppState>>()
+            .set(AppState::Result);
+        app.update();
+
+        assert_eq!(
+            app.world().resource::<ScoreStoreResource>().entries.len(),
+            1,
+            "the return entry must not save a second score"
+        );
+        assert_eq!(
+            *app.world().resource::<ResultAnalysis>(),
+            original_analysis,
+            "the return entry must not recompute analysis"
+        );
+        let return_state = app.world().resource::<ResultReturnState>();
+        assert!(return_state.available);
+        assert!(!return_state.skip_processing_once);
+        let mut entities = app.world_mut().query::<&ResultEntity>();
+        assert_eq!(entities.iter(app.world()).count(), 1, "result UI respawned");
+        let mut text_query = app.world_mut().query::<&Text>();
+        let texts = text_query
+            .iter(app.world())
+            .map(|text| text.0.clone())
+            .collect::<Vec<_>>();
+        assert!(texts.iter().any(|text| text == "Original result"));
+        assert!(texts.iter().any(|text| text == "1,234"));
+        assert!(!texts.iter().any(|text| text == "Reset gameplay"));
+        assert!(!texts.iter().any(|text| text == "STAGE FAILED"));
     }
 }

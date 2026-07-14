@@ -5,12 +5,11 @@ use dtx_scoring::Rank;
 use dtx_ui::easing::EaseFunction;
 use dtx_ui::motion::EnterChoreo;
 use dtx_ui::{theme::Theme, ThemeResource};
-use game_shell::{despawn_stage, SelectedDifficulty};
-use gameplay_drums::resources::{ActiveChart, Combo, DrumScoring, JudgmentCounts, Score};
-use gameplay_drums::stage_end::LastStageOutcome;
+use game_shell::despawn_stage;
+use gameplay_drums::resources::JudgmentCounts;
 
 use crate::input::ResultVerb;
-use crate::{ResultAnalysis, ResultEntity, SaveStatus};
+use crate::{ResultAnalysis, ResultDisplaySnapshot, ResultEntity, SaveStatus};
 
 /// Marks a revealed element: fade starts at `reveal_at_ms`, rises to
 /// `target_alpha` (the element's authored alpha, e.g. 0.5 for
@@ -211,40 +210,19 @@ pub(crate) fn pct(count: u32, total: u32) -> f32 {
 pub(crate) fn spawn_result(
     mut commands: Commands,
     theme: Res<ThemeResource>,
-    score: Res<Score>,
-    combo: Res<Combo>,
-    counts: Res<JudgmentCounts>,
-    chart: Res<ActiveChart>,
-    scoring: Res<DrumScoring>,
-    difficulty: Res<SelectedDifficulty>,
-    outcome: Option<Res<LastStageOutcome>>,
+    display: Res<ResultDisplaySnapshot>,
     midi: Option<Res<game_shell::MidiConnected>>,
-    status: Res<SaveStatus>,
-    analysis: Res<ResultAnalysis>,
 ) {
     commands.insert_resource(RevealState::new(LAST_SLOT));
     commands.insert_resource(ResultVerb::default());
     commands.insert_resource(ResultDetailsOpen::default());
 
     let t = theme.0;
-    let title = chart
-        .metadata()
-        .title
-        .clone()
-        .unwrap_or_else(|| "Unknown".into());
-    let artist = chart
-        .metadata()
-        .artist
-        .clone()
-        .unwrap_or_else(|| "Unknown".into());
-    let dlevel = chart
-        .metadata()
-        .display_drum_level()
+    let dlevel = display
+        .drum_level
         .map(|v| format!("{v:.2}"))
         .unwrap_or_else(|| "--".into());
-    let total = scoring.total_notes;
-    let rank = crate::result_rank(&counts, combo.max, total);
-    let failed = outcome.is_some_and(|o| !o.cleared);
+    let rank = crate::result_rank(&display.counts, display.max_combo, display.total_notes);
     let midi_connected = midi.is_some_and(|m| m.0);
 
     commands
@@ -278,7 +256,14 @@ pub(crate) fn spawn_result(
                 BackgroundColor(t.panel_bg),
             ))
             .with_children(|card| {
-                spawn_header(card, &t, &title, &artist, &dlevel, difficulty.0);
+                spawn_header(
+                    card,
+                    &t,
+                    &display.title,
+                    &display.artist,
+                    &dlevel,
+                    display.difficulty,
+                );
                 divider(card, &t, SLOT_HEADER);
                 card.spawn(Node {
                     flex_direction: FlexDirection::Row,
@@ -286,14 +271,21 @@ pub(crate) fn spawn_result(
                     ..default()
                 })
                 .with_children(|body| {
-                    spawn_rank_panel(body, &t, rank, failed, *status);
+                    spawn_rank_panel(body, &t, rank, display.failed, display.status);
                     spawn_stats_panel(
-                        body, &t, &counts, total, combo.max, score.0, *status, &analysis,
+                        body,
+                        &t,
+                        &display.counts,
+                        display.total_notes,
+                        display.max_combo,
+                        display.score,
+                        display.status,
+                        &display.analysis,
                     );
                 });
-                spawn_details_panel(card, &t, &analysis);
+                spawn_details_panel(card, &t, &display.analysis);
                 divider(card, &t, SLOT_VERBS);
-                spawn_verb_row(card, &t, analysis.recommendation.is_some());
+                spawn_verb_row(card, &t, display.analysis.recommendation.is_some());
                 spawn_legends(card, &t, midi_connected);
             });
         });
@@ -720,13 +712,13 @@ pub(crate) fn sync_verb_row(
     theme: Res<ThemeResource>,
     cursor: Res<ResultVerb>,
     reveal: Res<RevealState>,
-    analysis: Res<ResultAnalysis>,
+    display: Res<ResultDisplaySnapshot>,
     mut q: Query<(&VerbLabel, &mut Text, &mut TextColor)>,
 ) {
     let t = theme.0;
     for (label, mut text, mut color) in &mut q {
         let selected = label.0 == *cursor;
-        let next = verb_text(label.0, selected, analysis.recommendation.is_some());
+        let next = verb_text(label.0, selected, display.analysis.recommendation.is_some());
         if text.0 != next {
             text.0 = next;
         }
@@ -822,29 +814,23 @@ mod tests {
     fn spawn_world() -> World {
         let mut world = World::new();
         world.insert_resource(ThemeResource::default());
-        world.insert_resource(Score(912_340));
-        world.insert_resource(Combo {
-            current: 0,
-            max: 214,
-        });
-        world.insert_resource(JudgmentCounts {
-            perfect: 412,
-            great: 61,
-            good: 12,
-            ok: 6,
-            miss: 9,
-        });
-        world.insert_resource(ActiveChart {
-            chart: dtx_core::Chart::default(),
-            source_path: None,
-        });
-        world.insert_resource(DrumScoring {
+        world.insert_resource(ResultDisplaySnapshot {
+            title: "Unknown".into(),
+            artist: "Unknown".into(),
+            difficulty: 2,
+            score: 912_340,
+            max_combo: 214,
+            counts: JudgmentCounts {
+                perfect: 412,
+                great: 61,
+                good: 12,
+                ok: 6,
+                miss: 9,
+            },
             total_notes: 500,
+            status: SaveStatus::Saved,
             ..Default::default()
         });
-        world.insert_resource(game_shell::SelectedDifficulty(2));
-        world.insert_resource(SaveStatus::Saved);
-        world.insert_resource(ResultAnalysis::default());
         world
     }
 
@@ -889,7 +875,8 @@ mod tests {
     fn spawn_result_explains_modified_speed_is_not_saved() {
         use bevy::ecs::system::RunSystemOnce;
         let mut world = spawn_world();
-        world.insert_resource(SaveStatus::ModifiedSpeed { rate: 0.75 });
+        world.resource_mut::<ResultDisplaySnapshot>().status =
+            SaveStatus::ModifiedSpeed { rate: 0.75 };
         world
             .run_system_once(spawn_result)
             .expect("spawn_result runs");
@@ -920,11 +907,9 @@ mod tests {
     fn spawn_result_failed_tag_and_unknown_rank() {
         use bevy::ecs::system::RunSystemOnce;
         let mut world = spawn_world();
-        world.insert_resource(LastStageOutcome { cleared: false });
-        world.insert_resource(DrumScoring {
-            total_notes: 0,
-            ..Default::default()
-        });
+        let mut display = world.resource_mut::<ResultDisplaySnapshot>();
+        display.failed = true;
+        display.total_notes = 0;
         world
             .run_system_once(spawn_result)
             .expect("spawn_result runs");
@@ -1010,7 +995,7 @@ mod tests {
             total_ms: 1_130.0,
             done: true,
         });
-        world.insert_resource(ResultAnalysis::default());
+        world.insert_resource(ResultDisplaySnapshot::default());
         let t = Theme::default();
         let retry = world
             .spawn((

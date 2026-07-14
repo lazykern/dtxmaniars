@@ -110,10 +110,6 @@ fn session_from_intent(intent: &PracticeIntent) -> Option<PracticeSession> {
     session.transport.user_tempo = recommendation
         .initial_tempo
         .clamp(session::RATE_MIN, session::RATE_MAX);
-    session.transport.user_tempo = session
-        .transport
-        .user_tempo
-        .clamp(session::RATE_MIN, session::RATE_MAX);
     Some(session)
 }
 
