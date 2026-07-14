@@ -90,7 +90,7 @@ pub(crate) fn judge_lane_hit_system(
         crate::practice::wait::WaitPhase::Halted(set) => Some(set.chips.as_slice()),
         crate::practice::wait::WaitPhase::Flowing => None,
     });
-    let defer_wait_judgments = practice.is_some_and(|session| session.trainer.wait_enabled);
+    let defer_wait_judgments = practice.is_some_and(|session| session.trainer.wait_enabled());
 
     for hit in lane_hits.read() {
         let Some(pad) = DrumPad::from_lane(hit.lane) else {

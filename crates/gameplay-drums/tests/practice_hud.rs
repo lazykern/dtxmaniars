@@ -316,7 +316,7 @@ fn rail_clear_loop_disarms_the_ramp() {
         },
         ..Default::default()
     };
-    session.trainer.ramp.armed = true;
+    session.trainer.arm_ramp();
     app.world_mut().insert_resource(session);
 
     // Point the rail selection at the Clear-loop row and press Enter.
@@ -336,7 +336,7 @@ fn rail_clear_loop_disarms_the_ramp() {
         "rail Clear loop clears the region"
     );
     assert!(
-        !session.trainer.ramp.armed,
+        !session.trainer.ramp_armed(),
         "rail Clear loop must disarm the ramp"
     );
 }

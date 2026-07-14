@@ -147,7 +147,7 @@ pub fn wrap_micro_report(
         .iter()
         .filter(|a| a.start_ms == done.region_start_ms)
         .count();
-    if session.trainer.wait_enabled {
+    if session.trainer.wait_enabled() {
         toasts.push(format!(
             "pass {n} · flow {:.0}% · {} waited",
             att.flow_pct, att.waited

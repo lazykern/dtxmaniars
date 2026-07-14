@@ -5,6 +5,8 @@ use bevy::prelude::*;
 use crate::resources::JudgmentCounts;
 use crate::timeline::{ChipTimeline, SnapDivisor};
 
+use super::draft::PracticeTrainerMode;
+
 pub const RATE_MIN: f32 = 0.5;
 pub const RATE_MAX: f32 = 1.5;
 pub const RATE_STEP: f32 = 0.05;
@@ -190,31 +192,95 @@ impl Default for PracticeTransport {
 }
 
 /// Trainer state: the accuracy-gated ramp (future trainers live here).
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone)]
 pub struct PracticeTrainer {
+    pub mode: PracticeTrainerMode,
     pub ramp_config: RampConfig,
     pub ramp: RampState,
-    /// Wait mode: halt at unhit notes (mutually exclusive with the ramp).
-    pub wait_enabled: bool,
+}
+
+impl Default for PracticeTrainer {
+    fn default() -> Self {
+        Self {
+            mode: PracticeTrainerMode::Off,
+            ramp_config: RampConfig::default(),
+            ramp: RampState::default(),
+        }
+    }
+}
+
+impl PracticeTrainer {
+    pub fn wait_enabled(&self) -> bool {
+        self.mode == PracticeTrainerMode::Wait
+    }
+
+    pub fn ramp_armed(&self) -> bool {
+        self.mode == PracticeTrainerMode::Ramp && self.ramp.armed
+    }
+
+    pub fn disable(&mut self) {
+        self.mode = PracticeTrainerMode::Off;
+        self.ramp.armed = false;
+    }
+
+    pub fn enable_wait(&mut self, enabled: bool) {
+        if enabled {
+            self.mode = PracticeTrainerMode::Wait;
+            self.ramp.armed = false;
+        } else if self.mode == PracticeTrainerMode::Wait {
+            self.disable();
+        }
+    }
+
+    pub fn arm_ramp(&mut self) {
+        self.mode = PracticeTrainerMode::Ramp;
+        self.ramp = RampState {
+            armed: true,
+            step_tempo: self.ramp_config.start_tempo,
+            success_streak: 0,
+            fail_streak: 0,
+        };
+    }
+
+    pub fn disarm_ramp(&mut self) {
+        self.ramp.armed = false;
+        if self.mode == PracticeTrainerMode::Ramp {
+            self.mode = PracticeTrainerMode::Off;
+        }
+    }
 }
 
 /// Present only while the stage runs in practice mode. Absence = normal
 /// play with zero behavior change.
-#[derive(Resource, Debug, Clone, Default)]
+#[derive(Resource, Debug, Clone)]
 pub struct PracticeSession {
     pub transport: PracticeTransport,
     pub trainer: PracticeTrainer,
     pub current_attempt: AttemptStats,
+    pub current_attempt_eligible: bool,
     pub attempt_history: Vec<AttemptRecord>,
     /// Per-lane diagnosis for the current loop region (full-HUD panel).
     pub lane_diag: super::diagnosis::LaneDiagnosis,
+}
+
+impl Default for PracticeSession {
+    fn default() -> Self {
+        Self {
+            transport: PracticeTransport::default(),
+            trainer: PracticeTrainer::default(),
+            current_attempt: AttemptStats::default(),
+            current_attempt_eligible: true,
+            attempt_history: Vec::new(),
+            lane_diag: super::diagnosis::LaneDiagnosis::default(),
+        }
+    }
 }
 
 impl PracticeSession {
     /// The tempo playback actually runs at: the ramp's step while armed,
     /// the player's chosen tempo otherwise.
     pub fn effective_tempo(&self) -> f32 {
-        if self.trainer.ramp.armed {
+        if self.trainer.ramp_armed() {
             self.trainer.ramp.step_tempo
         } else {
             self.transport.user_tempo
@@ -224,23 +290,29 @@ impl PracticeSession {
     /// Clear the A/B loop (disarms the ramp — the ramp is a claim about
     /// one specific section).
     pub fn clear_loop(&mut self) {
+        self.invalidate_current_attempt();
         self.lane_diag.clear();
         self.transport.loop_region = None;
-        self.trainer.ramp.armed = false;
+        self.trainer.disarm_ramp();
     }
 
     /// Step the user tempo by `dir` in RATE_STEP increments, clamped and
     /// quantized so repeated stepping never accumulates float error.
     pub fn step_user_tempo(&mut self, dir: i8) {
+        self.invalidate_current_attempt();
         let steps = (self.transport.user_tempo / RATE_STEP).round() as i32 + dir as i32;
         self.transport.user_tempo = (steps as f32 * RATE_STEP).clamp(RATE_MIN, RATE_MAX);
+    }
+
+    pub fn invalidate_current_attempt(&mut self) {
+        self.current_attempt_eligible = false;
     }
 
     /// Finalize the running attempt into history (skipped when it saw no
     /// judgements) and start a fresh one at `next_start_ms`. Returns the
     /// finalized record when it had data, `None` when the pass was empty.
     pub fn roll_attempt(&mut self, end_ms: i64, next_start_ms: i64) -> Option<AttemptRecord> {
-        let record = if self.current_attempt.has_data() {
+        let record = if self.current_attempt_eligible && self.current_attempt.has_data() {
             let a = &self.current_attempt;
             let record = AttemptRecord {
                 start_ms: a.start_ms,
@@ -266,14 +338,16 @@ impl PracticeSession {
             start_ms: next_start_ms,
             ..Default::default()
         };
+        self.current_attempt_eligible = true;
         record
     }
 
     /// Set the A marker; keeps the region valid (swap, min length is
     /// enforced by the caller against bar data).
     pub fn set_loop_start(&mut self, ms: i64) {
+        self.invalidate_current_attempt();
         self.lane_diag.clear();
-        self.trainer.ramp.armed = false;
+        self.trainer.disarm_ramp();
         let end = self.transport.loop_region.map(|r| r.end_ms);
         self.transport.loop_region = Some(match end {
             Some(e) if e > ms => LoopRegion {
@@ -288,8 +362,9 @@ impl PracticeSession {
     }
 
     pub fn set_loop_end(&mut self, ms: i64) {
+        self.invalidate_current_attempt();
         self.lane_diag.clear();
-        self.trainer.ramp.armed = false;
+        self.trainer.disarm_ramp();
         let start = self.transport.loop_region.map(|r| r.start_ms).unwrap_or(0);
         self.transport.loop_region = Some(if ms > start {
             LoopRegion {
@@ -326,7 +401,7 @@ mod tests {
     #[test]
     fn wait_defaults_off_and_flow_pct_computes() {
         let s = PracticeSession::default();
-        assert!(!s.trainer.wait_enabled);
+        assert!(!s.trainer.wait_enabled());
 
         let mut a = AttemptStats::default();
         a.counts.perfect = 3;
@@ -405,6 +480,28 @@ mod tests {
     }
 
     #[test]
+    fn ineligible_attempt_is_not_recorded_and_next_attempt_is_eligible() {
+        let mut s = PracticeSession::default();
+        s.current_attempt.counts.perfect = 4;
+        s.current_attempt_eligible = false;
+
+        assert!(s.roll_attempt(4_000, 0).is_none());
+        assert!(s.attempt_history.is_empty());
+        assert!(s.current_attempt_eligible);
+    }
+
+    #[test]
+    fn manual_loop_and_tempo_changes_invalidate_the_attempt() {
+        let mut s = PracticeSession::default();
+        s.set_loop_start(1_000);
+        assert!(!s.current_attempt_eligible);
+
+        s.current_attempt_eligible = true;
+        s.step_user_tempo(1);
+        assert!(!s.current_attempt_eligible);
+    }
+
+    #[test]
     fn history_capped() {
         let mut s = PracticeSession::default();
         for i in 0..(MAX_ATTEMPT_HISTORY + 5) {
@@ -449,10 +546,9 @@ mod tests {
         let mut s = PracticeSession::default();
         s.transport.user_tempo = 1.0;
         assert!((s.effective_tempo() - 1.0).abs() < 1e-6);
-        s.trainer.ramp.armed = true;
-        s.trainer.ramp.step_tempo = 0.70;
+        s.trainer.arm_ramp();
         assert!((s.effective_tempo() - 0.70).abs() < 1e-6);
-        s.trainer.ramp.armed = false;
+        s.trainer.disarm_ramp();
         assert!(
             (s.effective_tempo() - 1.0).abs() < 1e-6,
             "disarm restores the user's tempo untouched"
@@ -464,11 +560,11 @@ mod tests {
         let mut s = PracticeSession::default();
         s.set_loop_start(2_000);
         s.set_loop_end(4_000);
-        s.trainer.ramp.armed = true;
+        s.trainer.arm_ramp();
         s.set_loop_start(6_000);
-        assert!(!s.trainer.ramp.armed, "changing A disarms");
-        s.trainer.ramp.armed = true;
+        assert!(!s.trainer.ramp_armed(), "changing A disarms");
+        s.trainer.arm_ramp();
         s.clear_loop();
-        assert!(!s.trainer.ramp.armed, "clearing the loop disarms");
+        assert!(!s.trainer.ramp_armed(), "clearing the loop disarms");
     }
 }

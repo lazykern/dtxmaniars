@@ -218,7 +218,7 @@ pub fn rail_row_value(item: RailItem, session: &PracticeSession) -> String {
             None => "—".into(),
         },
         RailItem::Rate => {
-            if session.trainer.ramp.armed {
+            if session.trainer.ramp_armed() {
                 format!(
                     "x{:.2} (ramp x{:.2})",
                     session.transport.user_tempo, session.trainer.ramp.step_tempo
@@ -236,7 +236,7 @@ pub fn rail_row_value(item: RailItem, session: &PracticeSession) -> String {
         }
         .into(),
         RailItem::RampArm => {
-            if session.trainer.ramp.armed {
+            if session.trainer.ramp_armed() {
                 let (cur, total) = crate::practice::ramp::ramp_step_index(
                     &session.trainer.ramp_config,
                     session.transport.user_tempo,
@@ -253,7 +253,7 @@ pub fn rail_row_value(item: RailItem, session: &PracticeSession) -> String {
             format!("≥{:.0}%", session.trainer.ramp_config.threshold_pct)
         }
         RailItem::RampStreak => format!("×{}", session.trainer.ramp_config.required_successes),
-        RailItem::WaitMode => if session.trainer.wait_enabled {
+        RailItem::WaitMode => if session.trainer.wait_enabled() {
             "ON"
         } else {
             "off"
@@ -325,6 +325,7 @@ pub fn activate_rail_item(
     match item {
         RailItem::Resume => next_pause.set(PauseState::Running),
         RailItem::Scrub => {
+            session.invalidate_current_attempt();
             let intent = session.transport.scrub_cursor_ms.unwrap_or(current_ms);
             seeks.write(SeekToChartTime {
                 target_ms: preroll_target(timeline, session.transport.preroll, intent),
@@ -334,6 +335,7 @@ pub fn activate_rail_item(
             next_pause.set(PauseState::Running);
         }
         RailItem::RestartSection => {
+            session.invalidate_current_attempt();
             let intent = session
                 .transport
                 .loop_region
@@ -369,11 +371,10 @@ pub fn activate_rail_item(
             practice_actions.write(crate::practice::actions::PracticeAction::ToggleRamp);
         }
         RailItem::WaitMode => {
-            session.trainer.wait_enabled = !session.trainer.wait_enabled;
-            if session.trainer.wait_enabled && session.trainer.ramp.armed {
-                session.trainer.ramp.armed = false;
-            }
-            if session.trainer.wait_enabled {
+            let enabled = !session.trainer.wait_enabled();
+            session.invalidate_current_attempt();
+            session.trainer.enable_wait(enabled);
+            if enabled {
                 if let (Some(wait_state), Some(chord_hits)) = (wait_state, chord_hits) {
                     wait_state.begin(current_ms);
                     chord_hits.0.clear();
@@ -1125,7 +1126,7 @@ mod tests {
     fn rail_row_value_reflects_toggles() {
         let mut s = PracticeSession::default();
         assert_eq!(rail_row_value(RailItem::WaitMode, &s), "off");
-        s.trainer.wait_enabled = true;
+        s.trainer.enable_wait(true);
         assert_eq!(rail_row_value(RailItem::WaitMode, &s), "ON");
         assert_eq!(rail_row_value(RailItem::Metronome, &s), "on");
         s.transport.metronome = false;
@@ -1178,7 +1179,7 @@ mod tests {
         let mut session = PracticeSession::default();
         session.set_loop_start(2_000);
         session.set_loop_end(6_000);
-        session.trainer.ramp.armed = true;
+        session.trainer.arm_ramp();
         world.insert_resource(session);
 
         world
@@ -1227,7 +1228,7 @@ mod tests {
 
         let session = world.resource::<PracticeSession>();
         assert!(session.transport.loop_region.is_none());
-        assert!(!session.trainer.ramp.armed);
+        assert!(!session.trainer.ramp_armed());
         assert!(matches!(
             world.resource::<NextState<PauseState>>(),
             NextState::Pending(PauseState::Running)

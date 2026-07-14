@@ -181,6 +181,7 @@ pub fn timeline_mouse(
     match effect {
         GestureEffect::None => {}
         GestureEffect::Seek { target_ms } => {
+            session.invalidate_current_attempt();
             let snapped = timeline.resolve_snap(target_ms, session.transport.snap);
             session.transport.scrub_cursor_ms = Some(snapped);
             seeks.write(SeekToChartTime {
@@ -190,8 +191,9 @@ pub fn timeline_mouse(
             });
         }
         GestureEffect::LoopPreview { anchor_ms } => {
-            if session.trainer.ramp.armed {
-                session.trainer.ramp.armed = false;
+            session.invalidate_current_attempt();
+            if session.trainer.ramp_armed() {
+                session.trainer.disarm_ramp();
                 toasts.push("ramp off (loop changed)");
             }
             session.lane_diag.clear();

@@ -82,7 +82,7 @@ pub fn apply_practice_actions(
     for action in actions.read() {
         match action {
             PracticeAction::SetLoopStart => {
-                let was_armed = session.trainer.ramp.armed;
+                let was_armed = session.trainer.ramp_armed();
                 let ms = timeline.bar_start_before(clock.current_ms);
                 session.set_loop_start(ms);
                 toasts.push(format!("A set @ bar {}", bar_number(&timeline.bar_ms, ms)));
@@ -91,7 +91,7 @@ pub fn apply_practice_actions(
                 }
             }
             PracticeAction::SetLoopEnd => {
-                let was_armed = session.trainer.ramp.armed;
+                let was_armed = session.trainer.ramp_armed();
                 let mut ms = timeline.bar_start_before(clock.current_ms);
                 // Min region: one bar. B on/before A pushes one bar past A.
                 if let Some(r) = session.transport.loop_region {
@@ -106,7 +106,7 @@ pub fn apply_practice_actions(
                 }
             }
             PracticeAction::ClearLoop => {
-                let was_armed = session.trainer.ramp.armed;
+                let was_armed = session.trainer.ramp_armed();
                 session.clear_loop();
                 toasts.push("loop cleared");
                 if was_armed {
@@ -119,14 +119,15 @@ pub fn apply_practice_actions(
                 } else {
                     -1
                 };
-                if session.trainer.ramp.armed {
-                    session.trainer.ramp.armed = false;
+                if session.trainer.ramp_armed() {
+                    session.trainer.disarm_ramp();
                     toasts.push("ramp off (manual tempo)");
                 }
                 session.step_user_tempo(dir);
                 toasts.push(format!("tempo → {:.2}×", session.transport.user_tempo));
             }
             PracticeAction::RestartLoop => {
+                session.invalidate_current_attempt();
                 let intent = session
                     .transport
                     .loop_region

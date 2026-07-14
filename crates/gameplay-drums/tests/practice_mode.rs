@@ -470,7 +470,7 @@ fn looped_session(rate: f32) -> PracticeSession {
         },
         ..Default::default()
     };
-    s.trainer.ramp.armed = true;
+    s.trainer.arm_ramp();
     s.trainer.ramp.step_tempo = rate;
     s.current_attempt.start_ms = 2_000;
     s
@@ -522,7 +522,7 @@ fn ramp_steps_rate_up_after_clean_pass() {
         "clean pass steps 0.70 → 0.75, got {}",
         session.effective_tempo()
     );
-    assert!(session.trainer.ramp.armed);
+    assert!(session.trainer.ramp_armed());
 }
 
 #[test]
@@ -557,7 +557,7 @@ fn toggle_ramp_without_loop_arms_over_whole_song() {
     app.update();
     let session = app.world().resource::<PracticeSession>();
     assert!(
-        session.trainer.ramp.armed,
+        session.trainer.ramp_armed(),
         "arming with no loop uses the whole song"
     );
     assert!((session.effective_tempo() - 0.70).abs() < 1e-6);
@@ -583,7 +583,7 @@ fn toggle_ramp_with_loop_arms() {
     app.update();
     let session = app.world().resource::<PracticeSession>();
     assert!(
-        session.trainer.ramp.armed,
+        session.trainer.ramp_armed(),
         "arming with an A/B loop must succeed"
     );
     assert!(
@@ -614,7 +614,10 @@ fn tempo_nudge_while_armed_disarms_and_nudges_user_tempo() {
         .press(KeyCode::Minus);
     app.update();
     let session = app.world().resource::<PracticeSession>();
-    assert!(!session.trainer.ramp.armed, "manual nudge disarms the ramp");
+    assert!(
+        !session.trainer.ramp_armed(),
+        "manual nudge disarms the ramp"
+    );
     assert!(
         (session.transport.user_tempo - 0.95).abs() < 1e-6,
         "nudge applies to the user tempo (1.00 → 0.95)"
@@ -758,6 +761,32 @@ fn empty_loop_pass_makes_no_ramp_decision() {
 }
 
 #[test]
+fn ineligible_loop_does_not_record_or_advance_ramp_then_next_loop_recovers() {
+    let mut app = build_app();
+    add_ramp_wiring(&mut app);
+    enter_performance(&mut app, chart_with_measures(8));
+    let mut session = looped_session(0.70);
+    session.current_attempt_eligible = false;
+    app.world_mut().insert_resource(session);
+    {
+        let mut clock = app.world_mut().resource_mut::<GameplayClock>();
+        clock.start();
+        clock.sync(Some(3_000));
+    }
+
+    finish_loop_pass(&mut app, 4);
+    let session = app.world().resource::<PracticeSession>();
+    assert!(session.attempt_history.is_empty());
+    assert!((session.effective_tempo() - 0.70).abs() < 1e-6);
+    assert!(session.current_attempt_eligible);
+
+    finish_loop_pass(&mut app, 4);
+    let session = app.world().resource::<PracticeSession>();
+    assert_eq!(session.attempt_history.len(), 1);
+    assert!((session.effective_tempo() - 0.75).abs() < 1e-6);
+}
+
+#[test]
 fn no_loop_set_wraps_at_chart_end_as_implicit_loop() {
     let mut app = build_app();
     add_ramp_wiring(&mut app);
@@ -786,7 +815,7 @@ fn loop_wrap_pushes_a_micro_report_toast() {
     add_ramp_wiring(&mut app);
     enter_performance(&mut app, chart_with_measures(8));
     let mut s = looped_session(0.70);
-    s.trainer.ramp.armed = false; // report fires with or without ramp
+    s.trainer.disarm_ramp(); // report fires with or without ramp
     app.world_mut().insert_resource(s);
     {
         let mut clock = app.world_mut().resource_mut::<GameplayClock>();

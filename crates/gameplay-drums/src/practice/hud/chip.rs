@@ -14,14 +14,14 @@ pub struct StatusChip;
 /// Pure: chip contents from session state. `bar_ms` from `ChipTimeline`.
 pub fn chip_text(session: &PracticeSession, bar_ms: &[i64]) -> String {
     let mut parts = vec![format!("{:.2}×", session.effective_tempo())];
-    if session.trainer.ramp.armed {
+    if session.trainer.ramp_armed() {
         let (cur, total) = crate::practice::ramp::ramp_step_index(
             &session.trainer.ramp_config,
             session.effective_tempo(),
         );
         parts.push(format!("RAMP {cur}/{total}"));
     }
-    if session.trainer.wait_enabled {
+    if session.trainer.wait_enabled() {
         parts.push("WAIT".into());
     }
     if let Some(r) = session
@@ -46,7 +46,7 @@ pub fn chip_text(session: &PracticeSession, bar_ms: &[i64]) -> String {
         .iter()
         .rfind(|a| a.start_ms == span_start)
     {
-        if session.trainer.wait_enabled {
+        if session.trainer.wait_enabled() {
             parts.push(format!("flow {:.0}%", last.flow_pct));
         } else {
             parts.push(format!("{:.0}%", last.accuracy_pct));
@@ -157,7 +157,7 @@ mod tests {
     #[test]
     fn chip_text_shows_wait_and_flow() {
         let mut s = PracticeSession::default();
-        s.trainer.wait_enabled = true;
+        s.trainer.enable_wait(true);
         s.attempt_history.push(AttemptRecord {
             start_ms: 0,
             end_ms: 4_000,
@@ -180,7 +180,7 @@ mod tests {
     fn chip_text_shows_ramp_segment_when_armed() {
         let mut s = PracticeSession::default();
         s.transport.user_tempo = 1.0;
-        s.trainer.ramp.armed = true;
+        s.trainer.arm_ramp();
         s.trainer.ramp.step_tempo = 0.85;
         let bar_ms = vec![0, 2_000];
         assert_eq!(chip_text(&s, &bar_ms), "0.85× · RAMP 3/6");

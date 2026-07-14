@@ -96,8 +96,9 @@ pub fn handle_toggle_ramp(
         if *action != super::actions::PracticeAction::ToggleRamp {
             continue;
         }
-        if session.trainer.ramp.armed {
-            session.trainer.ramp.armed = false;
+        if session.trainer.ramp_armed() {
+            session.invalidate_current_attempt();
+            session.trainer.disarm_ramp();
             toasts.push(format!(
                 "ramp off — tempo {:.2}×",
                 session.transport.user_tempo
@@ -107,14 +108,10 @@ pub fn handle_toggle_ramp(
         // Arm — an explicit A/B region if set, else the implicit whole
         // song.
         let cfg = session.trainer.ramp_config;
-        session.trainer.ramp = RampState {
-            armed: true,
-            step_tempo: cfg.start_tempo,
-            success_streak: 0,
-            fail_streak: 0,
-        };
-        if session.trainer.wait_enabled {
-            session.trainer.wait_enabled = false;
+        let wait_was_enabled = session.trainer.wait_enabled();
+        session.invalidate_current_attempt();
+        session.trainer.arm_ramp();
+        if wait_was_enabled {
             toasts.push("wait off (ramp armed)");
         }
         let a_ms = session
@@ -146,7 +143,7 @@ pub fn apply_ramp(
     let Some(done) = completions.read().last().copied() else {
         return;
     };
-    if !session.trainer.ramp.armed {
+    if !session.trainer.ramp_armed() {
         return;
     }
     let Some(att) = finalized.0.as_ref() else {
@@ -164,6 +161,7 @@ pub fn apply_ramp(
         }
         RampDecision::Hold => toasts.push("ramp: one more fail steps down"),
         RampDecision::Complete { new_tempo } => {
+            session.trainer.disarm_ramp();
             session.transport.user_tempo = new_tempo;
             toasts.push("ramp complete");
         }

@@ -184,7 +184,7 @@ pub fn wait_watcher(
     if !clock.is_ready() {
         return;
     }
-    if !session.trainer.wait_enabled {
+    if !session.trainer.wait_enabled() {
         if state.halted() {
             crate::pause::resume_all_chart_audio(&bgm, &polyphony, &active, &mut instances);
             state.phase = WaitPhase::Flowing;
@@ -563,7 +563,7 @@ mod tests {
     fn wait_watcher_test_app(chord_hit_times: HashMap<usize, Instant>) -> App {
         let mut app = App::new();
         let mut session = PracticeSession::default();
-        session.trainer.wait_enabled = true;
+        session.trainer.enable_wait(true);
         app.insert_resource(session);
         app.insert_resource(ChipTimeline::default());
         let mut judged = JudgedChips::default();

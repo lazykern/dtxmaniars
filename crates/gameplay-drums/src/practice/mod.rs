@@ -8,6 +8,8 @@
 pub mod ab_loop;
 pub mod actions;
 pub mod diagnosis;
+pub mod draft;
+pub mod flow;
 pub mod hud;
 pub mod metronome;
 pub mod ramp;
@@ -20,6 +22,13 @@ pub mod wait;
 use bevy::prelude::*;
 use game_shell::{AppState, PracticeIntent};
 
+pub use draft::{
+    PracticeDraft, PracticeDraftSource, PracticeTrainerDraft, PracticeTrainerMode, ValidatedDraft,
+};
+pub use flow::{
+    chart_clock_active, gameplay_input_active, practice_running, practice_surface_open,
+    PracticeEditSnapshot, PracticeFlow, PracticePhase, PreviewState,
+};
 pub use session::PracticeSession;
 
 use crate::gauge::StageGauge;
