@@ -35,3 +35,22 @@
 
 - `RTK.md` is referenced by the supplied root instructions but is absent from the repository and worktree.
 - Task 4 lifecycle/gate wiring and Task 5 preview transport remain intentionally unimplemented.
+
+## Fix cycle: normalize invalid-loop sources and cover the flow matrix
+
+### RED evidence
+
+- `cargo test -p gameplay-drums --lib out_of_chart_ -- --nocapture` exited 101 with all three new regressions failing at the source assertion: `Saved(17)`, `Custom`, and `Recommended` were retained instead of `WholeSong` after their out-of-chart loops clamped to zero length.
+- Root cause: the zero-length validation branch cleared `loop_region` and emitted the fallback warning but did not normalize `PracticeDraftSource`, leaving provenance inconsistent with the validated whole-song draft.
+
+### GREEN evidence
+
+- The recovery branch now sets `source = PracticeDraftSource::WholeSong` alongside `loop_region = None`; no other validation or runtime behavior changed.
+- `cargo test -p gameplay-drums --lib out_of_chart_ -- --nocapture`: 3 passed, 0 failed.
+- `cargo test -p gameplay-drums --lib practice::flow::tests:: -- --nocapture`: 5 passed, 0 failed. Coverage includes no-flow semantics, every `PracticePhase` x `PreviewState` combination, all four run conditions, all three origins, defaults, and frozen edit snapshots.
+- `cargo test -p gameplay-drums --lib`: 597 passed, 0 failed.
+- `cargo test -p gameplay-drums --test practice_mode`: 22 passed, 0 failed.
+- `cargo clippy -p gameplay-drums --all-targets -- -D warnings`: passed.
+- `cargo fmt --all -- --check`: passed.
+- `git diff --check`: passed.
+- Task 4 runtime gates remain unwired.

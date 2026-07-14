@@ -114,35 +114,164 @@ fn chart_clock_active_value(flow: Option<&PracticeFlow>) -> bool {
 mod tests {
     use super::*;
     use crate::practice::session::PracticeSession;
+    use game_shell::PracticeSeed;
 
     #[test]
-    fn opening_settings_marks_current_pass_ineligible() {
-        let mut session = PracticeSession::default();
-        let flow = PracticeFlow::running();
+    fn defaults_are_stopped_song_select_setup_without_a_snapshot() {
+        assert_eq!(PracticePhase::default(), PracticePhase::Setup);
+        assert_eq!(PreviewState::default(), PreviewState::Stopped);
 
-        let (flow, snapshot) = flow.open_settings(2_500, &mut session);
-
-        assert_eq!(flow.phase, PracticePhase::Editing);
+        let flow = PracticeFlow::default();
+        assert_eq!(flow.phase, PracticePhase::Setup);
         assert_eq!(flow.preview, PreviewState::Stopped);
-        assert!(!session.current_attempt_eligible);
-        assert_eq!(snapshot.chart_ms, 2_500);
-        assert_eq!(flow.edit_snapshot.as_ref().map(|s| s.chart_ms), Some(2_500));
+        assert_eq!(flow.origin, PracticeOrigin::SongSelect);
+        assert!(flow.edit_snapshot.is_none());
+
+        let running = PracticeFlow::running();
+        assert_eq!(running.phase, PracticePhase::Running);
+        assert_eq!(running.preview, PreviewState::Stopped);
+        assert_eq!(running.origin, PracticeOrigin::SongSelect);
+        assert!(running.edit_snapshot.is_none());
     }
 
     #[test]
-    fn run_conditions_keep_normal_play_active_and_surface_play_inert() {
+    fn request_and_edit_transitions_preserve_every_origin() {
+        for origin in [
+            PracticeOrigin::SongSelect,
+            PracticeOrigin::Results,
+            PracticeOrigin::NormalPause,
+        ] {
+            let request = PracticeRequest {
+                origin,
+                seed: PracticeSeed::Manual,
+            };
+            let mut flow = PracticeFlow::from_request(&request);
+            assert_eq!(flow.origin, origin);
+            assert_eq!(flow.phase, PracticePhase::Setup);
+            assert_eq!(flow.preview, PreviewState::Stopped);
+            assert!(flow.edit_snapshot.is_none());
+
+            flow.phase = PracticePhase::Running;
+            flow.preview = PreviewState::Playing;
+            let (flow, _) = flow.open_settings(2_500, &mut PracticeSession::default());
+            assert_eq!(flow.origin, origin);
+        }
+    }
+
+    #[test]
+    fn opening_settings_stops_preview_and_freezes_the_invalidated_session() {
+        let mut session = PracticeSession::default();
+        session.transport.user_tempo = 0.75;
+        let flow = PracticeFlow {
+            phase: PracticePhase::Running,
+            preview: PreviewState::Playing,
+            origin: PracticeOrigin::Results,
+            edit_snapshot: None,
+        };
+
+        let (flow, snapshot) = flow.open_settings(2_500, &mut session);
+        session.transport.user_tempo = 1.25;
+
+        assert_eq!(flow.phase, PracticePhase::Editing);
+        assert_eq!(flow.preview, PreviewState::Stopped);
+        assert_eq!(flow.origin, PracticeOrigin::Results);
+        assert!(!session.current_attempt_eligible);
+        assert_eq!(snapshot.chart_ms, 2_500);
+        assert!(!snapshot.session.current_attempt_eligible);
+        assert_eq!(snapshot.session.transport.user_tempo, 0.75);
+        let stored = flow.edit_snapshot.as_ref().expect("snapshot stored");
+        assert_eq!(stored.chart_ms, snapshot.chart_ms);
+        assert_eq!(stored.session.transport.user_tempo, 0.75);
+        assert!(!stored.session.current_attempt_eligible);
+    }
+
+    #[test]
+    fn run_conditions_keep_normal_play_active_without_practice_surfaces() {
+        assert!(!practice_running_value(None));
+        assert!(!practice_surface_open_value(None));
         assert!(gameplay_input_active_value(None));
         assert!(chart_clock_active_value(None));
+    }
 
-        let setup = PracticeFlow::default();
-        assert!(!practice_running_value(Some(&setup)));
-        assert!(practice_surface_open_value(Some(&setup)));
-        assert!(!gameplay_input_active_value(Some(&setup)));
-        assert!(!chart_clock_active_value(Some(&setup)));
+    #[test]
+    fn run_conditions_cover_every_phase_and_preview_combination() {
+        let cases = [
+            (
+                PracticePhase::Setup,
+                PreviewState::Stopped,
+                false,
+                true,
+                false,
+                false,
+            ),
+            (
+                PracticePhase::Setup,
+                PreviewState::Playing,
+                false,
+                true,
+                false,
+                true,
+            ),
+            (
+                PracticePhase::Running,
+                PreviewState::Stopped,
+                true,
+                false,
+                true,
+                true,
+            ),
+            (
+                PracticePhase::Running,
+                PreviewState::Playing,
+                true,
+                false,
+                true,
+                true,
+            ),
+            (
+                PracticePhase::Editing,
+                PreviewState::Stopped,
+                false,
+                true,
+                false,
+                false,
+            ),
+            (
+                PracticePhase::Editing,
+                PreviewState::Playing,
+                false,
+                true,
+                false,
+                true,
+            ),
+        ];
 
-        let mut preview = setup.clone();
-        preview.preview = PreviewState::Playing;
-        assert!(!gameplay_input_active_value(Some(&preview)));
-        assert!(chart_clock_active_value(Some(&preview)));
+        for (phase, preview, running, surface_open, input_active, clock_active) in cases {
+            let flow = PracticeFlow {
+                phase,
+                preview,
+                ..Default::default()
+            };
+            assert_eq!(
+                practice_running_value(Some(&flow)),
+                running,
+                "practice_running for {phase:?} / {preview:?}"
+            );
+            assert_eq!(
+                practice_surface_open_value(Some(&flow)),
+                surface_open,
+                "practice_surface_open for {phase:?} / {preview:?}"
+            );
+            assert_eq!(
+                gameplay_input_active_value(Some(&flow)),
+                input_active,
+                "gameplay_input_active for {phase:?} / {preview:?}"
+            );
+            assert_eq!(
+                chart_clock_active_value(Some(&flow)),
+                clock_active,
+                "chart_clock_active for {phase:?} / {preview:?}"
+            );
+        }
     }
 }

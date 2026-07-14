@@ -157,6 +157,7 @@ impl PracticeDraft {
             }
             if start_ms == end_ms {
                 draft.loop_region = None;
+                draft.source = PracticeDraftSource::WholeSong;
                 warning = Some(
                     "Loop bounds could not form a positive region; using whole song".to_owned(),
                 );
@@ -332,6 +333,59 @@ mod tests {
         let validated = draft.validate(&timeline()).expect("recoverable draft");
 
         assert_eq!(validated.draft.loop_region, None);
+        assert!(validated.warning.is_some());
+    }
+
+    #[test]
+    fn out_of_chart_saved_loop_falls_back_to_whole_song_source() {
+        let config = PracticePresetConfig {
+            loop_start_ms: Some(20_000),
+            loop_end_ms: Some(30_000),
+            snap: PracticeSnapPreset::Bar,
+            tempo: 1.0,
+            preroll: PracticePrerollPreset::OneBar,
+            count_in: true,
+            trainer: PracticeTrainerPreset::Off,
+        };
+        let draft = PracticeDraft::from_preset(17, &config);
+
+        let validated = draft.validate(&timeline()).expect("recoverable draft");
+
+        assert_eq!(validated.draft.loop_region, None);
+        assert_eq!(validated.draft.source, PracticeDraftSource::WholeSong);
+        assert!(validated.warning.is_some());
+    }
+
+    #[test]
+    fn out_of_chart_custom_loop_falls_back_to_whole_song_source() {
+        let mut session = PracticeSession::default();
+        session.transport.loop_region = Some(LoopRegion {
+            start_ms: 20_000,
+            end_ms: 30_000,
+        });
+        let draft = PracticeDraft::from(&session);
+
+        let validated = draft.validate(&timeline()).expect("recoverable draft");
+
+        assert_eq!(validated.draft.loop_region, None);
+        assert_eq!(validated.draft.source, PracticeDraftSource::WholeSong);
+        assert!(validated.warning.is_some());
+    }
+
+    #[test]
+    fn out_of_chart_recommended_loop_falls_back_to_whole_song_source() {
+        let request = PracticeRequest {
+            origin: PracticeOrigin::Results,
+            seed: PracticeSeed::Recommended(PracticeRecommendation::weak_section(
+                20_000, 30_000, None,
+            )),
+        };
+        let draft = PracticeDraft::from_request(&request);
+
+        let validated = draft.validate(&timeline()).expect("recoverable draft");
+
+        assert_eq!(validated.draft.loop_region, None);
+        assert_eq!(validated.draft.source, PracticeDraftSource::WholeSong);
         assert!(validated.warning.is_some());
     }
 
