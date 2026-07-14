@@ -76,6 +76,7 @@ pub fn apply_practice_actions(
     clock: Res<GameplayClock>,
     mut seeks: MessageWriter<SeekToChartTime>,
     mut next_pause: ResMut<NextState<PauseState>>,
+    mut open_settings: Option<MessageWriter<super::OpenPracticeSettings>>,
     mut toasts: ResMut<ToastQueue>,
     mut surface: ResMut<crate::pause::PracticePauseSurface>,
 ) {
@@ -142,7 +143,10 @@ pub fn apply_practice_actions(
             }
             PracticeAction::OpenFullHud => {
                 *surface = crate::pause::PracticePauseSurface::Rail;
-                next_pause.set(PauseState::Paused);
+                if let Some(open_settings) = &mut open_settings {
+                    open_settings.write(super::OpenPracticeSettings);
+                }
+                next_pause.set(PauseState::Running);
             }
             PracticeAction::ToggleRamp => {}
         }
@@ -193,7 +197,7 @@ mod tests {
     }
 
     #[test]
-    fn tab_opener_sets_rail_surface_and_pauses() {
+    fn tab_opener_requests_settings_without_pausing() {
         use crate::pause::PracticePauseSurface;
         use bevy::ecs::message::Messages;
         use bevy::ecs::system::RunSystemOnce;
@@ -202,6 +206,7 @@ mod tests {
         let mut world = World::new();
         world.init_resource::<Messages<PracticeAction>>();
         world.init_resource::<Messages<crate::seek::SeekToChartTime>>();
+        world.init_resource::<Messages<crate::practice::OpenPracticeSettings>>();
         world.insert_resource(crate::practice::session::PracticeSession::default());
         world.init_resource::<crate::timeline::ChipTimeline>();
         world.init_resource::<crate::resources::GameplayClock>();
@@ -218,9 +223,16 @@ mod tests {
             *world.resource::<PracticePauseSurface>(),
             PracticePauseSurface::Rail
         );
+        assert_eq!(
+            world
+                .resource::<Messages<crate::practice::OpenPracticeSettings>>()
+                .iter_current_update_messages()
+                .count(),
+            1
+        );
         assert!(matches!(
             world.resource::<NextState<PauseState>>(),
-            NextState::Pending(PauseState::Paused)
+            NextState::Pending(PauseState::Running)
         ));
     }
 }

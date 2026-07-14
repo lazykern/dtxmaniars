@@ -33,6 +33,7 @@ pub enum PauseItemKind {
     Retry,
     Quit,
     RestartLoop,
+    PracticeSettings,
     ExitPractice,
 }
 
@@ -43,6 +44,7 @@ impl PauseItemKind {
             PauseItemKind::Retry => "Retry",
             PauseItemKind::Quit => "Quit to Song Select",
             PauseItemKind::RestartLoop => "Restart loop",
+            PauseItemKind::PracticeSettings => "Practice Settings",
             PauseItemKind::ExitPractice => "Exit Practice",
         }
     }
@@ -56,6 +58,7 @@ const NORMAL_ITEMS: &[PauseItemKind] = &[
 const PRACTICE_ITEMS: &[PauseItemKind] = &[
     PauseItemKind::Resume,
     PauseItemKind::RestartLoop,
+    PauseItemKind::PracticeSettings,
     PauseItemKind::ExitPractice,
 ];
 
@@ -276,15 +279,23 @@ fn resume_chart_audio(
     active: Res<ActiveDrumSounds>,
     mut instances: ResMut<Assets<AudioInstance>>,
     wait_state: Option<Res<crate::practice::wait::WaitState>>,
+    flow: Option<Res<crate::practice::PracticeFlow>>,
 ) {
-    if !should_resume_chart_audio(wait_state.as_deref()) {
+    if !should_resume_chart_audio(wait_state.as_deref(), flow.as_deref()) {
         return;
     }
     resume_all_chart_audio(&bgm, &polyphony, &active, &mut instances);
 }
 
-fn should_resume_chart_audio(wait_state: Option<&crate::practice::wait::WaitState>) -> bool {
+fn should_resume_chart_audio(
+    wait_state: Option<&crate::practice::wait::WaitState>,
+    flow: Option<&crate::practice::PracticeFlow>,
+) -> bool {
     wait_state.is_none_or(|state| !state.halted())
+        && flow.is_none_or(|flow| {
+            flow.phase == crate::practice::PracticePhase::Running
+                || flow.preview == crate::practice::PreviewState::Playing
+        })
 }
 
 pub fn spawn_overlay(
@@ -393,6 +404,7 @@ fn pause_menu_input(
     mut next_pause: ResMut<NextState<PauseState>>,
     mut requests: MessageWriter<TransitionRequest>,
     mut practice_actions: MessageWriter<crate::practice::actions::PracticeAction>,
+    mut open_settings: MessageWriter<crate::practice::OpenPracticeSettings>,
     mut rows: Query<(&PauseItemKind, &mut TextColor)>,
     practice: Option<Res<crate::practice::PracticeSession>>,
     surface: Res<PracticePauseSurface>,
@@ -448,6 +460,10 @@ fn pause_menu_input(
                 // (gated Running) reads this message the frame after the resume
                 // transition applies — messages live two update cycles.
                 practice_actions.write(crate::practice::actions::PracticeAction::RestartLoop);
+                next_pause.set(PauseState::Running);
+            }
+            PauseItemKind::PracticeSettings => {
+                open_settings.write(crate::practice::OpenPracticeSettings);
                 next_pause.set(PauseState::Running);
             }
         }
@@ -534,6 +550,7 @@ mod tests {
             &[
                 PauseItemKind::Resume,
                 PauseItemKind::RestartLoop,
+                PauseItemKind::PracticeSettings,
                 PauseItemKind::ExitPractice
             ]
         );
@@ -545,6 +562,7 @@ mod tests {
         world.init_resource::<Messages<game_shell::NavAction>>();
         world.init_resource::<Messages<TransitionRequest>>();
         world.init_resource::<Messages<crate::practice::actions::PracticeAction>>();
+        world.init_resource::<Messages<crate::practice::OpenPracticeSettings>>();
         world.insert_resource(PauseSelection(selection));
         world.init_resource::<NextState<PauseState>>();
         world.init_resource::<PracticePauseSurface>(); // Overlay
@@ -561,7 +579,7 @@ mod tests {
     fn practice_confirm_exit_goes_to_song_select() {
         use bevy::ecs::message::Messages;
         use bevy::ecs::system::RunSystemOnce;
-        let mut world = dispatch_world(2); // Exit Practice row
+        let mut world = dispatch_world(3); // Exit Practice row
         world
             .run_system_once(pause_menu_input)
             .expect("pause_menu_input runs");
@@ -596,6 +614,27 @@ mod tests {
             .copied()
             .collect();
         assert_eq!(actions, vec![PracticeAction::RestartLoop]);
+    }
+
+    #[test]
+    fn practice_confirm_settings_requests_editing_and_resumes_pause_state() {
+        use bevy::ecs::message::Messages;
+        use bevy::ecs::system::RunSystemOnce;
+        let mut world = dispatch_world(2);
+        world
+            .run_system_once(pause_menu_input)
+            .expect("pause_menu_input runs");
+        assert!(matches!(
+            world.resource::<NextState<PauseState>>(),
+            NextState::Pending(PauseState::Running)
+        ));
+        assert_eq!(
+            world
+                .resource::<Messages<crate::practice::OpenPracticeSettings>>()
+                .iter_current_update_messages()
+                .count(),
+            1
+        );
     }
 
     #[test]
@@ -814,7 +853,20 @@ mod tests {
             ..default()
         };
 
-        assert!(!should_resume_chart_audio(Some(&halted)));
-        assert!(should_resume_chart_audio(None));
+        assert!(!should_resume_chart_audio(Some(&halted), None));
+        assert!(should_resume_chart_audio(None, None));
+    }
+
+    #[test]
+    fn stopped_practice_surface_owns_paused_chart_audio() {
+        let mut flow = crate::practice::PracticeFlow::default();
+        assert!(!should_resume_chart_audio(None, Some(&flow)));
+
+        flow.preview = crate::practice::PreviewState::Playing;
+        assert!(should_resume_chart_audio(None, Some(&flow)));
+
+        flow.phase = crate::practice::PracticePhase::Running;
+        flow.preview = crate::practice::PreviewState::Stopped;
+        assert!(should_resume_chart_audio(None, Some(&flow)));
     }
 }

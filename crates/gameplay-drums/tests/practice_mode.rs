@@ -15,8 +15,9 @@ use gameplay_drums::orchestrator::{
 };
 use gameplay_drums::practice::session::{LoopRegion, PracticeSession, PracticeTransport};
 use gameplay_drums::practice::{
-    cancel_initial_setup, start_or_continue_practice, PracticeDraft, PracticeEditSnapshot,
-    PracticeFlow, PracticePhase, PresetCommand, PreviewState,
+    cancel_initial_setup, start_or_continue_practice, CancelPracticeSettings, OpenPracticeSettings,
+    PracticeDraft, PracticeEditSnapshot, PracticeFlow, PracticePhase, PresetCommand, PreviewAction,
+    PreviewState,
 };
 use gameplay_drums::resources::{
     AccuracyHistory, ActiveChart, BgmAdjustState, Combo, EffectivePlaybackRate, GameStartMs,
@@ -1364,6 +1365,124 @@ fn setup_chart_clock_stays_frozen_until_preview_plays() {
         .advance_by(std::time::Duration::from_millis(16));
     app.world_mut().run_schedule(FixedUpdate);
     assert!(app.world().resource::<GameplayClock>().current_ms > 0);
+}
+
+#[test]
+fn preview_wraps_draft_loop_without_attempt_completion() {
+    let mut app = build_lifecycle_app(PracticeIntent::manual(PracticeOrigin::SongSelect));
+    enter_performance(&mut app, chart_with_measures(8));
+    app.world_mut().resource_mut::<PracticeDraft>().loop_region = Some(LoopRegion {
+        start_ms: 2_000,
+        end_ms: 6_000,
+    });
+
+    app.world_mut().write_message(PreviewAction::Play);
+    app.update();
+    {
+        let mut clock = app.world_mut().resource_mut::<GameplayClock>();
+        clock.sync(Some(6_100));
+    }
+    app.world_mut().run_schedule(FixedUpdate);
+
+    assert_eq!(
+        app.world().resource::<PracticeFlow>().preview,
+        PreviewState::Playing
+    );
+    assert_eq!(app.world().resource::<GameplayClock>().current_ms, 2_000);
+    assert!(app
+        .world()
+        .resource::<PracticeSession>()
+        .attempt_history
+        .is_empty());
+    assert!(app
+        .world()
+        .resource::<Messages<gameplay_drums::practice::ab_loop::PracticeLoopCompleted>>()
+        .is_empty());
+}
+
+#[test]
+fn preview_transport_plays_pauses_seeks_and_steps_bars() {
+    let mut app = build_lifecycle_app(PracticeIntent::manual(PracticeOrigin::SongSelect));
+    enter_performance(&mut app, chart_with_measures(16));
+
+    app.world_mut().write_message(PreviewAction::Play);
+    app.update();
+    app.world_mut().run_schedule(FixedUpdate);
+    assert_eq!(
+        app.world().resource::<PracticeFlow>().preview,
+        PreviewState::Playing
+    );
+
+    app.world_mut().write_message(PreviewAction::Pause);
+    app.update();
+    assert_eq!(
+        app.world().resource::<PracticeFlow>().preview,
+        PreviewState::Stopped
+    );
+
+    app.world_mut().write_message(PreviewAction::Seek(5_500));
+    app.update();
+    app.world_mut().run_schedule(FixedUpdate);
+    assert_eq!(app.world().resource::<GameplayClock>().current_ms, 5_500);
+
+    app.world_mut().write_message(PreviewAction::PrevBar);
+    app.update();
+    app.world_mut().run_schedule(FixedUpdate);
+    assert_eq!(app.world().resource::<GameplayClock>().current_ms, 2_000);
+
+    app.world_mut().write_message(PreviewAction::NextBar);
+    app.update();
+    app.world_mut().run_schedule(FixedUpdate);
+    assert_eq!(app.world().resource::<GameplayClock>().current_ms, 4_000);
+    assert!(app
+        .world()
+        .resource::<PracticeSession>()
+        .attempt_history
+        .is_empty());
+}
+
+#[test]
+fn preview_cancel_editing_restores_frozen_session_and_cursor() {
+    let mut app = build_lifecycle_app(PracticeIntent::manual(PracticeOrigin::SongSelect));
+    enter_performance(&mut app, chart_with_measures(16));
+    {
+        let mut flow = app.world_mut().resource_mut::<PracticeFlow>();
+        flow.phase = PracticePhase::Running;
+    }
+    {
+        let mut session = app.world_mut().resource_mut::<PracticeSession>();
+        session.transport.user_tempo = 0.75;
+    }
+    {
+        let mut clock = app.world_mut().resource_mut::<GameplayClock>();
+        clock.sync(Some(5_000));
+    }
+
+    app.world_mut().write_message(OpenPracticeSettings);
+    app.update();
+    app.world_mut().resource_mut::<PracticeDraft>().user_tempo = 1.25;
+    app.world_mut().write_message(PreviewAction::Seek(20_000));
+    app.update();
+    app.world_mut().write_message(CancelPracticeSettings);
+    app.update();
+    app.world_mut().run_schedule(FixedUpdate);
+
+    let session = app.world().resource::<PracticeSession>();
+    assert_eq!(session.transport.user_tempo, 0.75);
+    assert!(!session.current_attempt_eligible);
+    let flow = app.world().resource::<PracticeFlow>();
+    assert_eq!(flow.phase, PracticePhase::Running);
+    assert_eq!(flow.preview, PreviewState::Stopped);
+    assert_eq!(app.world().resource::<GameplayClock>().current_ms, 5_000);
+    assert_eq!(
+        *app.world()
+            .resource::<gameplay_drums::pause::PracticePauseSurface>(),
+        gameplay_drums::pause::PracticePauseSurface::Overlay
+    );
+    assert!(matches!(
+        app.world().resource::<NextState<game_shell::PauseState>>(),
+        NextState::Pending(game_shell::PauseState::Paused)
+    ));
 }
 
 #[test]

@@ -30,8 +30,7 @@ pub(super) fn plugin(app: &mut App) {
             .after(crate::judge::judge_lane_hit_system)
             .after(crate::practice::wait::wait_watcher)
             .run_if(in_state(AppState::Performance))
-            .run_if(resource_exists::<PracticeSession>)
-            .run_if(super::gameplay_input_active),
+            .run_if(resource_exists::<PracticeSession>),
     );
 }
 
@@ -76,7 +75,15 @@ pub fn track_attempt_stats(
     mut combo: ResMut<Combo>,
     mut finalized: ResMut<LastFinalizedAttempt>,
     wait_state: Option<Res<crate::practice::wait::WaitState>>,
+    flow: Option<Res<crate::practice::PracticeFlow>>,
 ) {
+    if flow.is_some_and(|flow| flow.phase != crate::practice::PracticePhase::Running) {
+        judgments.clear();
+        missed.clear();
+        empty_hits.clear();
+        seeks.clear();
+        return;
+    }
     for ev in judgments.read() {
         let judge_ms = timeline
             .judge_ms_by_idx

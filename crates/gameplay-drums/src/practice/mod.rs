@@ -12,6 +12,7 @@ pub mod draft;
 pub mod flow;
 pub mod hud;
 pub mod metronome;
+pub mod preview;
 pub mod ramp;
 pub mod rate;
 pub mod session;
@@ -29,6 +30,7 @@ pub use flow::{
     chart_clock_active, gameplay_input_active, practice_running, practice_surface_open,
     PracticeEditSnapshot, PracticeFlow, PracticePhase, PreviewState,
 };
+pub use preview::{CancelPracticeSettings, OpenPracticeSettings, PreviewAction, PreviewController};
 pub use session::PracticeSession;
 
 use crate::gauge::StageGauge;
@@ -83,6 +85,7 @@ pub(super) fn plugin(app: &mut App) {
         ab_loop::plugin,
         hud::plugin,
         metronome::plugin,
+        preview::plugin,
         ramp::plugin,
         rate::plugin,
         stats::plugin,
