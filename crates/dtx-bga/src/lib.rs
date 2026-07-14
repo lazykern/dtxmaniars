@@ -778,7 +778,12 @@ pub fn clear_visuals(
     runtime.stop_movie();
     player.reset();
     for entity in &overlays {
-        commands.entity(entity).despawn();
+        // Overlays are parented under the drums `HudRoot`, whose own OnExit
+        // despawn is unordered against this one and takes the children with it.
+        // Losing that race is expected, not an error.
+        commands
+            .entity(entity)
+            .queue_silenced(bevy::ecs::system::entity_command::despawn());
     }
 }
 
