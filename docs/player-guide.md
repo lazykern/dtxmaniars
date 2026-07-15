@@ -89,10 +89,17 @@ switch to MIDI, and:
 2. Select the intended input port. The saved value is a port-name substring;
    no selection uses the first available port.
 3. Adjust the velocity threshold. NoteOn values at or below the threshold are
-   ignored.
-4. Select a lane or Pause/Restart row, start capture, then strike the intended
-   pad. MIDI learn accepts a newly arriving NoteOn rather than a stale hit.
-5. Save the user profile and verify the live status/hit display.
+   ignored by gameplay but remain visible and learnable during capture.
+4. Click `+` on the target pad row, then strike the intended pad. Review the
+   captured note and choose Add shared or Move here if another lane owns it;
+   confirm with the button, `Enter`, or the same pad hit.
+5. To bind Pause or Restart, click `+` on that row in the visible System card
+   and strike an unused pad. A free note binds at once; a lane-owned note or a
+   note assigned to the other system action is refused in the capture modal.
+6. Save the user profile and verify the live status/hit display.
+
+MIDI learn accepts a new positive-velocity NoteOn after capture starts. A stale
+hit cannot bind, while a below-threshold hit remains learnable for setup.
 
 Port availability and note output are hardware/driver behavior and must be
 checked manually. If a port disconnects, reconnect it and use Rescan; keyboard
@@ -127,8 +134,10 @@ offers Resume, Restart Song, Practice This Section, Quick Settings, and Return
 to Song Select. A bound Restart action reloads the current chart from either
 running or paused play.
 
-Gameplay Play Speed ranges from `0.50x` to `2.00x` and changes both notes and
-audio; pitch changes because pitch-preserving stretch is not implemented.
+Gameplay Play Speed ranges from `0.50x` to `2.00x`. One effective rate keeps
+audio, chart time, notes, visuals, seeking, and completion synchronized. The
+rate changes pitch because pitch-preserving stretch is not implemented. A
+normal run qualifies for an ordinary saved record only at `1.00x`.
 Standard fail mode ends the stage when life reaches zero. No Fail is an
 assisted mode: the stage continues, Results labels it, and no normal record is
 saved.

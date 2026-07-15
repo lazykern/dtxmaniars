@@ -388,7 +388,7 @@ banner. The banner advances automatically after about 1.6 seconds.
 |---|---|
 | `Enter` or `Space` | Skip the clear/fail banner |
 
-The results screen shows:
+The Results screen shows:
 
 - Song title, artist, and level
 - Final score
@@ -396,34 +396,45 @@ The results screen shows:
 - Rank
 - Perfect, Great, Good, Poor, and Miss counts and percentages
 - Total judged notes
+- Save qualification and save status
+- Personal-best delta for comparable runs
+- Timing bias/spread, weakest lanes, and weakest section when the run supplies
+  enough timing evidence
 
 Ranks use SS, S, A, B, C, D, and E. Rank includes the Perfect rate, Great rate,
 and maximum-combo rate; it is not based on score alone.
 
-### Leaving results
+### Results actions
 
 | Input | Action |
 |---|---|
-| `Enter` or `Esc` | Return to song selection |
-| Bass drum or snare pad | Return to song selection |
+| `Left` / `Right` | Select Continue, Retry, or Practice |
+| `Enter` or `Space` | Activate the selected action |
+| `Esc` | Continue to song selection |
+| `R` | Retry the same chart directly |
+| `Tab` | Show or hide timing, lane, and section details |
+| Hi-hat / cymbal or ride | Move among Continue, Retry, and Practice |
+| Bass drum | Activate the selected action |
+| Snare | Continue to song selection |
+| Floor tom | Open Practice directly |
+
+The first navigation input during the animated reveal completes the reveal and
+is consumed. Retry reloads the same chart without returning to song selection.
+Practice opens stopped Setup. For a qualifying normal run with enough timing
+evidence, the Practice action names the weakest section and seeds that loop,
+one-bar pre-roll, and `1.00x` tempo. Otherwise it opens manual Setup.
 
 ### Saved results
 
-Normal results are saved when the player leaves the Results screen, not when the
-screen first appears. The game then keeps individual play history and the best
-score for a chart. A compatible per-chart score record is also written next to
-the chart when that location is writable.
+Results attempts persistence when the screen opens. The save-status line shows
+success, failure, Practice, modified-speed, or No Fail qualification. A
+qualifying normal run enters native history and updates a compatible per-chart
+score record when that location is writable. No Fail enters native history as
+an assisted run but cannot update the ordinary best or compatible score.
 
-Failed normal plays are recorded. Practice attempts are never added to normal
-score history.
-
-**Limited:** closing or killing the application while still on the Results
-screen can lose that play because the save has not run yet. A failure while
-saving either score record has no player-visible error or retry prompt.
-
-**Unavailable on the current results screen:** retry, direct practice handoff,
-personal-best delta, timing histogram, weakest-section analysis, and per-lane
-miss analysis.
+Failed normal plays are recorded. Practice and modified-speed runs do not enter
+normal score history. A failed save is visible, but Results has no retry-save
+action or recovery workflow.
 
 ## 12. Practice mode
 
@@ -678,11 +689,13 @@ editor autoplay off. Those temporary states are restored afterward.
 diagnostic. It does not show sample spread or confidence and does not measure
 audio output latency with hardware loopback.
 
-### Play-speed warning
+### Play-speed behavior
 
-**Limited:** normal Play Speed currently compresses chart time without matching
-audio time-scaling. Values other than 1.0x can desynchronize the chart from the
-song. This control should not be treated as equivalent to practice tempo.
+Normal Play Speed applies one effective rate to audio, chart time, notes,
+visuals, seeking, and completion, so those systems stay synchronized. Values
+other than `1.0x` change pitch and make the run ineligible for an ordinary
+saved record. Practice tempo uses the same synchronized rate path under
+Practice rules.
 
 ### Gameplay options not exposed
 
@@ -802,6 +815,12 @@ Click a chip's `x` to remove only that channel's claim. Other owners of a
 shared source remain bound. At runtime, pressing one shared keyboard key or
 hitting one shared MIDI note generates a hit for every assigned channel.
 
+To bind a MIDI system action, click `+` on Pause or Restart in the visible
+System card, then hit the intended pad. A free note binds immediately without
+the lane-sharing confirmation step. The modal refuses a note already owned by
+a drum lane or the other system action and remains open so another pad can be
+tried. Pause and Restart have no default MIDI notes.
+
 ### Controls-tab mouse actions
 
 | Mouse action | Result |
@@ -813,6 +832,7 @@ hitting one shared MIDI note generates a hit for every assigned channel.
 | Click a channel row | Select that channel for inspection and spatial highlighting |
 | Click a binding chip's remove button | Remove that key or MIDI note |
 | Click `+` on a channel | Start capture for the active Keyboard or MIDI segment |
+| Click `+` on Pause or Restart | Start system-action capture for the active segment |
 | Click `Reset tab` | Open reset confirmation |
 | Click `Confirm reset` | Restore the full composed defaults, including both source types and MIDI device fields |
 | Click `CANCEL` in reset prompt | Keep current bindings |
@@ -999,8 +1019,12 @@ events, and movie events.
 - **Unavailable:** long-note gameplay.
 - **Unavailable:** mouse operation for the main title, song, pause, and results
   workflows.
-- **Unavailable:** opening pause with a drum pad during active performance.
-- **Unavailable:** full pad-only operation of Customize and advanced practice.
+- **Limited:** opening Pause from a drum pad requires a configured system Pause
+  binding because the action is unbound by default.
+- **Limited:** pads cannot open Customize or operate its Controls, Lanes, and
+  Widgets panels. Practice Setup, Progress, preview transport, Start Practice,
+  Continue Practice, and Pause actions are wired to shared pad navigation;
+  physical-kit behavior remains unverified.
 - **Limited:** malformed charts are skipped, but the current player experience
   does not provide a full library error-management screen.
 - **Limited:** after a score-history load failure, history can appear empty for
@@ -1035,11 +1059,13 @@ events, and movie events.
 
 1. Select a song and difficulty.
 2. Press `Shift+Enter`.
-3. Press `[` at the desired section start.
-4. Press `]` at the desired section end.
-5. Use `-`/`=` to change tempo.
-6. Press `R` to restart the section.
-7. Press `Tab` for detailed practice controls.
+3. In the stopped Setup surface, configure the loop, tempo, trainer, pre-roll,
+   and count-in. Use Preview if needed; preview input is not judged.
+4. Choose Start Practice to begin from pre-roll/count-in.
+5. During the run, press `Tab` to open Settings and choose Continue Practice to
+   restart from pre-roll, or press `Esc` to open Pause.
+6. Choose Resume in Pause to continue from the frozen position, or Exit to Song
+   Select to leave Practice.
 
 ### Start practice with a MIDI kit
 
@@ -1047,9 +1073,12 @@ events, and movie events.
 2. Strike the bass drum to enter difficulty selection.
 3. Choose the difficulty with hi-hat and cymbal/ride hits.
 4. Strike the floor tom.
-5. Play the whole-song practice loop.
-6. Use the keyboard or mouse for A/B selection, tempo, detailed feedback, and
-   exiting the full practice workflow.
+5. Use the shared pad-navigation verbs to configure stopped Setup, inspect
+   Progress, or operate preview transport.
+6. Activate Start Practice to begin from pre-roll/count-in.
+7. During the run, use a configured system Pause note to open Pause, then
+   choose Practice Settings, Resume, Restart Loop, or Exit to Song Select. The
+   Pause note is unbound by default and must be configured before kit-only use.
 
 ### Calibrate input offset
 
@@ -1071,13 +1100,12 @@ events, and movie events.
 1. Press `F1` and open Controls.
 2. Find the target drum channel.
 3. Remove an unwanted binding if necessary.
-4. Activate Add.
-5. Press the keyboard key.
-6. Close Customize.
-7. Press `Enter` in the dirty-changes dialog to save, or choose another visible
-   dialog action.
-
-Adding a new MIDI-note binding is unavailable from the current visible panel.
+4. Click `+` on the target row.
+5. Press a keyboard key in the Keyboard segment, or hit a pad in the MIDI
+   segment.
+6. For a lane source, review the candidate, choose Add shared or Move here if
+   needed, and confirm. A free Pause/Restart system source binds immediately.
+7. Save the user profile, or close Customize and choose Save in the dirty guard.
 
 ### Change the HUD layout
 

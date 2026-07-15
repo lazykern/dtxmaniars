@@ -145,8 +145,9 @@ The following settings remain in scope because they affect routine behavior.
 
 Behavioral constraints:
 
-- Play Speed outside 1.0x can desynchronize chart and audio; it is not practice
-  tempo.
+- Play Speed uses one effective rate for audio, chart time, notes, visuals,
+  seeking, and completion. Values outside `1.0x` change pitch and disqualify an
+  ordinary saved record.
 - Closing Customize triggers a settings-save attempt, but failure has no
   on-screen error or retry prompt.
 - `Ctrl+S` or closing triggers a HUD-layout save attempt; failure is also
@@ -184,6 +185,7 @@ offer Rename, Revert, and Delete. Built-ins are immutable.
 | Inspect a channel | Click its row; for MIDI, optionally hit an already mapped pad | Row and playfield lane highlight together |
 | Add a key | Click `+`, press an allowed key, choose sharing behavior if needed, then click Confirm or press `Enter` | Key is added to the draft; confirmation can immediately fire the target lane |
 | Add a MIDI note | Click `+`, hit a new pad, review note/velocity, choose sharing behavior if needed, then click Confirm, press `Enter`, or hit the same note again | Note is added to the draft; confirmation can immediately fire the target lane |
+| Add a MIDI system action | In the MIDI segment, click `+` on Pause or Restart and hit an unused pad | A free note binds at once; a lane-owned or other-system note is refused in the modal |
 | Resolve a collision | Click `Add shared` or `Move here`, or press `Left`/`Right`, then confirm | Source either fans out or moves exclusively |
 | Remove one claim | Click the chip's `x` | Only that channel loses the source |
 | Check soft hits | Hit a pad while viewing the MIDI device card/capture modal | Meter and below-threshold feedback expose velocity |
@@ -249,9 +251,10 @@ unavailable.
 The clear/fail banner auto-advances after about 1.6 seconds. Keyboard
 `Enter`/`Space` can skip it; no equivalent pad skip is documented.
 
-Leaving Results triggers the native-history and compatible per-chart save
-attempts. Closing while still on Results can lose the play, and write failure
-has no player-visible error or retry.
+Results attempts native-history and compatible per-chart persistence on entry
+and shows the save status. Continue, Retry, and Practice are direct actions.
+Comparable normal runs show personal-best delta and can recommend the weakest
+section for Practice. Write failure is visible but has no retry-save action.
 
 - **RESULT-1:** As a player, I want to know when persistence is attempted and
   whether it succeeded.
@@ -341,7 +344,7 @@ These motivations and concerns are hypotheses until validated with players.
 | Arrange lanes | Make the playfield match preference | Click Lanes, select a profile, then click rows/pads; drag preview pads/edges and use detail-card add/split/hide/restore actions; Save As if editing a built-in | Lane profiles and live draft preview are reachable with mouse | Do players discover preview dragging without instruction? |
 | Load chart | Wait, cancel a mistake, or recover from failure | Observe progress; use `Esc` to cancel | Cancel/failure returns to songs | Does the player understand why loading ended? |
 | First play | Complete a chart | Select difficulty and press `Enter` | Normal performance, clear/fail banner, and results are reachable | Is the HUD understandable without prior DTX knowledge? |
-| Save result | Preserve the first play | Leave Results with `Enter` or `Esc` | Leaving Results triggers a save attempt | Does the player remain on Results and close the app before the attempt occurs? |
+| Save result | Preserve the first play | Reach Results after a qualifying run and inspect the status | Results attempts persistence on entry | Does the player understand qualification and a failed status? |
 
 ### First-time acceptance stories
 
@@ -372,8 +375,8 @@ These motivations and concerns are hypotheses until validated with players.
 | Start | Press `Enter` | Normal play starts | Direct and repeatable |
 | Adjust | Correct speed or offsets during play | Press `Up`/`Down` for scroll speed, `Left`/`Right` for input offset, add `Ctrl` for fine input adjustment, or press `Shift+Up`/`Shift+Down` for song BGM offset | Accidental adjustment is possible because arrows are active during play |
 | Pause | Interrupt safely | Press `Esc`; select Resume, Restart Song, Practice This Section, Quick Settings, or Return to Song Select; `Esc` resumes | Fully reachable |
-| Finish | Inspect score and judgments | Results presents score, combo, rank, counts, and percentages | Diagnostic depth may not answer why performance was weak |
-| Return | Press `Enter` or `Esc` | Song selection returns and a save is attempted | Navigation is reachable; save failure is silent |
+| Finish | Inspect score and judgments | Results presents score, combo, rank, counts, save status, timing/lane/section analysis, and a recommendation when evidence qualifies | `Tab` exposes the detailed analysis |
+| Continue, retry, or practice | Choose a direct Results action | Continue returns to songs, Retry reloads the chart, and Practice opens stopped Setup with a recommended loop when available | The first input during reveal only finishes the animation |
 
 ### Returning practice journey
 
@@ -402,8 +405,8 @@ whether the player understands or accepts the behavior.
 | Issue | Classification | Workaround |
 |---|---|---|
 | Main title, song, pause, and results workflows are not mouse-clickable | Limitation, not blocker | Use keyboard |
-| Normal Play Speed can desynchronize audio and chart | Behavioral hazard | Keep Play Speed at 1.0x; use practice tempo for training |
-| Result persistence is attempted only when Results is exited | Data-loss risk | Return to song selection before closing; no visible confirmation proves success |
+| Play Speed changes pitch and disqualifies an ordinary record outside `1.0x` | Qualification constraint | Check the visible speed and Results qualification status |
+| A failed Results save has no retry-save action | Recovery limitation | Preserve the chart and configuration paths, then diagnose storage permissions |
 | Actual BGA images and video are unavailable during play | Presentation limitation | Use gameplay/HUD feedback without relying on chart media |
 
 ### Keyboard/mouse success criteria
@@ -413,8 +416,8 @@ whether the player understands or accepts the behavior.
 - A returning player reaches a remembered or searched song quickly.
 - The player can pause, retry, quit, and practice without changing posture or
   input device.
-- The player understands when result persistence is attempted and that success
-  is not visibly confirmed.
+- The player understands the on-entry persistence attempt and its visible
+  qualification/save status.
 - The player does not confuse normal Play Speed with practice tempo.
 
 ## 6. Player Type 2: Nearby MIDI Kit With Computer Access
@@ -455,10 +458,10 @@ Possible concerns:
 | Save the setup | Reuse it next session | Click Save As for a built-in, type a name, and submit; later click Save after edits | User MIDI profile becomes active if the registry write succeeds | Is the separation between MIDI and Keyboard profiles understood? |
 | Verify play input | Confirm prepared pads produce gameplay input | Strike mapped pads during a readiness check or chart | Hits above the prepared threshold produce gameplay input | Can the player recognize loss of readiness from routine game feedback? |
 | Calibrate | Align physical strike and judgment | Press keyboard `F1`, click `Calibrate`, hit configured pads 12 times, then press `Enter` to apply or `Esc` to cancel | Suggested input offset can be applied | Does a pad drummer produce stable enough samples? |
-| Learn menu grammar | Navigate without immediately reaching for keyboard | Hit HH/CY to move, BD to enter/confirm, SD to go back, and FT to start practice at difficulty level | Title, song wheel, difficulty, play, practice, results, and open pause are partially navigable | Are lane-to-command associations memorable? |
+| Learn menu grammar | Navigate without reaching for keyboard after setup | Hit HH/CY to move, BD to enter/confirm, SD to go back, FT to start practice at difficulty level, and the configured system note to open Pause | Title, song wheel, difficulty, play, practice, Results, and Pause are kit-navigable after the Pause binding is configured | Are lane-to-command associations memorable? |
 | Load chart | Wait or correct a mistaken selection | Observe progress; reach keyboard `Esc` to cancel | Failure returns automatically; kit has no cancel action | Does the fallback occur before the player settles into play posture? |
 | First play | Play primarily from the kit | Hit HH/CY to choose song, BD to enter difficulty, HH/CY to choose difficulty, BD to start, then hit mapped pads at the judgment line | Normal drum gameplay is reachable | Are pad/audio/judgment responses perceived as simultaneous? |
-| Recover | Handle first failure or interruption | Open Pause; press `Up`/`Down` and `Enter`, or hit HH/CY and BD, to choose Restart Song or Return to Song Select; hit SD to resume directly | Restart and return are available | Does reaching away feel acceptable or disruptive? |
+| Recover | Handle first failure or interruption | Use keyboard `Esc` or the configured system Pause note, then choose with arrows/`Enter` or HH/CY/BD; SD resumes | Kit-only interruption handling depends on the unbound-by-default Pause action | Does setup make that dependency clear? |
 
 ### First-time acceptance stories
 
@@ -483,9 +486,9 @@ Possible concerns:
 | Choose difficulty | Compare chart choices | HH/CY move difficulty; SD returns | Kit-accessible |
 | Start | Play or practice | BD starts play; FT starts practice | Kit-accessible |
 | Perform | Stay focused on kit | Mapped pads drive lanes and sounds | Primary job is supported |
-| Pause | Interrupt play | Reach keyboard and press `Esc` | Computer is nearby, but kit-only flow breaks |
-| Operate pause | Resume/retry/quit | Hit HH/CY to move, BD to activate, or SD to resume; keyboard arrows/`Enter`/`Esc` are fallback | Kit works once pause is open |
-| Results | Continue back to songs | BD or SD | Kit-accessible |
+| Pause | Interrupt play | Press keyboard `Esc`, or hit the configured system Pause note | Kit-only Pause works after setup; no MIDI note is bound by default |
+| Operate pause | Resume/restart/settings/return | Hit HH/CY to move, BD to activate, or SD to resume; keyboard arrows/`Enter`/`Esc` remain available | Kit works after Pause opens |
+| Results | Continue, Retry, or Practice | HH/CY moves, BD activates, SD continues, and FT opens Practice | Kit-accessible after the reveal finishes |
 | Search | Find a named song | Type title/artist characters and use `Backspace` to delete | Keyboard fallback is required |
 | Import | Add an archive | Press `F6`, click files, or mouse-drag files onto the window | Keyboard/mouse fallback is required |
 | Open settings | Change a routine setting | Press keyboard `F1`; after opening, use pad navigation for Gameplay/Audio/Drums/System | Opening requires fallback; four settings tabs are pad-operable |
@@ -501,7 +504,7 @@ physical-kit behavior remains a manual research item.
 | Open Setup | FT on difficulty selection | None |
 | Set A/B loop | Navigate Setup controls, or use `[` / `]` or mouse while running | None in wired pad navigation; keyboard/mouse fallback remains |
 | Change tempo | Navigate Setup/Settings controls, or press `-`/`=` while running | None in wired pad navigation; keyboard fallback remains |
-| Restart section | `R` | Kit to keyboard |
+| Restart section | `R`, a configured system Restart note, or Restart Loop in Pause | No switch after system binding; keyboard remains fallback |
 | Inspect completed Progress | Navigate to Progress in Setup/Settings | None in wired pad navigation |
 | Seek a section | Navigate preview transport; mouse timeline remains available | None for bar transport; mouse for direct dragging |
 | Configure Off/Wait/Ramp | Navigate Trainer and Ramp rows in Setup/Settings | None in wired pad navigation |
@@ -567,7 +570,7 @@ alone. The player must temporarily access the computer or receive help.
 | Stage | Required behavior | Current reality | Classification |
 |---|---|---|---|
 | Add songs | Import or locate content | Press `F6` and click one or more archives, or mouse-drag archives onto the window | Computer-access setup task |
-| Configure input | Establish working mappings/device | At the computer, open Controls, click MIDI, choose/rescan port, adjust threshold, capture pads, resolve shared/move conflicts, and save a user profile | Computer-access setup task; not operable from distant kit alone |
+| Configure input | Establish working mappings/device | At the computer, open Controls, click MIDI, choose/rescan port, adjust threshold, capture lanes, bind unused notes to Pause/Restart, resolve lane sharing, and save a user profile | Computer-access setup task; not operable from distant kit alone |
 | Configure lanes | Establish readable order/width | At the computer, open Lanes, select or create a profile, use mouse preview/detail actions, and save | Computer-access setup task; mouse required |
 | Calibrate | Start and accept calibration | Press `F1`, click `Calibrate`, hit pads 12 times, then press `Enter` to apply or `Esc` to cancel | Computer-access setup task |
 | Verify distant readability | Read title, wheel, difficulty, HUD, pause, results | Not verified at real room distance | Research gap |
@@ -600,7 +603,7 @@ alone. The player must temporarily access the computer or receive help.
 | Play | Mapped pads | Notes are judged | Reachable |
 | Pause during play | Configured system Pause note | Performance freezes and Pause opens | Reachable after setup-time binding |
 | Resume/restart/quit after pause is open | HH/CY/BD/SD | Pause menu works | Reachable |
-| Leave results | BD or SD | Returns to songs and triggers a save attempt | Reachable; save failure is silent |
+| Results actions | HH/CY, BD, SD, or FT | Select/activate Continue, Retry, or Practice; save status is already visible | Reachable after the reveal finishes |
 | Return to title | SD from song wheel | Title appears | Reachable |
 | Quit application | No kit action on title | Requires keyboard `Esc` | **Blocker** |
 
@@ -610,16 +613,16 @@ alone. The player must temporarily access the computer or receive help.
 > so an interruption does not force me to abandon the chart or allow the song
 > to continue unattended.
 
-Current sequence:
+Current sequence after computer-access setup:
 
-1. An interruption occurs during performance.
-2. No pad navigation context exists while performance is running.
-3. The player must leave the kit and press keyboard `Esc`, ask another person,
-   or allow the song to continue.
-4. Once paused, the kit can operate Resume, Restart Song, Practice This Section,
-   Quick Settings, and Return to Song Select.
+1. Assign an unused MIDI note to the system Pause action; no note is bound by
+   default.
+2. During performance, hit that note to freeze the chart and audio.
+3. Use HH/CY/BD/SD to operate Resume, Restart Song, Practice This Section,
+   Quick Settings, or Return to Song Select.
 
-This is a current blocker for a self-contained distant-kit session.
+Without that setup-time binding, pausing remains a blocker for a self-contained
+distant-kit session.
 
 ### Failure and retry story
 
@@ -629,11 +632,10 @@ This is a current blocker for a self-contained distant-kit session.
 Current behavior:
 
 - Stage failure advances through the banner to Results.
-- BD or SD leaves Results and triggers a save attempt.
-- The player can select the song again and restart from the kit.
-- There is no direct Retry action on Results.
-
-The recovery is reachable but requires a full Results-to-song-selection cycle.
+- Results has Continue, Retry, and Practice actions after the reveal completes.
+- HH/CY selects Retry and BD reloads the same chart directly; `R` is the
+  keyboard shortcut.
+- SD continues to songs, while FT opens stopped Practice Setup directly.
 
 ### Returning practice journey
 
@@ -649,10 +651,10 @@ The recovery is reachable but requires a full Results-to-song-selection cycle.
 | Pause and resume exactly | Bound system Pause, then Resume | Reachable after binding |
 | Exit practice | Bound system Pause, then Exit to Song Select | Reachable after binding |
 
-Starting practice from floor tom now enters mandatory Setup rather than an
-already-running whole-song loop. A complete distant-kit workflow depends on
-configured system Pause/Restart bindings. Its source/test reachability is known,
-but it still requires physical-kit and room-distance validation.
+Starting practice from floor tom enters mandatory stopped Setup. A complete
+distant-kit Practice workflow depends on configured system Pause/Restart
+bindings. Source and tests confirm reachability, but physical-kit and
+room-distance validation remain pending.
 
 ### Distant-MIDI blockers and workarounds
 
@@ -667,11 +669,12 @@ but it still requires physical-kit and room-distance validation.
 
 ### Distant-MIDI success criteria
 
-- After one computer-access setup phase, a returning player completes an entire
-  routine session from the kit.
+- After one computer-access setup phase, a returning player completes the
+  browse, play, Results, and Practice portions of a routine session from the
+  kit.
 - The player can pause immediately during active performance.
-- The player can retry, quit a song, leave results, return to title, and exit
-  the game without another person.
+- The player can retry, quit a song, leave Results, and return to title without
+  another person. Quitting the application still requires computer input.
 - Practice supports section selection, tempo adjustment, restart, feedback, and
   exit from the kit.
 - Essential text and selection state remain readable at realistic room distance.
@@ -699,7 +702,7 @@ Legend:
 | Play drum notes | Yes | Yes, kit | Yes, kit |
 | Open pause during play | Yes | Yes after system binding | Yes after system binding |
 | Operate an open pause menu | Yes | Yes, kit | Yes, kit |
-| Leave results and trigger save attempt | Yes | Yes, kit | Yes, kit |
+| Use Continue/Retry/Practice on Results | Yes | Yes, kit | Yes, kit |
 | Define practice A/B | Yes | Yes, pad navigation | Yes, pad navigation |
 | Change practice tempo | Yes | Yes, pad navigation | Yes, pad navigation |
 | Inspect practice feedback | Yes | Yes, Progress navigation | Yes, Progress navigation |
@@ -710,7 +713,7 @@ Legend:
 | Edit lane profiles/order/width/channels | Yes, mouse required | Computer fallback | Setup only |
 | Customize HUD | Yes | Fallback | Setup only |
 | Skip clear/fail banner | Yes | Keyboard fallback | No, wait for auto-advance |
-| Confirm result save success | No visible confirmation | No visible confirmation | No visible confirmation |
+| Read result save status | Yes | Yes, display | Yes, display |
 | Quit from title | Yes | Fallback | No |
 
 ### Exact player-action inventory
@@ -727,6 +730,7 @@ journey, including the redesigned Controls and Lanes workflows.
 | Inspect a binding | Click channel row or hover a shared chip | Hit an already mapped pad to select its channel |
 | Add keyboard source | Click Keyboard and channel `+`; press key; use `Left`/`Right` or click shared/move choice; press `Enter` or click Confirm | No pad action |
 | Add MIDI source | Click MIDI and channel `+`; hit pad; use keyboard/mouse for shared/move choice; press `Enter`/click Confirm | Hit candidate; hit same note again to confirm, or a different note to replace it |
+| Add MIDI Pause/Restart | Click MIDI and `+` on the visible system row; hit an unused pad | Free note binds at once; conflicting note is refused |
 | Cancel capture | Press `Esc` or click Cancel | No dedicated cancel hit |
 | Remove one source claim | Click chip `x` | No pad action |
 | Choose/rescan port | Click port arrows or Rescan | Strike pads only to verify input |
@@ -820,8 +824,12 @@ The visible song wheel is not mouse-clickable for routine browse/start actions.
 | Move pause selection | Press `Up`/`Down` | Hit hi-hat/cymbal or ride |
 | Activate Resume/Restart/Settings/Exit actions | Press `Enter` or `Space` | Hit bass drum |
 | Resume directly | Press `Esc` | Hit snare after pause is open |
-| Leave Results | Press `Enter` or `Esc` | Hit bass drum or snare |
-| Trigger result save attempt | Leave Results using an action above | Leave Results using an action above |
+| Move among Results actions | Press `Left`/`Right` | Hit hi-hat/cymbal or ride |
+| Activate Continue/Retry/Practice | Press `Enter` or `Space` | Hit bass drum |
+| Continue directly | Press `Esc` | Hit snare |
+| Retry directly | Press `R` | Select Retry and hit bass drum |
+| Open Practice directly | Select Practice | Hit floor tom |
+| Inspect Results analysis | Press `Tab` | No dedicated pad shortcut |
 
 Main pause and Results rows are not mouse-clickable.
 
@@ -923,10 +931,10 @@ Because practice can be started from the kit, players may expect Setup,
 section, tempo, restart, Progress, and exit actions to remain understandable at
 room distance. This needs physical-kit and readability testing.
 
-### H5: Save-on-leaving-Results is not visible enough
+### H5: Results qualification and failed-save recovery need observation
 
-Players may close the game while admiring or recording a result, losing the
-play without knowing that leaving Results was required.
+Players may misread Practice, modified-speed, and No Fail statuses or lack a
+clear next step after a visible failed save.
 
 ### H6: Calibration confidence differs by input type
 
@@ -958,8 +966,8 @@ Ask the participant to:
    `Esc` to close Customize.
 7. Press `Enter` to start and press configured drum keys to complete or fail one
    play.
-8. Press `Enter` or `Esc` to leave Results, then inspect whether the result
-   appears in history.
+8. Inspect the Results save status and analysis, choose Retry once, then use
+   Continue and inspect whether the result appears in history.
 9. Press `Shift+Enter`, verify Setup preview is stopped, configure a section and
    Off/Wait/Ramp, start from pre-roll, open Settings with `Tab`, continue from
    pre-roll, then press `Esc` and choose Exit to Song Select.
@@ -1005,8 +1013,8 @@ participant to:
    that no pad action is available.
 4. Respond to a simulated interruption with the configured system Pause note;
    verify Pause opens and Resume returns to the exact position.
-5. After failure, hit BD or SD to leave Results, navigate back with HH/CY and
-   BD, and hit BD to retry.
+5. After failure, use HH/CY to select Retry on Results and hit BD to reload the
+   chart directly.
 6. Hit FT to enter stopped Practice Setup, set the requested section and slower
    tempo using pads, start, then open Settings and inspect completed Progress.
 7. Open Pause with the configured system binding and exit Practice using pads.
@@ -1047,7 +1055,8 @@ MIDI player. Ask each participant to:
 3. Press `Enter` or hit BD to start, press `Up`/`Down` once for scroll speed,
    press keyboard `Esc`, select Restart Song with arrows or HH/CY, and activate with
    `Enter`/BD.
-4. Press `Enter`/`Esc` or hit BD/SD to leave Results, then inspect history.
+4. Use the direct Retry action once, then Continue from Results and inspect
+   history.
 5. Press `Shift+Enter` or hit FT, configure and start an A/B span, press `R`,
    press `Tab` to open Settings, continue from pre-roll, then press `Esc` and
    choose Exit to Song Select.
@@ -1074,8 +1083,8 @@ Ask after behavior has been observed:
 10. After one session, which pad-menu commands can you recall unaided?
 11. What did you think happened when loading returned to the song wheel?
 12. How would you know that a settings or result save failed?
-13. What did ramp promotion, wait flow, and the second Exit confirmation mean
-    to you?
+13. What did ramp promotion, wait flow, and the Pause-versus-Settings split
+    mean to you?
 14. Which exact key, click, or pad hit did you expect for the first blocked
     action?
 
@@ -1092,7 +1101,7 @@ bad for any player type:
 - Returning-player timing for common journeys
 - Frequency and physical cost of device handoffs
 - Practice completion and escape behavior from a distant kit
-- Confirmation of save behavior under normal exit and forced application close
+- Confirmation of Results-entry save behavior and forced application close
 - OS-specific archive picker and drag/drop tests
 - Loading cancel/failure tests for keyboard, nearby-kit, and distant-kit setups
 - MIDI disconnect/reconnect during title, browsing, loading, play, pause, and
@@ -1106,11 +1115,11 @@ bad for any player type:
 
 ## 14. Neutral baseline summary
 
-The current product provides a complete routine play loop for keyboard/mouse
-and a mostly kit-driven browse-play-results loop for MIDI. A nearby computer
-turns missing kit actions into fallbacks. Physical distance turns several of
-the same gaps into blockers, especially opening pause, controlling practice,
-and quitting the application.
+The current product provides a routine play loop for keyboard/mouse and a
+kit-driven browse-play-results loop for MIDI. A configured system Pause binding
+makes interruption and Practice exit reachable from the kit; no MIDI note is
+bound by default. Physical-kit navigation, room-distance readability, and
+application quit still need manual validation or computer input as noted above.
 
 This is a reachability summary, not a usability verdict. The hypotheses and
 research sessions above must be tested before redesign priorities are assigned.

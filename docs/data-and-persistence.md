@@ -59,9 +59,10 @@ downgraded.
 
 Saved practice loops are separate from general settings. Each lookup uses both
 the chart's canonical hash and its selected difficulty index, so a loop saved
-for one difficulty is not offered for another. The source path is retained only
-as display and recovery metadata. Editing a loaded loop changes a session draft;
-it is not persisted until the player chooses Save as New or Update Saved Loop.
+for one difficulty is not offered for another. The registry retains the source
+path as metadata; the current UI does not display it or use it for recovery.
+Editing a loaded loop changes a session draft; it is not persisted until the
+player chooses Save as New or Update Saved Loop.
 Deleting a saved loop is also explicit. Last Used is the one automatic snapshot
 per chart and difficulty, written only when Start Practice or Continue Practice
 commits the draft.
