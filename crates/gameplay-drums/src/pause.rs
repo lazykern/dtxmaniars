@@ -245,7 +245,7 @@ pub fn practice_request_at(
 /// Minimum gap between two accepted hits of the SAME system verb. Pads
 /// double-fire (flam/retrigger 20-40 ms apart), and an un-guarded verb would
 /// toggle pause straight back off. Same reason — and same window — as
-/// `menu_nav::DEBOUNCE`, which guards pad *navigation*.
+/// game_shell::navigation's pad-nav debounce, which guards pad *navigation*.
 const VERB_DEBOUNCE: Duration = Duration::from_millis(80);
 
 /// Per-verb min-interval guard for the system-verb path.

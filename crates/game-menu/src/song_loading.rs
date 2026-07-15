@@ -747,7 +747,7 @@ fn spawn_loading(
 }
 
 /// Watch for a cancel during load: Esc on the keyboard, or `NavVerb::Back` — SD
-/// — from the kit (`menu_nav` emits it while `NavContext::Loading` is active).
+/// — from the kit (`game_shell::navigation` emits it while `NavContext::Loading` is active).
 /// On cancel, mark the load; the next `poll_chart_parse` tick sees the flag and
 /// fails fast, and `advance_when_loaded` routes back to SongSelect.
 fn watch_cancel_key(

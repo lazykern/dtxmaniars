@@ -8,13 +8,17 @@
 //! - [`events`] — `LaneHit`, `LaneHitKind` (moved here from gameplay-drums)
 //! - [`keyboard`] — keyboard → LaneHit system (BEVY_SYSTEM)
 //! - [`midi`] — `MidiSource` trait + `VirtualSource` + (optional) real-device impl
+//! - [`lane_map`] — fixed BocuD lane order
+//! - [`resolver`] — bind resolution (`BindResolver`)
+//! - [`pump`] — the MIDI pump; emits `PadNavHit`, `ResolvedInputHit`, `SystemVerbHit`
 //!
-//! ## LaneId is opaque
+//! ## Lane resolution lives here
 //!
-//! `LaneHit::lane` is just a `u8`. Sources here emit raw events (keys,
-//! `MidiEvent`s); resolving them to lanes is the consuming gameplay crate's
-//! job (drums does it via this crate's `InputBindings` → `BindResolver`).
-//! dtx-input only knows "key pressed on lane X at audio_ms Y".
+//! Since the menu-nav extraction (2026-07-15 spec), this crate owns the fixed
+//! BocuD lane order (`lane_map`), bind resolution (`resolver`), and the MIDI
+//! pump (`pump`). It emits device-level messages (`PadNavHit`,
+//! `ResolvedInputHit`, `SystemVerbHit`); it knows nothing about application
+//! contexts (SongSelect, Settings, Practice) — those belong to game-shell.
 
 #![warn(missing_docs)]
 
