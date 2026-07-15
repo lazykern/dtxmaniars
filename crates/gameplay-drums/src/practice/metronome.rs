@@ -64,8 +64,8 @@ pub fn build_preroll_schedule(
 
 const CLICK_SAMPLE_RATE: u32 = 44_100;
 const CLICK_LEN_S: f32 = 0.03;
-const ACCENT_HZ: f32 = 2_000.0;
-const TICK_HZ: f32 = 1_000.0;
+pub const ACCENT_HZ: f32 = 2_000.0;
+pub const TICK_HZ: f32 = 1_000.0;
 
 /// ~30ms sine burst with exponential decay (pure; unit-tested).
 pub fn synth_click_frames(freq_hz: f32, sample_rate: u32) -> Vec<Frame> {
@@ -79,7 +79,7 @@ pub fn synth_click_frames(freq_hz: f32, sample_rate: u32) -> Vec<Frame> {
         .collect()
 }
 
-fn click_source(freq_hz: f32) -> KiraAudioSource {
+pub fn click_source(freq_hz: f32) -> KiraAudioSource {
     KiraAudioSource {
         sound: StaticSoundData {
             sample_rate: CLICK_SAMPLE_RATE,

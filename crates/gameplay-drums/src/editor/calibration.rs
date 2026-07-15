@@ -220,8 +220,6 @@ struct CalibrationOverlay;
 #[derive(Resource, Default)]
 struct CalibrationClickSound(Option<Handle<bevy_kira_audio::prelude::AudioSource>>);
 
-const CALIBRATION_CLICK_PATH: &str = "sounds/metronome.wav";
-
 pub(super) fn plugin(app: &mut App) {
     app.init_resource::<CalibrationState>()
         .init_resource::<CalibrationClickSound>()
@@ -276,9 +274,14 @@ pub fn start_calibration(
     autoplay.0 = false;
 }
 
-fn preload_click_sound(asset_server: Res<AssetServer>, mut click: ResMut<CalibrationClickSound>) {
+fn preload_click_sound(
+    mut sources: ResMut<Assets<bevy_kira_audio::prelude::AudioSource>>,
+    mut click: ResMut<CalibrationClickSound>,
+) {
     if click.0.is_none() {
-        click.0 = Some(asset_server.load(CALIBRATION_CLICK_PATH));
+        click.0 = Some(sources.add(crate::practice::metronome::click_source(
+            crate::practice::metronome::TICK_HZ,
+        )));
     }
 }
 

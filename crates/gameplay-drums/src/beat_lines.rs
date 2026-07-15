@@ -22,7 +22,6 @@ use game_shell::{AppState, EGameMode, PauseState};
 
 const BACKFILL_MS: i64 = 500;
 const DESPAWN_MARGIN_MS: i64 = 200;
-const METRONOME_PATH: &str = "sounds/metronome.wav";
 const BEAT_METRONOME_VOLUME: f32 = 0.35;
 
 /// NX skin atlas heights (2px at 720p ref); scaled by playfield layout.
@@ -98,8 +97,13 @@ fn timing_line_visibility(lane_display: LaneDisplayState, override_lines: bool) 
     }
 }
 
-fn preload_metronome_sound(asset_server: Res<AssetServer>, mut metronome: ResMut<MetronomeSound>) {
-    metronome.0 = Some(asset_server.load(METRONOME_PATH));
+fn preload_metronome_sound(
+    mut sources: ResMut<Assets<AudioSource>>,
+    mut metronome: ResMut<MetronomeSound>,
+) {
+    metronome.0 = Some(sources.add(crate::practice::metronome::click_source(
+        crate::practice::metronome::TICK_HZ,
+    )));
 }
 
 fn init_timing_lines(
