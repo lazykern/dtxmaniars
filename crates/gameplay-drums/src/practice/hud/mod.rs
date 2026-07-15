@@ -30,7 +30,17 @@ pub fn plugin(app: &mut App) {
         .init_resource::<crate::practice::toast::ToastQueue>()
         .add_systems(
             Update,
-            (setup::ensure_setup_shell, setup::update_tab_selection)
+            (
+                setup::ensure_setup_shell,
+                setup::update_tab_selection,
+                timeline_ui::timeline_mouse.run_if(crate::practice::practice_surface_open),
+                timeline_ui::preview_transport_buttons
+                    .run_if(crate::practice::practice_surface_open),
+                timeline_ui::update_timeline_markers.run_if(crate::practice::practice_surface_open),
+                timeline_ui::update_transport_label.run_if(crate::practice::practice_surface_open),
+                setup::refresh_setup_copy.run_if(crate::practice::practice_surface_open),
+                progress::refresh_progress_copy.run_if(crate::practice::practice_surface_open),
+            )
                 .chain()
                 .run_if(in_state(AppState::Performance))
                 .run_if(resource_exists::<crate::practice::PracticeFlow>),
@@ -41,19 +51,6 @@ pub fn plugin(app: &mut App) {
             sync_compact_hud_visibility
                 .run_if(in_state(AppState::Performance))
                 .run_if(resource_exists::<crate::practice::PracticeFlow>),
-        )
-        .add_systems(
-            Update,
-            (
-                timeline_ui::timeline_mouse,
-                timeline_ui::preview_transport_buttons,
-                timeline_ui::update_timeline_markers,
-                timeline_ui::update_transport_label,
-            )
-                .chain()
-                .run_if(in_state(AppState::Performance))
-                .run_if(resource_exists::<crate::practice::PracticeFlow>)
-                .run_if(crate::practice::practice_surface_open),
         );
 }
 

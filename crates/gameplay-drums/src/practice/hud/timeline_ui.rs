@@ -309,7 +309,16 @@ pub(super) fn spawn_timeline(
                             handle,
                             Node {
                                 position_type: PositionType::Absolute,
-                                left: Val::Percent(0.0),
+                                left: if handle == PracticeLoopHandle::Start {
+                                    Val::Percent(0.0)
+                                } else {
+                                    Val::Auto
+                                },
+                                right: if handle == PracticeLoopHandle::End {
+                                    Val::Percent(0.0)
+                                } else {
+                                    Val::Auto
+                                },
                                 top: Val::Px(0.0),
                                 bottom: Val::Px(0.0),
                                 min_width: Val::Px(20.0),
@@ -453,14 +462,23 @@ pub(super) fn update_timeline_markers(
     for (handle, mut node, mut visibility) in &mut markers.p2() {
         match region {
             Some(region) => {
-                let marker_ms = match handle {
-                    PracticeLoopHandle::Start => region.start_ms,
-                    PracticeLoopHandle::End => region.end_ms,
-                };
-                node.left = Val::Percent(dtx_ui::widget::density_strip::time_to_pct(
-                    marker_ms,
+                let percent = dtx_ui::widget::density_strip::time_to_pct(
+                    match handle {
+                        PracticeLoopHandle::Start => region.start_ms,
+                        PracticeLoopHandle::End => region.end_ms,
+                    },
                     timeline.end_ms,
-                ));
+                );
+                match handle {
+                    PracticeLoopHandle::Start => {
+                        node.left = Val::Percent(percent);
+                        node.right = Val::Auto;
+                    }
+                    PracticeLoopHandle::End => {
+                        node.left = Val::Auto;
+                        node.right = Val::Percent(100.0 - percent);
+                    }
+                }
                 *visibility = Visibility::Visible;
             }
             None => *visibility = Visibility::Hidden,

@@ -1,15 +1,23 @@
+use bevy::camera::{Camera, Camera2d, ComputedCameraValues, RenderTargetInfo, Viewport};
+use bevy::ecs::system::RunSystemOnce;
 use bevy::prelude::*;
+use bevy::window::{PrimaryWindow, WindowResolution};
 use game_shell::{AppState, PauseState};
 use gameplay_drums::practice::hud::setup::{
-    practice_layout_mode, PracticeLayoutMode, PracticePreviewRegion, PracticePrimaryAction,
-    PracticeSettingsPane, PracticeSetupLayout, PracticeSetupRoot,
+    practice_layout_mode, update_tab_selection, PracticeLayoutMode, PracticePreviewRegion,
+    PracticePrimaryAction, PracticeSettingsPane, PracticeSetupLayout, PracticeSetupRoot,
+    PracticeTab, PracticeTabButton,
 };
 use gameplay_drums::practice::hud::timeline_ui::{
-    PracticeLoopFill, PracticeLoopHandle, PracticeTimelineRoot, PreviewTransportButton,
+    PracticeLoopFill, PracticeLoopHandle, PracticeTimelineRoot, PracticeTimelineStrip,
+    PreviewTransportButton,
 };
-use gameplay_drums::practice::{PracticeDraft, PracticeFlow, PracticeSession};
+use gameplay_drums::practice::session::{AttemptRecord, LoopRegion};
+use gameplay_drums::practice::{
+    PracticeDraft, PracticeDraftSource, PracticeFlow, PracticeSession, PracticeTrainerMode,
+};
 use gameplay_drums::resources::GameplayClock;
-use gameplay_drums::timeline::ChipTimeline;
+use gameplay_drums::timeline::{ChipTimeline, SnapDivisor};
 
 fn setup_hud_app(width: f32, height: f32, text_scale: dtx_config::TextScale) -> App {
     let mut app = App::new();
@@ -17,6 +25,16 @@ fn setup_hud_app(width: f32, height: f32, text_scale: dtx_config::TextScale) -> 
         MinimalPlugins,
         bevy::state::app::StatesPlugin,
         bevy::input::InputPlugin,
+        bevy::window::WindowPlugin {
+            primary_window: None,
+            ..default()
+        },
+        bevy::asset::AssetPlugin::default(),
+        bevy::image::ImagePlugin::default(),
+        bevy::image::TextureAtlasPlugin,
+        bevy::text::TextPlugin,
+        bevy::picking::DefaultPickingPlugins,
+        bevy::ui::UiPlugin,
     ))
     .init_state::<AppState>()
     .init_state::<PauseState>()
@@ -41,10 +59,38 @@ fn setup_hud_app(width: f32, height: f32, text_scale: dtx_config::TextScale) -> 
     .insert_resource(PracticeDraft::default())
     .insert_resource(PracticeFlow::default());
 
+    let physical_size = UVec2::new(width as u32, height as u32);
+    app.world_mut().spawn((
+        Camera2d,
+        Camera {
+            computed: ComputedCameraValues {
+                target_info: Some(RenderTargetInfo {
+                    physical_size,
+                    scale_factor: 1.0,
+                }),
+                ..default()
+            },
+            viewport: Some(Viewport {
+                physical_size,
+                ..default()
+            }),
+            ..default()
+        },
+    ));
+    app.world_mut().spawn((
+        Window {
+            resolution: WindowResolution::new(width as u32, height as u32)
+                .with_scale_factor_override(1.0),
+            ..default()
+        },
+        PrimaryWindow,
+    ));
+
     gameplay_drums::practice::hud::plugin(&mut app);
     app.world_mut()
         .resource_mut::<NextState<AppState>>()
         .set(AppState::Performance);
+    app.update();
     app.update();
     app.update();
     app
@@ -60,6 +106,85 @@ fn texts(app: &mut App) -> Vec<String> {
 
 fn count<T: Component>(app: &mut App) -> usize {
     app.world_mut().query::<&T>().iter(app.world()).count()
+}
+
+fn click_tab(app: &mut App, label: &str) {
+    let tab = match label {
+        "Setup" => PracticeTab::Setup,
+        "Progress" => PracticeTab::Progress,
+        "Preview" => PracticeTab::Preview,
+        _ => panic!("unknown practice tab {label}"),
+    };
+    let button = app
+        .world_mut()
+        .query::<(Entity, &PracticeTabButton)>()
+        .iter(app.world())
+        .find_map(|(entity, button)| (button.0 == tab).then_some(entity))
+        .unwrap_or_else(|| panic!("missing {label} tab button"));
+    *app.world_mut()
+        .get_mut::<Interaction>(button)
+        .expect("practice tab is interactive") = Interaction::Pressed;
+    app.world_mut()
+        .run_system_once(update_tab_selection)
+        .expect("tab click system runs");
+    app.update();
+}
+
+fn write_mouse_button(app: &mut App, state: bevy::input::ButtonState) {
+    let window = app
+        .world_mut()
+        .query_filtered::<Entity, With<PrimaryWindow>>()
+        .single(app.world())
+        .expect("primary window");
+    app.world_mut()
+        .write_message(bevy::input::mouse::MouseButtonInput {
+            button: MouseButton::Left,
+            state,
+            window,
+        });
+}
+
+fn computed_width<T: Component>(app: &mut App) -> f32 {
+    app.world_mut()
+        .query_filtered::<&ComputedNode, With<T>>()
+        .single(app.world())
+        .expect("one computed node")
+        .size()
+        .x
+}
+
+fn resize_surface(app: &mut App, width: f32, height: f32) {
+    app.world_mut()
+        .insert_resource(gameplay_drums::layout::PlayfieldLayout::from_size(
+            width,
+            height,
+            &gameplay_drums::lanes::Lanes::default(),
+        ));
+    let physical_size = UVec2::new(width as u32, height as u32);
+    let mut cameras = app.world_mut().query::<&mut Camera>();
+    let mut camera = cameras.single_mut(app.world_mut()).expect("one UI camera");
+    camera.computed.target_info = Some(RenderTargetInfo {
+        physical_size,
+        scale_factor: 1.0,
+    });
+    camera.viewport = Some(Viewport {
+        physical_size,
+        ..default()
+    });
+    app.world_mut()
+        .query_filtered::<&mut Window, With<PrimaryWindow>>()
+        .single_mut(app.world_mut())
+        .expect("primary window")
+        .resolution =
+        WindowResolution::new(width as u32, height as u32).with_scale_factor_override(1.0);
+}
+
+fn node_rect(node: &ComputedNode, transform: &bevy::ui::UiGlobalTransform) -> Rect {
+    let inverse_scale = node.inverse_scale_factor();
+    Rect::from_center_size(
+        transform.translation * inverse_scale,
+        node.size() * inverse_scale,
+    )
 }
 
 #[test]
@@ -139,6 +264,110 @@ fn xlarge_narrow_shell_uses_tabs_without_hiding_timeline() {
 }
 
 #[test]
+fn tabbed_layout_collapses_inactive_pane_and_visible_pane_fills_content() {
+    let mut app = setup_hud_app(900.0, 720.0, dtx_config::TextScale::XLarge);
+
+    assert!((computed_width::<PracticeSettingsPane>(&mut app) - 900.0).abs() <= 1.0);
+    assert_eq!(computed_width::<PracticePreviewRegion>(&mut app), 0.0);
+
+    click_tab(&mut app, "Preview");
+
+    assert_eq!(computed_width::<PracticeSettingsPane>(&mut app), 0.0);
+    assert!((computed_width::<PracticePreviewRegion>(&mut app) - 900.0).abs() <= 1.0);
+    assert!(texts(&mut app)
+        .iter()
+        .any(|text| text == "PREVIEW: INPUT IS NOT JUDGED"));
+}
+
+#[test]
+fn split_computed_widths_honor_layout_minima_without_horizontal_overflow() {
+    for (width, height, scale, settings_min, preview_min) in [
+        (1280.0, 720.0, dtx_config::TextScale::Standard, 400.0, 520.0),
+        (1920.0, 1080.0, dtx_config::TextScale::XLarge, 900.0, 780.0),
+    ] {
+        let mut app = setup_hud_app(width, height, scale);
+        let mut query = app.world_mut().query::<(
+            Option<&PracticeSettingsPane>,
+            Option<&PracticePreviewRegion>,
+            &ComputedNode,
+        )>();
+        let (settings_width, settings_content, preview_width, preview_content) =
+            query.iter(app.world()).fold(
+                (0.0, 0.0, 0.0, 0.0),
+                |mut sizes, (settings, preview, node)| {
+                    if settings.is_some() {
+                        sizes.0 = node.size().x;
+                        sizes.1 = node.content_size().x;
+                    }
+                    if preview.is_some() {
+                        sizes.2 = node.size().x;
+                        sizes.3 = node.content_size().x;
+                    }
+                    sizes
+                },
+            );
+        assert!(
+            settings_width + 1.0 >= settings_min,
+            "settings width {settings_width}"
+        );
+        assert!(
+            preview_width + 1.0 >= preview_min,
+            "preview width {preview_width}"
+        );
+        assert!(settings_content <= settings_width + 1.0);
+        assert!(preview_content <= preview_width + 1.0);
+        assert!((settings_width + preview_width - width).abs() <= 1.0);
+    }
+}
+
+#[test]
+fn resize_from_tabbed_preview_to_split_selects_setup_coherently() {
+    let mut app = setup_hud_app(900.0, 720.0, dtx_config::TextScale::Standard);
+    click_tab(&mut app, "Preview");
+    assert_eq!(*app.world().resource::<PracticeTab>(), PracticeTab::Preview);
+
+    resize_surface(&mut app, 1280.0, 720.0);
+    app.update();
+    app.update();
+
+    assert_eq!(*app.world().resource::<PracticeTab>(), PracticeTab::Setup);
+    assert!(texts(&mut app).iter().any(|text| text == "✓ Setup"));
+    assert!(!texts(&mut app).iter().any(|text| text == "✓ Preview"));
+    assert_eq!(computed_width::<PracticeSettingsPane>(&mut app), 400.0);
+
+    resize_surface(&mut app, 900.0, 720.0);
+    app.update();
+    app.update();
+    assert_eq!(*app.world().resource::<PracticeTab>(), PracticeTab::Setup);
+    assert!(texts(&mut app).iter().any(|text| text == "✓ Setup"));
+}
+
+#[test]
+fn split_resize_recomputes_pane_minima_without_a_mode_change() {
+    let mut app = setup_hud_app(1280.0, 720.0, dtx_config::TextScale::Standard);
+    assert_eq!(computed_width::<PracticeSettingsPane>(&mut app), 400.0);
+
+    resize_surface(&mut app, 1920.0, 1080.0);
+    app.world_mut()
+        .insert_resource(dtx_ui::AccessibilityPolicy::from(
+            &dtx_config::AccessibilityConfig {
+                text_scale: dtx_config::TextScale::XLarge,
+                ..default()
+            },
+        ));
+    app.update();
+
+    let mode = app
+        .world_mut()
+        .query::<&PracticeSetupLayout>()
+        .single(app.world())
+        .expect("one setup layout");
+    assert_eq!(mode.0, PracticeLayoutMode::Split);
+    assert_eq!(computed_width::<PracticeSettingsPane>(&mut app), 900.0);
+    assert_eq!(computed_width::<PracticePreviewRegion>(&mut app), 1020.0);
+}
+
+#[test]
 fn editing_shell_uses_continue_as_the_pinned_primary_action() {
     let mut app = setup_hud_app(1280.0, 720.0, dtx_config::TextScale::Standard);
     app.world_mut().resource_mut::<PracticeFlow>().phase =
@@ -151,6 +380,79 @@ fn editing_shell_uses_continue_as_the_pinned_primary_action() {
         .single(app.world())
         .expect("one primary action");
     assert_eq!(action_text.0, "Continue Practice");
+}
+
+#[test]
+fn setup_copy_refreshes_from_draft_in_the_same_update() {
+    let mut app = setup_hud_app(1280.0, 720.0, dtx_config::TextScale::Standard);
+    {
+        let mut draft = app.world_mut().resource_mut::<PracticeDraft>();
+        draft.source = PracticeDraftSource::Custom;
+        draft.loop_region = Some(LoopRegion {
+            start_ms: 2_000,
+            end_ms: 6_000,
+        });
+        draft.user_tempo = 0.75;
+        draft.snap = SnapDivisor::Beat;
+        draft.preroll = gameplay_drums::practice::session::PrerollSetting::Off;
+        draft.count_in = false;
+        draft.trainer.mode = PracticeTrainerMode::Wait;
+    }
+    app.update();
+
+    let copy = texts(&mut app);
+    for expected in [
+        "✓ Custom",
+        "0:02.0",
+        "0:06.0",
+        "0.75×",
+        "Beat",
+        "off",
+        "Off",
+        "Wait",
+    ] {
+        assert!(
+            copy.iter().any(|text| text == expected),
+            "missing {expected:?} in {copy:?}"
+        );
+    }
+}
+
+#[test]
+fn progress_copy_refreshes_from_session_metrics() {
+    let mut app = setup_hud_app(1280.0, 720.0, dtx_config::TextScale::Standard);
+    click_tab(&mut app, "Progress");
+    assert!(texts(&mut app)
+        .iter()
+        .any(|text| text == "No completed attempts yet"));
+
+    {
+        let mut session = app.world_mut().resource_mut::<PracticeSession>();
+        session.attempt_history.push(AttemptRecord {
+            start_ms: 2_000,
+            end_ms: 6_000,
+            tempo: 0.8,
+            counts: default(),
+            max_combo: 20,
+            overhits: 1,
+            accuracy_pct: 93.5,
+            mean_error_ms: -12.0,
+            waited: 0,
+            flow_pct: 100.0,
+        });
+        session
+            .lane_diag
+            .apply_judgment(0, dtx_scoring::JudgmentKind::Perfect, -18);
+    }
+    app.update();
+
+    let copy = texts(&mut app);
+    assert!(copy
+        .iter()
+        .any(|text| text == "Latest: 93.5% at 0.80×, timing -12 ms"));
+    assert!(copy
+        .iter()
+        .any(|text| text.contains("HH") && text.contains("rushing")));
 }
 
 #[test]
@@ -180,27 +482,158 @@ fn timeline_markers_follow_the_draft_not_the_committed_session() {
     assert_eq!(node.width, Val::Percent(40.0));
     assert_eq!(*visibility, Visibility::Visible);
 
-    let handles: Vec<_> = app
+    let mut handles: Vec<_> = app
         .world_mut()
         .query::<(&PracticeLoopHandle, &Node, &Visibility)>()
         .iter(app.world())
-        .map(|(handle, node, visibility)| (*handle, node.left, *visibility))
+        .map(|(handle, node, visibility)| (*handle, node.left, node.right, *visibility))
         .collect();
+    handles.sort_by_key(|(handle, _, _, _)| match handle {
+        PracticeLoopHandle::Start => 0,
+        PracticeLoopHandle::End => 1,
+    });
     assert_eq!(
         handles,
         vec![
             (
                 PracticeLoopHandle::Start,
                 Val::Percent(20.0),
+                Val::Auto,
                 Visibility::Visible
             ),
             (
                 PracticeLoopHandle::End,
-                Val::Percent(60.0),
+                Val::Auto,
+                Val::Percent(40.0),
                 Visibility::Visible
             ),
         ]
     );
+}
+
+#[test]
+fn real_timeline_drag_updates_draft_and_setup_copy_in_the_same_frame() {
+    let mut app = setup_hud_app(1280.0, 720.0, dtx_config::TextScale::Standard);
+    {
+        let mut timeline = app.world_mut().resource_mut::<ChipTimeline>();
+        timeline.end_ms = 16_000;
+        timeline.bar_ms = (0..=8).map(|bar| bar * 2_000).collect();
+        timeline.beat_ms = (0..=32).map(|beat| beat * 500).collect();
+    }
+    app.update();
+    let strip_rect = app
+        .world_mut()
+        .query_filtered::<(&ComputedNode, &bevy::ui::UiGlobalTransform), With<PracticeTimelineStrip>>()
+        .single(app.world())
+        .map(|(node, transform)| node_rect(node, transform))
+        .expect("computed timeline strip");
+    let y = strip_rect.center().y;
+    let start = Vec2::new(strip_rect.min.x + strip_rect.width() * 0.25, y);
+    let end = Vec2::new(strip_rect.min.x + strip_rect.width() * 0.50, y);
+
+    app.world_mut()
+        .query_filtered::<&mut Window, With<PrimaryWindow>>()
+        .single_mut(app.world_mut())
+        .expect("primary window")
+        .set_cursor_position(Some(start));
+    write_mouse_button(&mut app, bevy::input::ButtonState::Pressed);
+    app.update();
+
+    app.world_mut()
+        .query_filtered::<&mut Window, With<PrimaryWindow>>()
+        .single_mut(app.world_mut())
+        .expect("primary window")
+        .set_cursor_position(Some(end));
+    app.update();
+
+    assert_eq!(
+        app.world().resource::<PracticeDraft>().loop_region,
+        Some(LoopRegion {
+            start_ms: 4_000,
+            end_ms: 8_000,
+        })
+    );
+    let copy = texts(&mut app);
+    assert!(copy.iter().any(|text| text == "✓ Custom"));
+    assert!(copy.iter().any(|text| text == "0:04.0"));
+    assert!(copy.iter().any(|text| text == "0:08.0"));
+}
+
+#[test]
+fn real_timeline_click_emits_snapped_preview_seek() {
+    let mut app = setup_hud_app(1280.0, 720.0, dtx_config::TextScale::Standard);
+    {
+        let mut timeline = app.world_mut().resource_mut::<ChipTimeline>();
+        timeline.end_ms = 16_000;
+        timeline.bar_ms = (0..=8).map(|bar| bar * 2_000).collect();
+    }
+    app.update();
+    let strip_rect = app
+        .world_mut()
+        .query_filtered::<(&ComputedNode, &bevy::ui::UiGlobalTransform), With<PracticeTimelineStrip>>()
+        .single(app.world())
+        .map(|(node, transform)| node_rect(node, transform))
+        .expect("computed timeline strip");
+    let cursor = Vec2::new(
+        strip_rect.min.x + strip_rect.width() * 0.30,
+        strip_rect.center().y,
+    );
+    app.world_mut()
+        .query_filtered::<&mut Window, With<PrimaryWindow>>()
+        .single_mut(app.world_mut())
+        .expect("primary window")
+        .set_cursor_position(Some(cursor));
+    write_mouse_button(&mut app, bevy::input::ButtonState::Pressed);
+    app.update();
+    write_mouse_button(&mut app, bevy::input::ButtonState::Released);
+    app.update();
+
+    let actions: Vec<_> = app
+        .world()
+        .resource::<Messages<gameplay_drums::practice::PreviewAction>>()
+        .iter_current_update_messages()
+        .copied()
+        .collect();
+    assert_eq!(
+        actions,
+        vec![gameplay_drums::practice::PreviewAction::Seek(4_000)]
+    );
+}
+
+#[test]
+fn end_handle_computed_geometry_stays_inside_timeline_strip() {
+    let mut app = setup_hud_app(1280.0, 720.0, dtx_config::TextScale::Standard);
+    app.world_mut().resource_mut::<ChipTimeline>().end_ms = 16_000;
+    app.world_mut().resource_mut::<PracticeDraft>().loop_region = Some(LoopRegion {
+        start_ms: 4_000,
+        end_ms: 16_000,
+    });
+    app.update();
+
+    let strip = app
+        .world_mut()
+        .query_filtered::<(&ComputedNode, &bevy::ui::UiGlobalTransform), With<PracticeTimelineStrip>>()
+        .single(app.world())
+        .map(|(node, transform)| node_rect(node, transform))
+        .expect("timeline strip");
+    let end = app
+        .world_mut()
+        .query::<(
+            &PracticeLoopHandle,
+            &ComputedNode,
+            &bevy::ui::UiGlobalTransform,
+        )>()
+        .iter(app.world())
+        .find_map(|(handle, node, transform)| {
+            (*handle == PracticeLoopHandle::End).then(|| node_rect(node, transform))
+        })
+        .expect("end handle");
+    assert!(end.min.x >= strip.min.x - 1.0);
+    assert!(
+        end.max.x <= strip.max.x + 1.0,
+        "end {end:?}, strip {strip:?}"
+    );
+    assert!(end.width() >= 20.0);
 }
 
 #[test]
@@ -251,4 +684,6 @@ fn compact_running_hud_is_hidden_during_setup_and_restored_for_running() {
         compact_visibility(&mut app),
         (Some(Visibility::Inherited), Some(Visibility::Inherited))
     );
+    assert_eq!(count::<PracticeSetupRoot>(&mut app), 0);
+    assert_eq!(count::<PracticeTimelineRoot>(&mut app), 0);
 }

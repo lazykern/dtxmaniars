@@ -28,10 +28,21 @@ pub enum PracticeLayoutMode {
     Tabbed,
 }
 
+const SETTINGS_REF_MIN: f32 = 400.0;
+const PREVIEW_REF_MIN: f32 = 520.0;
+
+fn required_pane_widths(width: f32, height: f32, text_multiplier: f32) -> (f32, f32) {
+    let scale = (width / dtx_ui::REF_WIDTH)
+        .min(height / dtx_ui::REF_HEIGHT)
+        .max(1.0);
+    (
+        SETTINGS_REF_MIN * scale * text_multiplier,
+        PREVIEW_REF_MIN * scale,
+    )
+}
+
 pub fn practice_layout_mode(width: f32, height: f32, text_multiplier: f32) -> PracticeLayoutMode {
-    let scale = (width / dtx_ui::REF_WIDTH).min(height / dtx_ui::REF_HEIGHT);
-    let settings_need = 400.0 * scale.max(1.0) * text_multiplier;
-    let preview_need = 520.0 * scale.max(1.0);
+    let (settings_need, preview_need) = required_pane_widths(width, height, text_multiplier);
     if width >= settings_need + preview_need {
         PracticeLayoutMode::Split
     } else {
@@ -58,7 +69,7 @@ pub struct PracticePrimaryAction;
 struct PrimaryActionButton;
 
 #[derive(Component, Debug, Clone, Copy)]
-pub(super) struct PracticeTabButton(PracticeTab);
+pub struct PracticeTabButton(pub PracticeTab);
 
 #[derive(Component)]
 struct SetupContent;
@@ -69,6 +80,21 @@ struct ProgressContent;
 #[derive(Component)]
 struct PreviewContent;
 
+#[derive(Component, Debug, Clone, Copy, PartialEq, Eq)]
+enum SetupValue {
+    Source,
+    LoopStart,
+    LoopEnd,
+    Tempo,
+    Snap,
+    Preroll,
+    CountIn,
+    Trainer,
+}
+
+#[derive(Component)]
+pub(super) struct SetupValueText(SetupValue);
+
 pub(super) fn ensure_setup_shell(
     mut commands: Commands,
     flow: Res<PracticeFlow>,
@@ -77,9 +103,12 @@ pub(super) fn ensure_setup_shell(
     timeline: Res<crate::timeline::ChipTimeline>,
     layout: Option<Res<crate::layout::PlayfieldLayout>>,
     accessibility: Option<Res<dtx_ui::AccessibilityPolicy>>,
-    tab: Res<PracticeTab>,
+    mut tab: ResMut<PracticeTab>,
     roots: Query<(Entity, &PracticeSetupLayout), With<PracticeSetupRoot>>,
-    mut primary: Query<&mut Text, With<PracticePrimaryAction>>,
+    mut panes: ParamSet<(
+        Query<&mut Node, With<PracticeSettingsPane>>,
+        Query<&mut Node, With<PracticePreviewRegion>>,
+    )>,
 ) {
     let surface_open = matches!(flow.phase, PracticePhase::Setup | PracticePhase::Editing);
     if !surface_open {
@@ -98,14 +127,27 @@ pub(super) fn ensure_setup_shell(
         .as_deref()
         .map_or(1.0, dtx_ui::AccessibilityPolicy::text_multiplier);
     let mode = practice_layout_mode(width, height, text_multiplier);
+    let (settings_width, preview_min_width) = required_pane_widths(width, height, text_multiplier);
+    if mode == PracticeLayoutMode::Split && *tab == PracticeTab::Preview {
+        *tab = PracticeTab::Setup;
+    }
 
     if let Ok((root, current)) = roots.single() {
         if current.0 != mode {
             commands.entity(root).despawn();
-        } else if let Ok(mut text) = primary.single_mut() {
-            text.0 = primary_action_label(flow.phase).to_owned();
+        } else {
+            if mode == PracticeLayoutMode::Split {
+                if let Ok(mut settings) = panes.p0().single_mut() {
+                    settings.width = Val::Px(settings_width);
+                }
+                if let Ok(mut preview) = panes.p1().single_mut() {
+                    preview.width = Val::Auto;
+                    preview.min_width = Val::Px(preview_min_width);
+                    preview.flex_grow = 1.0;
+                }
+            }
+            return;
         }
-        return;
     }
     if !roots.is_empty() {
         return;
@@ -114,6 +156,8 @@ pub(super) fn ensure_setup_shell(
     spawn_setup_shell(
         &mut commands,
         mode,
+        settings_width,
+        preview_min_width,
         *tab,
         &flow,
         &draft,
@@ -125,6 +169,8 @@ pub(super) fn ensure_setup_shell(
 fn spawn_setup_shell(
     commands: &mut Commands,
     mode: PracticeLayoutMode,
+    settings_width: f32,
+    preview_min_width: f32,
     tab: PracticeTab,
     flow: &PracticeFlow,
     draft: &PracticeDraft,
@@ -157,8 +203,17 @@ fn spawn_setup_shell(
                 ..default()
             })
             .with_children(|main| {
-                spawn_settings(main, &theme, mode, tab, flow.phase, draft, session);
-                spawn_preview(main, &theme, mode, tab);
+                spawn_settings(
+                    main,
+                    &theme,
+                    mode,
+                    settings_width,
+                    tab,
+                    flow.phase,
+                    draft,
+                    session,
+                );
+                spawn_preview(main, &theme, mode, preview_min_width, tab);
             });
             super::timeline_ui::spawn_timeline(root, &theme, flow, draft, timeline);
         });
@@ -168,6 +223,7 @@ fn spawn_settings(
     main: &mut ChildSpawnerCommands,
     theme: &dtx_ui::Theme,
     mode: PracticeLayoutMode,
+    settings_width: f32,
     tab: PracticeTab,
     phase: PracticePhase,
     draft: &PracticeDraft,
@@ -178,7 +234,7 @@ fn spawn_settings(
         PracticeSettingsPane,
         Node {
             width: if mode == PracticeLayoutMode::Split {
-                Val::Percent(38.0)
+                Val::Px(settings_width)
             } else {
                 Val::Percent(100.0)
             },
@@ -188,14 +244,15 @@ fn spawn_settings(
             row_gap: Val::Px(dtx_ui::SpacingRole::Sm.px()),
             min_width: Val::Px(0.0),
             min_height: Val::Px(0.0),
+            display: if visible {
+                Display::Flex
+            } else {
+                Display::None
+            },
             ..default()
         },
         BackgroundColor(theme.stage_bg),
-        if visible {
-            Visibility::Inherited
-        } else {
-            Visibility::Hidden
-        },
+        Visibility::Inherited,
     ))
     .with_children(|pane| {
         spawn_text(
@@ -317,43 +374,70 @@ fn spawn_setup_content(
     spawn_setting_row(
         content,
         theme,
+        SetupValue::Source,
         "Source",
-        format!(
-            "{} {}",
-            dtx_ui::StateMarker::Selected.label(),
-            source_label(draft.source)
-        ),
+        setup_value(SetupValue::Source, draft),
     );
-    let (a, b) = draft
-        .loop_region
-        .map_or(("Whole song".to_owned(), "End".to_owned()), |r| {
-            (
-                super::format_chart_time(r.start_ms),
-                super::format_chart_time(r.end_ms),
-            )
-        });
-    spawn_setting_row(content, theme, "A", a);
-    spawn_setting_row(content, theme, "B", b);
-
-    spawn_section_heading(content, theme, "Transport");
-    spawn_setting_row(content, theme, "Tempo", format!("{:.2}×", draft.user_tempo));
-    spawn_setting_row(content, theme, "Snap", draft.snap.label());
-    spawn_setting_row(content, theme, "Pre-roll", draft.preroll.label());
     spawn_setting_row(
         content,
         theme,
+        SetupValue::LoopStart,
+        "A",
+        setup_value(SetupValue::LoopStart, draft),
+    );
+    spawn_setting_row(
+        content,
+        theme,
+        SetupValue::LoopEnd,
+        "B",
+        setup_value(SetupValue::LoopEnd, draft),
+    );
+
+    spawn_section_heading(content, theme, "Transport");
+    spawn_setting_row(
+        content,
+        theme,
+        SetupValue::Tempo,
+        "Tempo",
+        setup_value(SetupValue::Tempo, draft),
+    );
+    spawn_setting_row(
+        content,
+        theme,
+        SetupValue::Snap,
+        "Snap",
+        setup_value(SetupValue::Snap, draft),
+    );
+    spawn_setting_row(
+        content,
+        theme,
+        SetupValue::Preroll,
+        "Pre-roll",
+        setup_value(SetupValue::Preroll, draft),
+    );
+    spawn_setting_row(
+        content,
+        theme,
+        SetupValue::CountIn,
         "Count-in",
-        if draft.count_in { "On" } else { "Off" },
+        setup_value(SetupValue::CountIn, draft),
     );
 
     spawn_section_heading(content, theme, "Trainer");
-    spawn_setting_row(content, theme, "Mode", trainer_label(draft.trainer.mode));
+    spawn_setting_row(
+        content,
+        theme,
+        SetupValue::Trainer,
+        "Mode",
+        setup_value(SetupValue::Trainer, draft),
+    );
 }
 
 fn spawn_preview(
     main: &mut ChildSpawnerCommands,
     theme: &dtx_ui::Theme,
     mode: PracticeLayoutMode,
+    preview_min_width: f32,
     tab: PracticeTab,
 ) {
     let visible = mode == PracticeLayoutMode::Split || tab == PracticeTab::Preview;
@@ -362,7 +446,7 @@ fn spawn_preview(
         PreviewContent,
         Node {
             width: if mode == PracticeLayoutMode::Split {
-                Val::Percent(62.0)
+                Val::Auto
             } else {
                 Val::Percent(100.0)
             },
@@ -370,15 +454,25 @@ fn spawn_preview(
             align_items: AlignItems::Start,
             justify_content: JustifyContent::End,
             padding: UiRect::all(Val::Px(dtx_ui::SpacingRole::Md.px())),
-            min_width: Val::Px(0.0),
+            min_width: if mode == PracticeLayoutMode::Split {
+                Val::Px(preview_min_width)
+            } else {
+                Val::Px(0.0)
+            },
             min_height: Val::Px(0.0),
+            flex_grow: if mode == PracticeLayoutMode::Split {
+                1.0
+            } else {
+                0.0
+            },
+            display: if visible {
+                Display::Flex
+            } else {
+                Display::None
+            },
             ..default()
         },
-        if visible {
-            Visibility::Inherited
-        } else {
-            Visibility::Hidden
-        },
+        Visibility::Inherited,
     ))
     .with_children(|preview| {
         preview.spawn((
@@ -417,6 +511,7 @@ fn spawn_section_heading(
 fn spawn_setting_row(
     parent: &mut ChildSpawnerCommands,
     theme: &dtx_ui::Theme,
+    field: SetupValue,
     label: impl Into<String>,
     value: impl Into<String>,
 ) {
@@ -439,13 +534,51 @@ fn spawn_setting_row(
                 dtx_ui::TypographyRole::Body,
                 theme.text_secondary,
             );
-            spawn_text(
+            let value = spawn_text(
                 row,
                 value,
                 dtx_ui::TypographyRole::Label,
                 theme.text_primary,
             );
+            row.commands().entity(value).insert(SetupValueText(field));
         });
+}
+
+fn setup_value(field: SetupValue, draft: &PracticeDraft) -> String {
+    match field {
+        SetupValue::Source => format!(
+            "{} {}",
+            dtx_ui::StateMarker::Selected.label(),
+            source_label(draft.source)
+        ),
+        SetupValue::LoopStart => draft.loop_region.map_or_else(
+            || "Whole song".to_owned(),
+            |region| super::format_chart_time(region.start_ms),
+        ),
+        SetupValue::LoopEnd => draft.loop_region.map_or_else(
+            || "End".to_owned(),
+            |region| super::format_chart_time(region.end_ms),
+        ),
+        SetupValue::Tempo => format!("{:.2}×", draft.user_tempo),
+        SetupValue::Snap => draft.snap.label().to_owned(),
+        SetupValue::Preroll => draft.preroll.label(),
+        SetupValue::CountIn => if draft.count_in { "On" } else { "Off" }.to_owned(),
+        SetupValue::Trainer => trainer_label(draft.trainer.mode).to_owned(),
+    }
+}
+
+pub(super) fn refresh_setup_copy(
+    flow: Res<PracticeFlow>,
+    draft: Res<PracticeDraft>,
+    mut values: Query<(&SetupValueText, &mut Text), Without<PracticePrimaryAction>>,
+    mut primary: Query<&mut Text, With<PracticePrimaryAction>>,
+) {
+    for (field, mut text) in &mut values {
+        text.0 = setup_value(field.0, &draft);
+    }
+    for mut text in &mut primary {
+        text.0 = primary_action_label(flow.phase).to_owned();
+    }
 }
 
 pub(super) fn spawn_text(
@@ -489,7 +622,7 @@ const fn trainer_label(mode: crate::practice::PracticeTrainerMode) -> &'static s
     }
 }
 
-pub(super) fn update_tab_selection(
+pub fn update_tab_selection(
     clicks: Query<(&Interaction, &PracticeTabButton), Changed<Interaction>>,
     mut tab: ResMut<PracticeTab>,
     roots: Query<Entity, With<PracticeSetupRoot>>,
