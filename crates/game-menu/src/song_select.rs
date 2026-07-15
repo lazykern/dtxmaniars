@@ -1202,18 +1202,12 @@ fn spawn_song_select(
                     ))
                     .with_children(|bar| {
                         for (label, hot) in [
-                            ("↑↓ SELECT", false),
-                            ("←→ FOCUS", false),
-                            ("↑↓ MOVE", false),
+                            ("←→ SELECT", false),
+                            ("↑↓ CHANGE", false),
                             ("ENTER READY", true),
-                            ("SHIFT+ENTER PRACTICE READY", false),
+                            ("SHIFT+ENTER PRACTICE", false),
                             ("TAB SORT", false),
                             ("F5 RESCAN", false),
-                            ("F7 FAVORITE", false),
-                            ("CTRL+1..4 FILTER", false),
-                            ("CTRL+R RANDOM", false),
-                            ("F6 IMPORT", false),
-                            ("F1 SETTINGS", false),
                             ("ESC BACK", false),
                         ] {
                             bar.spawn((
@@ -2208,12 +2202,8 @@ fn ready_mode_for_action(
     verb: NavVerb,
 ) -> Option<crate::song_ready::ReadyMode> {
     match (source, focus, verb) {
-        (NavSource::Keyboard, _, NavVerb::Confirm) => {
-            Some(crate::song_ready::ReadyMode::Normal)
-        }
-        (NavSource::Keyboard, _, NavVerb::Practice) => {
-            Some(crate::song_ready::ReadyMode::Practice)
-        }
+        (NavSource::Keyboard, _, NavVerb::Confirm) => Some(crate::song_ready::ReadyMode::Normal),
+        (NavSource::Keyboard, _, NavVerb::Practice) => Some(crate::song_ready::ReadyMode::Practice),
         (NavSource::Pad, SongSelectFocus::Difficulty, NavVerb::Confirm) => {
             Some(crate::song_ready::ReadyMode::Normal)
         }
