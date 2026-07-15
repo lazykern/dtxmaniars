@@ -13,7 +13,7 @@ use std::collections::HashMap;
 use std::time::{Duration, Instant};
 
 use bevy::ecs::system::SystemParam;
-use bevy::prelude::*;
+use bevy::{ecs::message::MessageId, prelude::*};
 use bevy_kira_audio::prelude::AudioInstance;
 use dtx_audio::{BgmHandle, DrumPolyphony};
 use dtx_input::SystemVerb;
@@ -134,6 +134,7 @@ pub struct PausedRestart {
     target_ms: Option<i64>,
     attempt_start_ms: i64,
     seek_revision: u64,
+    seek_id: Option<MessageId<crate::seek::SeekToChartTime>>,
 }
 
 impl PausedRestart {
@@ -147,6 +148,17 @@ impl PausedRestart {
             && seek.attempt_start_ms.is_none()
             && acknowledgement.revision == self.seek_revision
             && acknowledgement.request == Some(*seek)
+    }
+}
+
+#[derive(Resource, Default)]
+pub struct CancelledPausedRestart {
+    seek_id: Option<MessageId<crate::seek::SeekToChartTime>>,
+}
+
+impl CancelledPausedRestart {
+    pub(crate) fn owns(&self, seek_id: MessageId<crate::seek::SeekToChartTime>) -> bool {
+        self.seek_id == Some(seek_id)
     }
 }
 
@@ -271,6 +283,7 @@ pub(super) fn plugin(app: &mut App) {
         .init_resource::<QuickSettingsSelection>()
         .init_resource::<PauseView>()
         .init_resource::<PausedRestart>()
+        .init_resource::<CancelledPausedRestart>()
         .init_resource::<VerbGuard>()
         // Always start a performance un-paused.
         .add_systems(
@@ -302,7 +315,7 @@ pub(super) fn plugin(app: &mut App) {
             OnExit(PauseState::Paused),
             (
                 clear_gameplay_input_queues,
-                reset_paused_restart,
+                cancel_paused_restart,
                 resume_chart_audio,
                 despawn_overlay,
             )
@@ -320,6 +333,12 @@ pub(super) fn plugin(app: &mut App) {
                 .after(crate::seek::apply_seek_system)
                 .after(crate::practice::stats::track_attempt_stats)
                 .run_if(in_state(PauseState::Paused)),
+        )
+        .add_systems(
+            FixedUpdate,
+            clear_cancelled_paused_restart
+                .after(crate::seek::apply_seek_system)
+                .after(crate::practice::stats::track_attempt_stats),
         );
 }
 
@@ -329,6 +348,18 @@ fn force_running(mut next: ResMut<NextState<PauseState>>) {
 
 fn reset_paused_restart(mut restart: ResMut<PausedRestart>) {
     *restart = PausedRestart::default();
+}
+
+fn cancel_paused_restart(
+    mut restart: ResMut<PausedRestart>,
+    mut cancelled: ResMut<CancelledPausedRestart>,
+) {
+    cancelled.seek_id = restart.seek_id.take();
+    *restart = PausedRestart::default();
+}
+
+fn clear_cancelled_paused_restart(mut cancelled: ResMut<CancelledPausedRestart>) {
+    cancelled.seek_id = None;
 }
 
 fn clear_gameplay_input_queues(
@@ -866,6 +897,7 @@ pub(crate) fn pause_menu_input(
         state.next_pause.set(PauseState::Running);
     }
     match *state.view {
+        PauseView::Menu if resume => {}
         PauseView::Menu if confirm => {
             clear_menu_gameplay_queues(&mut state);
             let selected = items[state.selection.0 % items.len()];
@@ -921,7 +953,7 @@ pub(crate) fn pause_menu_input(
                             session.transport.preroll,
                             attempt_start_ms,
                         );
-                        seeks.write(crate::seek::SeekToChartTime {
+                        let seek_id = seeks.write(crate::seek::SeekToChartTime {
                             target_ms,
                             snap: None,
                             attempt_start_ms: None,
@@ -930,6 +962,7 @@ pub(crate) fn pause_menu_input(
                         paused_restart.attempt_start_ms = attempt_start_ms;
                         paused_restart.seek_revision =
                             seek_acknowledgement.revision.wrapping_add(1);
+                        paused_restart.seek_id = Some(seek_id);
                     }
                 }
                 PauseItemKind::PracticeSettings => {

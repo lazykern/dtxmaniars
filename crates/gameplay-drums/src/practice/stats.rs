@@ -75,6 +75,7 @@ pub fn track_attempt_stats(
     mut combo: ResMut<Combo>,
     mut finalized: ResMut<LastFinalizedAttempt>,
     paused_restart: Option<Res<crate::pause::PausedRestart>>,
+    cancelled_restart: Option<Res<crate::pause::CancelledPausedRestart>>,
     acknowledgement: Res<crate::seek::SeekAcknowledgement>,
     wait_state: Option<Res<crate::practice::wait::WaitState>>,
     flow: Option<Res<crate::practice::PracticeFlow>>,
@@ -124,7 +125,16 @@ pub fn track_attempt_stats(
         session.current_attempt.overhits += 1;
         session.lane_diag.apply_overhit(eh.lane);
     }
-    if let Some(seek) = seeks.read().last() {
+    if let Some(seek) = seeks
+        .read_with_id()
+        .filter(|(_, id)| {
+            !cancelled_restart
+                .as_ref()
+                .is_some_and(|cancelled| cancelled.owns(*id))
+        })
+        .map(|(seek, _)| seek)
+        .last()
+    {
         if paused_restart
             .is_some_and(|restart| restart.owns_acknowledged_seek(seek, &acknowledgement))
         {

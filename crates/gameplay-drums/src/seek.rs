@@ -239,6 +239,7 @@ pub struct SeekState<'w> {
 
 pub fn apply_seek_system(
     mut seeks: MessageReader<SeekToChartTime>,
+    cancelled_restart: Option<Res<crate::pause::CancelledPausedRestart>>,
     mut acknowledgement: ResMut<SeekAcknowledgement>,
     timeline: Res<ChipTimeline>,
     chart: Res<ActiveChart>,
@@ -248,7 +249,16 @@ pub fn apply_seek_system(
     mut commands: Commands,
 ) {
     // Coalesce: only the last seek this tick wins.
-    let Some(seek) = seeks.read().last().copied() else {
+    let Some(seek) = seeks
+        .read_with_id()
+        .filter(|(_, id)| {
+            !cancelled_restart
+                .as_ref()
+                .is_some_and(|cancelled| cancelled.owns(*id))
+        })
+        .map(|(seek, _)| *seek)
+        .last()
+    else {
         return;
     };
     if !state.clock.is_started() {
