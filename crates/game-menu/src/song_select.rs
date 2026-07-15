@@ -2219,7 +2219,7 @@ fn ready_mode_for_action(
     }
 }
 
-fn song_select_nav_consumer(
+pub(crate) fn song_select_nav_consumer(
     mut actions: MessageReader<NavAction>,
     mut focus: ResMut<SongSelectFocus>,
     db: Res<SongDb>,

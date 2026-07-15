@@ -5,8 +5,8 @@ use bevy::prelude::*;
 use dtx_ui::motion::EnterChoreo;
 use dtx_ui::{Notification, NotificationQueue, Theme, ThemeResource};
 use game_shell::{
-    AppState, NavAction, NavSource, NavVerb, PracticeIntent, TransitionRequest, despawn_stage,
-    request_transition,
+    AppState, NavAction, NavSource, NavVerb, PracticeIntent, PracticeOrigin, TransitionRequest,
+    despawn_stage, request_transition,
 };
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -1110,10 +1110,6 @@ fn execute_ready_launch(
     }
 }
 
-/// Isolated handoff seam for the parallel Practice overhaul.
-///
-/// Until that branch exposes a stable setup event/resource, preserve the
-/// existing fallback: mark a manual practice intent and enter SongLoading.
 fn request_practice_setup_from_song_ready(
     song: &dtx_library::SongInfo,
     selected: &mut crate::song_select::SelectedSong,
@@ -1121,8 +1117,12 @@ fn request_practice_setup_from_song_ready(
     requests: &mut MessageWriter<TransitionRequest>,
 ) {
     selected.0 = Some(song.path.clone());
-    *practice = PracticeIntent::Manual;
+    *practice = practice_intent_from_song_ready();
     request_transition(requests, AppState::SongLoading);
+}
+
+fn practice_intent_from_song_ready() -> PracticeIntent {
+    PracticeIntent::manual(PracticeOrigin::SongSelect)
 }
 
 fn record_summary(song: &dtx_library::SongInfo) -> String {
@@ -1438,6 +1438,73 @@ fn layout_song_ready(
 mod tests {
     use super::*;
 
+    fn ready_handoff_app(intent: PracticeIntent) -> App {
+        let song = dtx_library::SongInfo {
+            path: std::path::PathBuf::from("/songs/test/chart.dtx"),
+            title: "Test Song".into(),
+            artist: "Test Artist".into(),
+            bpm: Some(120.0),
+            dlevel: Some(50),
+            bgm_path: None,
+            preview_path: None,
+            preview_is_loopable: false,
+            preimage_path: None,
+        };
+        let selection_state = crate::song_select::SongSelectSelection {
+            visible: vec![crate::song_select::SongFolderView {
+                folder: std::path::PathBuf::from("/songs/test"),
+                title: song.title.clone(),
+                artist: song.artist.clone(),
+                chart_indices: vec![0],
+            }],
+            ..Default::default()
+        };
+        let mut app = App::new();
+        app.add_message::<NavAction>()
+            .add_message::<ReadyLaunch>()
+            .add_message::<TransitionRequest>()
+            .insert_resource(dtx_library::SongDb {
+                songs: vec![song],
+                ..Default::default()
+            })
+            .insert_resource(crate::song_select::Selection::default())
+            .insert_resource(selection_state)
+            .insert_resource(crate::song_select::SongSelectFocus::Songs)
+            .insert_resource(crate::song_select::SelectedSong::default())
+            .insert_resource(SongReadyState::default())
+            .insert_resource(ReadyConfigDraft::default())
+            .insert_resource(ReadyActionCapture::default())
+            .insert_resource(intent)
+            .insert_resource(NotificationQueue::default())
+            .add_systems(
+                Update,
+                (
+                    crate::song_select::song_select_nav_consumer,
+                    song_ready_nav_input,
+                    execute_ready_launch,
+                )
+                    .chain(),
+            );
+        app
+    }
+
+    fn send_nav(app: &mut App, verb: NavVerb) {
+        app.world_mut().write_message(NavAction {
+            verb,
+            source: NavSource::Keyboard,
+            coarse: false,
+        });
+        app.update();
+    }
+
+    fn transition_targets(app: &mut App) -> Vec<AppState> {
+        app.world_mut()
+            .resource_mut::<Messages<TransitionRequest>>()
+            .drain()
+            .map(|request| request.0)
+            .collect()
+    }
+
     #[test]
     fn ready_opens_in_browse_on_the_central_card() {
         let mut state = SongReadyState::default();
@@ -1632,6 +1699,83 @@ mod tests {
         assert_eq!(visible_difficulty_ordinals(8, 0), vec![0, 1, 2, 3, 4]);
         assert_eq!(visible_difficulty_ordinals(8, 4), vec![2, 3, 4, 5, 6]);
         assert_eq!(visible_difficulty_ordinals(8, 7), vec![3, 4, 5, 6, 7]);
+    }
+
+    #[test]
+    fn practice_launch_preserves_song_select_origin() {
+        let intent = practice_intent_from_song_ready();
+
+        assert_eq!(
+            intent.request().map(|request| request.origin),
+            Some(PracticeOrigin::SongSelect)
+        );
+        assert!(intent.recommendation().is_none());
+    }
+
+    #[test]
+    fn practice_ready_opens_without_launch_then_confirms_into_song_loading() {
+        let mut app = ready_handoff_app(PracticeIntent::None);
+
+        send_nav(&mut app, NavVerb::Practice);
+
+        let ready = app.world().resource::<SongReadyState>();
+        assert_eq!(ready.layer, SongReadyLayer::Browse);
+        assert_eq!(ready.mode, ReadyMode::Practice);
+        assert!(
+            app.world()
+                .resource::<crate::song_select::SelectedSong>()
+                .0
+                .is_none()
+        );
+        assert_eq!(
+            *app.world().resource::<PracticeIntent>(),
+            PracticeIntent::None
+        );
+        assert!(transition_targets(&mut app).is_empty());
+
+        send_nav(&mut app, NavVerb::Confirm);
+
+        assert_eq!(
+            app.world().resource::<crate::song_select::SelectedSong>().0,
+            Some(std::path::PathBuf::from("/songs/test/chart.dtx"))
+        );
+        assert_eq!(
+            app.world()
+                .resource::<PracticeIntent>()
+                .request()
+                .map(|request| request.origin),
+            Some(PracticeOrigin::SongSelect)
+        );
+        assert_eq!(transition_targets(&mut app), vec![AppState::SongLoading]);
+    }
+
+    #[test]
+    fn normal_ready_confirmation_clears_stale_practice_and_launches_once() {
+        let stale = PracticeIntent::manual(PracticeOrigin::Results);
+        let mut app = ready_handoff_app(stale);
+
+        send_nav(&mut app, NavVerb::Confirm);
+
+        assert_eq!(*app.world().resource::<PracticeIntent>(), stale);
+        assert!(
+            app.world()
+                .resource::<crate::song_select::SelectedSong>()
+                .0
+                .is_none()
+        );
+        assert!(transition_targets(&mut app).is_empty());
+
+        send_nav(&mut app, NavVerb::Confirm);
+
+        assert_eq!(
+            *app.world().resource::<PracticeIntent>(),
+            PracticeIntent::None
+        );
+        assert_eq!(
+            app.world().resource::<crate::song_select::SelectedSong>().0,
+            Some(std::path::PathBuf::from("/songs/test/chart.dtx"))
+        );
+        assert_eq!(transition_targets(&mut app), vec![AppState::SongLoading]);
     }
 
     #[test]
