@@ -158,8 +158,10 @@ fn reduce_ready_keyboard_browse(state: &mut SongReadyState, verb: NavVerb) -> Re
             state.step_card(1);
             ReadyKeyboardEffect::None
         }
-        NavVerb::Up if state.focus == ReadyCard::Song => ReadyKeyboardEffect::AdjustDifficulty(-1),
-        NavVerb::Down if state.focus == ReadyCard::Song => ReadyKeyboardEffect::AdjustDifficulty(1),
+        NavVerb::Up if state.focus == ReadyCard::Song => ReadyKeyboardEffect::AdjustDifficulty(1),
+        NavVerb::Down if state.focus == ReadyCard::Song => {
+            ReadyKeyboardEffect::AdjustDifficulty(-1)
+        }
         NavVerb::Up => ReadyKeyboardEffect::AdjustValue(-1),
         NavVerb::Down => ReadyKeyboardEffect::AdjustValue(1),
         NavVerb::Confirm if state.focus == ReadyCard::Song => ReadyKeyboardEffect::Launch,
@@ -975,8 +977,8 @@ fn song_ready_nav_input(
                 },
             },
             SongReadyLayer::PrimaryDetail => match action.verb {
-                NavVerb::Up => step_ready_difficulty(&mut selection, &selection_state, -1),
-                NavVerb::Down => step_ready_difficulty(&mut selection, &selection_state, 1),
+                NavVerb::Up => step_ready_difficulty(&mut selection, &selection_state, 1),
+                NavVerb::Down => step_ready_difficulty(&mut selection, &selection_state, -1),
                 NavVerb::Confirm => {
                     launches.write(ReadyLaunch::Current);
                 }
@@ -1046,9 +1048,9 @@ fn song_ready_pointer_input(
     for event in wheel.read() {
         if song_hovered {
             let delta = if event.y > 0.0 {
-                -1
-            } else if event.y < 0.0 {
                 1
+            } else if event.y < 0.0 {
+                -1
             } else {
                 0
             };
@@ -1530,6 +1532,21 @@ mod tests {
             ReadyKeyboardEffect::AdjustValue(-1)
         );
         assert_eq!(state.layer, SongReadyLayer::Browse);
+    }
+
+    #[test]
+    fn keyboard_song_difficulty_follows_visual_vertical_order() {
+        let mut state = SongReadyState::default();
+        state.open(ReadyMode::Normal);
+
+        assert_eq!(
+            reduce_ready_keyboard_browse(&mut state, NavVerb::Up),
+            ReadyKeyboardEffect::AdjustDifficulty(1)
+        );
+        assert_eq!(
+            reduce_ready_keyboard_browse(&mut state, NavVerb::Down),
+            ReadyKeyboardEffect::AdjustDifficulty(-1)
+        );
     }
 
     #[test]

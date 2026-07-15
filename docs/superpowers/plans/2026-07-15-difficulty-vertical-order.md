@@ -28,14 +28,15 @@
 - Consumes: `NavVerb`, `Selection.difficulty`, and descending rendered difficulty rails.
 - Produces: spatially consistent keyboard and mouse-wheel navigation.
 
-- [ ] **Step 1: Write failing regression tests**
+- [x] **Step 1: Write failing regression tests**
 
 Add a Ready reducer assertion that Song-focused `Up` returns
-`AdjustDifficulty(1)` and `Down` returns `AdjustDifficulty(-1)`. Add helper
-tests with three available difficulties showing positive deltas advance from
-ordinal 1 to 2 and negative deltas decrease from ordinal 1 to 0.
+`AdjustDifficulty(1)` and `Down` returns `AdjustDifficulty(-1)`. Add a Song
+Select navigation-system test with three available difficulties showing Up
+advances from ordinal 1 to 2 and Down decreases from ordinal 1 to 0 for both
+keyboard and pad input.
 
-- [ ] **Step 2: Run the focused tests to verify RED**
+- [x] **Step 2: Run the focused tests to verify RED**
 
 Run:
 
@@ -45,13 +46,13 @@ cargo test -p game-menu --lib song_ready::tests::keyboard_song_difficulty_follow
 
 Expected: failure because the reducer currently emits the opposite deltas.
 
-- [ ] **Step 3: Implement the minimal input-direction changes**
+- [x] **Step 3: Implement the minimal input-direction changes**
 
 Reverse only vertical difficulty deltas in Song Select and Song Ready. Keep
 `step_ready_difficulty` and direct click behavior unchanged because its
 positive delta already means a higher ordinal.
 
-- [ ] **Step 4: Verify the focused and package tests**
+- [x] **Step 4: Verify the focused and package tests**
 
 Run:
 

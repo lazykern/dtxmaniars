@@ -1980,7 +1980,7 @@ fn song_select_pointer_input(
             continue;
         }
         if difficulty_hovered {
-            if delta < 0 {
+            if delta > 0 {
                 selection.difficulty = selection.difficulty.saturating_sub(1);
             } else if let Some(folder) = selection_state.visible.get(selection.folder)
                 && folder.difficulty_count() > 0
@@ -2242,8 +2242,8 @@ pub(crate) fn song_select_nav_consumer(
         let (folder_step, diff_step) = match (*focus, action.verb) {
             (SongSelectFocus::Songs, NavVerb::Up) => (-1, 0),
             (SongSelectFocus::Songs, NavVerb::Down) => (1, 0),
-            (SongSelectFocus::Difficulty, NavVerb::Up) => (0, -1),
-            (SongSelectFocus::Difficulty, NavVerb::Down) => (0, 1),
+            (SongSelectFocus::Difficulty, NavVerb::Up) => (0, 1),
+            (SongSelectFocus::Difficulty, NavVerb::Down) => (0, -1),
             _ => (0, 0),
         };
         if folder_step > 0 {
@@ -2694,6 +2694,81 @@ mod tests {
             SongSelectFocus::Songs.on_pad_verb(NavVerb::Back),
             SongSelectFocus::Songs
         );
+    }
+
+    #[test]
+    fn difficulty_navigation_follows_descending_visual_order() {
+        let songs = vec![
+            SongInfo {
+                path: std::path::PathBuf::from("/songs/A/basic.dtx"),
+                title: "A".into(),
+                artist: "X".into(),
+                bpm: Some(120.0),
+                dlevel: Some(20),
+                bgm_path: None,
+                preview_path: None,
+                preview_is_loopable: false,
+                preimage_path: None,
+            },
+            SongInfo {
+                path: std::path::PathBuf::from("/songs/A/advanced.dtx"),
+                title: "A".into(),
+                artist: "X".into(),
+                bpm: Some(120.0),
+                dlevel: Some(50),
+                bgm_path: None,
+                preview_path: None,
+                preview_is_loopable: false,
+                preimage_path: None,
+            },
+            SongInfo {
+                path: std::path::PathBuf::from("/songs/A/master.dtx"),
+                title: "A".into(),
+                artist: "X".into(),
+                bpm: Some(120.0),
+                dlevel: Some(90),
+                bgm_path: None,
+                preview_path: None,
+                preview_is_loopable: false,
+                preimage_path: None,
+            },
+        ];
+        let mut selection_state = SongSelectSelection::default();
+        selection_state.recompute(&songs);
+        let mut app = App::new();
+        app.add_message::<NavAction>()
+            .add_message::<TransitionRequest>()
+            .insert_resource(SongDb {
+                songs,
+                ..Default::default()
+            })
+            .insert_resource(Selection {
+                folder: 0,
+                difficulty: 1,
+            })
+            .insert_resource(selection_state)
+            .insert_resource(SongSelectFocus::Difficulty)
+            .insert_resource(crate::song_ready::SongReadyState::default())
+            .insert_resource(crate::song_ready::ReadyConfigDraft::default())
+            .add_systems(Update, song_select_nav_consumer);
+
+        for source in [game_shell::NavSource::Keyboard, game_shell::NavSource::Pad] {
+            app.world_mut().write_message(NavAction {
+                verb: game_shell::NavVerb::Up,
+                source,
+                coarse: false,
+            });
+            app.update();
+            assert_eq!(app.world().resource::<Selection>().difficulty, 2);
+
+            app.world_mut().write_message(NavAction {
+                verb: game_shell::NavVerb::Down,
+                source,
+                coarse: false,
+            });
+            app.update();
+            assert_eq!(app.world().resource::<Selection>().difficulty, 1);
+        }
     }
 
     #[test]
