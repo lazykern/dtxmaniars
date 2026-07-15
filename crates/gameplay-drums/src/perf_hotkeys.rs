@@ -221,6 +221,7 @@ pub(super) fn plugin(app: &mut App) {
                 .run_if(in_state(AppState::Performance))
                 .run_if(in_state(PauseState::Running))
                 .run_if(drums_mode_active)
+                .run_if(performance_hotkeys_active)
                 // Editor arrow-nudge shares these keys; don't let it mutate/persist
                 // scroll speed + offsets while the layout editor is open.
                 .run_if(crate::editor::editor_closed),
@@ -229,6 +230,14 @@ pub(super) fn plugin(app: &mut App) {
 
 fn drums_mode_active(mode: Res<EGameMode>) -> bool {
     *mode == EGameMode::Drums
+}
+
+fn performance_hotkeys_active(flow: Option<Res<crate::practice::PracticeFlow>>) -> bool {
+    performance_hotkeys_active_value(flow.as_deref())
+}
+
+fn performance_hotkeys_active_value(flow: Option<&crate::practice::PracticeFlow>) -> bool {
+    flow.is_none_or(|flow| flow.phase == crate::practice::PracticePhase::Running)
 }
 
 fn init_perf_hotkey_draft(mut draft: ResMut<PerfHotkeyDraft>, show: Res<ShowPerfInfo>) {
@@ -374,6 +383,23 @@ fn flush_config_draft(draft: &mut PerfHotkeyDraft) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::practice::{PracticeFlow, PracticePhase};
+
+    #[test]
+    fn performance_hotkeys_yield_to_practice_setup_and_editing() {
+        assert!(!performance_hotkeys_active_value(Some(
+            &PracticeFlow::default()
+        )));
+
+        let mut editing = PracticeFlow::default();
+        editing.phase = PracticePhase::Editing;
+        assert!(!performance_hotkeys_active_value(Some(&editing)));
+
+        assert!(performance_hotkeys_active_value(Some(
+            &PracticeFlow::running()
+        )));
+        assert!(performance_hotkeys_active_value(None));
+    }
 
     #[test]
     fn forced_editor_close_sync_preserves_live_perf_info() {
