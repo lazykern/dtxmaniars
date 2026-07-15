@@ -14,7 +14,9 @@ use bevy::time::common_conditions::on_real_timer;
 
 use crate::events::LaneId;
 use crate::midi::{MidiSource, VirtualSource};
-use crate::resolver::{BindResolver, LiveBindings};
+use crate::resolver::BindResolver;
+#[cfg(feature = "midi")]
+use crate::resolver::LiveBindings;
 use crate::SystemVerb;
 
 /// A resolved hit from a real pad, for menu navigation only.
