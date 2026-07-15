@@ -127,6 +127,9 @@ fn build_lifecycle_app(intent: PracticeIntent) -> App {
     .add_plugins(dtx_timing::plugin)
     .add_plugins(game_shell::GameShellPlugin)
     .insert_resource(intent)
+    .insert_resource(bevy::time::TimeUpdateStrategy::ManualDuration(
+        std::time::Duration::ZERO,
+    ))
     .init_resource::<game_shell::EGameMode>()
     .add_plugins(gameplay_drums::DrumsPlugin);
     app
@@ -1925,6 +1928,7 @@ fn setup_stale_messages_cannot_mutate_outputs_or_attempts() {
         mean_error_ms: 0.0,
         waited: 0,
         flow_pct: 100.0,
+        trainer_mode: gameplay_drums::practice::PracticeTrainerMode::Ramp,
     });
     let gauge_before = app
         .world()
@@ -2970,6 +2974,7 @@ fn empty_loop_pass_makes_no_ramp_decision() {
             mean_error_ms: 0.0,
             waited: 0,
             flow_pct: 0.0,
+            trainer_mode: gameplay_drums::practice::PracticeTrainerMode::Ramp,
         });
     app.world_mut().insert_resource(s);
     {

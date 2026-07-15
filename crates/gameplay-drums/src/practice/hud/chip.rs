@@ -138,6 +138,7 @@ mod tests {
             mean_error_ms: -3.0,
             waited: 0,
             flow_pct: 0.0,
+            trainer_mode: crate::practice::PracticeTrainerMode::Off,
         });
         s.attempt_history.push(AttemptRecord {
             start_ms: 999,
@@ -150,6 +151,7 @@ mod tests {
             mean_error_ms: -3.0,
             waited: 0,
             flow_pct: 0.0,
+            trainer_mode: crate::practice::PracticeTrainerMode::Off,
         });
         assert_eq!(chip_text(&s, &bar_ms), "0.85× · loop 2–4 · 94%");
     }
@@ -169,6 +171,7 @@ mod tests {
             mean_error_ms: 0.0,
             waited: 2,
             flow_pct: 60.0,
+            trainer_mode: crate::practice::PracticeTrainerMode::Wait,
         });
         let bar_ms = vec![0, 2_000];
         let text = chip_text(&s, &bar_ms);

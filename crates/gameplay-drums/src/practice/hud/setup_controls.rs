@@ -3,7 +3,7 @@ use bevy::prelude::*;
 use crate::practice::session::{LoopRegion, PrerollSetting, RATE_MAX, RATE_MIN, RATE_STEP};
 use crate::practice::{
     PracticeDraft, PracticeDraftSource, PracticeFlow, PracticePhase, PracticePresetStore,
-    PracticeTrainerMode, PresetCommand, PreviewAction, PreviewState,
+    PracticeSourceCatalog, PracticeTrainerMode, PresetCommand, PreviewAction, PreviewState,
 };
 use crate::timeline::{ChipTimeline, SnapDivisor};
 
@@ -25,10 +25,14 @@ pub enum SetupItem {
     SaveAsNew,
     UpdateSaved,
     DeleteSaved,
+    ConfirmDelete,
+    CancelDelete,
+    RetryPreset,
+    CancelRetry,
     StartOrContinue,
 }
 
-const SETUP_ITEMS: [SetupItem; 17] = [
+const SETUP_ITEMS: [SetupItem; 21] = [
     SetupItem::Source,
     SetupItem::LoopStart,
     SetupItem::LoopEnd,
@@ -45,6 +49,10 @@ const SETUP_ITEMS: [SetupItem; 17] = [
     SetupItem::SaveAsNew,
     SetupItem::UpdateSaved,
     SetupItem::DeleteSaved,
+    SetupItem::ConfirmDelete,
+    SetupItem::CancelDelete,
+    SetupItem::RetryPreset,
+    SetupItem::CancelRetry,
     SetupItem::StartOrContinue,
 ];
 
@@ -57,7 +65,20 @@ impl Default for SetupSelection {
     }
 }
 
-pub fn visible_setup_items(draft: &PracticeDraft) -> Vec<SetupItem> {
+#[derive(Resource, Debug, Clone, Default, PartialEq)]
+pub enum PracticePresetPrompt {
+    #[default]
+    None,
+    ConfirmDelete {
+        id: u64,
+    },
+    Retry {
+        message: String,
+        command: Box<PresetCommand>,
+    },
+}
+
+pub fn visible_setup_items(draft: &PracticeDraft, prompt: &PracticePresetPrompt) -> Vec<SetupItem> {
     SETUP_ITEMS
         .into_iter()
         .filter(|item| {
@@ -71,8 +92,38 @@ pub fn visible_setup_items(draft: &PracticeDraft) -> Vec<SetupItem> {
             ) || draft.trainer_mode() == PracticeTrainerMode::Ramp)
                 && (!matches!(item, SetupItem::UpdateSaved | SetupItem::DeleteSaved)
                     || matches!(draft.source, PracticeDraftSource::Saved(_)))
+                && (!matches!(item, SetupItem::ConfirmDelete | SetupItem::CancelDelete)
+                    || matches!(prompt, PracticePresetPrompt::ConfirmDelete { .. }))
+                && (!matches!(item, SetupItem::RetryPreset | SetupItem::CancelRetry)
+                    || matches!(prompt, PracticePresetPrompt::Retry { .. }))
         })
         .collect()
+}
+
+pub fn normalize_selection(
+    selection: &mut SetupSelection,
+    draft: &PracticeDraft,
+    prompt: &PracticePresetPrompt,
+) {
+    let visible = visible_setup_items(draft, prompt);
+    if visible.contains(&selection.0) {
+        return;
+    }
+    let old = SETUP_ITEMS
+        .iter()
+        .position(|item| *item == selection.0)
+        .unwrap_or(0);
+    selection.0 = visible
+        .iter()
+        .rev()
+        .copied()
+        .find(|item| {
+            SETUP_ITEMS
+                .iter()
+                .position(|candidate| candidate == item)
+                .is_some_and(|index| index < old)
+        })
+        .unwrap_or(SetupItem::Source);
 }
 
 #[derive(Message, Debug, Clone, Copy, PartialEq)]
@@ -83,6 +134,7 @@ pub enum PracticeUiAction {
     Adjust(i8),
     SetLoopStart(i64),
     SetLoopEnd(i64),
+    SetLoopRegion(LoopRegion),
     SetTempo(f32),
     SetSnap(SnapDivisor),
     SetPreroll(PrerollSetting),
@@ -95,7 +147,10 @@ pub enum PracticeUiAction {
     SetRampPasses(u8),
     SaveAsNew,
     UpdateSaved,
-    DeleteSaved,
+    RequestDeleteSaved,
+    ConfirmDeleteSaved,
+    RetryPreset,
+    CancelPresetPrompt,
     StartOrContinue,
     Preview(PreviewAction),
     Confirm,
@@ -152,27 +207,39 @@ pub fn apply_ui_actions(
     mut selection: ResMut<SetupSelection>,
     mut draft: ResMut<PracticeDraft>,
     mut flow: ResMut<PracticeFlow>,
+    mut prompt: ResMut<PracticePresetPrompt>,
     timeline: Res<ChipTimeline>,
     store: Option<Res<PracticePresetStore>>,
+    catalog: Option<Res<PracticeSourceCatalog>>,
     mut preset_commands: MessageWriter<PresetCommand>,
     mut previews: MessageWriter<PreviewAction>,
     mut starts: MessageWriter<StartOrContinueRequested>,
     mut cancels: MessageWriter<crate::practice::CancelPracticeSettings>,
+    mut toasts: ResMut<crate::practice::toast::ToastQueue>,
 ) {
     for action in actions.read().copied() {
         match action {
             PracticeUiAction::SelectSource(source) => {
-                if let Some(next) = store
-                    .as_deref()
-                    .and_then(|store| crate::practice::presets::source_draft(store, source))
+                if let Some(next) =
+                    selected_source_draft(&draft, store.as_deref(), catalog.as_deref(), source)
                 {
-                    *draft = next;
+                    let validated = next
+                        .validate(&timeline)
+                        .expect("draft validation is infallible");
+                    if let Some(warning) = &validated.warning {
+                        toasts.push(warning.clone());
+                    }
+                    *draft = validated.draft;
                     flow.preview = PreviewState::Stopped;
+                    previews.write(PreviewAction::Pause);
+                    previews.write(PreviewAction::Seek(
+                        draft.loop_region.map_or(0, |region| region.start_ms),
+                    ));
                 }
             }
             PracticeUiAction::SelectItem(item) => selection.0 = item,
             PracticeUiAction::MoveSelection(direction) => {
-                let visible = visible_setup_items(&draft);
+                let visible = visible_setup_items(&draft, &prompt);
                 let current = visible
                     .iter()
                     .position(|item| *item == selection.0)
@@ -189,7 +256,7 @@ pub fn apply_ui_actions(
                     if let Some(store) = store.as_deref() {
                         let sources = crate::practice::presets::ordered_sources(
                             store,
-                            draft.source == PracticeDraftSource::Recommended,
+                            catalog.as_deref(),
                             &timeline,
                         );
                         let current = sources
@@ -202,41 +269,76 @@ pub fn apply_ui_actions(
                             (current + sources.len() - 1) % sources.len()
                         };
                         let source = sources[next].0;
-                        if source == PracticeDraftSource::Custom {
-                            draft.source = source;
-                        } else if let Some(next) =
-                            crate::practice::presets::source_draft(store, source)
+                        if let Some(next) =
+                            selected_source_draft(&draft, Some(store), catalog.as_deref(), source)
                         {
-                            *draft = next;
+                            let validated = next
+                                .validate(&timeline)
+                                .expect("draft validation is infallible");
+                            if let Some(warning) = &validated.warning {
+                                toasts.push(warning.clone());
+                            }
+                            *draft = validated.draft;
                             flow.preview = PreviewState::Stopped;
+                            previews.write(PreviewAction::Pause);
+                            previews.write(PreviewAction::Seek(
+                                draft.loop_region.map_or(0, |region| region.start_ms),
+                            ));
                         }
                     }
                 } else {
-                    adjust_selected(&mut draft, &timeline, selection.0, direction)
+                    edit_draft(&mut draft, &timeline, |draft| {
+                        adjust_selected(draft, &timeline, selection.0, direction)
+                    });
                 }
             }
             PracticeUiAction::SetLoopStart(ms) => {
-                set_loop_bound(&mut draft, ms, true, timeline.end_ms)
+                edit_draft(&mut draft, &timeline, |draft| {
+                    set_loop_bound(draft, ms, true, timeline.end_ms)
+                });
             }
             PracticeUiAction::SetLoopEnd(ms) => {
-                set_loop_bound(&mut draft, ms, false, timeline.end_ms)
+                edit_draft(&mut draft, &timeline, |draft| {
+                    set_loop_bound(draft, ms, false, timeline.end_ms)
+                });
             }
-            PracticeUiAction::SetTempo(tempo) => draft.user_tempo = tempo.clamp(RATE_MIN, RATE_MAX),
-            PracticeUiAction::SetSnap(snap) => draft.snap = snap,
-            PracticeUiAction::SetPreroll(preroll) => draft.preroll = preroll,
-            PracticeUiAction::SetCountIn(enabled) => draft.count_in = enabled,
-            PracticeUiAction::SetTrainerMode(mode) => draft.set_trainer_mode(mode),
-            PracticeUiAction::SetRampStart(value) => draft.trainer.ramp_config.start_tempo = value,
-            PracticeUiAction::SetRampTarget(value) => {
+            PracticeUiAction::SetLoopRegion(region) => {
+                edit_draft(&mut draft, &timeline, |draft| {
+                    draft.loop_region = Some(region)
+                });
+            }
+            PracticeUiAction::SetTempo(value) => {
+                edit_draft(&mut draft, &timeline, |draft| draft.user_tempo = value)
+            }
+            PracticeUiAction::SetSnap(value) => {
+                edit_draft(&mut draft, &timeline, |draft| draft.snap = value)
+            }
+            PracticeUiAction::SetPreroll(value) => edit_draft(&mut draft, &timeline, |draft| {
+                draft.preroll = normalize_preroll(value)
+            }),
+            PracticeUiAction::SetCountIn(value) => {
+                edit_draft(&mut draft, &timeline, |draft| draft.count_in = value)
+            }
+            PracticeUiAction::SetTrainerMode(value) => {
+                edit_draft(&mut draft, &timeline, |draft| draft.set_trainer_mode(value))
+            }
+            PracticeUiAction::SetRampStart(value) => edit_draft(&mut draft, &timeline, |draft| {
+                draft.trainer.ramp_config.start_tempo = value
+            }),
+            PracticeUiAction::SetRampTarget(value) => edit_draft(&mut draft, &timeline, |draft| {
                 draft.trainer.ramp_config.target_tempo = value
-            }
-            PracticeUiAction::SetRampStep(value) => draft.trainer.ramp_config.step = value,
+            }),
+            PracticeUiAction::SetRampStep(value) => edit_draft(&mut draft, &timeline, |draft| {
+                draft.trainer.ramp_config.step = value
+            }),
             PracticeUiAction::SetRampThreshold(value) => {
-                draft.trainer.ramp_config.threshold_pct = value
+                edit_draft(&mut draft, &timeline, |draft| {
+                    draft.trainer.ramp_config.threshold_pct = value
+                })
             }
-            PracticeUiAction::SetRampPasses(value) => {
+            PracticeUiAction::SetRampPasses(value) => edit_draft(&mut draft, &timeline, |draft| {
                 draft.trainer.ramp_config.required_successes = value
-            }
+            }),
             PracticeUiAction::SaveAsNew => {
                 preset_commands.write(PresetCommand::SaveNew {
                     name: None,
@@ -244,32 +346,39 @@ pub fn apply_ui_actions(
                 });
             }
             PracticeUiAction::UpdateSaved => {
+                write_update_command(&draft, store.as_deref(), &mut preset_commands)
+            }
+            PracticeUiAction::RequestDeleteSaved => {
                 if let PracticeDraftSource::Saved(id) = draft.source {
-                    let name = store
-                        .as_deref()
-                        .and_then(|store| store.registry.preset(id))
-                        .and_then(|preset| preset.name.clone());
-                    preset_commands.write(PresetCommand::UpdateSaved {
-                        id,
-                        name,
-                        draft: draft.clone(),
-                    });
+                    *prompt = PracticePresetPrompt::ConfirmDelete { id };
                 }
             }
-            PracticeUiAction::DeleteSaved => {
-                if let PracticeDraftSource::Saved(id) = draft.source {
+            PracticeUiAction::ConfirmDeleteSaved => {
+                if let PracticePresetPrompt::ConfirmDelete { id } = *prompt {
                     preset_commands.write(PresetCommand::DeleteSaved { id });
+                    *prompt = PracticePresetPrompt::None;
                 }
             }
+            PracticeUiAction::RetryPreset => {
+                if let PracticePresetPrompt::Retry { command, .. } = &*prompt {
+                    preset_commands.write((**command).clone());
+                }
+            }
+            PracticeUiAction::CancelPresetPrompt => *prompt = PracticePresetPrompt::None,
             PracticeUiAction::StartOrContinue => {
                 starts.write(StartOrContinueRequested);
             }
             PracticeUiAction::Preview(action) => {
                 previews.write(action);
             }
-            PracticeUiAction::Confirm => {
-                activate_selected(selection.0, &draft, &mut preset_commands, &mut starts)
-            }
+            PracticeUiAction::Confirm => activate_selected(
+                selection.0,
+                &draft,
+                store.as_deref(),
+                &mut prompt,
+                &mut preset_commands,
+                &mut starts,
+            ),
             PracticeUiAction::Back => {
                 flow.preview = PreviewState::Stopped;
                 if flow.phase == PracticePhase::Editing {
@@ -277,27 +386,45 @@ pub fn apply_ui_actions(
                 }
             }
         }
+        let validated = draft
+            .validate(&timeline)
+            .expect("draft validation is infallible");
+        if let Some(warning) = &validated.warning {
+            toasts.push(warning.clone());
+        }
+        *draft = validated.draft;
+        normalize_selection(&mut selection, &draft, &prompt);
     }
 }
 
 pub fn apply_preset_results(
     mut results: MessageReader<crate::practice::PresetResult>,
     mut draft: ResMut<PracticeDraft>,
+    mut prompt: ResMut<PracticePresetPrompt>,
 ) {
     for result in results.read() {
         match result {
             crate::practice::PresetResult::Saved { id }
             | crate::practice::PresetResult::Updated { id } => {
                 draft.source = PracticeDraftSource::Saved(*id);
+                *prompt = PracticePresetPrompt::None;
             }
             crate::practice::PresetResult::Deleted { id }
                 if draft.source == PracticeDraftSource::Saved(*id) =>
             {
                 draft.source = PracticeDraftSource::Custom;
+                *prompt = PracticePresetPrompt::None;
             }
             crate::practice::PresetResult::Deleted { .. }
-            | crate::practice::PresetResult::LastUsedRecorded
-            | crate::practice::PresetResult::Failed { .. } => {}
+            | crate::practice::PresetResult::LastUsedRecorded => {
+                *prompt = PracticePresetPrompt::None;
+            }
+            crate::practice::PresetResult::Failed { message, retry } => {
+                *prompt = PracticePresetPrompt::Retry {
+                    message: message.clone(),
+                    command: retry.clone(),
+                };
+            }
         }
     }
 }
@@ -305,6 +432,8 @@ pub fn apply_preset_results(
 fn activate_selected(
     item: SetupItem,
     draft: &PracticeDraft,
+    store: Option<&PracticePresetStore>,
+    prompt: &mut PracticePresetPrompt,
     commands: &mut MessageWriter<PresetCommand>,
     starts: &mut MessageWriter<StartOrContinueRequested>,
 ) {
@@ -315,18 +444,22 @@ fn activate_selected(
                 draft: draft.clone(),
             });
         }
-        SetupItem::UpdateSaved => {
-            if let PracticeDraftSource::Saved(id) = draft.source {
-                commands.write(PresetCommand::UpdateSaved {
-                    id,
-                    name: None,
-                    draft: draft.clone(),
-                });
-            }
-        }
+        SetupItem::UpdateSaved => write_update_command(draft, store, commands),
         SetupItem::DeleteSaved => {
             if let PracticeDraftSource::Saved(id) = draft.source {
+                *prompt = PracticePresetPrompt::ConfirmDelete { id };
+            }
+        }
+        SetupItem::ConfirmDelete => {
+            if let PracticePresetPrompt::ConfirmDelete { id } = *prompt {
                 commands.write(PresetCommand::DeleteSaved { id });
+                *prompt = PracticePresetPrompt::None;
+            }
+        }
+        SetupItem::CancelDelete | SetupItem::CancelRetry => *prompt = PracticePresetPrompt::None,
+        SetupItem::RetryPreset => {
+            if let PracticePresetPrompt::Retry { command, .. } = prompt {
+                commands.write((**command).clone());
             }
         }
         SetupItem::StartOrContinue => {
@@ -406,7 +539,6 @@ fn adjust_selected(
         }
         _ => {}
     }
-    draft.source = PracticeDraftSource::Custom;
 }
 
 fn set_loop_bound(draft: &mut PracticeDraft, ms: i64, start: bool, chart_end: i64) {
@@ -424,19 +556,88 @@ fn set_loop_bound(draft: &mut PracticeDraft, ms: i64, start: bool, chart_end: i6
         std::mem::swap(&mut region.start_ms, &mut region.end_ms);
     }
     draft.loop_region = (region.start_ms < region.end_ms).then_some(region);
-    draft.source = PracticeDraftSource::Custom;
+}
+
+fn edit_draft(
+    draft: &mut PracticeDraft,
+    _timeline: &ChipTimeline,
+    edit: impl FnOnce(&mut PracticeDraft),
+) {
+    let source = draft.source;
+    edit(draft);
+    draft.source = match source {
+        PracticeDraftSource::Saved(id) => PracticeDraftSource::Saved(id),
+        PracticeDraftSource::Custom => PracticeDraftSource::Custom,
+        _ => PracticeDraftSource::Custom,
+    };
+}
+
+fn selected_source_draft(
+    current: &PracticeDraft,
+    store: Option<&PracticePresetStore>,
+    catalog: Option<&PracticeSourceCatalog>,
+    source: PracticeDraftSource,
+) -> Option<PracticeDraft> {
+    if source == PracticeDraftSource::Custom {
+        let mut custom = current.clone();
+        custom.source = PracticeDraftSource::Custom;
+        Some(custom)
+    } else {
+        crate::practice::presets::source_draft(store, catalog, source)
+    }
+}
+
+fn normalize_preroll(value: PrerollSetting) -> PrerollSetting {
+    match value {
+        PrerollSetting::OneBar | PrerollSetting::Off => value,
+        PrerollSetting::Seconds(value) if value.is_finite() => PrerollSetting::Seconds(2.0),
+        PrerollSetting::Seconds(_) => PrerollSetting::OneBar,
+    }
+}
+
+fn write_update_command(
+    draft: &PracticeDraft,
+    store: Option<&PracticePresetStore>,
+    commands: &mut MessageWriter<PresetCommand>,
+) {
+    if let PracticeDraftSource::Saved(id) = draft.source {
+        let name = store
+            .and_then(|store| store.registry.preset(id))
+            .and_then(|preset| preset.name.clone());
+        commands.write(PresetCommand::UpdateSaved {
+            id,
+            name,
+            draft: draft.clone(),
+        });
+    }
+}
+
+pub(super) fn reset_selection(
+    mut selection: ResMut<SetupSelection>,
+    mut prompt: ResMut<PracticePresetPrompt>,
+) {
+    *selection = SetupSelection::default();
+    *prompt = PracticePresetPrompt::None;
 }
 
 pub(super) fn plugin(app: &mut App) {
     app.init_resource::<SetupSelection>()
+        .init_resource::<PracticePresetPrompt>()
         .add_message::<PracticeUiAction>()
         .add_message::<StartOrContinueRequested>()
-        .add_systems(Update, (keyboard_actions, nav_actions))
+        .add_systems(OnEnter(game_shell::AppState::Performance), reset_selection)
+        .add_systems(
+            Update,
+            (keyboard_actions, nav_actions).before(apply_ui_actions),
+        )
         .add_systems(
             Update,
             (apply_ui_actions, apply_preset_results)
                 .chain()
-                .after(super::PracticeShellUpdate)
+                .after(super::setup::setup_button_actions)
+                .after(super::timeline_ui::timeline_mouse)
+                .after(super::timeline_ui::preview_transport_buttons)
+                .before(super::setup::ensure_setup_shell)
                 .run_if(crate::practice::practice_surface_open),
         );
 }

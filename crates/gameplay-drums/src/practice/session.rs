@@ -160,6 +160,7 @@ pub struct AttemptRecord {
     pub mean_error_ms: f32,
     pub waited: u32,
     pub flow_pct: f32,
+    pub trainer_mode: PracticeTrainerMode,
 }
 
 /// Transport state: what/where/how-fast the player chose. Only user
@@ -325,6 +326,7 @@ impl PracticeSession {
                 mean_error_ms: a.mean_error_ms(),
                 waited: a.waited,
                 flow_pct: a.flow_pct(),
+                trainer_mode: self.trainer.mode,
             };
             self.attempt_history.push(record.clone());
             if self.attempt_history.len() > MAX_ATTEMPT_HISTORY {
@@ -415,11 +417,13 @@ mod tests {
     #[test]
     fn roll_attempt_carries_waited_and_flow() {
         let mut s = PracticeSession::default();
+        s.trainer.enable_wait(true);
         s.current_attempt.counts.perfect = 3;
         s.current_attempt.waited = 1;
         let rec = s.roll_attempt(4_000, 0).unwrap();
         assert_eq!(rec.waited, 1);
         assert_eq!(rec.flow_pct, 75.0);
+        assert_eq!(rec.trainer_mode, PracticeTrainerMode::Wait);
         assert_eq!(s.current_attempt.waited, 0, "fresh attempt starts clean");
     }
 

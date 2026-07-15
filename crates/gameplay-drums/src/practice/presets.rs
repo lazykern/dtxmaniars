@@ -8,6 +8,11 @@ use dtx_config::{
 
 use super::{PracticeDraft, PracticeDraftSource};
 
+#[derive(Resource, Debug, Clone, Default, PartialEq)]
+pub struct PracticeSourceCatalog {
+    pub recommended: Option<PracticeDraft>,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum PracticePresetStoreStatus {
     Ready,
@@ -166,20 +171,27 @@ pub fn apply_preset_command(
 }
 
 pub fn source_draft(
-    store: &PracticePresetStore,
+    store: Option<&PracticePresetStore>,
+    catalog: Option<&PracticeSourceCatalog>,
     source: PracticeDraftSource,
 ) -> Option<PracticeDraft> {
     match source {
         PracticeDraftSource::WholeSong => Some(PracticeDraft::default()),
-        PracticeDraftSource::LastUsed => store.registry.last_used(&store.chart).map(|entry| {
-            let mut draft = PracticeDraft::from(&entry.config);
-            draft.source = PracticeDraftSource::LastUsed;
-            draft
+        PracticeDraftSource::LastUsed => store
+            .and_then(|store| store.registry.last_used(&store.chart))
+            .map(|entry| {
+                let mut draft = PracticeDraft::from(&entry.config);
+                draft.source = PracticeDraftSource::LastUsed;
+                draft
+            }),
+        PracticeDraftSource::Saved(id) => store.and_then(|store| {
+            store.registry.preset(id).and_then(|preset| {
+                (preset.chart == store.chart)
+                    .then(|| PracticeDraft::from_preset(id, &preset.config))
+            })
         }),
-        PracticeDraftSource::Saved(id) => store.registry.preset(id).and_then(|preset| {
-            (preset.chart == store.chart).then(|| PracticeDraft::from_preset(id, &preset.config))
-        }),
-        PracticeDraftSource::Recommended | PracticeDraftSource::Custom => None,
+        PracticeDraftSource::Recommended => catalog.and_then(|catalog| catalog.recommended.clone()),
+        PracticeDraftSource::Custom => None,
     }
 }
 
@@ -201,14 +213,14 @@ pub fn automatic_preset_label(
 
 pub fn ordered_sources(
     store: &PracticePresetStore,
-    recommended: bool,
+    catalog: Option<&PracticeSourceCatalog>,
     timeline: &crate::timeline::ChipTimeline,
 ) -> Vec<(PracticeDraftSource, String)> {
     let mut sources = vec![(PracticeDraftSource::WholeSong, "Whole Song".to_owned())];
     if store.registry.last_used(&store.chart).is_some() {
         sources.push((PracticeDraftSource::LastUsed, "Last Used".to_owned()));
     }
-    if recommended {
+    if catalog.is_some_and(|catalog| catalog.recommended.is_some()) {
         sources.push((
             PracticeDraftSource::Recommended,
             "Recommended Section".to_owned(),
@@ -278,9 +290,15 @@ pub(super) fn plugin(app: &mut App) {
     }
     app.add_message::<PresetCommand>()
         .add_message::<PresetResult>()
+        .init_resource::<PracticeSourceCatalog>()
         .add_systems(
             OnEnter(game_shell::AppState::Performance),
             configure_chart_context.after(crate::orchestrator::DrumsEnterSet),
         )
-        .add_systems(Update, preset_system);
+        .add_systems(
+            Update,
+            preset_system
+                .after(super::hud::setup_controls::apply_ui_actions)
+                .before(super::hud::setup_controls::apply_preset_results),
+        );
 }

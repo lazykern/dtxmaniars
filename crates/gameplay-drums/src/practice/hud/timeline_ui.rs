@@ -421,7 +421,7 @@ pub fn timeline_mouse(
     buttons: Res<ButtonInput<MouseButton>>,
     strips: Query<(&ComputedNode, &bevy::ui::UiGlobalTransform), With<PracticeTimelineStrip>>,
     mut gesture: ResMut<TimelineGesture>,
-    mut draft: ResMut<crate::practice::PracticeDraft>,
+    draft: Res<crate::practice::PracticeDraft>,
     timeline: Res<ChipTimeline>,
     mut actions: MessageWriter<super::setup_controls::PracticeUiAction>,
 ) {
@@ -457,8 +457,9 @@ pub fn timeline_mouse(
             ));
         }
         GestureEffect::LoopPreview { anchor_ms } => {
-            draft.loop_region = Some(drag_region(&timeline, anchor_ms, cursor_ms));
-            draft.source = crate::practice::PracticeDraftSource::Custom;
+            actions.write(super::setup_controls::PracticeUiAction::SetLoopRegion(
+                drag_region(&timeline, anchor_ms, cursor_ms),
+            ));
         }
     }
 }

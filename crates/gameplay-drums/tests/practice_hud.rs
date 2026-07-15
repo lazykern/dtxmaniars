@@ -7,17 +7,18 @@ use gameplay_drums::practice::hud::setup::{
     practice_layout_mode, practice_transport_row_mode, update_tab_selection, PracticeLayoutMode,
     PracticePreviewGeometry, PracticePreviewRegion, PracticePrimaryAction, PracticeSettingsPane,
     PracticeSetupLayout, PracticeSetupRoot, PracticeTab, PracticeTabButton,
-    PracticeTransportRowMode,
+    PracticeTransportRowMode, SetupAdjustButton,
 };
-use gameplay_drums::practice::hud::setup_controls::PracticeUiAction;
+use gameplay_drums::practice::hud::setup_controls::{PracticeUiAction, SetupItem, SetupSelection};
 use gameplay_drums::practice::hud::timeline_ui::{
     PracticeLoopFill, PracticeLoopHandle, PracticeTimelineRoot, PracticeTimelineStrip,
     PreviewTransportButton, TimelineGesture,
 };
 use gameplay_drums::practice::session::{AttemptRecord, LoopRegion};
 use gameplay_drums::practice::{
-    apply_preset_command, PracticeDraft, PracticeDraftSource, PracticeFlow, PracticePresetStore,
-    PracticeSession, PracticeTrainerMode, PresetCommand, PresetResult,
+    apply_preset_command, PracticeDraft, PracticeDraftSource, PracticeFlow, PracticePresetPrompt,
+    PracticePresetStore, PracticeSession, PracticeSourceCatalog, PracticeTrainerMode,
+    PresetCommand, PresetResult,
 };
 use gameplay_drums::resources::GameplayClock;
 use gameplay_drums::timeline::{ChipTimeline, SnapDivisor};
@@ -215,6 +216,341 @@ fn selecting_saved_source_populates_draft_without_starting_preview() {
 }
 
 #[test]
+fn conditional_rows_appear_and_disappear_in_the_action_frame() {
+    let mut app = setup_hud_app(1280.0, 720.0, dtx_config::TextScale::Standard);
+
+    send_ui_action(
+        &mut app,
+        PracticeUiAction::SetTrainerMode(PracticeTrainerMode::Ramp),
+    );
+    app.update();
+    assert!(texts(&mut app).iter().any(|text| text == "Start tempo"));
+
+    send_ui_action(
+        &mut app,
+        PracticeUiAction::SetTrainerMode(PracticeTrainerMode::Off),
+    );
+    app.update();
+    assert!(!texts(&mut app).iter().any(|text| text == "Start tempo"));
+}
+
+#[test]
+fn hidden_selection_normalizes_and_fresh_performance_resets_it() {
+    let mut app = setup_hud_app(1280.0, 720.0, dtx_config::TextScale::Standard);
+    send_ui_action(
+        &mut app,
+        PracticeUiAction::SetTrainerMode(PracticeTrainerMode::Ramp),
+    );
+    send_ui_action(&mut app, PracticeUiAction::SelectItem(SetupItem::RampStart));
+    app.update();
+    send_ui_action(
+        &mut app,
+        PracticeUiAction::SetTrainerMode(PracticeTrainerMode::Off),
+    );
+    app.update();
+    assert_eq!(
+        app.world().resource::<SetupSelection>().0,
+        SetupItem::TrainerMode
+    );
+
+    app.world_mut()
+        .resource_mut::<NextState<AppState>>()
+        .set(AppState::SongSelect);
+    app.update();
+    app.world_mut()
+        .resource_mut::<NextState<AppState>>()
+        .set(AppState::Performance);
+    app.update();
+    assert_eq!(
+        app.world().resource::<SetupSelection>().0,
+        SetupItem::Source
+    );
+}
+
+#[test]
+fn recommended_source_survives_cycling_and_seeks_without_attempt_start() {
+    let mut app = setup_hud_app(1280.0, 720.0, dtx_config::TextScale::Standard);
+    app.world_mut().resource_mut::<ChipTimeline>().end_ms = 10_000;
+    let mut recommended = PracticeDraft {
+        source: PracticeDraftSource::Recommended,
+        loop_region: Some(LoopRegion {
+            start_ms: 2_000,
+            end_ms: 6_000,
+        }),
+        user_tempo: 0.8,
+        ..Default::default()
+    };
+    recommended.trainer.mode = PracticeTrainerMode::Wait;
+    app.world_mut().insert_resource(PracticeSourceCatalog {
+        recommended: Some(recommended.clone()),
+    });
+    send_ui_action(
+        &mut app,
+        PracticeUiAction::SelectSource(PracticeDraftSource::WholeSong),
+    );
+    app.update();
+    send_ui_action(
+        &mut app,
+        PracticeUiAction::SelectSource(PracticeDraftSource::Recommended),
+    );
+    app.update();
+
+    assert_eq!(*app.world().resource::<PracticeDraft>(), recommended);
+    let seeks: Vec<_> = app
+        .world()
+        .resource::<Messages<gameplay_drums::practice::PreviewAction>>()
+        .iter_current_update_messages()
+        .copied()
+        .collect();
+    assert_eq!(
+        seeks,
+        vec![
+            gameplay_drums::practice::PreviewAction::Pause,
+            gameplay_drums::practice::PreviewAction::Seek(0),
+            gameplay_drums::practice::PreviewAction::Pause,
+            gameplay_drums::practice::PreviewAction::Seek(2_000),
+        ]
+    );
+}
+
+#[test]
+fn selecting_custom_preserves_the_loaded_values_and_changes_only_identity() {
+    let mut app = setup_hud_app(1280.0, 720.0, dtx_config::TextScale::Standard);
+    app.world_mut().resource_mut::<ChipTimeline>().end_ms = 10_000;
+    let loaded = PracticeDraft {
+        source: PracticeDraftSource::Recommended,
+        loop_region: Some(LoopRegion {
+            start_ms: 2_000,
+            end_ms: 6_000,
+        }),
+        user_tempo: 0.8,
+        ..Default::default()
+    };
+    *app.world_mut().resource_mut::<PracticeDraft>() = loaded.clone();
+
+    send_ui_action(
+        &mut app,
+        PracticeUiAction::SelectSource(PracticeDraftSource::Custom),
+    );
+    app.update();
+
+    let draft = app.world().resource::<PracticeDraft>();
+    assert_eq!(draft.source, PracticeDraftSource::Custom);
+    assert_eq!(draft.loop_region, loaded.loop_region);
+    assert_eq!(draft.user_tempo, loaded.user_tempo);
+}
+
+#[test]
+fn saved_edits_keep_identity_and_confirm_update_keeps_name() {
+    let mut app = setup_hud_app(1280.0, 720.0, dtx_config::TextScale::Standard);
+    app.world_mut().resource_mut::<ChipTimeline>().end_ms = 10_000;
+    let chart = dtx_config::PracticeChartKey::new("dtx1:test", 0);
+    let mut registry = dtx_config::PracticePresetRegistry::default();
+    let id = registry
+        .create(
+            chart.clone(),
+            Some("Verse"),
+            None,
+            dtx_config::PracticePresetConfig {
+                loop_start_ms: Some(1_000),
+                loop_end_ms: Some(5_000),
+                snap: dtx_config::PracticeSnapPreset::Bar,
+                tempo: 1.0,
+                preroll: dtx_config::PracticePrerollPreset::OneBar,
+                count_in: true,
+                trainer: dtx_config::PracticeTrainerPreset::Off,
+            },
+        )
+        .expect("preset");
+    app.world_mut().insert_resource(PracticePresetStore::ready(
+        std::env::temp_dir().join("practice-hud-saved-policy.toml"),
+        chart,
+        None,
+        registry,
+    ));
+    send_ui_action(
+        &mut app,
+        PracticeUiAction::SelectSource(PracticeDraftSource::Saved(id)),
+    );
+    send_ui_action(&mut app, PracticeUiAction::SetTempo(0.75));
+    send_ui_action(
+        &mut app,
+        PracticeUiAction::SelectItem(SetupItem::UpdateSaved),
+    );
+    send_ui_action(&mut app, PracticeUiAction::Confirm);
+    app.update();
+
+    assert_eq!(
+        app.world().resource::<PracticeDraft>().source,
+        PracticeDraftSource::Saved(id)
+    );
+    let commands: Vec<_> = app
+        .world()
+        .resource::<Messages<PresetCommand>>()
+        .iter_current_update_messages()
+        .cloned()
+        .collect();
+    assert!(commands.iter().any(|command| matches!(
+        command,
+        PresetCommand::UpdateSaved { name: Some(name), .. } if name == "Verse"
+    )));
+}
+
+#[test]
+fn every_typed_setter_normalizes_nonfinite_and_extreme_values() {
+    let mut app = setup_hud_app(1280.0, 720.0, dtx_config::TextScale::Standard);
+    app.world_mut().resource_mut::<ChipTimeline>().end_ms = 10_000;
+    app.world_mut().resource_mut::<PracticeDraft>().source = PracticeDraftSource::Saved(7);
+    for action in [
+        PracticeUiAction::SetTempo(f32::NAN),
+        PracticeUiAction::SetRampStart(f32::INFINITY),
+        PracticeUiAction::SetRampTarget(f32::NEG_INFINITY),
+        PracticeUiAction::SetRampStep(f32::INFINITY),
+        PracticeUiAction::SetRampThreshold(f32::NAN),
+        PracticeUiAction::SetRampPasses(0),
+        PracticeUiAction::SetPreroll(gameplay_drums::practice::session::PrerollSetting::Seconds(
+            f32::NAN,
+        )),
+        PracticeUiAction::SetLoopStart(-5_000),
+        PracticeUiAction::SetLoopEnd(i64::MAX),
+    ] {
+        send_ui_action(&mut app, action);
+    }
+    app.update();
+
+    let draft = app.world().resource::<PracticeDraft>();
+    assert_eq!(draft.source, PracticeDraftSource::Saved(7));
+    assert_eq!(draft.user_tempo, 1.0);
+    assert_eq!(draft.trainer.ramp_config.start_tempo, 0.7);
+    assert_eq!(draft.trainer.ramp_config.target_tempo, 1.0);
+    assert_eq!(draft.trainer.ramp_config.step, 0.05);
+    assert_eq!(draft.trainer.ramp_config.threshold_pct, 90.0);
+    assert_eq!(draft.trainer.ramp_config.required_successes, 1);
+    assert_eq!(draft.preroll.label(), "1 bar");
+    assert_eq!(
+        draft.loop_region,
+        Some(LoopRegion {
+            start_ms: 0,
+            end_ms: 10_000,
+        })
+    );
+}
+
+#[test]
+fn mouse_adjust_buttons_use_the_same_typed_reducer() {
+    let mut app = setup_hud_app(1280.0, 720.0, dtx_config::TextScale::Standard);
+    let directions: Vec<_> = app
+        .world_mut()
+        .query::<&SetupAdjustButton>()
+        .iter(app.world())
+        .filter(|adjuster| adjuster.item == SetupItem::Tempo)
+        .map(|adjuster| adjuster.direction)
+        .collect();
+    assert!(directions.contains(&-1));
+    assert!(directions.contains(&1));
+    app.world_mut().spawn((
+        Interaction::Pressed,
+        SetupAdjustButton {
+            item: SetupItem::Tempo,
+            direction: 1,
+        },
+    ));
+    app.update();
+
+    assert_eq!(app.world().resource::<PracticeDraft>().user_tempo, 1.05);
+    assert_eq!(
+        app.world().resource::<PracticeDraft>().source,
+        PracticeDraftSource::Custom
+    );
+}
+
+#[test]
+fn delete_confirmation_and_retry_are_explicit_typed_states() {
+    let mut app = setup_hud_app(1280.0, 720.0, dtx_config::TextScale::Standard);
+    app.world_mut().resource_mut::<PracticeDraft>().source = PracticeDraftSource::Saved(9);
+    send_ui_action(&mut app, PracticeUiAction::RequestDeleteSaved);
+    app.update();
+    assert!(matches!(
+        app.world().resource::<PracticePresetPrompt>(),
+        PracticePresetPrompt::ConfirmDelete { id: 9 }
+    ));
+    assert!(texts(&mut app).iter().any(|text| text == "Confirm Delete"));
+
+    send_ui_action(&mut app, PracticeUiAction::CancelPresetPrompt);
+    app.update();
+    assert_eq!(
+        *app.world().resource::<PracticePresetPrompt>(),
+        PracticePresetPrompt::None
+    );
+}
+
+#[test]
+fn saved_rows_reconcile_on_live_source_changes() {
+    let mut app = setup_hud_app(1280.0, 720.0, dtx_config::TextScale::Standard);
+    app.world_mut().resource_mut::<PracticeDraft>().source = PracticeDraftSource::Saved(3);
+    app.update();
+    let copy = texts(&mut app);
+    assert!(copy.iter().any(|text| text == "Update Saved Loop"));
+    assert!(copy.iter().any(|text| text == "Delete Saved Loop"));
+
+    send_ui_action(&mut app, PracticeUiAction::SetCountIn(false));
+    app.update();
+    assert!(texts(&mut app)
+        .iter()
+        .any(|text| text == "Update Saved Loop"));
+
+    send_ui_action(
+        &mut app,
+        PracticeUiAction::SelectSource(PracticeDraftSource::WholeSong),
+    );
+    app.update();
+    assert!(!texts(&mut app)
+        .iter()
+        .any(|text| text == "Update Saved Loop"));
+}
+
+#[test]
+fn retry_action_reemits_the_exact_failed_command_and_cancel_clears_it() {
+    let mut app = setup_hud_app(1280.0, 720.0, dtx_config::TextScale::Standard);
+    let command = PresetCommand::SaveNew {
+        name: Some("Named".to_owned()),
+        draft: PracticeDraft {
+            user_tempo: 0.75,
+            ..Default::default()
+        },
+    };
+    app.world_mut().write_message(PresetResult::Failed {
+        message: "disk full".to_owned(),
+        retry: Box::new(command.clone()),
+    });
+    app.update();
+    assert!(texts(&mut app).iter().any(|text| text == "Retry Save"));
+
+    app.world_mut().write_message(PresetResult::Failed {
+        message: "permission denied".to_owned(),
+        retry: Box::new(command.clone()),
+    });
+    app.update();
+    assert!(texts(&mut app)
+        .iter()
+        .any(|text| text == "permission denied"));
+
+    send_ui_action(&mut app, PracticeUiAction::RetryPreset);
+    app.update();
+    let commands: Vec<_> = app
+        .world()
+        .resource::<Messages<PresetCommand>>()
+        .iter_current_update_messages()
+        .cloned()
+        .collect();
+    assert!(commands.contains(&command));
+
+    send_ui_action(&mut app, PracticeUiAction::CancelPresetPrompt);
+    app.update();
+    assert!(!texts(&mut app).iter().any(|text| text == "Retry Save"));
+}
+
+#[test]
 fn failed_save_keeps_draft_and_reports_retry() {
     let chart = dtx_config::PracticeChartKey::new("dtx1:test", 0);
     let mut store = PracticePresetStore::read_only(
@@ -259,6 +595,45 @@ fn progress_omits_ineligible_partial_attempt() {
     assert!(progress_rows(&session, 20_000)
         .iter()
         .all(|row| !row.contains("10")));
+}
+
+#[test]
+fn progress_filters_exact_whole_song_span_and_formats_each_record_mode() {
+    let mut session = PracticeSession::default();
+    session.attempt_history.extend([
+        AttemptRecord {
+            start_ms: 0,
+            end_ms: 10_000,
+            tempo: 1.0,
+            counts: default(),
+            max_combo: 1,
+            overhits: 0,
+            accuracy_pct: 91.0,
+            mean_error_ms: 2.0,
+            waited: 1,
+            flow_pct: 80.0,
+            trainer_mode: PracticeTrainerMode::Wait,
+        },
+        AttemptRecord {
+            start_ms: 1_000,
+            end_ms: 10_000,
+            tempo: 0.8,
+            counts: default(),
+            max_combo: 1,
+            overhits: 0,
+            accuracy_pct: 95.0,
+            mean_error_ms: -1.0,
+            waited: 0,
+            flow_pct: 100.0,
+            trainer_mode: PracticeTrainerMode::Ramp,
+        },
+    ]);
+    session.trainer.disable();
+
+    let rows = progress_rows(&session, 10_000);
+
+    assert_eq!(rows.len(), 1);
+    assert!(rows[0].contains("flow: 80.0%"), "{:?}", rows);
 }
 
 fn count<T: Component>(app: &mut App) -> usize {
@@ -970,6 +1345,10 @@ fn progress_copy_refreshes_from_session_metrics() {
 
     {
         let mut session = app.world_mut().resource_mut::<PracticeSession>();
+        session.transport.loop_region = Some(LoopRegion {
+            start_ms: 2_000,
+            end_ms: 6_000,
+        });
         session.attempt_history.push(AttemptRecord {
             start_ms: 2_000,
             end_ms: 6_000,
@@ -981,6 +1360,7 @@ fn progress_copy_refreshes_from_session_metrics() {
             mean_error_ms: -12.0,
             waited: 0,
             flow_pct: 100.0,
+            trainer_mode: PracticeTrainerMode::Off,
         });
         session
             .lane_diag

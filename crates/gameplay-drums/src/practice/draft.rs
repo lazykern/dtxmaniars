@@ -126,12 +126,18 @@ impl PracticeDraft {
             RATE_MAX - RAMP_TEMPO_GAP,
             super::session::RAMP_START_DEFAULT,
         );
-        ramp.target_tempo = finite_clamp(
+        let minimum_target = ramp.start_tempo + RAMP_TEMPO_GAP;
+        let target = finite_clamp(
             ramp.target_tempo,
-            ramp.start_tempo + RAMP_TEMPO_GAP,
+            RATE_MIN,
             RATE_MAX,
-            super::session::RAMP_TARGET_DEFAULT.max(ramp.start_tempo + RAMP_TEMPO_GAP),
+            super::session::RAMP_TARGET_DEFAULT.max(minimum_target),
         );
+        ramp.target_tempo = if target + f32::EPSILON < minimum_target {
+            minimum_target
+        } else {
+            target
+        };
         ramp.step = finite_clamp(
             ramp.step,
             RAMP_STEP_MIN,
@@ -170,6 +176,9 @@ impl PracticeDraft {
     }
 
     pub fn apply_to_session(&self, session: &mut PracticeSession) {
+        if session.transport.loop_region != self.loop_region {
+            session.lane_diag.clear();
+        }
         session.transport.loop_region = self.loop_region;
         session.transport.user_tempo = self.user_tempo;
         session.transport.snap = self.snap;
@@ -425,6 +434,18 @@ mod tests {
     }
 
     #[test]
+    fn validation_preserves_the_exact_supported_ramp_gap() {
+        let mut draft = PracticeDraft::default();
+        draft.trainer.ramp_config.start_tempo = 0.60;
+        draft.trainer.ramp_config.target_tempo = 0.65;
+
+        let validated = draft.validate(&timeline()).expect("validated").draft;
+
+        assert_eq!(validated.trainer.ramp_config.start_tempo, 0.60);
+        assert_eq!(validated.trainer.ramp_config.target_tempo, 0.65);
+    }
+
+    #[test]
     fn session_conversion_maps_all_committed_fields() {
         let mut session = PracticeSession::default();
         session.transport.loop_region = Some(LoopRegion {
@@ -459,6 +480,36 @@ mod tests {
         assert_eq!(restored.trainer.mode, PracticeTrainerMode::Ramp);
         assert_eq!(restored.trainer.ramp_config, session.trainer.ramp_config);
         assert!(restored.trainer.ramp_armed());
+    }
+
+    #[test]
+    fn commit_keeps_diagnosis_only_for_the_same_span() {
+        use dtx_scoring::JudgmentKind;
+
+        let mut session = PracticeSession::default();
+        session.transport.loop_region = Some(LoopRegion {
+            start_ms: 1_000,
+            end_ms: 5_000,
+        });
+        session
+            .lane_diag
+            .apply_judgment(0, JudgmentKind::Perfect, 0);
+        let same = PracticeDraft {
+            loop_region: session.transport.loop_region,
+            ..Default::default()
+        };
+        same.apply_to_session(&mut session);
+        assert!(!session.lane_diag.lanes.is_empty());
+
+        let changed = PracticeDraft {
+            loop_region: Some(LoopRegion {
+                start_ms: 2_000,
+                end_ms: 6_000,
+            }),
+            ..same
+        };
+        changed.apply_to_session(&mut session);
+        assert!(session.lane_diag.lanes.is_empty());
     }
 
     #[test]

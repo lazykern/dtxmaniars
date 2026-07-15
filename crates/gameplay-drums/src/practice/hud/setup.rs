@@ -116,6 +116,14 @@ pub struct PracticeSetupLayout(pub PracticeLayoutMode);
 #[derive(Component, Debug, Clone, Copy, PartialEq)]
 pub(super) struct PracticeShellGeometry(PracticeChromeGeometry);
 
+#[derive(Component, Debug, Clone, PartialEq)]
+pub(super) struct PracticeShellSignature {
+    tab: PracticeTab,
+    ramp_rows: bool,
+    saved_rows: bool,
+    prompt: super::setup_controls::PracticePresetPrompt,
+}
+
 #[derive(Component)]
 pub struct PracticeSettingsPane;
 
@@ -166,6 +174,12 @@ pub(super) struct SetupRowLabel(crate::practice::hud::setup_controls::SetupItem)
 #[derive(Component)]
 pub(super) struct SetupValueText(SetupValue);
 
+#[derive(Component, Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SetupAdjustButton {
+    pub item: super::setup_controls::SetupItem,
+    pub direction: i8,
+}
+
 pub(super) fn ensure_setup_shell(
     mut commands: Commands,
     flow: Res<PracticeFlow>,
@@ -175,8 +189,18 @@ pub(super) fn ensure_setup_shell(
     windows: Query<&Window, With<PrimaryWindow>>,
     accessibility: Option<Res<dtx_ui::AccessibilityPolicy>>,
     mut tab: ResMut<PracticeTab>,
+    mut selection: ResMut<super::setup_controls::SetupSelection>,
+    prompt: Res<super::setup_controls::PracticePresetPrompt>,
     mut preview_geometry: ResMut<PracticePreviewGeometry>,
-    roots: Query<(Entity, &PracticeSetupLayout, &PracticeShellGeometry), With<PracticeSetupRoot>>,
+    roots: Query<
+        (
+            Entity,
+            &PracticeSetupLayout,
+            &PracticeShellGeometry,
+            &PracticeShellSignature,
+        ),
+        With<PracticeSetupRoot>,
+    >,
     mut panes: ParamSet<(
         Query<&mut Node, With<PracticeSettingsPane>>,
         Query<&mut Node, With<PracticePreviewRegion>>,
@@ -185,7 +209,7 @@ pub(super) fn ensure_setup_shell(
     let surface_open = matches!(flow.phase, PracticePhase::Setup | PracticePhase::Editing);
     if !surface_open {
         preview_geometry.0 = None;
-        for (root, _, _) in &roots {
+        for (root, _, _, _) in &roots {
             commands.entity(root).despawn();
         }
         return;
@@ -205,10 +229,17 @@ pub(super) fn ensure_setup_shell(
     if mode == PracticeLayoutMode::Split && *tab == PracticeTab::Preview {
         *tab = PracticeTab::Setup;
     }
+    super::setup_controls::normalize_selection(&mut selection, &draft, &prompt);
+    let signature = PracticeShellSignature {
+        tab: *tab,
+        ramp_rows: draft.trainer_mode() == crate::practice::PracticeTrainerMode::Ramp,
+        saved_rows: matches!(draft.source, crate::practice::PracticeDraftSource::Saved(_)),
+        prompt: prompt.clone(),
+    };
     preview_geometry.0 = preview_stage_rect(width, height, mode, settings_width, *tab, chrome);
 
-    if let Ok((_, current, current_chrome)) = roots.single() {
-        if current.0 == mode && current_chrome.0 == chrome {
+    if let Ok((_, current, current_chrome, current_signature)) = roots.single() {
+        if current.0 == mode && current_chrome.0 == chrome && *current_signature == signature {
             if mode == PracticeLayoutMode::Split {
                 if let Ok(mut settings) = panes.p0().single_mut() {
                     settings.width = Val::Px(settings_width);
@@ -222,7 +253,7 @@ pub(super) fn ensure_setup_shell(
             return;
         }
     }
-    for (root, _, _) in &roots {
+    for (root, _, _, _) in &roots {
         commands.entity(root).despawn();
     }
 
@@ -232,11 +263,13 @@ pub(super) fn ensure_setup_shell(
         settings_width,
         preview_min_width,
         chrome,
+        signature,
         *tab,
         &flow,
         &draft,
         &session,
         &timeline,
+        &prompt,
     );
 }
 
@@ -271,11 +304,13 @@ fn spawn_setup_shell(
     settings_width: f32,
     preview_min_width: f32,
     chrome: PracticeChromeGeometry,
+    signature: PracticeShellSignature,
     tab: PracticeTab,
     flow: &PracticeFlow,
     draft: &PracticeDraft,
     session: &PracticeSession,
     timeline: &crate::timeline::ChipTimeline,
+    prompt: &super::setup_controls::PracticePresetPrompt,
 ) {
     let theme = dtx_ui::Theme::default();
     commands
@@ -283,6 +318,7 @@ fn spawn_setup_shell(
             PracticeSetupRoot,
             PracticeSetupLayout(mode),
             PracticeShellGeometry(chrome),
+            signature,
             Node {
                 position_type: PositionType::Absolute,
                 width: Val::Percent(100.0),
@@ -314,6 +350,8 @@ fn spawn_setup_shell(
                     flow.phase,
                     draft,
                     session,
+                    timeline,
+                    prompt,
                 );
                 spawn_preview(main, &theme, mode, preview_min_width, tab);
             });
@@ -427,6 +465,8 @@ fn spawn_settings(
     phase: PracticePhase,
     draft: &PracticeDraft,
     session: &PracticeSession,
+    timeline: &crate::timeline::ChipTimeline,
+    prompt: &super::setup_controls::PracticePresetPrompt,
 ) {
     let visible = mode == PracticeLayoutMode::Split || tab != PracticeTab::Preview;
     main.spawn((
@@ -469,11 +509,11 @@ fn spawn_settings(
         .with_children(|content| match tab {
             PracticeTab::Setup | PracticeTab::Preview => {
                 content.spawn(SetupContent);
-                spawn_setup_content(content, theme, draft);
+                spawn_setup_content(content, theme, draft, prompt);
             }
             PracticeTab::Progress => {
                 content.spawn(ProgressContent);
-                super::progress::spawn_progress(content, theme, session);
+                super::progress::spawn_progress(content, theme, session, timeline);
             }
         });
 
@@ -505,6 +545,7 @@ fn spawn_setup_content(
     content: &mut ChildSpawnerCommands,
     theme: &dtx_ui::Theme,
     draft: &PracticeDraft,
+    prompt: &super::setup_controls::PracticePresetPrompt,
 ) {
     spawn_section_heading(content, theme, "Loop");
     spawn_setting_row(
@@ -635,6 +676,43 @@ fn spawn_setup_content(
             "Delete Saved Loop",
         );
     }
+    match prompt {
+        super::setup_controls::PracticePresetPrompt::ConfirmDelete { .. } => {
+            spawn_action_row(
+                content,
+                theme,
+                super::setup_controls::SetupItem::ConfirmDelete,
+                "Confirm Delete",
+            );
+            spawn_action_row(
+                content,
+                theme,
+                super::setup_controls::SetupItem::CancelDelete,
+                "Cancel Delete",
+            );
+        }
+        super::setup_controls::PracticePresetPrompt::Retry { message, .. } => {
+            spawn_text(
+                content,
+                message,
+                dtx_ui::TypographyRole::Hint,
+                theme.text_secondary,
+            );
+            spawn_action_row(
+                content,
+                theme,
+                super::setup_controls::SetupItem::RetryPreset,
+                "Retry Save",
+            );
+            spawn_action_row(
+                content,
+                theme,
+                super::setup_controls::SetupItem::CancelRetry,
+                "Cancel Retry",
+            );
+        }
+        super::setup_controls::PracticePresetPrompt::None => {}
+    }
 }
 
 fn spawn_preview(
@@ -751,6 +829,27 @@ fn spawn_setting_row(
                 theme.text_primary,
             );
             row.commands().entity(value).insert(SetupValueText(field));
+            for (direction, label) in [(-1, "−"), (1, "+")] {
+                row.spawn((
+                    SetupAdjustButton { item, direction },
+                    Button,
+                    Node {
+                        min_width: Val::Px(32.0),
+                        min_height: Val::Px(32.0),
+                        justify_content: JustifyContent::Center,
+                        align_items: AlignItems::Center,
+                        ..default()
+                    },
+                ))
+                .with_children(|button| {
+                    spawn_text(
+                        button,
+                        label,
+                        dtx_ui::TypographyRole::Label,
+                        theme.text_primary,
+                    );
+                });
+            }
         });
 }
 
@@ -866,6 +965,7 @@ fn selected_source_label(
 
 pub(super) fn setup_button_actions(
     rows: Query<(&Interaction, &SetupRow), Changed<Interaction>>,
+    adjusters: Query<(&Interaction, &SetupAdjustButton), Changed<Interaction>>,
     primary: Query<&Interaction, (With<PrimaryActionButton>, Changed<Interaction>)>,
     mut actions: MessageWriter<super::setup_controls::PracticeUiAction>,
 ) {
@@ -877,9 +977,23 @@ pub(super) fn setup_button_actions(
                 super::setup_controls::SetupItem::SaveAsNew
                     | super::setup_controls::SetupItem::UpdateSaved
                     | super::setup_controls::SetupItem::DeleteSaved
+                    | super::setup_controls::SetupItem::ConfirmDelete
+                    | super::setup_controls::SetupItem::CancelDelete
+                    | super::setup_controls::SetupItem::RetryPreset
+                    | super::setup_controls::SetupItem::CancelRetry
             ) {
                 actions.write(super::setup_controls::PracticeUiAction::Confirm);
             }
+        }
+    }
+    for (interaction, adjuster) in &adjusters {
+        if *interaction == Interaction::Pressed {
+            actions.write(super::setup_controls::PracticeUiAction::SelectItem(
+                adjuster.item,
+            ));
+            actions.write(super::setup_controls::PracticeUiAction::Adjust(
+                adjuster.direction,
+            ));
         }
     }
     for interaction in &primary {

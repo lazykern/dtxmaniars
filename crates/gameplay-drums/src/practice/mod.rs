@@ -31,9 +31,10 @@ pub use flow::{
     chart_clock_active, gameplay_input_active, practice_running, practice_surface_open,
     PracticeEditSnapshot, PracticeFlow, PracticePhase, PreviewState,
 };
+pub use hud::setup_controls::PracticePresetPrompt;
 pub use presets::{
-    apply_preset_command, PracticePresetStore, PracticePresetStoreStatus, PresetCommand,
-    PresetResult,
+    apply_preset_command, PracticePresetStore, PracticePresetStoreStatus, PracticeSourceCatalog,
+    PresetCommand, PresetResult,
 };
 pub use preview::{CancelPracticeSettings, OpenPracticeSettings, PreviewAction, PreviewController};
 pub use session::PracticeSession;
@@ -120,6 +121,10 @@ fn enter_practice_setup(
         let mut draft = PracticeDraft::default();
         let mut flow = PracticeFlow::default();
         begin_practice_setup(&request, &mut session, &mut draft, &mut flow);
+        commands.insert_resource(PracticeSourceCatalog {
+            recommended: matches!(request.seed, game_shell::PracticeSeed::Recommended(_))
+                .then(|| draft.clone()),
+        });
         commands.insert_resource(session);
         commands.insert_resource(draft);
         commands.insert_resource(flow);
@@ -127,6 +132,7 @@ fn enter_practice_setup(
         commands.remove_resource::<PracticeSession>();
         commands.remove_resource::<PracticeDraft>();
         commands.remove_resource::<PracticeFlow>();
+        commands.remove_resource::<PracticeSourceCatalog>();
     }
 }
 
@@ -217,12 +223,14 @@ fn remove_practice_session(mut commands: Commands, mut intent: ResMut<PracticeIn
     commands.remove_resource::<PracticeSession>();
     commands.remove_resource::<PracticeDraft>();
     commands.remove_resource::<PracticeFlow>();
+    commands.remove_resource::<PracticeSourceCatalog>();
     *intent = PracticeIntent::None;
 }
 
 fn remove_practice_surface(mut commands: Commands) {
     commands.remove_resource::<PracticeDraft>();
     commands.remove_resource::<PracticeFlow>();
+    commands.remove_resource::<PracticeSourceCatalog>();
 }
 
 /// Gauge is meaningless in practice: pin it full so it can never fail
