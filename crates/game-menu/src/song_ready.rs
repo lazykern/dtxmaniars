@@ -80,6 +80,15 @@ pub struct SongReadyState {
     input_guarded: bool,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ReadyKeyboardEffect {
+    None,
+    AdjustValue(i32),
+    AdjustDifficulty(i32),
+    Launch,
+    Close,
+}
+
 impl SongReadyState {
     pub fn open(&mut self, mode: ReadyMode) {
         self.layer = SongReadyLayer::Browse;
@@ -139,6 +148,34 @@ impl SongReadyState {
     }
 }
 
+fn reduce_ready_keyboard_browse(state: &mut SongReadyState, verb: NavVerb) -> ReadyKeyboardEffect {
+    match verb {
+        NavVerb::Dec => {
+            state.step_card(-1);
+            ReadyKeyboardEffect::None
+        }
+        NavVerb::Inc => {
+            state.step_card(1);
+            ReadyKeyboardEffect::None
+        }
+        NavVerb::Up if state.focus == ReadyCard::Song => ReadyKeyboardEffect::AdjustDifficulty(-1),
+        NavVerb::Down if state.focus == ReadyCard::Song => ReadyKeyboardEffect::AdjustDifficulty(1),
+        NavVerb::Up => ReadyKeyboardEffect::AdjustValue(-1),
+        NavVerb::Down => ReadyKeyboardEffect::AdjustValue(1),
+        NavVerb::Confirm if state.focus == ReadyCard::Song => ReadyKeyboardEffect::Launch,
+        NavVerb::Confirm if state.focus == ReadyCard::Audio => {
+            state.audio_field = match state.audio_field {
+                AudioField::Bgm => AudioField::Drums,
+                AudioField::Drums => AudioField::Bgm,
+            };
+            ReadyKeyboardEffect::None
+        }
+        NavVerb::Confirm => ReadyKeyboardEffect::None,
+        NavVerb::Back => ReadyKeyboardEffect::Close,
+        _ => ReadyKeyboardEffect::None,
+    }
+}
+
 pub fn adjust_lane_speed(config: &mut dtx_config::Config, delta: i32) {
     config.gameplay.scroll_speed =
         (config.gameplay.scroll_speed + delta.signum() as f32 * 0.5).clamp(0.5, 9.0);
@@ -167,6 +204,10 @@ pub struct ReadyLayout {
     pub gap: f32,
     pub edge_peek_px: f32,
     pub rows: u8,
+    pub jacket_width: f32,
+    pub difficulty_width: f32,
+    pub metadata_min_width: f32,
+    pub content_gap: f32,
 }
 
 pub fn ready_layout(viewport_width: f32) -> ReadyLayout {
@@ -176,6 +217,10 @@ pub fn ready_layout(viewport_width: f32) -> ReadyLayout {
             gap: 10.0,
             edge_peek_px: 24.0,
             rows: 1,
+            jacket_width: 150.0,
+            difficulty_width: 180.0,
+            metadata_min_width: 204.0,
+            content_gap: 10.0,
         }
     } else {
         ReadyLayout {
@@ -183,6 +228,10 @@ pub fn ready_layout(viewport_width: f32) -> ReadyLayout {
             gap: 16.0,
             edge_peek_px: 0.0,
             rows: 1,
+            jacket_width: 190.0,
+            difficulty_width: 230.0,
+            metadata_min_width: 344.0,
+            content_gap: 10.0,
         }
     }
 }
@@ -215,6 +264,9 @@ struct ReadyCardTitle(ReadyCard);
 struct ReadyCardValue(ReadyCard);
 
 #[derive(Component)]
+struct ReadyAudioFieldButton(AudioField);
+
+#[derive(Component)]
 struct ReadySongTitle;
 
 #[derive(Component)]
@@ -225,6 +277,15 @@ struct ReadySongLevel;
 
 #[derive(Component)]
 struct ReadyJacket;
+
+#[derive(Component)]
+struct ReadySongContent;
+
+#[derive(Component)]
+struct ReadyDifficultyRail;
+
+#[derive(Component)]
+struct ReadyMetadataColumn;
 
 #[derive(Component)]
 struct ReadyDifficultyRow(usize);
@@ -339,7 +400,7 @@ fn manage_song_ready_ui(
                 overflow: Overflow::clip(),
                 ..default()
             },
-            BackgroundColor(Color::srgba(0.0, 0.0, 0.0, 0.74)),
+            BackgroundColor(Color::srgba(0.0, 0.0, 0.0, 0.88)),
             GlobalZIndex(15),
         ))
         .with_children(|root| {
@@ -393,7 +454,7 @@ fn manage_song_ready_ui(
                 Text::new(if midi.is_some_and(|midi| midi.0) {
                     "HH/CY CARD OR VALUE  ·  BD ENTER/APPLY  ·  SD BACK  ·  FT AUDIO FIELD"
                 } else {
-                    "←→ CARD/VALUE  ·  ↑↓ DIFFICULTY OR AUDIO FIELD  ·  ENTER APPLY  ·  ESC BACK"
+                    "←→ SELECT  ·  ↑↓ CHANGE  ·  ENTER ACTION/AUDIO ROW  ·  ESC BACK"
                 }),
                 Theme::font(12.0),
                 dtx_ui::SemanticText(dtx_ui::TypographyRole::Hint),
@@ -446,20 +507,50 @@ fn spawn_option_card(
                     ..default()
                 },
             ));
+            if card == ReadyCard::Audio {
+                body.spawn(Node {
+                    width: Val::Percent(100.0),
+                    flex_direction: FlexDirection::Row,
+                    justify_content: JustifyContent::SpaceBetween,
+                    column_gap: Val::Px(4.0),
+                    ..default()
+                })
+                .with_children(|fields| {
+                    for (field, label) in [(AudioField::Bgm, "BGM"), (AudioField::Drums, "DRUMS")] {
+                        fields.spawn((
+                            Button,
+                            ReadyAudioFieldButton(field),
+                            Node {
+                                flex_grow: 1.0,
+                                height: Val::Px(30.0),
+                                justify_content: JustifyContent::Center,
+                                align_items: AlignItems::Center,
+                                border: UiRect::all(Val::Px(1.0)),
+                                ..default()
+                            },
+                            BackgroundColor(t.stage_panel_bg),
+                            BorderColor::all(t.stage_panel_border),
+                            Text::new(label),
+                            Theme::font(11.0),
+                            TextColor(t.text_primary),
+                        ));
+                    }
+                });
+            }
             body.spawn(Node {
-                width: Val::Percent(100.0),
-                flex_direction: FlexDirection::Row,
-                justify_content: JustifyContent::SpaceBetween,
+                flex_direction: FlexDirection::Column,
+                row_gap: Val::Px(4.0),
+                align_items: AlignItems::Center,
                 ..default()
             })
             .with_children(|steps| {
-                for (delta, label) in [(-1, "◀"), (1, "▶")] {
+                for (delta, label) in [(-1, "▲"), (1, "▼")] {
                     steps.spawn((
                         Button,
                         ReadyStepButton {
                             card,
                             delta,
-                            field: (card == ReadyCard::Audio).then_some(AudioField::Bgm),
+                            field: None,
                         },
                         Node {
                             width: Val::Px(44.0),
@@ -477,39 +568,6 @@ fn spawn_option_card(
                     ));
                 }
             });
-            if card == ReadyCard::Audio {
-                body.spawn(Node {
-                    width: Val::Percent(100.0),
-                    flex_direction: FlexDirection::Row,
-                    justify_content: JustifyContent::SpaceBetween,
-                    ..default()
-                })
-                .with_children(|steps| {
-                    for (delta, label) in [(-1, "DR−"), (1, "DR+")] {
-                        steps.spawn((
-                            Button,
-                            ReadyStepButton {
-                                card,
-                                delta,
-                                field: Some(AudioField::Drums),
-                            },
-                            Node {
-                                min_width: Val::Px(44.0),
-                                height: Val::Px(34.0),
-                                justify_content: JustifyContent::Center,
-                                align_items: AlignItems::Center,
-                                border: UiRect::all(Val::Px(1.0)),
-                                ..default()
-                            },
-                            BackgroundColor(t.stage_panel_bg),
-                            BorderColor::all(t.text_secondary),
-                            Text::new(label),
-                            Theme::font(12.0),
-                            TextColor(t.text_primary),
-                        ));
-                    }
-                });
-            }
         });
 }
 
@@ -547,14 +605,17 @@ fn spawn_song_card(
                 dtx_ui::SemanticText(dtx_ui::TypographyRole::Heading),
                 TextColor(t.select_yellow),
             ));
-            card.spawn(Node {
-                width: Val::Percent(100.0),
-                flex_grow: 1.0,
-                flex_direction: FlexDirection::Row,
-                column_gap: Val::Px(14.0),
-                overflow: Overflow::clip(),
-                ..default()
-            })
+            card.spawn((
+                ReadySongContent,
+                Node {
+                    width: Val::Percent(100.0),
+                    flex_grow: 1.0,
+                    flex_direction: FlexDirection::Row,
+                    column_gap: Val::Px(10.0),
+                    overflow: Overflow::clip(),
+                    ..default()
+                },
+            ))
             .with_children(|content| {
                 let jacket = song
                     .and_then(|song| song.preimage_path.as_deref())
@@ -575,14 +636,18 @@ fn spawn_song_card(
                     },
                 ));
                 content
-                    .spawn(Node {
-                        width: Val::Px(230.0),
-                        max_height: Val::Px(238.0),
-                        flex_direction: FlexDirection::Column,
-                        row_gap: Val::Px(5.0),
-                        overflow: Overflow::clip(),
-                        ..default()
-                    })
+                    .spawn((
+                        ReadyDifficultyRail,
+                        Node {
+                            width: Val::Px(230.0),
+                            max_height: Val::Px(238.0),
+                            flex_shrink: 0.0,
+                            flex_direction: FlexDirection::Column,
+                            row_gap: Val::Px(5.0),
+                            overflow: Overflow::clip(),
+                            ..default()
+                        },
+                    ))
                     .with_children(|rail| {
                         if let Some(folder) = selection_state.visible.get(selection.folder) {
                             for ordinal in (0..folder.chart_indices.len()).rev() {
@@ -630,14 +695,17 @@ fn spawn_song_card(
                         }
                     });
                 content
-                    .spawn(Node {
-                        flex_grow: 1.0,
-                        min_width: Val::Px(160.0),
-                        flex_direction: FlexDirection::Column,
-                        row_gap: Val::Px(10.0),
-                        overflow: Overflow::clip(),
-                        ..default()
-                    })
+                    .spawn((
+                        ReadyMetadataColumn,
+                        Node {
+                            flex_grow: 1.0,
+                            min_width: Val::Px(160.0),
+                            flex_direction: FlexDirection::Column,
+                            row_gap: Val::Px(10.0),
+                            overflow: Overflow::clip(),
+                            ..default()
+                        },
+                    ))
                     .with_children(|meta| {
                         meta.spawn((
                             ReadySongTitle,
@@ -725,6 +793,49 @@ fn adjust_ready_value(state: &mut SongReadyState, draft: &mut ReadyConfigDraft, 
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ReadyPointerStepEffect {
+    Persist(ReadyCard),
+    Applied,
+    DraftOnly,
+    Ignored,
+}
+
+fn apply_ready_pointer_step(
+    state: &mut SongReadyState,
+    draft: &mut ReadyConfigDraft,
+    card: ReadyCard,
+    field: Option<AudioField>,
+    delta: i32,
+) -> ReadyPointerStepEffect {
+    if matches!(
+        state.layer,
+        SongReadyLayer::Closed | SongReadyLayer::PrimaryDetail
+    ) || (card == ReadyCard::Modifiers && state.mode == ReadyMode::Practice)
+    {
+        return ReadyPointerStepEffect::Ignored;
+    }
+    if state.layer == SongReadyLayer::Edit && state.focus != card {
+        return ReadyPointerStepEffect::Ignored;
+    }
+    state.focus = card;
+    if let Some(field) = field {
+        state.audio_field = field;
+    }
+    adjust_ready_value(state, draft, delta);
+    match state.layer {
+        SongReadyLayer::Browse if card == ReadyCard::Mode => ReadyPointerStepEffect::Applied,
+        SongReadyLayer::Browse => ReadyPointerStepEffect::Persist(card),
+        SongReadyLayer::Edit => ReadyPointerStepEffect::DraftOnly,
+        SongReadyLayer::Closed | SongReadyLayer::PrimaryDetail => ReadyPointerStepEffect::Ignored,
+    }
+}
+
+fn select_ready_audio_field(state: &mut SongReadyState, field: AudioField) {
+    state.focus = ReadyCard::Audio;
+    state.audio_field = field;
+}
+
 fn merge_ready_card_config(
     card: ReadyCard,
     draft: &dtx_config::Config,
@@ -741,26 +852,38 @@ fn merge_ready_card_config(
     }
 }
 
+fn persist_ready_card_value(
+    card: ReadyCard,
+    draft: &mut ReadyConfigDraft,
+    notifications: &mut NotificationQueue,
+) -> bool {
+    if matches!(card, ReadyCard::Mode | ReadyCard::Song) {
+        return true;
+    }
+    let path = dtx_config::default_path();
+    let mut current = dtx_config::load(&path);
+    merge_ready_card_config(card, &draft.config, &mut current);
+    match dtx_config::save(&path, &current) {
+        Ok(()) => {
+            draft.config = current;
+            true
+        }
+        Err(error) => {
+            notifications.push(Notification::error(format!(
+                "Could not save Ready settings: {error}"
+            )));
+            false
+        }
+    }
+}
+
 fn finish_ready_edit(
     state: &mut SongReadyState,
     draft: &mut ReadyConfigDraft,
     notifications: &mut NotificationQueue,
 ) {
-    if state.focus == ReadyCard::Mode {
+    if persist_ready_card_value(state.focus, draft, notifications) {
         state.apply_edit();
-        return;
-    }
-    let path = dtx_config::default_path();
-    let mut current = dtx_config::load(&path);
-    merge_ready_card_config(state.focus, &draft.config, &mut current);
-    match dtx_config::save(&path, &current) {
-        Ok(()) => {
-            draft.config = current;
-            state.apply_edit();
-        }
-        Err(error) => notifications.push(Notification::error(format!(
-            "Could not save Ready settings: {error}"
-        ))),
     }
 }
 
@@ -789,22 +912,25 @@ fn song_ready_nav_input(
         match state.layer {
             SongReadyLayer::Closed => {}
             SongReadyLayer::Browse => match action.source {
-                NavSource::Keyboard => match action.verb {
-                    NavVerb::Dec => state.step_card(-1),
-                    NavVerb::Inc => state.step_card(1),
-                    NavVerb::Up if state.focus == ReadyCard::Song => {
-                        step_ready_difficulty(&mut selection, &selection_state, -1)
+                NavSource::Keyboard => {
+                    match reduce_ready_keyboard_browse(&mut state, action.verb) {
+                        ReadyKeyboardEffect::None => {}
+                        ReadyKeyboardEffect::AdjustValue(delta) => {
+                            let card = state.focus;
+                            adjust_ready_value(&mut state, &mut draft, delta);
+                            if card != ReadyCard::Mode {
+                                persist_ready_card_value(card, &mut draft, &mut notifications);
+                            }
+                        }
+                        ReadyKeyboardEffect::AdjustDifficulty(delta) => {
+                            step_ready_difficulty(&mut selection, &selection_state, delta);
+                        }
+                        ReadyKeyboardEffect::Launch => {
+                            launches.write(ReadyLaunch::Current);
+                        }
+                        ReadyKeyboardEffect::Close => state.close(),
                     }
-                    NavVerb::Down if state.focus == ReadyCard::Song => {
-                        step_ready_difficulty(&mut selection, &selection_state, 1)
-                    }
-                    NavVerb::Confirm if state.focus == ReadyCard::Song => {
-                        launches.write(ReadyLaunch::Current);
-                    }
-                    NavVerb::Confirm => state.begin_edit(&draft),
-                    NavVerb::Back => state.close(),
-                    _ => {}
-                },
+                }
                 NavSource::Pad => match action.verb {
                     NavVerb::Up => state.step_card(-1),
                     NavVerb::Down => state.step_card(1),
@@ -866,6 +992,7 @@ fn song_ready_pointer_input(
     cards: Query<(&Interaction, &ReadyCardNode), Changed<Interaction>>,
     card_hover: Query<(&Interaction, &ReadyCardNode)>,
     steps: Query<(&Interaction, &ReadyStepButton), Changed<Interaction>>,
+    audio_fields: Query<(&Interaction, &ReadyAudioFieldButton), Changed<Interaction>>,
     difficulties: Query<(&Interaction, &ReadyDifficultyRow), Changed<Interaction>>,
     primary: Query<&Interaction, (With<ReadyPrimaryAction>, Changed<Interaction>)>,
     back: Query<&Interaction, (With<ReadyBackAction>, Changed<Interaction>)>,
@@ -874,6 +1001,7 @@ fn song_ready_pointer_input(
     mut selection: ResMut<crate::song_select::Selection>,
     selection_state: Res<crate::song_select::SongSelectSelection>,
     mut launches: MessageWriter<ReadyLaunch>,
+    mut notifications: ResMut<NotificationQueue>,
 ) {
     if state.layer == SongReadyLayer::Closed {
         return;
@@ -884,28 +1012,22 @@ fn song_ready_pointer_input(
         }
         if state.focus != card.0 {
             state.focus = card.0;
-        } else if card.0 != ReadyCard::Song
-            && !(card.0 == ReadyCard::Modifiers && state.mode == ReadyMode::Practice)
-        {
-            state.begin_edit(&draft);
+        }
+    }
+    for (interaction, field) in &audio_fields {
+        if *interaction == Interaction::Pressed && state.layer == SongReadyLayer::Browse {
+            select_ready_audio_field(&mut state, field.0);
         }
     }
     for (interaction, step) in &steps {
-        if *interaction != Interaction::Pressed
-            || (step.card == ReadyCard::Modifiers && state.mode == ReadyMode::Practice)
-            || (state.layer == SongReadyLayer::Edit && state.focus != step.card)
-            || state.layer == SongReadyLayer::PrimaryDetail
-        {
+        if *interaction != Interaction::Pressed {
             continue;
         }
-        if state.layer != SongReadyLayer::Edit || state.focus != step.card {
-            state.focus = step.card;
-            state.begin_edit(&draft);
+        let effect =
+            apply_ready_pointer_step(&mut state, &mut draft, step.card, step.field, step.delta);
+        if let ReadyPointerStepEffect::Persist(card) = effect {
+            persist_ready_card_value(card, &mut draft, &mut notifications);
         }
-        if let Some(field) = step.field {
-            state.audio_field = field;
-        }
-        adjust_ready_value(&mut state, &mut draft, step.delta);
     }
     for (interaction, row) in &difficulties {
         if *interaction == Interaction::Pressed
@@ -1068,6 +1190,19 @@ fn render_song_ready(
         ),
         Without<ReadyCardNode>,
     >,
+    mut audio_fields: Query<
+        (
+            &ReadyAudioFieldButton,
+            &mut Node,
+            &mut BorderColor,
+            &mut BackgroundColor,
+        ),
+        (
+            Without<ReadyCardNode>,
+            Without<ReadyDifficultyRow>,
+            Without<ReadyPrimaryAction>,
+        ),
+    >,
     mut record_cache: Local<Option<(std::path::PathBuf, String)>>,
 ) {
     if state.layer == SongReadyLayer::Closed {
@@ -1135,30 +1270,14 @@ fn render_song_ready(
                 false,
             ),
             ReadyCard::LaneSpeed => (format!("{:.1}x", draft.config.gameplay.scroll_speed), false),
-            ReadyCard::Audio => {
-                let bgm = if state.layer == SongReadyLayer::Edit
-                    && state.audio_field == AudioField::Bgm
-                {
-                    "▶"
-                } else {
-                    " "
-                };
-                let drums = if state.layer == SongReadyLayer::Edit
-                    && state.audio_field == AudioField::Drums
-                {
-                    "▶"
-                } else {
-                    " "
-                };
-                (
-                    format!(
-                        "{bgm} BGM {:>3}%\n{drums} DRUMS {:>3}%",
-                        (draft.config.audio.bgm_volume * 100.0).round() as i32,
-                        (draft.config.audio.drum_volume * 100.0).round() as i32
-                    ),
-                    false,
-                )
-            }
+            ReadyCard::Audio => (
+                format!(
+                    "BGM {:>3}%\nDRUMS {:>3}%",
+                    (draft.config.audio.bgm_volume * 100.0).round() as i32,
+                    (draft.config.audio.drum_volume * 100.0).round() as i32
+                ),
+                false,
+            ),
             ReadyCard::Song => (String::new(), false),
         };
         text.0 = content;
@@ -1166,6 +1285,20 @@ fn render_song_ready(
             t.text_secondary.with_alpha(0.45)
         } else {
             t.text_primary
+        };
+    }
+    for (field, mut node, mut border, mut bg) in &mut audio_fields {
+        let selected = state.focus == ReadyCard::Audio && state.audio_field == field.0;
+        node.border = UiRect::all(Val::Px(if selected { 2.0 } else { 1.0 }));
+        border.set_all(if selected {
+            t.select_yellow
+        } else {
+            t.stage_panel_border
+        });
+        bg.0 = if selected {
+            t.selection_highlight
+        } else {
+            t.stage_panel_bg
         };
     }
 
@@ -1260,23 +1393,44 @@ fn render_song_ready(
 
 fn layout_song_ready(
     windows: Query<&Window, With<bevy::window::PrimaryWindow>>,
-    mut strips: Query<&mut Node, (With<ReadyStrip>, Without<ReadyCardNode>)>,
-    mut cards: Query<(&ReadyCardNode, &mut Node), Without<ReadyStrip>>,
+    mut nodes: ParamSet<(
+        Query<&mut Node, With<ReadyStrip>>,
+        Query<(&ReadyCardNode, &mut Node)>,
+        Query<&mut Node, With<ReadySongContent>>,
+        Query<&mut Node, With<ReadyJacket>>,
+        Query<&mut Node, With<ReadyDifficultyRail>>,
+        Query<&mut Node, With<ReadyMetadataColumn>>,
+    )>,
 ) {
     let Ok(window) = windows.single() else {
         return;
     };
     let layout = ready_layout(window.width());
-    for mut strip in &mut strips {
+    for mut strip in &mut nodes.p0() {
         strip.column_gap = Val::Px(layout.gap);
     }
-    for (card, mut node) in &mut cards {
+    for (card, mut node) in &mut nodes.p1() {
         let index = ReadyCard::ALL
             .iter()
             .position(|candidate| *candidate == card.0)
             .unwrap_or(2);
         node.width = Val::Px(layout.widths[index]);
         node.flex_shrink = 0.0;
+    }
+    for mut content in &mut nodes.p2() {
+        content.column_gap = Val::Px(layout.content_gap);
+    }
+    for mut jacket in &mut nodes.p3() {
+        jacket.width = Val::Px(layout.jacket_width);
+        jacket.height = Val::Px(layout.jacket_width);
+        jacket.flex_shrink = 0.0;
+    }
+    for mut difficulty in &mut nodes.p4() {
+        difficulty.width = Val::Px(layout.difficulty_width);
+        difficulty.flex_shrink = 0.0;
+    }
+    for mut metadata in &mut nodes.p5() {
+        metadata.min_width = Val::Px(layout.metadata_min_width);
     }
 }
 
@@ -1292,6 +1446,90 @@ mod tests {
         assert_eq!(state.layer, SongReadyLayer::Browse);
         assert_eq!(state.focus, ReadyCard::Song);
         assert_eq!(state.mode, ReadyMode::Normal);
+    }
+
+    #[test]
+    fn keyboard_browse_uses_horizontal_focus_and_vertical_change_effects() {
+        let mut state = SongReadyState::default();
+        state.open(ReadyMode::Normal);
+
+        assert_eq!(
+            reduce_ready_keyboard_browse(&mut state, NavVerb::Dec),
+            ReadyKeyboardEffect::None
+        );
+        assert_eq!(state.focus, ReadyCard::Mode);
+        assert_eq!(
+            reduce_ready_keyboard_browse(&mut state, NavVerb::Up),
+            ReadyKeyboardEffect::AdjustValue(-1)
+        );
+        assert_eq!(state.layer, SongReadyLayer::Browse);
+    }
+
+    #[test]
+    fn keyboard_audio_confirm_toggles_field_without_entering_edit() {
+        let mut state = SongReadyState::default();
+        state.open(ReadyMode::Normal);
+        state.focus = ReadyCard::Audio;
+        state.audio_field = AudioField::Bgm;
+
+        assert_eq!(
+            reduce_ready_keyboard_browse(&mut state, NavVerb::Confirm),
+            ReadyKeyboardEffect::None
+        );
+        assert_eq!(state.audio_field, AudioField::Drums);
+        assert_eq!(state.layer, SongReadyLayer::Browse);
+    }
+
+    #[test]
+    fn keyboard_song_confirm_launches_and_other_cards_do_not_enter_edit() {
+        let mut state = SongReadyState::default();
+        state.open(ReadyMode::Normal);
+        state.focus = ReadyCard::LaneSpeed;
+        assert_eq!(
+            reduce_ready_keyboard_browse(&mut state, NavVerb::Confirm),
+            ReadyKeyboardEffect::None
+        );
+        assert_eq!(state.layer, SongReadyLayer::Browse);
+
+        state.focus = ReadyCard::Song;
+        assert_eq!(
+            reduce_ready_keyboard_browse(&mut state, NavVerb::Confirm),
+            ReadyKeyboardEffect::Launch
+        );
+    }
+
+    #[test]
+    fn pointer_step_applies_immediately_in_browse_but_not_primary_detail() {
+        let mut state = SongReadyState::default();
+        state.open(ReadyMode::Normal);
+        let mut draft = ReadyConfigDraft::default();
+        draft.config.gameplay.scroll_speed = 5.5;
+
+        assert_eq!(
+            apply_ready_pointer_step(&mut state, &mut draft, ReadyCard::LaneSpeed, None, 1,),
+            ReadyPointerStepEffect::Persist(ReadyCard::LaneSpeed)
+        );
+        assert_eq!(draft.config.gameplay.scroll_speed, 6.0);
+        assert_eq!(state.layer, SongReadyLayer::Browse);
+
+        state.layer = SongReadyLayer::PrimaryDetail;
+        assert_eq!(
+            apply_ready_pointer_step(&mut state, &mut draft, ReadyCard::LaneSpeed, None, 1,),
+            ReadyPointerStepEffect::Ignored
+        );
+        assert_eq!(draft.config.gameplay.scroll_speed, 6.0);
+    }
+
+    #[test]
+    fn pointer_audio_row_selects_field_without_entering_edit() {
+        let mut state = SongReadyState::default();
+        state.open(ReadyMode::Normal);
+
+        select_ready_audio_field(&mut state, AudioField::Drums);
+
+        assert_eq!(state.focus, ReadyCard::Audio);
+        assert_eq!(state.audio_field, AudioField::Drums);
+        assert_eq!(state.layer, SongReadyLayer::Browse);
     }
 
     #[test]
@@ -1377,6 +1615,12 @@ mod tests {
             assert!(layout.widths[2] > layout.widths[0]);
             assert!(layout.widths[2] > layout.widths[4]);
             assert_eq!(layout.rows, 1);
+            let central_inner = layout.widths[2] - 36.0;
+            let occupied = layout.jacket_width
+                + layout.content_gap * 2.0
+                + layout.difficulty_width
+                + layout.metadata_min_width;
+            assert!(occupied <= central_inner);
         }
         assert!(ready_layout(1280.0).edge_peek_px > 0.0);
         assert_eq!(ready_layout(1920.0).edge_peek_px, 0.0);
@@ -1415,17 +1659,28 @@ mod tests {
             .resource_mut::<NextState<AppState>>()
             .set(AppState::SongSelect);
         app.update();
-        app.world_mut()
-            .resource_mut::<SongReadyState>()
-            .open(ReadyMode::Normal);
+        for _ in 0..3 {
+            app.world_mut()
+                .resource_mut::<SongReadyState>()
+                .open(ReadyMode::Normal);
+            app.update();
+            assert_eq!(
+                app.world_mut()
+                    .query::<&ReadyCardNode>()
+                    .iter(app.world())
+                    .count(),
+                5
+            );
 
-        app.update();
-
-        let card_count = app
-            .world_mut()
-            .query::<&ReadyCardNode>()
-            .iter(app.world())
-            .count();
-        assert_eq!(card_count, 5);
+            app.world_mut().resource_mut::<SongReadyState>().close();
+            app.update();
+            assert_eq!(
+                app.world_mut()
+                    .query::<&SongReadyEntity>()
+                    .iter(app.world())
+                    .count(),
+                0
+            );
+        }
     }
 }
