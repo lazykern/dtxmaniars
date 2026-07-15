@@ -88,7 +88,13 @@ pub(crate) fn apply_semantic_typography(
             (base_px * policy.text_multiplier()).max(base_px),
             |semantic| typography.px(semantic.0, policy.text_scale()),
         );
-        font.font_size = FontSize::Px(px);
+        // Only write when the value actually changes: assigning through the
+        // `Mut<TextFont>` marks it `Changed`, and Bevy 0.19 re-shapes changed
+        // text every frame — which re-registers the font (new parley Blob id)
+        // and mints a fresh 512x512 glyph atlas each frame, leaking VRAM to OOM.
+        if current_px != px {
+            font.font_size = FontSize::Px(px);
+        }
     }
 }
 
