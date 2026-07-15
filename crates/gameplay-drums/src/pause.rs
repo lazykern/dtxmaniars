@@ -133,6 +133,7 @@ struct QuickSettingsSelection(usize);
 pub(crate) struct PausedRestart {
     target_ms: Option<i64>,
     attempt_start_ms: i64,
+    seek_revision: u64,
 }
 
 #[derive(SystemParam)]
@@ -258,16 +259,21 @@ pub(super) fn plugin(app: &mut App) {
         .init_resource::<PausedRestart>()
         .init_resource::<VerbGuard>()
         // Always start a performance un-paused.
-        .add_systems(OnEnter(AppState::Performance), force_running)
-        .add_systems(OnExit(AppState::Performance), force_running)
+        .add_systems(
+            OnEnter(AppState::Performance),
+            (force_running, reset_paused_restart),
+        )
+        .add_systems(
+            OnExit(AppState::Performance),
+            (force_running, reset_paused_restart),
+        )
         .add_systems(
             Update,
             // Both write NextState<PauseState>, but they compute the same
             // transition from the same current state, so a same-frame Escape +
             // pad hit is idempotent — no ordering constraint needed.
             (toggle_pause, system_verb_pause, system_verb_restart)
-                .run_if(in_state(AppState::Performance))
-                .run_if(crate::editor::editor_closed),
+                .run_if(in_state(AppState::Performance)),
         )
         .add_systems(
             OnEnter(PauseState::Paused),
@@ -282,6 +288,7 @@ pub(super) fn plugin(app: &mut App) {
             OnExit(PauseState::Paused),
             (
                 clear_gameplay_input_queues,
+                reset_paused_restart,
                 resume_chart_audio,
                 despawn_overlay,
             )
@@ -306,6 +313,10 @@ fn force_running(mut next: ResMut<NextState<PauseState>>) {
     next.set(PauseState::Running);
 }
 
+fn reset_paused_restart(mut restart: ResMut<PausedRestart>) {
+    *restart = PausedRestart::default();
+}
+
 fn clear_gameplay_input_queues(
     mut pending: ResMut<crate::input::PendingLaneInputs>,
     mut lane_hits: ResMut<Messages<crate::events::LaneHit>>,
@@ -324,20 +335,45 @@ fn clear_gameplay_input_queues(
 
 fn finish_paused_restart(
     mut restart: ResMut<PausedRestart>,
-    clock: Res<crate::resources::GameplayClock>,
+    acknowledgement: Res<crate::seek::SeekAcknowledgement>,
     practice: Option<Res<crate::practice::PracticeSession>>,
     mut next_pause: ResMut<NextState<PauseState>>,
 ) {
     let Some(target_ms) = restart.target_ms else {
         return;
     };
-    if clock.current_ms == target_ms
-        && practice.is_some_and(|session| {
-            session.current_attempt_eligible
-                && session.current_attempt.start_ms == restart.attempt_start_ms
+    if acknowledgement.revision < restart.seek_revision {
+        return;
+    }
+    if acknowledgement.revision != restart.seek_revision
+        || acknowledgement.request.is_none_or(|request| {
+            request.target_ms != target_ms
+                || request.attempt_start_ms != Some(restart.attempt_start_ms)
         })
     {
-        restart.target_ms = None;
+        warn!("paused restart cancelled by a competing seek");
+        *restart = PausedRestart::default();
+        return;
+    }
+    match acknowledgement.result {
+        Some(crate::seek::SeekResult::Applied { resolved_ms }) if resolved_ms == target_ms => {}
+        Some(crate::seek::SeekResult::Applied { resolved_ms }) => {
+            warn!("paused restart cancelled: target {target_ms} resolved to {resolved_ms}");
+            *restart = PausedRestart::default();
+            return;
+        }
+        Some(crate::seek::SeekResult::Rejected(reason)) => {
+            warn!("paused restart cancelled: seek rejected ({reason:?})");
+            *restart = PausedRestart::default();
+            return;
+        }
+        None => return,
+    }
+    if practice.is_some_and(|session| {
+        session.current_attempt_eligible
+            && session.current_attempt.start_ms == restart.attempt_start_ms
+    }) {
+        *restart = PausedRestart::default();
         next_pause.set(PauseState::Running);
     }
 }
@@ -346,8 +382,13 @@ fn toggle_pause(
     keys: Res<ButtonInput<KeyCode>>,
     state: Res<State<PauseState>>,
     mut next: ResMut<NextState<PauseState>>,
+    flow: Option<Res<crate::practice::PracticeFlow>>,
+    editor_open: Option<Res<crate::editor::EditorOpen>>,
 ) {
-    if keys.just_pressed(KeyCode::Escape) {
+    if keys.just_pressed(KeyCode::Escape)
+        && !editor_open.is_some_and(|editor| editor.0)
+        && system_verbs_active(flow.as_deref())
+    {
         toggle(state.get(), &mut next);
     }
 }
@@ -361,20 +402,21 @@ fn drain_verb(hits: &mut MessageReader<crate::events::SystemVerbHit>, verb: Syst
 }
 
 /// `SystemVerb::Pause` from a pad or a bound key — the distant-kit equivalent of
-/// Escape. Toggles both ways, so firing it while paused resumes. Gated to
-/// Performance with the editor closed (see `plugin`).
+/// Escape. Toggles both ways, so firing it while paused resumes. Always drains
+/// during Performance, but only acts while the gameplay surface owns the verb.
 fn system_verb_pause(
     mut hits: MessageReader<crate::events::SystemVerbHit>,
     state: Res<State<PauseState>>,
     mut next: ResMut<NextState<PauseState>>,
     mut guard: ResMut<VerbGuard>,
     flow: Option<Res<crate::practice::PracticeFlow>>,
+    editor_open: Option<Res<crate::editor::EditorOpen>>,
 ) {
     // Drain first: the guard decides whether to ACT, never whether to READ.
     if !drain_verb(&mut hits, SystemVerb::Pause) {
         return;
     }
-    if !system_verbs_active(flow.as_deref()) {
+    if editor_open.is_some_and(|editor| editor.0) || !system_verbs_active(flow.as_deref()) {
         return;
     }
     if !guard.accept(SystemVerb::Pause, Instant::now()) {
@@ -392,11 +434,12 @@ fn system_verb_restart(
     mut requests: MessageWriter<TransitionRequest>,
     mut guard: ResMut<VerbGuard>,
     flow: Option<Res<crate::practice::PracticeFlow>>,
+    editor_open: Option<Res<crate::editor::EditorOpen>>,
 ) {
     if !drain_verb(&mut hits, SystemVerb::Restart) {
         return;
     }
-    if !system_verbs_active(flow.as_deref()) {
+    if editor_open.is_some_and(|editor| editor.0) || !system_verbs_active(flow.as_deref()) {
         return;
     }
     if !guard.accept(SystemVerb::Restart, Instant::now()) {
@@ -755,6 +798,7 @@ pub(crate) fn pause_menu_input(
     mut open_settings: MessageWriter<crate::practice::OpenPracticeSettings>,
     mut seeks: MessageWriter<crate::seek::SeekToChartTime>,
     mut paused_restart: ResMut<PausedRestart>,
+    seek_acknowledgement: Res<crate::seek::SeekAcknowledgement>,
     mut ui: PauseMenuUi,
     mut quick_runtime: crate::perf_hotkeys::PauseQuickSettings,
 ) {
@@ -863,6 +907,8 @@ pub(crate) fn pause_menu_input(
                         });
                         paused_restart.target_ms = Some(target_ms);
                         paused_restart.attempt_start_ms = attempt_start_ms;
+                        paused_restart.seek_revision =
+                            seek_acknowledgement.revision.wrapping_add(1);
                     }
                 }
                 PauseItemKind::PracticeSettings => {
@@ -979,6 +1025,34 @@ mod tests {
     }
 
     #[test]
+    fn esc_is_owned_by_practice_setup_and_editing() {
+        for phase in [
+            crate::practice::PracticePhase::Setup,
+            crate::practice::PracticePhase::Editing,
+        ] {
+            let mut world = World::new();
+            let mut keys = ButtonInput::<KeyCode>::default();
+            keys.press(KeyCode::Escape);
+            world.insert_resource(keys);
+            world.insert_resource(State::new(PauseState::Running));
+            world.init_resource::<NextState<PauseState>>();
+            world.insert_resource(crate::practice::PracticeFlow {
+                phase,
+                ..Default::default()
+            });
+
+            world
+                .run_system_once(toggle_pause)
+                .expect("toggle_pause runs");
+
+            assert!(matches!(
+                world.resource::<NextState<PauseState>>(),
+                NextState::Unchanged
+            ));
+        }
+    }
+
+    #[test]
     fn pause_items_match_context_contracts() {
         assert_eq!(
             pause_items(PauseContext::Normal),
@@ -1034,6 +1108,7 @@ mod tests {
         world.init_resource::<QuickSettingsSelection>();
         world.init_resource::<PauseView>();
         world.init_resource::<PausedRestart>();
+        world.init_resource::<crate::seek::SeekAcknowledgement>();
         world.init_resource::<crate::input::PendingLaneInputs>();
         world.init_resource::<NextState<PauseState>>();
         world.insert_resource(crate::practice::PracticeSession::default());

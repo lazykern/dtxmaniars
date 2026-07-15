@@ -84,6 +84,7 @@ fn build_app() -> App {
     .init_resource::<gameplay_drums::seek::PendingBgmStart>()
     .init_resource::<gameplay_drums::seek::PendingAudioStarts>()
     .init_resource::<gameplay_drums::seek::LastSeekFrom>()
+    .init_resource::<gameplay_drums::seek::SeekAcknowledgement>()
     .init_resource::<gameplay_drums::seek::PreviewSkippedChips>()
     .init_resource::<gameplay_drums::seek::StoppedSeekRebuild>()
     .init_resource::<dtx_bga::BgaClock>()
@@ -1722,6 +1723,163 @@ fn pause_restart_loop_applies_seek_and_fresh_attempt_before_unpausing() {
     assert_eq!(app.world().resource::<GameplayClock>().current_ms, 2_000);
 }
 
+#[test]
+fn rejected_paused_restart_cannot_resume_later() {
+    let mut app = build_lifecycle_app(PracticeIntent::manual(PracticeOrigin::SongSelect));
+    enter_performance(&mut app, chart_with_measures(8));
+    app.world_mut().resource_mut::<PracticeFlow>().phase = PracticePhase::Running;
+    {
+        let mut session = app.world_mut().resource_mut::<PracticeSession>();
+        session.transport.loop_region = Some(LoopRegion {
+            start_ms: 2_000,
+            end_ms: 6_000,
+        });
+        session.transport.preroll = gameplay_drums::practice::session::PrerollSetting::Off;
+        session.current_attempt.start_ms = 2_000;
+    }
+    ready_clock(&mut app, 5_000);
+    app.world_mut()
+        .resource_mut::<NextState<game_shell::PauseState>>()
+        .set(game_shell::PauseState::Paused);
+    app.update();
+    app.world_mut()
+        .resource_mut::<gameplay_drums::pause::PauseSelection>()
+        .0 = 1;
+    app.world_mut().write_message(game_shell::NavAction {
+        verb: game_shell::NavVerb::Confirm,
+        source: game_shell::NavSource::Keyboard,
+        coarse: false,
+    });
+    app.update();
+    app.world_mut().resource_mut::<GameplayClock>().reset();
+
+    app.world_mut().run_schedule(FixedUpdate);
+    {
+        let mut session = app.world_mut().resource_mut::<PracticeSession>();
+        session.current_attempt = gameplay_drums::practice::session::AttemptStats {
+            start_ms: 2_000,
+            ..Default::default()
+        };
+        session.current_attempt_eligible = true;
+    }
+    ready_clock(&mut app, 2_000);
+    app.world_mut().run_schedule(FixedUpdate);
+    app.update();
+
+    assert_eq!(
+        *app.world()
+            .resource::<State<game_shell::PauseState>>()
+            .get(),
+        game_shell::PauseState::Paused
+    );
+}
+
+#[test]
+fn out_of_range_paused_restart_is_cancelled_after_seek_clamps() {
+    let mut app = build_lifecycle_app(PracticeIntent::manual(PracticeOrigin::SongSelect));
+    enter_performance(&mut app, chart_with_measures(4));
+    app.world_mut().resource_mut::<PracticeFlow>().phase = PracticePhase::Running;
+    {
+        let mut session = app.world_mut().resource_mut::<PracticeSession>();
+        session.transport.loop_region = Some(LoopRegion {
+            start_ms: 50_000,
+            end_ms: 60_000,
+        });
+        session.transport.preroll = gameplay_drums::practice::session::PrerollSetting::Off;
+        session.current_attempt.start_ms = 50_000;
+    }
+    ready_clock(&mut app, 5_000);
+    app.world_mut()
+        .resource_mut::<NextState<game_shell::PauseState>>()
+        .set(game_shell::PauseState::Paused);
+    app.update();
+    app.world_mut()
+        .resource_mut::<gameplay_drums::pause::PauseSelection>()
+        .0 = 1;
+    app.world_mut().write_message(game_shell::NavAction {
+        verb: game_shell::NavVerb::Confirm,
+        source: game_shell::NavSource::Keyboard,
+        coarse: false,
+    });
+    app.update();
+
+    app.world_mut().run_schedule(FixedUpdate);
+    app.update();
+
+    assert_eq!(
+        *app.world()
+            .resource::<State<game_shell::PauseState>>()
+            .get(),
+        game_shell::PauseState::Paused
+    );
+    assert_ne!(
+        app.world().resource::<GameplayClock>().current_ms,
+        50_000,
+        "the seek engine clamps the invalid target while restart stays paused"
+    );
+}
+
+#[test]
+fn paused_restart_is_cancelled_across_performance_transition() {
+    let mut app = build_lifecycle_app(PracticeIntent::manual(PracticeOrigin::SongSelect));
+    enter_performance(&mut app, chart_with_measures(8));
+    app.world_mut().resource_mut::<PracticeFlow>().phase = PracticePhase::Running;
+    {
+        let mut session = app.world_mut().resource_mut::<PracticeSession>();
+        session.transport.loop_region = Some(LoopRegion {
+            start_ms: 2_000,
+            end_ms: 6_000,
+        });
+        session.transport.preroll = gameplay_drums::practice::session::PrerollSetting::Off;
+        session.current_attempt.start_ms = 2_000;
+    }
+    ready_clock(&mut app, 5_000);
+    app.world_mut()
+        .resource_mut::<NextState<game_shell::PauseState>>()
+        .set(game_shell::PauseState::Paused);
+    app.update();
+    app.world_mut()
+        .resource_mut::<gameplay_drums::pause::PauseSelection>()
+        .0 = 1;
+    app.world_mut().write_message(game_shell::NavAction {
+        verb: game_shell::NavVerb::Confirm,
+        source: game_shell::NavSource::Keyboard,
+        coarse: false,
+    });
+    app.update();
+
+    app.world_mut()
+        .resource_mut::<NextState<AppState>>()
+        .set(AppState::SongSelect);
+    app.update();
+    *app.world_mut().resource_mut::<PracticeIntent>() =
+        PracticeIntent::manual(PracticeOrigin::SongSelect);
+    enter_performance(&mut app, chart_with_measures(16));
+    app.world_mut().resource_mut::<PracticeFlow>().phase = PracticePhase::Running;
+    {
+        let mut session = app.world_mut().resource_mut::<PracticeSession>();
+        session.current_attempt = gameplay_drums::practice::session::AttemptStats {
+            start_ms: 2_000,
+            ..Default::default()
+        };
+        session.current_attempt_eligible = true;
+    }
+    ready_clock(&mut app, 2_000);
+    app.world_mut()
+        .resource_mut::<NextState<game_shell::PauseState>>()
+        .set(game_shell::PauseState::Paused);
+    app.update();
+    app.world_mut().run_schedule(FixedUpdate);
+    app.update();
+
+    assert_eq!(
+        *app.world()
+            .resource::<State<game_shell::PauseState>>()
+            .get(),
+        game_shell::PauseState::Paused
+    );
+}
+
 fn assert_gameplay_seek_rebuilds_judged(intent: PracticeIntent) {
     let mut app = build_lifecycle_app(intent);
     enter_performance(&mut app, chart_for_preview_seek());
@@ -2436,6 +2594,57 @@ fn setup_system_verbs_are_drained_before_continue() {
         .world()
         .resource::<Messages<game_shell::TransitionRequest>>()
         .is_empty());
+}
+
+#[test]
+fn customize_system_verbs_are_drained_before_close() {
+    let mut app = build_lifecycle_app(PracticeIntent::manual(PracticeOrigin::SongSelect));
+    enter_performance(&mut app, chart_with_measures(4));
+    app.world_mut().resource_mut::<PracticeFlow>().phase = PracticePhase::Running;
+    app.world_mut()
+        .resource_mut::<gameplay_drums::editor::EditorOpen>()
+        .0 = true;
+    for verb in [dtx_input::SystemVerb::Pause, dtx_input::SystemVerb::Restart] {
+        app.world_mut()
+            .write_message(gameplay_drums::events::SystemVerbHit { verb });
+    }
+    app.update();
+    app.world_mut()
+        .resource_mut::<gameplay_drums::editor::EditorOpen>()
+        .0 = false;
+    app.update();
+    app.update();
+
+    assert_eq!(
+        *app.world()
+            .resource::<State<game_shell::PauseState>>()
+            .get(),
+        game_shell::PauseState::Running
+    );
+    assert!(app
+        .world()
+        .resource::<Messages<game_shell::TransitionRequest>>()
+        .is_empty());
+}
+
+#[test]
+fn paused_autoplay_does_not_emit_or_queue_lane_hits() {
+    let mut app = build_lifecycle_app(PracticeIntent::None);
+    enter_performance(&mut app, chart_with_measures(4));
+    app.world_mut()
+        .resource_mut::<gameplay_drums::autoplay::AutoplayEnabled>()
+        .0 = true;
+    ready_clock(&mut app, 5_000);
+    app.world_mut()
+        .resource_mut::<NextState<game_shell::PauseState>>()
+        .set(game_shell::PauseState::Paused);
+    app.update();
+    app.world_mut().resource_mut::<Messages<LaneHit>>().clear();
+
+    for _ in 0..3 {
+        app.world_mut().run_schedule(FixedUpdate);
+        assert!(app.world().resource::<Messages<LaneHit>>().is_empty());
+    }
 }
 
 #[test]

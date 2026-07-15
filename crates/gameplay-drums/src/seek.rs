@@ -22,7 +22,7 @@ use crate::resources::{
 use crate::timeline::{ChipTimeline, SnapDivisor};
 
 /// Request to jump playback to a chart time.
-#[derive(Message, Debug, Clone, Copy)]
+#[derive(Message, Debug, Clone, Copy, PartialEq, Eq)]
 pub struct SeekToChartTime {
     /// Requested chart time (ms). Snapped by the engine when `snap` is set.
     pub target_ms: i64,
@@ -93,6 +93,33 @@ pub struct PendingAudioStarts(pub Vec<PendingAudioSlice>);
 #[derive(Resource, Default, Debug, Clone, Copy)]
 pub struct LastSeekFrom(pub Option<i64>);
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SeekRejection {
+    ClockNotStarted,
+    EmptyTimeline,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SeekResult {
+    Applied { resolved_ms: i64 },
+    Rejected(SeekRejection),
+}
+
+#[derive(Resource, Default, Debug, Clone, Copy)]
+pub struct SeekAcknowledgement {
+    pub revision: u64,
+    pub request: Option<SeekToChartTime>,
+    pub result: Option<SeekResult>,
+}
+
+impl SeekAcknowledgement {
+    fn record(&mut self, request: SeekToChartTime, result: SeekResult) {
+        self.revision = self.revision.wrapping_add(1);
+        self.request = Some(request);
+        self.result = Some(result);
+    }
+}
+
 /// Chip indices already passed by non-judged Setup/Editing preview playback.
 /// This keeps preview reconstruction independent from gameplay judgment state.
 #[derive(Resource, Default, Debug, Clone)]
@@ -118,12 +145,14 @@ pub(crate) fn reset_seek_transients(
     mut pending_audio: ResMut<PendingAudioStarts>,
     mut stopped_rebuild: ResMut<StoppedSeekRebuild>,
     mut last_seek: ResMut<LastSeekFrom>,
+    mut acknowledgement: ResMut<SeekAcknowledgement>,
     mut seeks: ResMut<Messages<SeekToChartTime>>,
 ) {
     pending_bgm.0 = None;
     pending_audio.0.clear();
     stopped_rebuild.0 = false;
     last_seek.0 = None;
+    *acknowledgement = SeekAcknowledgement::default();
     seeks.clear();
 }
 
@@ -210,6 +239,7 @@ pub struct SeekState<'w> {
 
 pub fn apply_seek_system(
     mut seeks: MessageReader<SeekToChartTime>,
+    mut acknowledgement: ResMut<SeekAcknowledgement>,
     timeline: Res<ChipTimeline>,
     chart: Res<ActiveChart>,
     mut audio: SeekAudio,
@@ -221,7 +251,14 @@ pub fn apply_seek_system(
     let Some(seek) = seeks.read().last().copied() else {
         return;
     };
-    if !state.clock.is_started() || timeline.entries.is_empty() {
+    if !state.clock.is_started() {
+        acknowledgement.record(seek, SeekResult::Rejected(SeekRejection::ClockNotStarted));
+        warn!("seek rejected: gameplay clock has not started");
+        return;
+    }
+    if timeline.entries.is_empty() {
+        acknowledgement.record(seek, SeekResult::Rejected(SeekRejection::EmptyTimeline));
+        warn!("seek rejected: chart timeline is empty");
         return;
     }
 
@@ -413,6 +450,12 @@ pub fn apply_seek_system(
     state.last_seek_from.0 = Some(state.clock.current_ms);
     state.clock.seek(resolved);
     state.bga_clock.current_ms = resolved;
+    acknowledgement.record(
+        seek,
+        SeekResult::Applied {
+            resolved_ms: resolved,
+        },
+    );
     info!(
         "seek: target={} resolved={} (snap {:?})",
         seek.target_ms, resolved, seek.snap

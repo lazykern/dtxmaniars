@@ -126,6 +126,7 @@ pub fn plugin(app: &mut App) {
     .init_resource::<seek::PendingBgmStart>()
     .init_resource::<seek::PendingAudioStarts>()
     .init_resource::<seek::LastSeekFrom>()
+    .init_resource::<seek::SeekAcknowledgement>()
     .init_resource::<seek::PreviewSkippedChips>()
     .init_resource::<seek::StoppedSeekRebuild>()
     .init_resource::<dtx_bga::BgaClock>()
