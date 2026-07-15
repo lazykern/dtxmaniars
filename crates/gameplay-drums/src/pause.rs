@@ -769,6 +769,7 @@ fn refresh_pause_legend(
     midi: Option<Res<game_shell::MidiConnected>>,
     overlays: Query<Entity, With<PauseOverlay>>,
     legends: Query<Entity, With<dtx_ui::widget::nav_legend::NavLegend>>,
+    parents: Query<&ChildOf>,
 ) {
     if !view.is_changed()
         && !midi
@@ -777,12 +778,19 @@ fn refresh_pause_legend(
     {
         return;
     }
-    for legend in &legends {
-        commands.entity(legend).despawn();
-    }
     let Ok(root) = overlays.single() else {
         return;
     };
+    for legend in &legends {
+        let mut ancestor = legend;
+        while let Ok(parent) = parents.get(ancestor) {
+            ancestor = parent.parent();
+            if ancestor == root {
+                commands.entity(legend).despawn();
+                break;
+            }
+        }
+    }
     let theme = Theme::default();
     commands.entity(root).with_children(|overlay| {
         dtx_ui::widget::nav_legend::spawn_nav_legend(
@@ -1243,6 +1251,115 @@ mod tests {
                 ("Esc", "back"),
             ]
         );
+    }
+
+    fn descendant_count<T: Component>(world: &mut World, root: Entity) -> usize {
+        let mut query = world.query_filtered::<Entity, With<T>>();
+        query
+            .iter(world)
+            .filter(|entity| {
+                let mut current = *entity;
+                loop {
+                    if current == root {
+                        return true;
+                    }
+                    let Some(parent) = world.get::<ChildOf>(current) else {
+                        return false;
+                    };
+                    current = parent.parent();
+                }
+            })
+            .count()
+    }
+
+    fn descendant_text(world: &mut World, root: Entity) -> Vec<String> {
+        let mut query = world.query::<(Entity, &Text)>();
+        query
+            .iter(world)
+            .filter_map(|(entity, text)| {
+                let mut current = entity;
+                loop {
+                    if current == root {
+                        return Some(text.0.clone());
+                    }
+                    let parent = world.get::<ChildOf>(current)?;
+                    current = parent.parent();
+                }
+            })
+            .collect()
+    }
+
+    fn spawn_test_pause_overlay(mut commands: Commands) {
+        commands.spawn(PauseOverlay).with_children(|root| {
+            dtx_ui::widget::nav_legend::spawn_nav_legend(
+                root,
+                &Theme::default(),
+                pause_legend(PauseView::Menu, false),
+            );
+        });
+    }
+
+    #[test]
+    fn pause_legend_refresh_preserves_running_mini_strip_through_resume() {
+        let mut world = World::new();
+        world.insert_resource(PauseView::QuickSettings);
+        world.insert_resource(game_shell::MidiConnected(false));
+        world
+            .run_system_once(crate::practice::hud::mini_strip::spawn_mini_strip)
+            .expect("mini strip spawns");
+        let mini_strip = world
+            .query_filtered::<Entity, With<crate::practice::hud::mini_strip::MiniStripRoot>>()
+            .single(&world)
+            .expect("mini strip");
+        world
+            .run_system_once(spawn_test_pause_overlay)
+            .expect("pause overlay spawns");
+        let overlay = world
+            .query_filtered::<Entity, With<PauseOverlay>>()
+            .single(&world)
+            .expect("pause overlay");
+
+        world
+            .run_system_once(refresh_pause_legend)
+            .expect("quick settings legend refreshes");
+        assert_eq!(
+            descendant_count::<dtx_ui::widget::nav_legend::NavLegend>(&mut world, mini_strip),
+            1
+        );
+        assert_eq!(
+            descendant_count::<dtx_ui::widget::nav_legend::NavLegend>(&mut world, overlay),
+            1
+        );
+
+        *world.resource_mut::<PauseView>() = PauseView::Menu;
+        world
+            .run_system_once(refresh_pause_legend)
+            .expect("pause menu legend refreshes");
+        world
+            .run_system_once(refresh_pause_legend)
+            .expect("unchanged pause menu refresh is a no-op");
+        assert_eq!(
+            descendant_count::<dtx_ui::widget::nav_legend::NavLegend>(&mut world, overlay),
+            1
+        );
+
+        world
+            .run_system_once(despawn_overlay)
+            .expect("pause overlay despawns on resume");
+        assert_eq!(
+            descendant_count::<dtx_ui::widget::nav_legend::NavLegend>(&mut world, mini_strip),
+            1
+        );
+        let text = descendant_text(&mut world, mini_strip);
+        for expected in ["Esc", "Pause", "Tab", "Settings"] {
+            assert_eq!(
+                text.iter()
+                    .filter(|label| label.as_str() == expected)
+                    .count(),
+                1,
+                "running mini-strip legend must retain exactly one {expected:?}: {text:?}"
+            );
+        }
     }
 
     #[test]

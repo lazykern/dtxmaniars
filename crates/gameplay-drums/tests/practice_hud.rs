@@ -1851,6 +1851,95 @@ fn split_keyboard_and_pad_reach_every_transport_without_mutating_settings() {
     }
 }
 
+fn assert_split_progress_transport(mut app: App, pad: bool) {
+    let original = app.world().resource::<PracticeDraft>().clone();
+    app.world_mut().resource_mut::<SetupSelection>().0 = SetupItem::Tempo;
+    click_tab(&mut app, "Progress");
+    let layout = app
+        .world_mut()
+        .query_filtered::<&PracticeSetupLayout, With<PracticeSetupRoot>>()
+        .single(app.world())
+        .expect("practice layout")
+        .0;
+    assert_eq!(layout, PracticeLayoutMode::Split);
+    assert_eq!(
+        *app.world().resource::<PracticeTab>(),
+        PracticeTab::Progress
+    );
+    assert_eq!(
+        *app.world().resource::<PracticeSurfaceFocus>(),
+        PracticeSurfaceFocus::Settings
+    );
+
+    if pad {
+        send_nav(&mut app, game_shell::NavVerb::Practice);
+    } else {
+        press_key(&mut app, KeyCode::Tab);
+    }
+    assert_eq!(
+        *app.world().resource::<PracticeTab>(),
+        PracticeTab::Progress
+    );
+    assert_eq!(
+        *app.world().resource::<PracticeSurfaceFocus>(),
+        PracticeSurfaceFocus::Preview(PreviewTransportButton::Back)
+    );
+
+    if pad {
+        send_nav(&mut app, game_shell::NavVerb::Inc);
+        send_nav(&mut app, game_shell::NavVerb::Inc);
+        send_nav(&mut app, game_shell::NavVerb::Confirm);
+    } else {
+        press_key(&mut app, KeyCode::ArrowRight);
+        press_key(&mut app, KeyCode::ArrowRight);
+        press_key(&mut app, KeyCode::Enter);
+    }
+    assert_eq!(
+        *app.world().resource::<PracticeSurfaceFocus>(),
+        PracticeSurfaceFocus::Preview(PreviewTransportButton::PlayPause)
+    );
+    assert!(app
+        .world()
+        .resource::<Messages<gameplay_drums::practice::PreviewAction>>()
+        .iter_current_update_messages()
+        .any(|seen| *seen == gameplay_drums::practice::PreviewAction::Play));
+    assert_eq!(*app.world().resource::<PracticeDraft>(), original);
+
+    if pad {
+        send_nav(&mut app, game_shell::NavVerb::Practice);
+        send_nav(&mut app, game_shell::NavVerb::Confirm);
+    } else {
+        press_key(&mut app, KeyCode::Tab);
+        press_key(&mut app, KeyCode::Enter);
+    }
+    assert_eq!(
+        *app.world().resource::<PracticeSurfaceFocus>(),
+        PracticeSurfaceFocus::Settings
+    );
+    assert_eq!(*app.world().resource::<PracticeTab>(), PracticeTab::Setup);
+    assert_eq!(*app.world().resource::<PracticeDraft>(), original);
+}
+
+#[test]
+fn split_progress_keyboard_focuses_and_activates_persistent_preview_transport() {
+    for (width, height) in [(1280.0, 720.0), (1920.0, 1080.0)] {
+        assert_split_progress_transport(
+            setup_hud_app(width, height, dtx_config::TextScale::Standard),
+            false,
+        );
+    }
+}
+
+#[test]
+fn split_progress_pad_focuses_and_activates_persistent_preview_transport() {
+    for (width, height) in [(1280.0, 720.0), (1920.0, 1080.0)] {
+        assert_split_progress_transport(
+            setup_hud_app(width, height, dtx_config::TextScale::Standard),
+            true,
+        );
+    }
+}
+
 #[test]
 fn progress_hides_primary_action_and_cannot_focus_or_activate_it() {
     for width in [900.0, 1280.0, 1920.0] {

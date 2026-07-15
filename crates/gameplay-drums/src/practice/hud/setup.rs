@@ -285,7 +285,6 @@ pub(super) fn ensure_setup_shell(
     }
     if *tab == PracticeTab::Progress {
         selection.0 = super::setup_controls::SetupItem::Source;
-        *focus = PracticeSurfaceFocus::Settings;
     }
     super::setup_controls::normalize_selection(&mut selection, &draft, &prompt);
     let signature = PracticeShellSignature {

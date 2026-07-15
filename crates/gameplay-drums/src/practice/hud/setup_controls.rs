@@ -264,7 +264,20 @@ pub fn nav_actions(
         .single()
         .is_ok_and(|layout| layout.0 == super::setup::PracticeLayoutMode::Split);
     for action in nav.read() {
-        let action = if *tab == super::setup::PracticeTab::Progress {
+        let action = if split && action.verb == game_shell::NavVerb::Practice {
+            PracticeUiAction::ToggleSurfaceFocus
+        } else if split && matches!(*focus, super::setup::PracticeSurfaceFocus::Preview(_)) {
+            match action.verb {
+                game_shell::NavVerb::Back => PracticeUiAction::Back,
+                game_shell::NavVerb::Practice => PracticeUiAction::ToggleSurfaceFocus,
+                game_shell::NavVerb::Dec => PracticeUiAction::MoveTransportFocus(-1),
+                game_shell::NavVerb::Inc => PracticeUiAction::MoveTransportFocus(1),
+                game_shell::NavVerb::Confirm => PracticeUiAction::ActivateTransport,
+                game_shell::NavVerb::Up | game_shell::NavVerb::Down => {
+                    PracticeUiAction::ToggleSurfaceFocus
+                }
+            }
+        } else if *tab == super::setup::PracticeTab::Progress {
             match action.verb {
                 game_shell::NavVerb::Back => PracticeUiAction::Back,
                 game_shell::NavVerb::Up | game_shell::NavVerb::Dec => PracticeUiAction::MoveTab(-1),
