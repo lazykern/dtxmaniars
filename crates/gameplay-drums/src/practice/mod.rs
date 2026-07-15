@@ -12,6 +12,7 @@ pub mod draft;
 pub mod flow;
 pub mod hud;
 pub mod metronome;
+pub mod presets;
 pub mod preview;
 pub mod ramp;
 pub mod rate;
@@ -30,17 +31,16 @@ pub use flow::{
     chart_clock_active, gameplay_input_active, practice_running, practice_surface_open,
     PracticeEditSnapshot, PracticeFlow, PracticePhase, PreviewState,
 };
+pub use presets::{
+    apply_preset_command, PracticePresetStore, PracticePresetStoreStatus, PresetCommand,
+    PresetResult,
+};
 pub use preview::{CancelPracticeSettings, OpenPracticeSettings, PreviewAction, PreviewController};
 pub use session::PracticeSession;
 
 use crate::gauge::StageGauge;
 use crate::seek::SeekToChartTime;
 use crate::timeline::ChipTimeline;
-
-#[derive(Message, Debug, Clone, PartialEq)]
-pub enum PresetCommand {
-    RecordLastUsed { draft: PracticeDraft },
-}
 
 /// The practice action chain and its full gating. Split out of `plugin` so the
 /// test can register the PRODUCTION wiring (notably the `editor_closed` gate)
@@ -66,14 +66,15 @@ fn add_action_systems(app: &mut App) {
 
 pub(super) fn plugin(app: &mut App) {
     add_action_systems(app);
-    app.init_resource::<toast::ToastQueue>()
-        .add_message::<PresetCommand>();
+    app.init_resource::<toast::ToastQueue>();
+    presets::plugin(app);
     app.add_systems(
         OnEnter(AppState::Performance),
         enter_practice_setup.before(crate::orchestrator::DrumsEnterSet),
     )
     .add_systems(OnExit(AppState::Performance), remove_practice_surface)
     .add_systems(OnEnter(AppState::SongSelect), remove_practice_session)
+    .add_systems(Update, run_start_requests.run_if(practice_surface_open))
     .add_systems(
         FixedUpdate,
         freeze_gauge_in_practice
@@ -91,6 +92,15 @@ pub(super) fn plugin(app: &mut App) {
         stats::plugin,
         wait::plugin,
     ));
+}
+
+fn run_start_requests(
+    mut requests: MessageReader<hud::setup_controls::StartOrContinueRequested>,
+    mut commands: Commands,
+) {
+    if requests.read().next().is_some() {
+        commands.run_system_cached(start_or_continue_practice);
+    }
 }
 
 fn enter_practice_setup(

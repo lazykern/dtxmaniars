@@ -2,19 +2,22 @@ use bevy::camera::{Camera, Camera2d, ComputedCameraValues, RenderTargetInfo, Vie
 use bevy::prelude::*;
 use bevy::window::{PrimaryWindow, WindowResolution};
 use game_shell::{AppState, PauseState};
+use gameplay_drums::practice::hud::progress::progress_rows;
 use gameplay_drums::practice::hud::setup::{
     practice_layout_mode, practice_transport_row_mode, update_tab_selection, PracticeLayoutMode,
     PracticePreviewGeometry, PracticePreviewRegion, PracticePrimaryAction, PracticeSettingsPane,
     PracticeSetupLayout, PracticeSetupRoot, PracticeTab, PracticeTabButton,
     PracticeTransportRowMode,
 };
+use gameplay_drums::practice::hud::setup_controls::PracticeUiAction;
 use gameplay_drums::practice::hud::timeline_ui::{
     PracticeLoopFill, PracticeLoopHandle, PracticeTimelineRoot, PracticeTimelineStrip,
     PreviewTransportButton, TimelineGesture,
 };
 use gameplay_drums::practice::session::{AttemptRecord, LoopRegion};
 use gameplay_drums::practice::{
-    PracticeDraft, PracticeDraftSource, PracticeFlow, PracticeSession, PracticeTrainerMode,
+    apply_preset_command, PracticeDraft, PracticeDraftSource, PracticeFlow, PracticePresetStore,
+    PracticeSession, PracticeTrainerMode, PresetCommand, PresetResult,
 };
 use gameplay_drums::resources::GameplayClock;
 use gameplay_drums::timeline::{ChipTimeline, SnapDivisor};
@@ -153,12 +156,109 @@ fn setup_hud_app(width: f32, height: f32, text_scale: dtx_config::TextScale) -> 
     app
 }
 
+fn send_ui_action(app: &mut App, action: PracticeUiAction) {
+    app.world_mut().write_message(action);
+}
+
 fn texts(app: &mut App) -> Vec<String> {
     app.world_mut()
         .query::<&Text>()
         .iter(app.world())
         .map(|text| text.0.clone())
         .collect()
+}
+
+#[test]
+fn selecting_saved_source_populates_draft_without_starting_preview() {
+    let mut app = setup_hud_app(1280.0, 720.0, dtx_config::TextScale::Standard);
+    let chart = dtx_config::PracticeChartKey::new("dtx1:test", 0);
+    let mut registry = dtx_config::PracticePresetRegistry::default();
+    let id = registry
+        .create(
+            chart.clone(),
+            Some("Chorus"),
+            None,
+            dtx_config::PracticePresetConfig {
+                loop_start_ms: Some(10_000),
+                loop_end_ms: Some(20_000),
+                snap: dtx_config::PracticeSnapPreset::Beat,
+                tempo: 0.8,
+                preroll: dtx_config::PracticePrerollPreset::TwoSeconds,
+                count_in: false,
+                trainer: dtx_config::PracticeTrainerPreset::Wait,
+            },
+        )
+        .expect("valid preset");
+    app.world_mut().insert_resource(PracticePresetStore::ready(
+        std::env::temp_dir().join("practice-hud-source.toml"),
+        chart,
+        None,
+        registry,
+    ));
+
+    send_ui_action(
+        &mut app,
+        PracticeUiAction::SelectSource(PracticeDraftSource::Saved(id)),
+    );
+    app.update();
+
+    let draft = app.world().resource::<PracticeDraft>();
+    assert_eq!(draft.user_tempo, 0.8);
+    assert_eq!(draft.snap, SnapDivisor::Beat);
+    assert_eq!(draft.preroll.label(), "2s");
+    assert!(!draft.count_in);
+    assert_eq!(draft.trainer_mode(), PracticeTrainerMode::Wait);
+    assert_eq!(
+        app.world().resource::<PracticeFlow>().preview,
+        gameplay_drums::practice::PreviewState::Stopped
+    );
+}
+
+#[test]
+fn failed_save_keeps_draft_and_reports_retry() {
+    let chart = dtx_config::PracticeChartKey::new("dtx1:test", 0);
+    let mut store = PracticePresetStore::read_only(
+        std::env::temp_dir().join("practice-hud-read-only.toml"),
+        chart,
+        None,
+        dtx_config::PracticePresetRegistry::default(),
+        "unsupported version",
+    );
+    let draft = PracticeDraft {
+        user_tempo: 0.8,
+        ..Default::default()
+    };
+    let original = draft.clone();
+
+    let result = apply_preset_command(
+        &mut store,
+        PresetCommand::SaveNew {
+            name: None,
+            draft: draft.clone(),
+        },
+    );
+
+    assert!(matches!(result, PresetResult::Failed { .. }));
+    assert_eq!(draft, original);
+    assert!(store.registry.presets.is_empty());
+}
+
+#[test]
+fn progress_omits_ineligible_partial_attempt() {
+    let session = PracticeSession {
+        current_attempt_eligible: false,
+        current_attempt: gameplay_drums::practice::session::AttemptStats {
+            counts: gameplay_drums::resources::JudgmentCounts {
+                perfect: 10,
+                ..Default::default()
+            },
+            ..Default::default()
+        },
+        ..Default::default()
+    };
+    assert!(progress_rows(&session, 20_000)
+        .iter()
+        .all(|row| !row.contains("10")));
 }
 
 fn count<T: Component>(app: &mut App) -> usize {

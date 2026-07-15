@@ -41,15 +41,41 @@ pub(super) struct ProgressSummaryText;
 pub(super) struct ProgressDiagnosisText;
 
 fn progress_summary(session: &crate::practice::PracticeSession) -> String {
-    session.attempt_history.last().map_or_else(
-        || "No completed attempts yet".to_owned(),
-        |attempt| {
+    let span_end = session
+        .transport
+        .loop_region
+        .map(|region| region.end_ms)
+        .or_else(|| session.attempt_history.last().map(|attempt| attempt.end_ms))
+        .unwrap_or(0);
+    let rows = progress_rows(session, span_end);
+    if rows.is_empty() {
+        "No completed attempts yet".to_owned()
+    } else {
+        rows.join("\n")
+    }
+}
+
+pub fn progress_rows(session: &crate::practice::PracticeSession, span_end_ms: i64) -> Vec<String> {
+    let span_start_ms = session.transport.loop_region.map(|region| region.start_ms);
+    session
+        .attempt_history
+        .iter()
+        .filter(|attempt| {
+            span_start_ms.is_none_or(|start| attempt.start_ms == start)
+                && attempt.end_ms == span_end_ms
+        })
+        .map(|attempt| {
+            let metric = if session.trainer.wait_enabled() {
+                format!("Latest flow: {:.1}%", attempt.flow_pct)
+            } else {
+                format!("Latest: {:.1}%", attempt.accuracy_pct)
+            };
             format!(
-                "Latest: {:.1}% at {:.2}×, timing {:+.0} ms",
-                attempt.accuracy_pct, attempt.tempo, attempt.mean_error_ms
+                "{metric} at {:.2}×, timing {:+.0} ms",
+                attempt.tempo, attempt.mean_error_ms
             )
-        },
-    )
+        })
+        .collect()
 }
 
 pub(super) fn refresh_progress_copy(

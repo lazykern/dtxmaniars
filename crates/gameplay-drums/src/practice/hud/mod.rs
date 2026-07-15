@@ -4,6 +4,7 @@ pub mod chip;
 pub mod mini_strip;
 pub mod progress;
 pub mod setup;
+pub mod setup_controls;
 pub mod timeline_ui;
 pub mod wait_prompt;
 
@@ -26,6 +27,10 @@ pub fn format_chart_time(ms: i64) -> String {
 /// HUD plugin schedule headlessly; see `tests/practice_hud.rs`.
 pub fn plugin(app: &mut App) {
     use game_shell::AppState;
+    app.add_message::<game_shell::NavAction>()
+        .add_message::<crate::practice::CancelPracticeSettings>()
+        .add_message::<crate::practice::PresetCommand>()
+        .add_message::<crate::practice::PresetResult>();
     mini_strip::plugin(app);
     chip::plugin(app);
     wait_prompt::plugin(app);
@@ -44,6 +49,7 @@ pub fn plugin(app: &mut App) {
             Update,
             (
                 setup::update_tab_selection,
+                setup::setup_button_actions,
                 setup::ensure_setup_shell,
                 timeline_ui::timeline_mouse.run_if(crate::practice::practice_surface_open),
                 timeline_ui::preview_transport_buttons
@@ -72,6 +78,7 @@ pub fn plugin(app: &mut App) {
             )
                 .run_if(in_state(AppState::Performance)),
         );
+    setup_controls::plugin(app);
 }
 
 fn sync_compact_hud_visibility(

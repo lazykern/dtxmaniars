@@ -126,7 +126,7 @@ pub struct PracticePreviewRegion;
 pub struct PracticePrimaryAction;
 
 #[derive(Component)]
-struct PrimaryActionButton;
+pub(super) struct PrimaryActionButton;
 
 #[derive(Component, Debug, Clone, Copy)]
 pub struct PracticeTabButton(pub PracticeTab);
@@ -150,7 +150,18 @@ enum SetupValue {
     Preroll,
     CountIn,
     Trainer,
+    RampStart,
+    RampTarget,
+    RampStep,
+    RampThreshold,
+    RampPasses,
 }
+
+#[derive(Component, Debug, Clone, Copy)]
+pub(super) struct SetupRow(crate::practice::hud::setup_controls::SetupItem);
+
+#[derive(Component, Debug, Clone, Copy)]
+pub(super) struct SetupRowLabel(crate::practice::hud::setup_controls::SetupItem);
 
 #[derive(Component)]
 pub(super) struct SetupValueText(SetupValue);
@@ -499,6 +510,7 @@ fn spawn_setup_content(
     spawn_setting_row(
         content,
         theme,
+        super::setup_controls::SetupItem::Source,
         SetupValue::Source,
         "Source",
         setup_value(SetupValue::Source, draft),
@@ -506,6 +518,7 @@ fn spawn_setup_content(
     spawn_setting_row(
         content,
         theme,
+        super::setup_controls::SetupItem::LoopStart,
         SetupValue::LoopStart,
         "A",
         setup_value(SetupValue::LoopStart, draft),
@@ -513,6 +526,7 @@ fn spawn_setup_content(
     spawn_setting_row(
         content,
         theme,
+        super::setup_controls::SetupItem::LoopEnd,
         SetupValue::LoopEnd,
         "B",
         setup_value(SetupValue::LoopEnd, draft),
@@ -522,6 +536,7 @@ fn spawn_setup_content(
     spawn_setting_row(
         content,
         theme,
+        super::setup_controls::SetupItem::Tempo,
         SetupValue::Tempo,
         "Tempo",
         setup_value(SetupValue::Tempo, draft),
@@ -529,6 +544,7 @@ fn spawn_setup_content(
     spawn_setting_row(
         content,
         theme,
+        super::setup_controls::SetupItem::Snap,
         SetupValue::Snap,
         "Snap",
         setup_value(SetupValue::Snap, draft),
@@ -536,6 +552,7 @@ fn spawn_setup_content(
     spawn_setting_row(
         content,
         theme,
+        super::setup_controls::SetupItem::Preroll,
         SetupValue::Preroll,
         "Pre-roll",
         setup_value(SetupValue::Preroll, draft),
@@ -543,6 +560,7 @@ fn spawn_setup_content(
     spawn_setting_row(
         content,
         theme,
+        super::setup_controls::SetupItem::CountIn,
         SetupValue::CountIn,
         "Count-in",
         setup_value(SetupValue::CountIn, draft),
@@ -552,10 +570,71 @@ fn spawn_setup_content(
     spawn_setting_row(
         content,
         theme,
+        super::setup_controls::SetupItem::TrainerMode,
         SetupValue::Trainer,
         "Mode",
         setup_value(SetupValue::Trainer, draft),
     );
+    if draft.trainer.mode == crate::practice::PracticeTrainerMode::Ramp {
+        for (item, field, label) in [
+            (
+                super::setup_controls::SetupItem::RampStart,
+                SetupValue::RampStart,
+                "Start tempo",
+            ),
+            (
+                super::setup_controls::SetupItem::RampTarget,
+                SetupValue::RampTarget,
+                "Target tempo",
+            ),
+            (
+                super::setup_controls::SetupItem::RampStep,
+                SetupValue::RampStep,
+                "Step",
+            ),
+            (
+                super::setup_controls::SetupItem::RampThreshold,
+                SetupValue::RampThreshold,
+                "Pass threshold",
+            ),
+            (
+                super::setup_controls::SetupItem::RampPasses,
+                SetupValue::RampPasses,
+                "Required passes",
+            ),
+        ] {
+            spawn_setting_row(
+                content,
+                theme,
+                item,
+                field,
+                label,
+                setup_value(field, draft),
+            );
+        }
+    }
+
+    spawn_section_heading(content, theme, "Saved presets");
+    spawn_action_row(
+        content,
+        theme,
+        super::setup_controls::SetupItem::SaveAsNew,
+        "Save as New",
+    );
+    if matches!(draft.source, crate::practice::PracticeDraftSource::Saved(_)) {
+        spawn_action_row(
+            content,
+            theme,
+            super::setup_controls::SetupItem::UpdateSaved,
+            "Update Saved Loop",
+        );
+        spawn_action_row(
+            content,
+            theme,
+            super::setup_controls::SetupItem::DeleteSaved,
+            "Delete Saved Loop",
+        );
+    }
 }
 
 fn spawn_preview(
@@ -636,29 +715,35 @@ fn spawn_section_heading(
 fn spawn_setting_row(
     parent: &mut ChildSpawnerCommands,
     theme: &dtx_ui::Theme,
+    item: super::setup_controls::SetupItem,
     field: SetupValue,
     label: impl Into<String>,
     value: impl Into<String>,
 ) {
     parent
-        .spawn(Node {
-            width: Val::Percent(100.0),
-            min_height: Val::Px(36.0),
-            flex_direction: FlexDirection::Row,
-            flex_wrap: FlexWrap::Wrap,
-            justify_content: JustifyContent::SpaceBetween,
-            align_items: AlignItems::Center,
-            column_gap: Val::Px(dtx_ui::SpacingRole::Sm.px()),
-            padding: UiRect::vertical(Val::Px(dtx_ui::SpacingRole::Xs.px())),
-            ..default()
-        })
+        .spawn((
+            SetupRow(item),
+            Button,
+            Node {
+                width: Val::Percent(100.0),
+                min_height: Val::Px(36.0),
+                flex_direction: FlexDirection::Row,
+                flex_wrap: FlexWrap::Wrap,
+                justify_content: JustifyContent::SpaceBetween,
+                align_items: AlignItems::Center,
+                column_gap: Val::Px(dtx_ui::SpacingRole::Sm.px()),
+                padding: UiRect::vertical(Val::Px(dtx_ui::SpacingRole::Xs.px())),
+                ..default()
+            },
+        ))
         .with_children(|row| {
-            spawn_text(
+            let label = spawn_text(
                 row,
                 label,
                 dtx_ui::TypographyRole::Body,
                 theme.text_secondary,
             );
+            row.commands().entity(label).insert(SetupRowLabel(item));
             let value = spawn_text(
                 row,
                 value,
@@ -666,6 +751,36 @@ fn spawn_setting_row(
                 theme.text_primary,
             );
             row.commands().entity(value).insert(SetupValueText(field));
+        });
+}
+
+fn spawn_action_row(
+    parent: &mut ChildSpawnerCommands,
+    theme: &dtx_ui::Theme,
+    item: super::setup_controls::SetupItem,
+    label: &'static str,
+) {
+    parent
+        .spawn((
+            SetupRow(item),
+            Button,
+            Node {
+                width: Val::Percent(100.0),
+                min_height: Val::Px(40.0),
+                align_items: AlignItems::Center,
+                padding: UiRect::axes(Val::Px(10.0), Val::Px(6.0)),
+                ..default()
+            },
+            BackgroundColor(Color::srgba(1.0, 1.0, 1.0, 0.08)),
+        ))
+        .with_children(|row| {
+            let entity = spawn_text(
+                row,
+                label,
+                dtx_ui::TypographyRole::Label,
+                theme.text_primary,
+            );
+            row.commands().entity(entity).insert(SetupRowLabel(item));
         });
 }
 
@@ -689,6 +804,11 @@ fn setup_value(field: SetupValue, draft: &PracticeDraft) -> String {
         SetupValue::Preroll => draft.preroll.label(),
         SetupValue::CountIn => if draft.count_in { "On" } else { "Off" }.to_owned(),
         SetupValue::Trainer => trainer_label(draft.trainer.mode).to_owned(),
+        SetupValue::RampStart => format!("{:.2}×", draft.trainer.ramp_config.start_tempo),
+        SetupValue::RampTarget => format!("{:.2}×", draft.trainer.ramp_config.target_tempo),
+        SetupValue::RampStep => format!("{:.2}×", draft.trainer.ramp_config.step),
+        SetupValue::RampThreshold => format!("{:.0}%", draft.trainer.ramp_config.threshold_pct),
+        SetupValue::RampPasses => draft.trainer.ramp_config.required_successes.to_string(),
     }
 }
 
@@ -697,12 +817,75 @@ pub(super) fn refresh_setup_copy(
     draft: Res<PracticeDraft>,
     mut values: Query<(&SetupValueText, &mut Text), Without<PracticePrimaryAction>>,
     mut primary: Query<&mut Text, With<PracticePrimaryAction>>,
+    selection: Res<super::setup_controls::SetupSelection>,
+    store: Option<Res<crate::practice::PracticePresetStore>>,
+    timeline: Res<crate::timeline::ChipTimeline>,
+    mut labels: Query<
+        (&SetupRowLabel, &mut Text),
+        (Without<SetupValueText>, Without<PracticePrimaryAction>),
+    >,
 ) {
     for (field, mut text) in &mut values {
-        text.0 = setup_value(field.0, &draft);
+        text.0 = if field.0 == SetupValue::Source {
+            format!(
+                "{} {}",
+                dtx_ui::StateMarker::Selected.label(),
+                selected_source_label(draft.source, store.as_deref(), &timeline)
+            )
+        } else {
+            setup_value(field.0, &draft)
+        };
     }
     for mut text in &mut primary {
         text.0 = primary_action_label(flow.phase).to_owned();
+    }
+    for (row, mut text) in &mut labels {
+        let raw = text.0.trim_start_matches("› ").to_owned();
+        text.0 = if row.0 == selection.0 {
+            format!("› {raw}")
+        } else {
+            raw
+        };
+    }
+}
+
+fn selected_source_label(
+    source: crate::practice::PracticeDraftSource,
+    store: Option<&crate::practice::PracticePresetStore>,
+    timeline: &crate::timeline::ChipTimeline,
+) -> String {
+    if let (crate::practice::PracticeDraftSource::Saved(id), Some(store)) = (source, store) {
+        if let Some(preset) = store.registry.preset(id) {
+            return preset.name.clone().unwrap_or_else(|| {
+                crate::practice::presets::automatic_preset_label(&preset.config, timeline)
+            });
+        }
+    }
+    source_label(source).to_owned()
+}
+
+pub(super) fn setup_button_actions(
+    rows: Query<(&Interaction, &SetupRow), Changed<Interaction>>,
+    primary: Query<&Interaction, (With<PrimaryActionButton>, Changed<Interaction>)>,
+    mut actions: MessageWriter<super::setup_controls::PracticeUiAction>,
+) {
+    for (interaction, row) in &rows {
+        if *interaction == Interaction::Pressed {
+            actions.write(super::setup_controls::PracticeUiAction::SelectItem(row.0));
+            if matches!(
+                row.0,
+                super::setup_controls::SetupItem::SaveAsNew
+                    | super::setup_controls::SetupItem::UpdateSaved
+                    | super::setup_controls::SetupItem::DeleteSaved
+            ) {
+                actions.write(super::setup_controls::PracticeUiAction::Confirm);
+            }
+        }
+    }
+    for interaction in &primary {
+        if *interaction == Interaction::Pressed {
+            actions.write(super::setup_controls::PracticeUiAction::StartOrContinue);
+        }
     }
 }
 

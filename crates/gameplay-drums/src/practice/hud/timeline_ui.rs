@@ -382,13 +382,13 @@ pub(super) fn spawn_timeline(
 pub(super) fn preview_transport_buttons(
     interactions: Query<(&Interaction, &PreviewTransportButton), Changed<Interaction>>,
     flow: Res<crate::practice::PracticeFlow>,
-    mut actions: MessageWriter<crate::practice::PreviewAction>,
+    mut actions: MessageWriter<super::setup_controls::PracticeUiAction>,
 ) {
     for (interaction, button) in &interactions {
         if *interaction != Interaction::Pressed {
             continue;
         }
-        actions.write(match button {
+        let preview = match button {
             PreviewTransportButton::PrevBar => crate::practice::PreviewAction::PrevBar,
             PreviewTransportButton::PlayPause
                 if flow.preview == crate::practice::PreviewState::Playing =>
@@ -397,7 +397,8 @@ pub(super) fn preview_transport_buttons(
             }
             PreviewTransportButton::PlayPause => crate::practice::PreviewAction::Play,
             PreviewTransportButton::NextBar => crate::practice::PreviewAction::NextBar,
-        });
+        };
+        actions.write(super::setup_controls::PracticeUiAction::Preview(preview));
     }
 }
 
@@ -422,7 +423,7 @@ pub fn timeline_mouse(
     mut gesture: ResMut<TimelineGesture>,
     mut draft: ResMut<crate::practice::PracticeDraft>,
     timeline: Res<ChipTimeline>,
-    mut actions: MessageWriter<crate::practice::PreviewAction>,
+    mut actions: MessageWriter<super::setup_controls::PracticeUiAction>,
 ) {
     let Ok(window) = windows.single() else {
         *gesture = TimelineGesture::Idle;
@@ -451,7 +452,9 @@ pub fn timeline_mouse(
         GestureEffect::None => {}
         GestureEffect::Seek { target_ms } => {
             let snapped = timeline.resolve_snap(target_ms, draft.snap);
-            actions.write(crate::practice::PreviewAction::Seek(snapped));
+            actions.write(super::setup_controls::PracticeUiAction::Preview(
+                crate::practice::PreviewAction::Seek(snapped),
+            ));
         }
         GestureEffect::LoopPreview { anchor_ms } => {
             draft.loop_region = Some(drag_region(&timeline, anchor_ms, cursor_ms));
