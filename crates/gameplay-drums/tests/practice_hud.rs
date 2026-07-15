@@ -435,6 +435,69 @@ fn saved_edits_keep_identity_and_confirm_update_keeps_name() {
 }
 
 #[test]
+fn cycling_saved_sources_refreshes_name_and_custom_clears_it() {
+    let mut app = setup_hud_app(1280.0, 720.0, dtx_config::TextScale::Standard);
+    app.world_mut().resource_mut::<ChipTimeline>().end_ms = 10_000;
+    let chart = dtx_config::PracticeChartKey::new("dtx1:cycle", 0);
+    let mut registry = dtx_config::PracticePresetRegistry::default();
+    let config = dtx_config::PracticePresetConfig {
+        loop_start_ms: Some(1_000),
+        loop_end_ms: Some(5_000),
+        snap: dtx_config::PracticeSnapPreset::Bar,
+        tempo: 1.0,
+        preroll: dtx_config::PracticePrerollPreset::OneBar,
+        count_in: true,
+        trainer: dtx_config::PracticeTrainerPreset::Off,
+    };
+    let first = registry
+        .create(chart.clone(), Some("A"), None, config.clone())
+        .expect("first preset");
+    let second = registry
+        .create(chart.clone(), Some("B"), None, config)
+        .expect("second preset");
+    app.world_mut().insert_resource(PracticePresetStore::ready(
+        std::env::temp_dir().join("practice-hud-cycle-policy.toml"),
+        chart,
+        None,
+        registry,
+    ));
+    send_ui_action(
+        &mut app,
+        PracticeUiAction::SelectSource(PracticeDraftSource::Saved(first)),
+    );
+    send_ui_action(&mut app, PracticeUiAction::SelectItem(SetupItem::Source));
+    send_ui_action(&mut app, PracticeUiAction::Adjust(1));
+    app.update();
+
+    assert_eq!(
+        app.world().resource::<PracticeDraft>().source,
+        PracticeDraftSource::Saved(second)
+    );
+    assert_eq!(app.world().resource::<PresetNameInput>().value, "B");
+
+    send_ui_action(
+        &mut app,
+        PracticeUiAction::SelectItem(SetupItem::UpdateSaved),
+    );
+    send_ui_action(&mut app, PracticeUiAction::Confirm);
+    app.update();
+    assert!(app
+        .world()
+        .resource::<Messages<PresetCommand>>()
+        .iter_current_update_messages()
+        .any(|command| matches!(command, PresetCommand::UpdateSaved { id, name: Some(name), .. } if *id == second && name == "B")));
+
+    send_ui_action(&mut app, PracticeUiAction::SelectItem(SetupItem::Source));
+    send_ui_action(&mut app, PracticeUiAction::Adjust(1));
+    app.update();
+    assert_eq!(
+        app.world().resource::<PracticeDraft>().source,
+        PracticeDraftSource::Custom
+    );
+    assert!(app.world().resource::<PresetNameInput>().value.is_empty());
+}
+
+#[test]
 fn optional_preset_name_is_used_by_save_and_blank_keeps_auto_label() {
     let mut app = setup_hud_app(1280.0, 720.0, dtx_config::TextScale::Standard);
     app.world_mut().resource_mut::<ChipTimeline>().end_ms = 10_000;

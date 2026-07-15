@@ -318,14 +318,46 @@ impl PracticeSession {
     /// judgements) and start a fresh one at `next_start_ms`. Returns the
     /// finalized record when it had data, `None` when the pass was empty.
     pub fn roll_attempt(&mut self, end_ms: i64, next_start_ms: i64) -> Option<AttemptRecord> {
-        let completed_region = self.transport.loop_region.is_some_and(|region| {
-            self.current_attempt.start_ms == region.start_ms && end_ms >= region.end_ms
-        });
-        let canonical_end_ms = self
+        self.roll_attempt_inner(end_ms, next_start_ms, None)
+    }
+
+    /// Finalize an attempt with the chart end available as the implicit
+    /// whole-song loop boundary.
+    pub fn roll_attempt_for_chart(
+        &mut self,
+        end_ms: i64,
+        next_start_ms: i64,
+        chart_end_ms: i64,
+    ) -> Option<AttemptRecord> {
+        self.roll_attempt_inner(end_ms, next_start_ms, Some(chart_end_ms))
+    }
+
+    fn roll_attempt_inner(
+        &mut self,
+        end_ms: i64,
+        next_start_ms: i64,
+        chart_end_ms: Option<i64>,
+    ) -> Option<AttemptRecord> {
+        let completed_span = self
             .transport
             .loop_region
-            .filter(|_| completed_region)
-            .map_or(end_ms, |region| region.end_ms);
+            .filter(|region| {
+                self.current_attempt.start_ms == region.start_ms && end_ms >= region.end_ms
+            })
+            .or_else(|| {
+                chart_end_ms
+                    .filter(|chart_end_ms| {
+                        self.transport.loop_region.is_none()
+                            && self.current_attempt.start_ms == 0
+                            && *chart_end_ms > 0
+                            && end_ms >= *chart_end_ms
+                    })
+                    .map(|chart_end_ms| LoopRegion {
+                        start_ms: 0,
+                        end_ms: chart_end_ms,
+                    })
+            });
+        let canonical_end_ms = completed_span.map_or(end_ms, |region| region.end_ms);
         let record = if self.current_attempt_eligible && self.current_attempt.has_data() {
             let a = &self.current_attempt;
             let record = AttemptRecord {
@@ -345,7 +377,7 @@ impl PracticeSession {
             if self.attempt_history.len() > MAX_ATTEMPT_HISTORY {
                 self.attempt_history.remove(0);
             }
-            if completed_region {
+            if completed_span.is_some() {
                 self.lane_diag.merge(&self.current_attempt_lane_diag);
             }
             Some(record)
@@ -534,6 +566,48 @@ mod tests {
         assert!(s.roll_attempt(8_020, 4_000).is_some());
         assert_eq!(s.lane_diag.lanes[&0].judged, 1);
         assert_eq!(s.lane_diag.lanes[&0].delta_sum_ms, 4);
+    }
+
+    #[test]
+    fn whole_song_overshoot_records_canonical_progress_and_diagnosis() {
+        use dtx_scoring::JudgmentKind;
+
+        let mut session = PracticeSession::default();
+        session.current_attempt.start_ms = 0;
+        session.current_attempt.counts.perfect = 1;
+        session
+            .current_attempt_lane_diag
+            .apply_judgment(0, JudgmentKind::Perfect, -6);
+
+        let record = session
+            .roll_attempt_for_chart(10_019, 0, 10_000)
+            .expect("completed whole-song attempt");
+
+        assert_eq!((record.start_ms, record.end_ms), (0, 10_000));
+        assert_eq!(session.lane_diag.lanes[&0].judged, 1);
+        assert_eq!(
+            crate::practice::hud::progress::progress_rows(&session, 10_000).len(),
+            1
+        );
+    }
+
+    #[test]
+    fn partial_whole_song_seek_is_not_promoted_as_completion() {
+        use dtx_scoring::JudgmentKind;
+
+        let mut session = PracticeSession::default();
+        session.current_attempt.counts.perfect = 1;
+        session
+            .current_attempt_lane_diag
+            .apply_judgment(0, JudgmentKind::Perfect, 0);
+
+        let record = session
+            .roll_attempt_for_chart(5_000, 0, 10_000)
+            .expect("partial attempts remain available outside Progress");
+
+        assert_eq!(record.end_ms, 5_000);
+        assert!(session.lane_diag.lanes.is_empty());
+        assert!(crate::practice::hud::progress::progress_rows(&session, 10_000).is_empty());
     }
 
     #[test]

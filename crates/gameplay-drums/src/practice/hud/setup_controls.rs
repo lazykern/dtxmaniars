@@ -470,24 +470,18 @@ pub fn apply_ui_actions(
     for action in actions.read().copied() {
         match action {
             PracticeUiAction::SelectSource(source) => {
-                if let Some(next) =
-                    selected_source_draft(&draft, store.as_deref(), catalog.as_deref(), source)
-                {
-                    let validated = next
-                        .validate(&timeline)
-                        .expect("draft validation is infallible");
+                if let Some((validated, name)) = selected_source(
+                    &draft,
+                    store.as_deref(),
+                    catalog.as_deref(),
+                    &timeline,
+                    source,
+                ) {
                     if let Some(warning) = &validated.warning {
                         toasts.push(warning.clone());
                     }
                     *draft = validated.draft;
-                    preset_name.value = match source {
-                        PracticeDraftSource::Saved(id) => store
-                            .as_deref()
-                            .and_then(|store| store.registry.preset(id))
-                            .and_then(|preset| preset.name.clone())
-                            .unwrap_or_default(),
-                        _ => String::new(),
-                    };
+                    preset_name.value = name;
                     flow.preview = PreviewState::Stopped;
                     previews.write(PreviewAction::Pause);
                     previews.write(PreviewAction::Seek(
@@ -527,16 +521,18 @@ pub fn apply_ui_actions(
                             (current + sources.len() - 1) % sources.len()
                         };
                         let source = sources[next].0;
-                        if let Some(next) =
-                            selected_source_draft(&draft, Some(store), catalog.as_deref(), source)
-                        {
-                            let validated = next
-                                .validate(&timeline)
-                                .expect("draft validation is infallible");
+                        if let Some((validated, name)) = selected_source(
+                            &draft,
+                            Some(store),
+                            catalog.as_deref(),
+                            &timeline,
+                            source,
+                        ) {
                             if let Some(warning) = &validated.warning {
                                 toasts.push(warning.clone());
                             }
                             *draft = validated.draft;
+                            preset_name.value = name;
                             flow.preview = PreviewState::Stopped;
                             previews.write(PreviewAction::Pause);
                             previews.write(PreviewAction::Seek(
@@ -959,6 +955,27 @@ fn selected_source_draft(
     } else {
         crate::practice::presets::source_draft(store, catalog, source)
     }
+}
+
+fn selected_source(
+    current: &PracticeDraft,
+    store: Option<&PracticePresetStore>,
+    catalog: Option<&PracticeSourceCatalog>,
+    timeline: &ChipTimeline,
+    source: PracticeDraftSource,
+) -> Option<(crate::practice::ValidatedDraft, String)> {
+    let draft = selected_source_draft(current, store, catalog, source)?;
+    let validated = draft
+        .validate(timeline)
+        .expect("draft validation is infallible");
+    let name = match source {
+        PracticeDraftSource::Saved(id) => store
+            .and_then(|store| store.registry.preset(id))
+            .and_then(|preset| preset.name.clone())
+            .unwrap_or_default(),
+        _ => String::new(),
+    };
+    Some((validated, name))
 }
 
 fn normalize_preroll(value: PrerollSetting) -> PrerollSetting {

@@ -504,7 +504,8 @@ physical-kit behavior remains a manual research item.
 | Open Setup | FT on difficulty selection | None |
 | Set A/B loop | Navigate Setup controls, or use `[` / `]` or mouse while running | None in wired pad navigation; keyboard/mouse fallback remains |
 | Change tempo | Navigate Setup/Settings controls, or press `-`/`=` while running | None in wired pad navigation; keyboard fallback remains |
-| Restart section | `R`, a configured system Restart note, or Restart Loop in Pause | No switch after system binding; keyboard remains fallback |
+| Restart current practice section | `R` or Restart Loop in Pause | `R` remains the keyboard fallback; the Pause action is throne-reachable |
+| Reload practice song | A configured system Restart note | Reloads the song and returns to the mandatory stopped Setup surface |
 | Inspect completed Progress | Navigate to Progress in Setup/Settings | None in wired pad navigation |
 | Seek a section | Navigate preview transport; mouse timeline remains available | None for bar transport; mouse for direct dragging |
 | Configure Off/Wait/Ramp | Navigate Trainer and Ramp rows in Setup/Settings | None in wired pad navigation |
@@ -645,7 +646,8 @@ Current behavior:
 | Configure Setup and start | Shared pad navigation | Wired; physical kit unverified |
 | Play whole-song or A/B loop | Normal mapped pads | Reachable after Setup |
 | Change loop, tempo, or Off/Wait/Ramp | Practice Setup/Settings navigation | Wired; physical kit unverified |
-| Restart section | Bound system Restart or Pause menu | Reachable after binding |
+| Restart current practice section | `R` or Restart Loop in Pause | The Pause action is throne-reachable; `R` is the keyboard fallback |
+| Reload practice song | Bound system Restart | Reloads the song and returns to the mandatory stopped Setup surface |
 | Inspect completed Progress | Progress tab navigation | Wired; physical kit unverified |
 | Seek preview | Previous/next bar transport | Wired; direct timeline drag still needs mouse |
 | Pause and resume exactly | Bound system Pause, then Resume | Reachable after binding |

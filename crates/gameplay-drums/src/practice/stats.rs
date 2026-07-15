@@ -143,7 +143,7 @@ pub fn track_attempt_stats(
         // Pre-seek clock, captured by apply_seek_system earlier this tick.
         let end_ms = last_seek_from.0.take().unwrap_or(clock.current_ms);
         let next_start = seek.attempt_start_ms.unwrap_or(seek.target_ms);
-        finalized.0 = session.roll_attempt(end_ms, next_start);
+        finalized.0 = session.roll_attempt_for_chart(end_ms, next_start, timeline.end_ms);
         // Fresh attempt = fresh visible combo.
         combo.current = 0;
     }
