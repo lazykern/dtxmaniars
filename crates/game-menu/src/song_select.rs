@@ -504,10 +504,6 @@ struct BigAlbumArt;
 struct DifficultyFocusRegion;
 #[derive(Component)]
 struct SongSelectFocusText;
-#[derive(Component)]
-struct ReadyActionButton;
-#[derive(Component)]
-struct ReadyActionText;
 
 /// Cursor into the song-select list. Two-level: which song folder,
 /// which chart inside it (the latter is the difficulty index).
@@ -1136,33 +1132,6 @@ fn spawn_song_select(
                                 UiTransform::default(),
                             ))
                             .with_children(|p| spawn_difficulty_grid(p, &t));
-                    });
-
-                    root.spawn((
-                        Button,
-                        ReadyActionButton,
-                        Node {
-                            position_type: PositionType::Absolute,
-                            left: Val::Px(430.0),
-                            bottom: Val::Px(42.0),
-                            width: Val::Px(180.0),
-                            height: Val::Px(44.0),
-                            justify_content: JustifyContent::Center,
-                            align_items: AlignItems::Center,
-                            border: UiRect::all(Val::Px(2.0)),
-                            ..default()
-                        },
-                        BackgroundColor(t.select_yellow),
-                        BorderColor::all(t.text_primary),
-                    ))
-                    .with_children(|button| {
-                        button.spawn((
-                            ReadyActionText,
-                            Text::new("READY"),
-                            Theme::font(16.0),
-                            dtx_ui::SemanticText(dtx_ui::TypographyRole::Heading),
-                            TextColor(Color::BLACK),
-                        ));
                     });
 
                     // ---- right: song wheel container (rows spawned separately)
@@ -1915,7 +1884,6 @@ fn song_select_pointer_input(
     row_hover: Query<&Interaction, With<WheelRow>>,
     difficulties: Query<(&Interaction, &DifficultySlotPanel), Changed<Interaction>>,
     difficulty_hover: Query<&Interaction, With<DifficultySlotPanel>>,
-    ready_button: Query<&Interaction, (With<ReadyActionButton>, Changed<Interaction>)>,
     mut focus: ResMut<SongSelectFocus>,
     mut selection: ResMut<Selection>,
     selection_state: Res<SongSelectSelection>,
@@ -1930,8 +1898,19 @@ fn song_select_pointer_input(
     }
     for (interaction, row) in &rows {
         if *interaction == Interaction::Pressed {
-            selection.folder = row.index;
-            selection.clamp_to_visible(&selection_state);
+            if row.index == selection.folder {
+                open_song_ready(
+                    crate::song_ready::ReadyMode::Normal,
+                    &selection,
+                    &selection_state,
+                    &db,
+                    &mut ready,
+                    &mut draft,
+                );
+            } else {
+                selection.folder = row.index;
+                selection.clamp_to_visible(&selection_state);
+            }
             *focus = SongSelectFocus::Songs;
         } else if *interaction == Interaction::Hovered {
             *focus = SongSelectFocus::Songs;
@@ -1947,19 +1926,6 @@ fn song_select_pointer_input(
         } else if *interaction == Interaction::Hovered {
             *focus = SongSelectFocus::Difficulty;
         }
-    }
-    if ready_button
-        .iter()
-        .any(|interaction| *interaction == Interaction::Pressed)
-    {
-        open_song_ready(
-            crate::song_ready::ReadyMode::Normal,
-            &selection,
-            &selection_state,
-            &db,
-            &mut ready,
-            &mut draft,
-        );
     }
 
     let wheel_hovered = row_hover

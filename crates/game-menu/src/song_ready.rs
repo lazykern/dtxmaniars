@@ -1243,7 +1243,13 @@ fn render_song_ready(
             ReadyCard::LaneSpeed => "LANE SPEED",
             ReadyCard::Audio => "AUDIO",
         };
-        text.0 = format!("{} {label}", if state.focus == title.0 { "▶" } else { " " });
+        // Guard every Text write: an unconditional assignment marks Text
+        // `Changed` each frame, which re-shapes and mints a fresh 512x512
+        // glyph atlas per frame -> VRAM leak to OOM (same as practice HUD).
+        let want = format!("{} {label}", if state.focus == title.0 { "▶" } else { " " });
+        if text.0 != want {
+            text.0 = want;
+        }
         color.0 = if disabled {
             t.text_secondary.with_alpha(0.45)
         } else {
@@ -1282,7 +1288,9 @@ fn render_song_ready(
             ),
             ReadyCard::Song => (String::new(), false),
         };
-        text.0 = content;
+        if text.0 != content {
+            text.0 = content;
+        }
         color.0 = if disabled {
             t.text_secondary.with_alpha(0.45)
         } else {
@@ -1330,27 +1338,36 @@ fn render_song_ready(
         .map(dtx_core::display_dlevel)
         .map(|value| format!("{value:.2}"))
         .unwrap_or_else(|| "--".into());
+    let difficulty_line = format!("{label}  {level}");
     for mut text in &mut texts.p2() {
-        text.0 = format!("{label}  {level}");
+        if text.0 != difficulty_line {
+            text.0 = difficulty_line.clone();
+        }
     }
+    let title_line = song
+        .map(|song| song.title.clone())
+        .unwrap_or_else(|| "Unavailable".into());
     for mut text in &mut texts.p3() {
-        text.0 = song
-            .map(|song| song.title.clone())
-            .unwrap_or_else(|| "Unavailable".into());
+        if text.0 != title_line {
+            text.0 = title_line.clone();
+        }
     }
+    let metadata_block = song
+        .map(|song| {
+            format!(
+                "{}\nBPM {}\n{}",
+                song.artist,
+                song.bpm
+                    .map(|bpm| format!("{bpm:.0}"))
+                    .unwrap_or_else(|| "--".into()),
+                cached_record.as_deref().unwrap_or("NO RECORD")
+            )
+        })
+        .unwrap_or_else(|| "The selected chart is no longer available".into());
     for mut text in &mut texts.p4() {
-        text.0 = song
-            .map(|song| {
-                format!(
-                    "{}\nBPM {}\n{}",
-                    song.artist,
-                    song.bpm
-                        .map(|bpm| format!("{bpm:.0}"))
-                        .unwrap_or_else(|| "--".into()),
-                    cached_record.as_deref().unwrap_or("NO RECORD")
-                )
-            })
-            .unwrap_or_else(|| "The selected chart is no longer available".into());
+        if text.0 != metadata_block {
+            text.0 = metadata_block.clone();
+        }
     }
     let count = selection_state
         .visible
@@ -1378,17 +1395,23 @@ fn render_song_ready(
         for child in children.iter() {
             if let Ok(mut text) = texts.p5().get_mut(child) {
                 let raw = text.0.trim_start_matches([' ', '▶']).to_string();
-                text.0 = format!("{} {raw}", if selected { "▶" } else { " " });
+                let want = format!("{} {raw}", if selected { "▶" } else { " " });
+                if text.0 != want {
+                    text.0 = want;
+                }
             }
         }
     }
     for (mut text, mut bg) in &mut texts.p6() {
-        if song.is_some() {
-            text.0 = primary_action_label(state.mode, draft.config.gameplay.fail_mode()).into();
+        let want: String = if song.is_some() {
             bg.0 = t.select_yellow;
+            primary_action_label(state.mode, draft.config.gameplay.fail_mode()).into()
         } else {
-            text.0 = "CHART UNAVAILABLE".into();
             bg.0 = t.stage_panel_border;
+            "CHART UNAVAILABLE".into()
+        };
+        if text.0 != want {
+            text.0 = want;
         }
     }
 }
