@@ -33,13 +33,35 @@ const SETTINGS_REF_MIN: f32 = 400.0;
 const PREVIEW_REF_MIN: f32 = 520.0;
 const TAB_CHROME_MIN_HEIGHT: f32 = 48.0;
 const TIMELINE_MIN_HEIGHT: f32 = 88.0;
-const TIMELINE_WRAP_WIDTH: f32 = 560.0;
 const WRAPPED_TIMELINE_GROWTH: f32 = 24.0;
+pub(super) const TIMELINE_HORIZONTAL_PADDING: f32 = 16.0;
+pub(super) const TRANSPORT_BUTTON_MIN_WIDTH: f32 = 72.0;
+pub(super) const TRANSPORT_TIME_MIN_WIDTH: f32 = 72.0;
+pub(super) const TRANSPORT_CONTROL_GAP: f32 = 16.0;
+pub(super) const TIMELINE_STRIP_MIN_WIDTH: f32 = 220.0;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PracticeTransportRowMode {
+    Single,
+    Stacked,
+}
+
+pub fn practice_transport_row_mode(width: f32) -> PracticeTransportRowMode {
+    let controls = 3.0 * TRANSPORT_BUTTON_MIN_WIDTH + TRANSPORT_TIME_MIN_WIDTH;
+    let gaps = 4.0 * TRANSPORT_CONTROL_GAP;
+    let minimum = 2.0 * TIMELINE_HORIZONTAL_PADDING + controls + gaps + TIMELINE_STRIP_MIN_WIDTH;
+    if width >= minimum {
+        PracticeTransportRowMode::Single
+    } else {
+        PracticeTransportRowMode::Stacked
+    }
+}
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub(super) struct PracticeChromeGeometry {
     tab_height: f32,
     timeline_height: f32,
+    transport_rows: PracticeTransportRowMode,
 }
 
 impl PracticeChromeGeometry {
@@ -47,9 +69,10 @@ impl PracticeChromeGeometry {
         let scale_growth = (text_multiplier - 1.0).max(0.0);
         let tab_height = TAB_CHROME_MIN_HEIGHT
             + dtx_ui::Typography.base_px(dtx_ui::TypographyRole::Heading) * scale_growth;
+        let transport_rows = practice_transport_row_mode(width);
         let timeline_height = TIMELINE_MIN_HEIGHT
             + dtx_ui::Typography.base_px(dtx_ui::TypographyRole::Label) * scale_growth
-            + if width < TIMELINE_WRAP_WIDTH * text_multiplier {
+            + if transport_rows == PracticeTransportRowMode::Stacked {
                 WRAPPED_TIMELINE_GROWTH
             } else {
                 0.0
@@ -57,6 +80,7 @@ impl PracticeChromeGeometry {
         Self {
             tab_height,
             timeline_height,
+            transport_rows,
         }
     }
 }
@@ -289,6 +313,7 @@ fn spawn_setup_shell(
                 draft,
                 timeline,
                 chrome.timeline_height,
+                chrome.transport_rows,
             );
         });
 }

@@ -3,9 +3,10 @@ use bevy::prelude::*;
 use bevy::window::{PrimaryWindow, WindowResolution};
 use game_shell::{AppState, PauseState};
 use gameplay_drums::practice::hud::setup::{
-    practice_layout_mode, update_tab_selection, PracticeLayoutMode, PracticePreviewGeometry,
-    PracticePreviewRegion, PracticePrimaryAction, PracticeSettingsPane, PracticeSetupLayout,
-    PracticeSetupRoot, PracticeTab, PracticeTabButton,
+    practice_layout_mode, practice_transport_row_mode, update_tab_selection, PracticeLayoutMode,
+    PracticePreviewGeometry, PracticePreviewRegion, PracticePrimaryAction, PracticeSettingsPane,
+    PracticeSetupLayout, PracticeSetupRoot, PracticeTab, PracticeTabButton,
+    PracticeTransportRowMode,
 };
 use gameplay_drums::practice::hud::timeline_ui::{
     PracticeLoopFill, PracticeLoopHandle, PracticeTimelineRoot, PracticeTimelineStrip,
@@ -255,6 +256,23 @@ fn assert_semantic_heading_scale(app: &mut App, scale: dtx_config::TextScale) {
     );
 }
 
+fn assert_all_semantic_fonts_match_policy(app: &mut App, scale: dtx_config::TextScale) {
+    let fonts: Vec<_> = app
+        .world_mut()
+        .query::<(&dtx_ui::SemanticText, &TextFont)>()
+        .iter(app.world())
+        .map(|(semantic, font)| (semantic.0, font.font_size))
+        .collect();
+    assert!(!fonts.is_empty());
+    for (role, font_size) in fonts {
+        assert_eq!(
+            font_size,
+            bevy::text::FontSize::Px(dtx_ui::Typography.px(role, scale)),
+            "semantic {role:?} did not receive the live policy"
+        );
+    }
+}
+
 fn assert_preview_handoff_matches_computed_region(app: &mut App) {
     let preview = computed_rect::<PracticePreviewRegion>(app);
     let handoff = app
@@ -408,6 +426,7 @@ fn live_resize_and_text_scale_update_preview_geometry_in_the_same_frame() {
         ));
     app.update();
 
+    assert_all_semantic_fonts_match_policy(&mut app, dtx_config::TextScale::XLarge);
     assert_preview_handoff_matches_computed_region(&mut app);
     let preview = computed_rect::<PracticePreviewRegion>(&mut app);
     let layout = app
@@ -422,6 +441,79 @@ fn live_resize_and_text_scale_update_preview_geometry_in_the_same_frame() {
             size: preview.size(),
         })
     );
+}
+
+#[test]
+fn transport_row_structure_and_reserved_geometry_share_exact_breakpoints() {
+    assert_eq!(
+        practice_transport_row_mode(603.0),
+        PracticeTransportRowMode::Stacked
+    );
+    assert_eq!(
+        practice_transport_row_mode(604.0),
+        PracticeTransportRowMode::Single
+    );
+    for (scale, below, above) in [
+        (dtx_config::TextScale::Standard, 603.0, 605.0),
+        (dtx_config::TextScale::XLarge, 603.0, 605.0),
+    ] {
+        let mut app = setup_hud_app(above, 720.0, scale);
+        click_tab(&mut app, "Preview");
+
+        let one_row_node = app
+            .world_mut()
+            .query_filtered::<&Node, With<PracticeTimelineRoot>>()
+            .single(app.world())
+            .expect("timeline root");
+        assert_eq!(one_row_node.flex_direction, FlexDirection::Row);
+        assert_eq!(one_row_node.flex_wrap, FlexWrap::NoWrap);
+        let one_row_height = computed_rect::<PracticeTimelineRoot>(&mut app).height();
+        let one_row_preview = computed_rect::<PracticePreviewRegion>(&mut app).height();
+        let one_row_strip = computed_rect::<PracticeTimelineStrip>(&mut app);
+        let one_row_button = app
+            .world_mut()
+            .query_filtered::<
+                (&ComputedNode, &bevy::ui::UiGlobalTransform),
+                With<PreviewTransportButton>,
+            >()
+            .iter(app.world())
+            .next()
+            .map(|(node, transform)| node_rect(node, transform))
+            .expect("preview transport button");
+        assert!((one_row_strip.center().y - one_row_button.center().y).abs() <= 1.0);
+
+        resize_surface(&mut app, below, 720.0);
+        app.update();
+
+        let two_row_node = app
+            .world_mut()
+            .query_filtered::<&Node, With<PracticeTimelineRoot>>()
+            .single(app.world())
+            .expect("timeline root");
+        assert_eq!(two_row_node.flex_direction, FlexDirection::Column);
+        assert_eq!(two_row_node.flex_wrap, FlexWrap::NoWrap);
+        let two_row_height = computed_rect::<PracticeTimelineRoot>(&mut app).height();
+        let two_row_preview = computed_rect::<PracticePreviewRegion>(&mut app).height();
+        assert_timeline_wraps(&mut app);
+        assert_eq!(two_row_height - one_row_height, 24.0);
+        assert_eq!(one_row_preview - two_row_preview, 24.0);
+        assert_preview_handoff_matches_computed_region(&mut app);
+        assert_all_semantic_fonts_match_policy(&mut app, scale);
+
+        resize_surface(&mut app, above, 720.0);
+        app.update();
+
+        assert_eq!(
+            computed_rect::<PracticeTimelineRoot>(&mut app).height(),
+            one_row_height
+        );
+        assert_eq!(
+            computed_rect::<PracticePreviewRegion>(&mut app).height(),
+            one_row_preview
+        );
+        assert_preview_handoff_matches_computed_region(&mut app);
+        assert_all_semantic_fonts_match_policy(&mut app, scale);
+    }
 }
 
 #[test]

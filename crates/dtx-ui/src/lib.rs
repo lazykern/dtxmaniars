@@ -46,6 +46,9 @@ pub const DEFAULT_LABEL_PT: f32 = 18.0;
 pub const DEFAULT_HUD_PT: f32 = 36.0;
 pub const DEFAULT_TITLE_PT: f32 = 48.0;
 
+#[derive(SystemSet, Debug, Clone, PartialEq, Eq, Hash)]
+pub struct SemanticTypographyUpdate;
+
 pub fn load_font_handle(asset_server: &AssetServer, path: &str) -> Handle<Font> {
     let owned: String = if path.is_empty() {
         DEFAULT_FONT_PATH.to_string()
@@ -122,7 +125,7 @@ pub fn plugin(app: &mut App) {
         .add_systems(
             Update,
             (
-                typography::apply_semantic_typography,
+                typography::apply_semantic_typography.in_set(SemanticTypographyUpdate),
                 age_notifications,
                 present_notifications,
                 widget::album_art::album_art_tween_system,

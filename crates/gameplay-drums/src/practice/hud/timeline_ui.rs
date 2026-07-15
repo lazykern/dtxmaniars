@@ -168,6 +168,7 @@ pub(super) fn spawn_timeline(
     draft: &crate::practice::PracticeDraft,
     timeline: &crate::timeline::ChipTimeline,
     height: f32,
+    row_mode: super::setup::PracticeTransportRowMode,
 ) {
     root.spawn((
         PracticeTimelineRoot,
@@ -175,78 +176,104 @@ pub(super) fn spawn_timeline(
             width: Val::Percent(100.0),
             height: Val::Px(height),
             min_height: Val::Px(height),
-            flex_direction: FlexDirection::Row,
-            flex_wrap: FlexWrap::Wrap,
+            flex_direction: if row_mode == super::setup::PracticeTransportRowMode::Single {
+                FlexDirection::Row
+            } else {
+                FlexDirection::Column
+            },
+            flex_wrap: FlexWrap::NoWrap,
             align_items: AlignItems::Center,
-            column_gap: Val::Px(dtx_ui::SpacingRole::Md.px()),
+            column_gap: Val::Px(super::setup::TRANSPORT_CONTROL_GAP),
             row_gap: Val::Px(dtx_ui::SpacingRole::Sm.px()),
-            padding: UiRect::axes(Val::Px(16.0), Val::Px(10.0)),
+            padding: UiRect::axes(
+                Val::Px(super::setup::TIMELINE_HORIZONTAL_PADDING),
+                Val::Px(10.0),
+            ),
             flex_shrink: 0.0,
             ..default()
         },
         BackgroundColor(Color::srgba(0.0, 0.0, 0.0, 0.88)),
     ))
-    .with_children(|timeline_row| {
-        for button in [
-            PreviewTransportButton::PrevBar,
-            PreviewTransportButton::PlayPause,
-            PreviewTransportButton::NextBar,
-        ] {
-            timeline_row
-                .spawn((
-                    button,
-                    Button,
+    .with_children(|timeline_root| {
+        timeline_root
+            .spawn(Node {
+                flex_direction: FlexDirection::Row,
+                align_items: AlignItems::Center,
+                column_gap: Val::Px(super::setup::TRANSPORT_CONTROL_GAP),
+                flex_shrink: 0.0,
+                ..default()
+            })
+            .with_children(|transport_row| {
+                for button in [
+                    PreviewTransportButton::PrevBar,
+                    PreviewTransportButton::PlayPause,
+                    PreviewTransportButton::NextBar,
+                ] {
+                    transport_row
+                        .spawn((
+                            button,
+                            Button,
+                            Node {
+                                min_width: Val::Px(super::setup::TRANSPORT_BUTTON_MIN_WIDTH),
+                                min_height: Val::Px(40.0),
+                                justify_content: JustifyContent::Center,
+                                align_items: AlignItems::Center,
+                                padding: UiRect::axes(Val::Px(10.0), Val::Px(6.0)),
+                                ..default()
+                            },
+                            BackgroundColor(Color::srgba(1.0, 1.0, 1.0, 0.08)),
+                        ))
+                        .with_children(|button_root| {
+                            let label = match button {
+                                PreviewTransportButton::PrevBar => "Previous bar",
+                                PreviewTransportButton::PlayPause
+                                    if flow.preview == crate::practice::PreviewState::Playing =>
+                                {
+                                    "Pause Preview"
+                                }
+                                PreviewTransportButton::PlayPause => "Play Preview",
+                                PreviewTransportButton::NextBar => "Next bar",
+                            };
+                            let text = super::setup::spawn_text(
+                                button_root,
+                                label,
+                                dtx_ui::TypographyRole::Label,
+                                theme.text_primary,
+                            );
+                            if button == PreviewTransportButton::PlayPause {
+                                button_root
+                                    .commands()
+                                    .entity(text)
+                                    .insert(PreviewTransportText);
+                            }
+                        });
+                }
+                transport_row.spawn((
+                    PracticeTimeText,
+                    Text::new(super::format_chart_time(0)),
+                    dtx_ui::Theme::font(dtx_ui::Typography.base_px(dtx_ui::TypographyRole::Label)),
+                    dtx_ui::SemanticText(dtx_ui::TypographyRole::Label),
+                    TextColor(theme.text_primary),
                     Node {
-                        min_width: Val::Px(72.0),
-                        min_height: Val::Px(40.0),
-                        justify_content: JustifyContent::Center,
-                        align_items: AlignItems::Center,
-                        padding: UiRect::axes(Val::Px(10.0), Val::Px(6.0)),
+                        min_width: Val::Px(super::setup::TRANSPORT_TIME_MIN_WIDTH),
                         ..default()
                     },
-                    BackgroundColor(Color::srgba(1.0, 1.0, 1.0, 0.08)),
-                ))
-                .with_children(|button_root| {
-                    let label = match button {
-                        PreviewTransportButton::PrevBar => "Previous bar",
-                        PreviewTransportButton::PlayPause
-                            if flow.preview == crate::practice::PreviewState::Playing =>
-                        {
-                            "Pause Preview"
-                        }
-                        PreviewTransportButton::PlayPause => "Play Preview",
-                        PreviewTransportButton::NextBar => "Next bar",
-                    };
-                    let text = super::setup::spawn_text(
-                        button_root,
-                        label,
-                        dtx_ui::TypographyRole::Label,
-                        theme.text_primary,
-                    );
-                    if button == PreviewTransportButton::PlayPause {
-                        button_root
-                            .commands()
-                            .entity(text)
-                            .insert(PreviewTransportText);
-                    }
-                });
-        }
-        timeline_row.spawn((
-            PracticeTimeText,
-            Text::new(super::format_chart_time(0)),
-            dtx_ui::Theme::font(dtx_ui::Typography.base_px(dtx_ui::TypographyRole::Label)),
-            dtx_ui::SemanticText(dtx_ui::TypographyRole::Label),
-            TextColor(theme.text_primary),
-        ));
+                ));
+            });
         let strip = dtx_ui::widget::density_strip::spawn_density_strip(
-            timeline_row,
+            timeline_root,
             &timeline.density,
             theme,
         );
-        timeline_row.commands().entity(strip).insert((
+        timeline_root.commands().entity(strip).insert((
             PracticeTimelineStrip,
             Node {
-                min_width: Val::Px(220.0),
+                width: if row_mode == super::setup::PracticeTransportRowMode::Stacked {
+                    Val::Percent(100.0)
+                } else {
+                    Val::Auto
+                },
+                min_width: Val::Px(super::setup::TIMELINE_STRIP_MIN_WIDTH),
                 height: Val::Px(44.0),
                 flex_grow: 1.0,
                 flex_direction: FlexDirection::Row,
@@ -255,7 +282,7 @@ pub(super) fn spawn_timeline(
                 ..default()
             },
         ));
-        timeline_row
+        timeline_root
             .commands()
             .entity(strip)
             .with_children(|markers| {

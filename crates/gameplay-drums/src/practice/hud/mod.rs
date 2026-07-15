@@ -35,7 +35,9 @@ pub fn plugin(app: &mut App) {
         .init_resource::<crate::practice::toast::ToastQueue>()
         .configure_sets(
             Update,
-            PracticeShellUpdate.before(crate::layout::PlayfieldLayoutSync),
+            PracticeShellUpdate
+                .before(dtx_ui::SemanticTypographyUpdate)
+                .before(crate::layout::PlayfieldLayoutSync),
         )
         .add_systems(OnEnter(AppState::Performance), setup::reset_tab)
         .add_systems(
