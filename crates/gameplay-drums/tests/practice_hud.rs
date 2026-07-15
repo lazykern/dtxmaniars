@@ -3,9 +3,9 @@ use bevy::prelude::*;
 use bevy::window::{PrimaryWindow, WindowResolution};
 use game_shell::{AppState, PauseState};
 use gameplay_drums::practice::hud::setup::{
-    practice_layout_mode, update_tab_selection, PracticeLayoutMode, PracticePreviewRegion,
-    PracticePrimaryAction, PracticeSettingsPane, PracticeSetupLayout, PracticeSetupRoot,
-    PracticeTab, PracticeTabButton,
+    practice_layout_mode, update_tab_selection, PracticeLayoutMode, PracticePreviewGeometry,
+    PracticePreviewRegion, PracticePrimaryAction, PracticeSettingsPane, PracticeSetupLayout,
+    PracticeSetupRoot, PracticeTab, PracticeTabButton,
 };
 use gameplay_drums::practice::hud::timeline_ui::{
     PracticeLoopFill, PracticeLoopHandle, PracticeTimelineRoot, PracticeTimelineStrip,
@@ -64,6 +64,7 @@ fn build_hud_app(width: f32, height: f32, text_scale: dtx_config::TextScale) -> 
         bevy::text::TextPlugin,
         bevy::picking::DefaultPickingPlugins,
         bevy::ui::UiPlugin,
+        dtx_ui::plugin,
     ))
     .init_state::<AppState>()
     .init_state::<PauseState>()
@@ -239,6 +240,110 @@ fn computed_rect<T: Component>(app: &mut App) -> Rect {
         .expect("one computed node")
 }
 
+fn assert_semantic_heading_scale(app: &mut App, scale: dtx_config::TextScale) {
+    let heading_px = app
+        .world_mut()
+        .query::<(&dtx_ui::SemanticText, &TextFont)>()
+        .iter(app.world())
+        .find_map(|(semantic, font)| {
+            (semantic.0 == dtx_ui::TypographyRole::Heading).then_some(font.font_size)
+        })
+        .expect("semantic heading");
+    assert_eq!(
+        heading_px,
+        bevy::text::FontSize::Px(dtx_ui::Typography.px(dtx_ui::TypographyRole::Heading, scale))
+    );
+}
+
+fn assert_preview_handoff_matches_computed_region(app: &mut App) {
+    let preview = computed_rect::<PracticePreviewRegion>(app);
+    let handoff = app
+        .world()
+        .resource::<PracticePreviewGeometry>()
+        .0
+        .expect("visible preview handoff");
+    assert_eq!(handoff.origin, preview.min);
+    assert_eq!(handoff.size, preview.size());
+
+    let root = app
+        .world_mut()
+        .query_filtered::<Entity, With<PracticeSetupRoot>>()
+        .single(app.world())
+        .expect("one setup root");
+    let children = app
+        .world()
+        .get::<Children>(root)
+        .expect("setup root children");
+    for &entity in [children[0], children[2]].iter() {
+        let chrome_rect = {
+            let node = app
+                .world()
+                .get::<ComputedNode>(entity)
+                .expect("computed chrome node");
+            let transform = app
+                .world()
+                .get::<bevy::ui::UiGlobalTransform>(entity)
+                .expect("computed chrome transform");
+            node_rect(node, transform)
+        };
+        let computed = app
+            .world()
+            .get::<ComputedNode>(entity)
+            .expect("computed chrome node");
+        assert!(
+            computed.content_size().x <= computed.size().x + 1.0
+                && computed.content_size().y <= computed.size().y + 1.0,
+            "chrome content {:?} overflows node {:?}",
+            computed.content_size(),
+            computed.size()
+        );
+        let mut descendants = app
+            .world()
+            .get::<Children>(entity)
+            .into_iter()
+            .flat_map(|children| children.iter())
+            .collect::<Vec<_>>();
+        while let Some(child) = descendants.pop() {
+            if let (Some(node), Some(transform)) = (
+                app.world().get::<ComputedNode>(child),
+                app.world().get::<bevy::ui::UiGlobalTransform>(child),
+            ) {
+                let rect = node_rect(node, transform);
+                if rect.size().cmpgt(Vec2::ZERO).all() {
+                    assert!(
+                        rect.min.x >= chrome_rect.min.x - 1.0
+                            && rect.min.y >= chrome_rect.min.y - 1.0
+                            && rect.max.x <= chrome_rect.max.x + 1.0
+                            && rect.max.y <= chrome_rect.max.y + 1.0,
+                        "descendant {child:?} rect {rect:?} escapes chrome {chrome_rect:?}"
+                    );
+                }
+            }
+            if let Some(children) = app.world().get::<Children>(child) {
+                descendants.extend(children.iter());
+            }
+        }
+    }
+}
+
+fn assert_timeline_wraps(app: &mut App) {
+    let strip = computed_rect::<PracticeTimelineStrip>(app);
+    let button = app
+        .world_mut()
+        .query_filtered::<
+            (&ComputedNode, &bevy::ui::UiGlobalTransform),
+            With<PreviewTransportButton>,
+        >()
+        .iter(app.world())
+        .next()
+        .map(|(node, transform)| node_rect(node, transform))
+        .expect("preview transport button");
+    assert!(
+        (strip.center().y - button.center().y).abs() > 1.0,
+        "narrow transport and timeline must occupy separate rows"
+    );
+}
+
 #[test]
 fn reference_layout_is_split_and_xlarge_narrow_layout_is_tabbed() {
     assert_eq!(
@@ -260,6 +365,62 @@ fn reference_layout_is_split_and_xlarge_narrow_layout_is_tabbed() {
     assert_eq!(
         practice_layout_mode(1920.0, 1080.0, 1.5),
         PracticeLayoutMode::Split
+    );
+}
+
+#[test]
+fn semantic_typography_keeps_preview_handoff_equal_to_unclipped_chrome_layout() {
+    for (width, height, scale) in [
+        (1280.0, 720.0, dtx_config::TextScale::Standard),
+        (1920.0, 1080.0, dtx_config::TextScale::Standard),
+        (1920.0, 1080.0, dtx_config::TextScale::XLarge),
+    ] {
+        let mut app = setup_hud_app(width, height, scale);
+        assert_semantic_heading_scale(&mut app, scale);
+        assert_preview_handoff_matches_computed_region(&mut app);
+    }
+
+    for scale in [
+        dtx_config::TextScale::XLarge,
+        dtx_config::TextScale::Standard,
+    ] {
+        let mut app = setup_hud_app(480.0, 720.0, scale);
+        click_tab(&mut app, "Preview");
+        app.update();
+        assert_semantic_heading_scale(&mut app, scale);
+        assert_preview_handoff_matches_computed_region(&mut app);
+        assert_timeline_wraps(&mut app);
+    }
+}
+
+#[test]
+fn live_resize_and_text_scale_update_preview_geometry_in_the_same_frame() {
+    let mut app = setup_hud_app(900.0, 720.0, dtx_config::TextScale::Standard);
+    click_tab(&mut app, "Preview");
+
+    resize_surface(&mut app, 480.0, 720.0);
+    app.world_mut()
+        .insert_resource(dtx_ui::AccessibilityPolicy::from(
+            &dtx_config::AccessibilityConfig {
+                text_scale: dtx_config::TextScale::XLarge,
+                ..default()
+            },
+        ));
+    app.update();
+
+    assert_preview_handoff_matches_computed_region(&mut app);
+    let preview = computed_rect::<PracticePreviewRegion>(&mut app);
+    let layout = app
+        .world()
+        .resource::<gameplay_drums::layout::PlayfieldLayout>();
+    assert_eq!(layout.origin, preview.min);
+    assert_eq!(Vec2::new(layout.width, layout.height), preview.size());
+    assert_eq!(
+        app.world().resource::<ConsumerLayout>().0,
+        Some(gameplay_drums::stage_rect::StageRect {
+            origin: preview.min,
+            size: preview.size(),
+        })
     );
 }
 

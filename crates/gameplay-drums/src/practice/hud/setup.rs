@@ -31,8 +31,35 @@ pub enum PracticeLayoutMode {
 
 const SETTINGS_REF_MIN: f32 = 400.0;
 const PREVIEW_REF_MIN: f32 = 520.0;
-const TAB_CHROME_HEIGHT: f32 = 48.0;
-pub(super) const TIMELINE_HEIGHT: f32 = 88.0;
+const TAB_CHROME_MIN_HEIGHT: f32 = 48.0;
+const TIMELINE_MIN_HEIGHT: f32 = 88.0;
+const TIMELINE_WRAP_WIDTH: f32 = 560.0;
+const WRAPPED_TIMELINE_GROWTH: f32 = 24.0;
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(super) struct PracticeChromeGeometry {
+    tab_height: f32,
+    timeline_height: f32,
+}
+
+impl PracticeChromeGeometry {
+    fn resolve(width: f32, text_multiplier: f32) -> Self {
+        let scale_growth = (text_multiplier - 1.0).max(0.0);
+        let tab_height = TAB_CHROME_MIN_HEIGHT
+            + dtx_ui::Typography.base_px(dtx_ui::TypographyRole::Heading) * scale_growth;
+        let timeline_height = TIMELINE_MIN_HEIGHT
+            + dtx_ui::Typography.base_px(dtx_ui::TypographyRole::Label) * scale_growth
+            + if width < TIMELINE_WRAP_WIDTH * text_multiplier {
+                WRAPPED_TIMELINE_GROWTH
+            } else {
+                0.0
+            };
+        Self {
+            tab_height,
+            timeline_height,
+        }
+    }
+}
 
 #[derive(Resource, Debug, Clone, Copy, Default, PartialEq)]
 pub struct PracticePreviewGeometry(pub Option<crate::stage_rect::StageRect>);
@@ -61,6 +88,9 @@ pub struct PracticeSetupRoot;
 
 #[derive(Component, Debug, Clone, Copy, PartialEq, Eq)]
 pub struct PracticeSetupLayout(pub PracticeLayoutMode);
+
+#[derive(Component, Debug, Clone, Copy, PartialEq)]
+pub(super) struct PracticeShellGeometry(PracticeChromeGeometry);
 
 #[derive(Component)]
 pub struct PracticeSettingsPane;
@@ -111,7 +141,7 @@ pub(super) fn ensure_setup_shell(
     accessibility: Option<Res<dtx_ui::AccessibilityPolicy>>,
     mut tab: ResMut<PracticeTab>,
     mut preview_geometry: ResMut<PracticePreviewGeometry>,
-    roots: Query<(Entity, &PracticeSetupLayout), With<PracticeSetupRoot>>,
+    roots: Query<(Entity, &PracticeSetupLayout, &PracticeShellGeometry), With<PracticeSetupRoot>>,
     mut panes: ParamSet<(
         Query<&mut Node, With<PracticeSettingsPane>>,
         Query<&mut Node, With<PracticePreviewRegion>>,
@@ -120,7 +150,7 @@ pub(super) fn ensure_setup_shell(
     let surface_open = matches!(flow.phase, PracticePhase::Setup | PracticePhase::Editing);
     if !surface_open {
         preview_geometry.0 = None;
-        for (root, _) in &roots {
+        for (root, _, _) in &roots {
             commands.entity(root).despawn();
         }
         return;
@@ -135,14 +165,15 @@ pub(super) fn ensure_setup_shell(
         .as_deref()
         .map_or(1.0, dtx_ui::AccessibilityPolicy::text_multiplier);
     let mode = practice_layout_mode(width, height, text_multiplier);
+    let chrome = PracticeChromeGeometry::resolve(width, text_multiplier);
     let (settings_width, preview_min_width) = required_pane_widths(width, height, text_multiplier);
     if mode == PracticeLayoutMode::Split && *tab == PracticeTab::Preview {
         *tab = PracticeTab::Setup;
     }
-    preview_geometry.0 = preview_stage_rect(width, height, mode, settings_width, *tab);
+    preview_geometry.0 = preview_stage_rect(width, height, mode, settings_width, *tab, chrome);
 
-    if let Ok((_, current)) = roots.single() {
-        if current.0 == mode {
+    if let Ok((_, current, current_chrome)) = roots.single() {
+        if current.0 == mode && current_chrome.0 == chrome {
             if mode == PracticeLayoutMode::Split {
                 if let Ok(mut settings) = panes.p0().single_mut() {
                     settings.width = Val::Px(settings_width);
@@ -156,7 +187,7 @@ pub(super) fn ensure_setup_shell(
             return;
         }
     }
-    for (root, _) in &roots {
+    for (root, _, _) in &roots {
         commands.entity(root).despawn();
     }
 
@@ -165,6 +196,7 @@ pub(super) fn ensure_setup_shell(
         mode,
         settings_width,
         preview_min_width,
+        chrome,
         *tab,
         &flow,
         &draft,
@@ -179,6 +211,7 @@ fn preview_stage_rect(
     mode: PracticeLayoutMode,
     settings_width: f32,
     tab: PracticeTab,
+    chrome: PracticeChromeGeometry,
 ) -> Option<crate::stage_rect::StageRect> {
     if mode == PracticeLayoutMode::Tabbed && tab != PracticeTab::Preview {
         return None;
@@ -189,10 +222,10 @@ fn preview_stage_rect(
         0.0
     };
     Some(crate::stage_rect::StageRect {
-        origin: Vec2::new(origin_x, TAB_CHROME_HEIGHT),
+        origin: Vec2::new(origin_x, chrome.tab_height),
         size: Vec2::new(
             (width - origin_x).max(0.0),
-            (height - TAB_CHROME_HEIGHT - TIMELINE_HEIGHT).max(0.0),
+            (height - chrome.tab_height - chrome.timeline_height).max(0.0),
         ),
     })
 }
@@ -202,6 +235,7 @@ fn spawn_setup_shell(
     mode: PracticeLayoutMode,
     settings_width: f32,
     preview_min_width: f32,
+    chrome: PracticeChromeGeometry,
     tab: PracticeTab,
     flow: &PracticeFlow,
     draft: &PracticeDraft,
@@ -213,6 +247,7 @@ fn spawn_setup_shell(
         .spawn((
             PracticeSetupRoot,
             PracticeSetupLayout(mode),
+            PracticeShellGeometry(chrome),
             Node {
                 position_type: PositionType::Absolute,
                 width: Val::Percent(100.0),
@@ -225,7 +260,7 @@ fn spawn_setup_shell(
             GlobalZIndex(crate::ui_z::PRACTICE_FULL_HUD),
         ))
         .with_children(|root| {
-            spawn_tab_chrome(root, &theme, mode, tab);
+            spawn_tab_chrome(root, &theme, mode, tab, chrome.tab_height);
             root.spawn(Node {
                 width: Val::Percent(100.0),
                 flex_grow: 1.0,
@@ -247,7 +282,14 @@ fn spawn_setup_shell(
                 );
                 spawn_preview(main, &theme, mode, preview_min_width, tab);
             });
-            super::timeline_ui::spawn_timeline(root, &theme, flow, draft, timeline);
+            super::timeline_ui::spawn_timeline(
+                root,
+                &theme,
+                flow,
+                draft,
+                timeline,
+                chrome.timeline_height,
+            );
         });
 }
 
@@ -256,11 +298,13 @@ fn spawn_tab_chrome(
     theme: &dtx_ui::Theme,
     mode: PracticeLayoutMode,
     tab: PracticeTab,
+    height: f32,
 ) {
     root.spawn((
         Node {
             width: Val::Percent(100.0),
-            min_height: Val::Px(TAB_CHROME_HEIGHT),
+            height: Val::Px(height),
+            min_height: Val::Px(height),
             flex_direction: FlexDirection::Row,
             flex_wrap: FlexWrap::Wrap,
             align_items: AlignItems::Center,

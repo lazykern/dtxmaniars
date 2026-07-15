@@ -167,12 +167,14 @@ pub(super) fn spawn_timeline(
     flow: &crate::practice::PracticeFlow,
     draft: &crate::practice::PracticeDraft,
     timeline: &crate::timeline::ChipTimeline,
+    height: f32,
 ) {
     root.spawn((
         PracticeTimelineRoot,
         Node {
             width: Val::Percent(100.0),
-            min_height: Val::Px(super::setup::TIMELINE_HEIGHT),
+            height: Val::Px(height),
+            min_height: Val::Px(height),
             flex_direction: FlexDirection::Row,
             flex_wrap: FlexWrap::Wrap,
             align_items: AlignItems::Center,
