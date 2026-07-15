@@ -246,6 +246,30 @@ fn chart_with_repeated_primary_path() -> Chart {
     }
 }
 
+fn chart_with_ineligible_primary_and_same_path_layer() -> Chart {
+    let mut assets = DtxAssets::default();
+    assets.wav.insert(1, "shared-bgm.wav".into());
+    assets.wav.insert(2, "shared-bgm.wav".into());
+    assets.wav.volumes.insert(2, 48);
+    assets.wav.pans.insert(2, 22);
+    Chart {
+        metadata: Metadata {
+            bpm: Some(120.0),
+            ..Default::default()
+        },
+        chips: vec![
+            Chip::with_wav(0, EChannel::MixerAdd, 0.0, 1),
+            Chip::with_wav(0, EChannel::MixerAdd, 0.0, 2),
+            Chip::with_wav(0, EChannel::BGM, 0.0, 1),
+            Chip::with_wav(0, EChannel::BGM, 0.25, 2),
+            Chip::with_wav(1, EChannel::MixerRemove, 0.0, 1),
+            Chip::new(2, EChannel::BassDrum, 0.0),
+        ],
+        assets,
+        ..Default::default()
+    }
+}
+
 fn ready_clock(app: &mut App, current_ms: i64) {
     let mut clock = app.world_mut().resource_mut::<GameplayClock>();
     clock.start();
@@ -1159,42 +1183,72 @@ fn seek_does_not_reconstruct_a_decoded_slice_past_its_duration() {
     use bevy_kira_audio::prelude::{Frame, StaticSoundData, StaticSoundSettings};
     use bevy_kira_audio::AudioSource as KiraAudioSource;
 
+    let mut assets = DtxAssets::default();
+    for (slot, path) in [
+        (1, "primary.wav"),
+        (2, "layer.wav"),
+        (3, "se.wav"),
+        (4, "system.wav"),
+    ] {
+        assets.wav.insert(slot, path.into());
+    }
+    let chart = Chart {
+        metadata: Metadata {
+            bpm: Some(120.0),
+            ..Default::default()
+        },
+        chips: vec![
+            Chip::with_wav(0, EChannel::BGM, 0.0, 1),
+            Chip::with_wav(0, EChannel::BGM, 0.25, 2),
+            Chip::with_wav(0, EChannel::SE01, 0.25, 3),
+            Chip::with_wav(0, EChannel::Click, 0.25, 4),
+            Chip::new(2, EChannel::BassDrum, 0.0),
+        ],
+        assets,
+        ..Default::default()
+    };
     let mut app = build_lifecycle_app(PracticeIntent::manual(PracticeOrigin::SongSelect));
-    enter_performance(&mut app, chart_with_overlapping_audio_slices());
+    enter_performance(&mut app, chart);
     app.world_mut().resource_mut::<PracticeFlow>().phase = PracticePhase::Editing;
-    let source = app
-        .world_mut()
-        .resource_mut::<Assets<KiraAudioSource>>()
-        .add(KiraAudioSource {
-            sound: StaticSoundData {
-                sample_rate: 1_000,
-                frames: vec![Frame::from_mono(0.0); 500].into(),
-                settings: StaticSoundSettings::default(),
-                slice: None,
-            },
-        });
-    app.world_mut()
-        .resource_mut::<dtx_audio::ChartSoundBank>()
-        .insert(
-            1,
-            dtx_audio::LoadedChartSound {
-                handle: source,
-                path: "primary.wav".into(),
-                volume: 100,
-                pan: 0,
-            },
-        );
+    for (slot, path) in [(2, "layer.wav"), (3, "se.wav"), (4, "system.wav")] {
+        let source = app
+            .world_mut()
+            .resource_mut::<Assets<KiraAudioSource>>()
+            .add(KiraAudioSource {
+                sound: StaticSoundData {
+                    sample_rate: 1_000,
+                    frames: vec![Frame::from_mono(0.0); 500].into(),
+                    settings: StaticSoundSettings::default(),
+                    slice: None,
+                },
+            });
+        app.world_mut()
+            .resource_mut::<dtx_audio::ChartSoundBank>()
+            .insert(
+                slot,
+                dtx_audio::LoadedChartSound {
+                    handle: source,
+                    path: path.into(),
+                    volume: 100,
+                    pan: 0,
+                },
+            );
+    }
     ready_clock(&mut app, 250);
 
     send_seek(&mut app, 1_500);
     app.world_mut().run_schedule(FixedUpdate);
 
-    assert!(!app
+    let slices = &app
         .world()
         .resource::<gameplay_drums::seek::PendingAudioStarts>()
-        .0
-        .iter()
-        .any(|slice| slice.wav_slot == 1));
+        .0;
+    for slot in [2, 3, 4] {
+        assert!(
+            !slices.iter().any(|slice| slice.wav_slot == slot),
+            "decoded one-shot slot {slot} must expire"
+        );
+    }
 }
 
 fn install_short_primary(app: &mut App) {
@@ -1430,6 +1484,62 @@ fn preview_seek_deduplicates_repeated_primary_path() {
 #[test]
 fn normal_running_seek_deduplicates_repeated_primary_path() {
     assert_running_seek_deduplicates_repeated_primary_path();
+}
+
+#[test]
+fn stopped_preview_seek_keeps_same_path_layer_when_primary_is_ineligible() {
+    let mut app = build_lifecycle_app(PracticeIntent::manual(PracticeOrigin::SongSelect));
+    enter_performance(
+        &mut app,
+        chart_with_ineligible_primary_and_same_path_layer(),
+    );
+    app.world_mut().resource_mut::<PracticeFlow>().phase = PracticePhase::Editing;
+    ready_clock(&mut app, 250);
+
+    send_seek(&mut app, 2_500);
+    app.world_mut().run_schedule(FixedUpdate);
+
+    assert!(app
+        .world()
+        .resource::<gameplay_drums::seek::PendingBgmStart>()
+        .0
+        .is_none());
+    let slices = &app
+        .world()
+        .resource::<gameplay_drums::seek::PendingAudioStarts>()
+        .0;
+    assert_eq!(slices.len(), 1);
+    assert_eq!(slices[0].wav_slot, 2);
+    assert_eq!(slices[0].path, "shared-bgm.wav");
+    assert!((slices[0].start_seconds - 2.0).abs() < f64::EPSILON);
+    assert_eq!((slices[0].volume, slices[0].pan), (48, 22));
+}
+
+#[test]
+fn normal_running_seek_starts_same_path_layer_when_primary_is_ineligible() {
+    let mut app = build_lifecycle_app(PracticeIntent::None);
+    enter_performance(
+        &mut app,
+        chart_with_ineligible_primary_and_same_path_layer(),
+    );
+    ready_clock(&mut app, 250);
+
+    send_seek(&mut app, 2_500);
+    app.world_mut().run_schedule(FixedUpdate);
+
+    assert!(app
+        .world()
+        .resource::<gameplay_drums::seek::PendingBgmStart>()
+        .0
+        .is_none());
+    assert!(app.world().resource::<BgmHandle>().path.is_none());
+    assert_eq!(
+        app.world()
+            .resource::<gameplay_drums::resources::ActiveDrumSounds>()
+            .layer_bgm_instances
+            .len(),
+        1
+    );
 }
 
 #[test]

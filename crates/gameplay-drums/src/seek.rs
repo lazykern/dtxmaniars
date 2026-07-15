@@ -354,7 +354,8 @@ pub fn apply_seek_system(
                 pan: slice.pan,
             });
         } else {
-            if slice.kind == PendingAudioKind::LayerBgm
+            if authoritative_bgm.is_some()
+                && slice.kind == PendingAudioKind::LayerBgm
                 && authoritative_bgm_path.as_deref() == Some(slice.path.as_str())
             {
                 continue;
