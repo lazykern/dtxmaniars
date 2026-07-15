@@ -10,7 +10,9 @@
 
 use std::time::{Duration, Instant};
 
+use bevy::ecs::system::SystemParam;
 use bevy::prelude::*;
+use bevy_kira_audio::prelude::AudioInstance;
 use dtx_config::{default_path, load, save, Config};
 use game_shell::{AppState, EGameMode, PauseState};
 
@@ -102,6 +104,101 @@ pub fn adjust_bgm_offset_ms(current: i32, direction: i32, fine: bool) -> i32 {
         BGM_ADJUST_STEP_MS
     };
     (current + step * direction).clamp(-BGM_ADJUST_CLAMP_MS, BGM_ADJUST_CLAMP_MS)
+}
+
+pub fn adjust_quick_setting_config(
+    cfg: &mut Config,
+    setting: crate::pause::QuickSettingKind,
+    direction: i32,
+) {
+    match setting {
+        crate::pause::QuickSettingKind::ScrollSpeed => {
+            cfg.gameplay.scroll_speed = adjust_scroll_speed(cfg.gameplay.scroll_speed, direction);
+        }
+        crate::pause::QuickSettingKind::LaneVisibility => {
+            let values = dtx_config::LaneDisplay::all();
+            let current = values
+                .iter()
+                .position(|value| *value == cfg.gameplay.lane_display)
+                .unwrap_or_default() as i32;
+            cfg.gameplay.lane_display =
+                values[(current + direction).rem_euclid(values.len() as i32) as usize];
+        }
+        crate::pause::QuickSettingKind::BgmVolume => {
+            let steps = (cfg.audio.bgm_volume * 20.0).round() as i32 + direction;
+            cfg.audio.bgm_volume = steps.clamp(0, 20) as f32 / 20.0;
+        }
+        crate::pause::QuickSettingKind::InputOffset => {
+            cfg.gameplay.input_offset_ms =
+                adjust_input_offset_ms(cfg.gameplay.input_offset_ms, direction, false);
+        }
+        crate::pause::QuickSettingKind::Back => {}
+    }
+}
+
+pub(crate) fn quick_setting_value(cfg: &Config, setting: crate::pause::QuickSettingKind) -> String {
+    match setting {
+        crate::pause::QuickSettingKind::ScrollSpeed => {
+            format!("Scroll Speed  {:.1}×", cfg.gameplay.scroll_speed)
+        }
+        crate::pause::QuickSettingKind::LaneVisibility => {
+            let value = match cfg.gameplay.lane_display {
+                dtx_config::LaneDisplay::AllOn => "All On",
+                dtx_config::LaneDisplay::Half => "Half",
+                dtx_config::LaneDisplay::LineOff => "Lines Off",
+                dtx_config::LaneDisplay::AllOff => "All Off",
+            };
+            format!("Lane Visibility  {value}")
+        }
+        crate::pause::QuickSettingKind::BgmVolume => {
+            format!(
+                "BGM Volume  {}%",
+                (cfg.audio.bgm_volume * 100.0).round() as i32
+            )
+        }
+        crate::pause::QuickSettingKind::InputOffset => {
+            format!("Input Offset  {:+} ms", cfg.gameplay.input_offset_ms)
+        }
+        crate::pause::QuickSettingKind::Back => "Back".to_owned(),
+    }
+}
+
+#[derive(SystemParam)]
+pub(crate) struct PauseQuickSettings<'w> {
+    draft: ResMut<'w, PerfHotkeyDraft>,
+    scroll: ResMut<'w, ScrollSettings>,
+    input_offset: ResMut<'w, InputOffsetMs>,
+    bgm_adjust: ResMut<'w, BgmAdjustState>,
+    show_timing_lines: ResMut<'w, crate::resources::ShowTimingLines>,
+    audio_settings: ResMut<'w, crate::resources::DrumAudioSettings>,
+    bgm: Res<'w, dtx_audio::BgmHandle>,
+    instances: ResMut<'w, Assets<AudioInstance>>,
+}
+
+impl PauseQuickSettings<'_> {
+    pub fn adjust(&mut self, setting: crate::pause::QuickSettingKind, direction: i32) {
+        adjust_quick_setting_config(&mut self.draft.cfg, setting, direction);
+        self.draft.mark_dirty();
+        apply_runtime_from_draft(
+            &self.draft,
+            &mut self.scroll,
+            &mut self.input_offset,
+            &mut self.bgm_adjust,
+        );
+        self.show_timing_lines.0 = self.draft.cfg.gameplay.lane_display.shows_timing_lines();
+        self.audio_settings.bgm_volume = self.draft.cfg.audio.bgm_volume;
+        if self.audio_settings.bgm_enabled {
+            dtx_audio::set_bgm_volume(
+                &self.bgm,
+                &mut self.instances,
+                self.audio_settings.bgm_gain(),
+            );
+        }
+    }
+
+    pub fn value(&self, setting: crate::pause::QuickSettingKind) -> String {
+        quick_setting_value(&self.draft.cfg, setting)
+    }
 }
 
 pub(super) fn plugin(app: &mut App) {
@@ -354,5 +451,24 @@ mod tests {
         assert_eq!(adjust_bgm_offset_ms(0, 1, false), 10);
         assert_eq!(adjust_bgm_offset_ms(0, 1, true), 1);
         assert_eq!(adjust_bgm_offset_ms(95, 1, false), 99);
+    }
+
+    #[test]
+    fn pause_quick_settings_adjust_only_the_compact_contract() {
+        let mut cfg = Config::default();
+        cfg.gameplay.scroll_speed = 1.0;
+        cfg.gameplay.lane_display = dtx_config::LaneDisplay::AllOn;
+        cfg.audio.bgm_volume = 0.7;
+        cfg.gameplay.input_offset_ms = 0;
+
+        adjust_quick_setting_config(&mut cfg, crate::pause::QuickSettingKind::ScrollSpeed, 1);
+        adjust_quick_setting_config(&mut cfg, crate::pause::QuickSettingKind::LaneVisibility, 1);
+        adjust_quick_setting_config(&mut cfg, crate::pause::QuickSettingKind::BgmVolume, -1);
+        adjust_quick_setting_config(&mut cfg, crate::pause::QuickSettingKind::InputOffset, 1);
+
+        assert_eq!(cfg.gameplay.scroll_speed, 1.5);
+        assert_eq!(cfg.gameplay.lane_display, dtx_config::LaneDisplay::Half);
+        assert!((cfg.audio.bgm_volume - 0.65).abs() < f32::EPSILON);
+        assert_eq!(cfg.gameplay.input_offset_ms, 10);
     }
 }

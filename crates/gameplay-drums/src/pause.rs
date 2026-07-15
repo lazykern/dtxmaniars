@@ -12,12 +12,16 @@
 use std::collections::HashMap;
 use std::time::{Duration, Instant};
 
+use bevy::ecs::system::SystemParam;
 use bevy::prelude::*;
 use bevy_kira_audio::prelude::AudioInstance;
 use dtx_audio::{BgmHandle, DrumPolyphony};
 use dtx_input::SystemVerb;
 use dtx_ui::theme::Theme;
-use game_shell::{request_transition, AppState, PauseState, TransitionRequest};
+use game_shell::{
+    request_transition, AppState, PauseState, PracticeIntent, PracticeOrigin,
+    PracticeRecommendation, PracticeRequest, TransitionRequest,
+};
 
 use crate::resources::ActiveDrumSounds;
 
@@ -31,51 +35,170 @@ pub struct PauseOverlay;
 #[derive(Component, Clone, Copy, PartialEq, Eq, Debug)]
 pub enum PauseItemKind {
     Resume,
-    Retry,
-    Quit,
+    RestartSong,
+    PracticeThisSection,
+    QuickSettings,
+    ReturnToSongSelect,
     RestartLoop,
     PracticeSettings,
-    ExitPractice,
+    ExitToSongSelect,
 }
 
 impl PauseItemKind {
     fn label(self) -> &'static str {
         match self {
             PauseItemKind::Resume => "Resume",
-            PauseItemKind::Retry => "Retry",
-            PauseItemKind::Quit => "Quit to Song Select",
-            PauseItemKind::RestartLoop => "Restart loop",
+            PauseItemKind::RestartSong => "Restart Song",
+            PauseItemKind::PracticeThisSection => "Practice This Section",
+            PauseItemKind::QuickSettings => "Quick Settings",
+            PauseItemKind::ReturnToSongSelect => "Return to Song Select",
+            PauseItemKind::RestartLoop => "Restart Loop",
             PauseItemKind::PracticeSettings => "Practice Settings",
-            PauseItemKind::ExitPractice => "Exit Practice",
+            PauseItemKind::ExitToSongSelect => "Exit to Song Select",
         }
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PauseContext {
+    Normal,
+    Practice,
+}
+
 const NORMAL_ITEMS: &[PauseItemKind] = &[
     PauseItemKind::Resume,
-    PauseItemKind::Retry,
-    PauseItemKind::Quit,
+    PauseItemKind::RestartSong,
+    PauseItemKind::PracticeThisSection,
+    PauseItemKind::QuickSettings,
+    PauseItemKind::ReturnToSongSelect,
 ];
 const PRACTICE_ITEMS: &[PauseItemKind] = &[
     PauseItemKind::Resume,
     PauseItemKind::RestartLoop,
     PauseItemKind::PracticeSettings,
-    PauseItemKind::ExitPractice,
+    PauseItemKind::ExitToSongSelect,
 ];
 
-/// Rows for the pause overlay: practice gets Resume / Restart loop /
-/// Practice Settings / Exit Practice; normal play keeps Resume / Retry / Quit.
-pub fn pause_items(practice: bool) -> &'static [PauseItemKind] {
-    if practice {
-        PRACTICE_ITEMS
-    } else {
-        NORMAL_ITEMS
+pub fn pause_items(context: PauseContext) -> &'static [PauseItemKind] {
+    match context {
+        PauseContext::Normal => NORMAL_ITEMS,
+        PauseContext::Practice => PRACTICE_ITEMS,
     }
 }
+
+#[derive(Component, Debug, Clone, Copy, PartialEq, Eq)]
+pub enum QuickSettingKind {
+    ScrollSpeed,
+    LaneVisibility,
+    BgmVolume,
+    InputOffset,
+    Back,
+}
+
+const QUICK_SETTINGS: &[QuickSettingKind] = &[
+    QuickSettingKind::ScrollSpeed,
+    QuickSettingKind::LaneVisibility,
+    QuickSettingKind::BgmVolume,
+    QuickSettingKind::InputOffset,
+    QuickSettingKind::Back,
+];
+
+#[derive(Resource, Debug, Clone, Copy, Default, PartialEq, Eq)]
+enum PauseView {
+    #[default]
+    Menu,
+    QuickSettings,
+}
+
+#[derive(Component)]
+struct PauseMenuContent;
+
+#[derive(Component)]
+struct QuickSettingsContent;
 
 /// Currently highlighted pause-menu row.
 #[derive(Resource, Default)]
 pub struct PauseSelection(pub usize);
+
+#[derive(Resource, Default)]
+struct QuickSettingsSelection(usize);
+
+#[derive(SystemParam)]
+pub(crate) struct PauseMenuState<'w> {
+    selection: ResMut<'w, PauseSelection>,
+    quick_selection: ResMut<'w, QuickSettingsSelection>,
+    view: ResMut<'w, PauseView>,
+    next_pause: ResMut<'w, NextState<PauseState>>,
+    practice: Option<Res<'w, crate::practice::PracticeSession>>,
+    timeline: Res<'w, crate::timeline::ChipTimeline>,
+    clock: Res<'w, crate::resources::GameplayClock>,
+    intent: ResMut<'w, PracticeIntent>,
+    completed_run: ResMut<'w, game_shell::CompletedRunContext>,
+    normal_events: ResMut<'w, crate::results_analysis::NormalPlayEventStream>,
+}
+
+#[derive(SystemParam)]
+pub(crate) struct PauseMenuUi<'w, 's> {
+    menu_rows: Query<
+        'w,
+        's,
+        (
+            &'static PauseItemKind,
+            &'static mut Text,
+            &'static mut TextColor,
+        ),
+        Without<QuickSettingKind>,
+    >,
+    quick_rows: Query<
+        'w,
+        's,
+        (
+            &'static QuickSettingKind,
+            &'static mut Text,
+            &'static mut TextColor,
+        ),
+        Without<PauseItemKind>,
+    >,
+    menu_visibility: Query<
+        'w,
+        's,
+        &'static mut Visibility,
+        (With<PauseMenuContent>, Without<QuickSettingsContent>),
+    >,
+    quick_visibility: Query<
+        'w,
+        's,
+        &'static mut Visibility,
+        (With<QuickSettingsContent>, Without<PauseMenuContent>),
+    >,
+}
+
+pub fn practice_request_at(
+    timeline: &crate::timeline::ChipTimeline,
+    playhead_ms: i64,
+) -> PracticeRequest {
+    let current = timeline
+        .bar_ms
+        .partition_point(|bar_ms| *bar_ms <= playhead_ms)
+        .saturating_sub(1);
+    let start = timeline
+        .bar_ms
+        .get(current.saturating_sub(1))
+        .copied()
+        .unwrap_or(0);
+    let end = timeline
+        .bar_ms
+        .get(current.saturating_add(2))
+        .copied()
+        .unwrap_or(timeline.end_ms)
+        .max(start.saturating_add(1));
+    PracticeRequest {
+        origin: PracticeOrigin::NormalPause,
+        seed: game_shell::PracticeSeed::Recommended(PracticeRecommendation::weak_section(
+            start, end, None,
+        )),
+    }
+}
 
 /// Minimum gap between two accepted hits of the SAME system verb. Pads
 /// double-fire (flam/retrigger 20-40 ms apart), and an un-guarded verb would
@@ -115,6 +238,8 @@ impl VerbGuard {
 
 pub(super) fn plugin(app: &mut App) {
     app.init_resource::<PauseSelection>()
+        .init_resource::<QuickSettingsSelection>()
+        .init_resource::<PauseView>()
         .init_resource::<VerbGuard>()
         // Always start a performance un-paused.
         .add_systems(OnEnter(AppState::Performance), force_running)
@@ -126,6 +251,7 @@ pub(super) fn plugin(app: &mut App) {
             // pad hit is idempotent — no ordering constraint needed.
             (toggle_pause, system_verb_pause, system_verb_restart)
                 .run_if(in_state(AppState::Performance))
+                .run_if(crate::practice::gameplay_input_active)
                 .run_if(crate::editor::editor_closed),
         )
         .add_systems(
@@ -138,7 +264,7 @@ pub(super) fn plugin(app: &mut App) {
         )
         .add_systems(
             Update,
-            (pause_kb_emit, pause_menu_input)
+            (pause_kb_emit, pause_pointer_emit, pause_menu_input)
                 .chain()
                 .run_if(in_state(PauseState::Paused)),
         );
@@ -272,22 +398,43 @@ fn should_resume_chart_audio(
         })
 }
 
-pub fn spawn_overlay(
+fn spawn_overlay(
     mut commands: Commands,
     mut selection: ResMut<PauseSelection>,
+    mut quick_selection: ResMut<QuickSettingsSelection>,
+    mut view: ResMut<PauseView>,
     practice: Option<Res<crate::practice::PracticeSession>>,
     midi: Option<Res<game_shell::MidiConnected>>,
 ) {
     selection.0 = 0;
+    quick_selection.0 = 0;
+    *view = PauseView::Menu;
+    let context = if practice.is_some() {
+        PauseContext::Practice
+    } else {
+        PauseContext::Normal
+    };
+    let items = pause_items(context);
     let theme = Theme::default();
     commands
         .spawn((
             PauseOverlay,
-            dtx_ui::ModalDialog::new(vec![
-                dtx_ui::DialogAction::Custom(0),
-                dtx_ui::DialogAction::Custom(1),
-                dtx_ui::DialogAction::Destructive,
-            ]),
+            dtx_ui::ModalDialog::new(
+                items
+                    .iter()
+                    .enumerate()
+                    .map(|(index, item)| {
+                        if matches!(
+                            item,
+                            PauseItemKind::ReturnToSongSelect | PauseItemKind::ExitToSongSelect
+                        ) {
+                            dtx_ui::DialogAction::Destructive
+                        } else {
+                            dtx_ui::DialogAction::Custom(index as u16)
+                        }
+                    })
+                    .collect(),
+            ),
             Node {
                 position_type: PositionType::Absolute,
                 width: Val::Percent(100.0),
@@ -312,21 +459,70 @@ pub fn spawn_overlay(
                     ..default()
                 },
             ));
-            for (index, item) in pause_items(practice.is_some()).iter().enumerate() {
-                let tone = if matches!(item, PauseItemKind::Quit | PauseItemKind::ExitPractice) {
-                    dtx_ui::InteractionTone::Destructive
-                } else {
-                    dtx_ui::InteractionTone::Focus
-                };
-                root.spawn((
-                    *item,
-                    dtx_ui::ActionButton::new(dtx_ui::DialogAction::Custom(index as u16), tone),
-                    Text::new(item.label()),
-                    Theme::hud_font(),
-                    dtx_ui::SemanticText(dtx_ui::TypographyRole::Hud),
-                    TextColor(theme.text_secondary),
-                ));
-            }
+            root.spawn((
+                PauseMenuContent,
+                Node {
+                    flex_direction: FlexDirection::Column,
+                    align_items: AlignItems::Center,
+                    row_gap: Val::Px(16.0),
+                    ..default()
+                },
+            ))
+            .with_children(|menu| {
+                for (index, item) in items.iter().enumerate() {
+                    let tone = if matches!(
+                        item,
+                        PauseItemKind::ReturnToSongSelect | PauseItemKind::ExitToSongSelect
+                    ) {
+                        dtx_ui::InteractionTone::Destructive
+                    } else {
+                        dtx_ui::InteractionTone::Focus
+                    };
+                    let action = if matches!(
+                        item,
+                        PauseItemKind::ReturnToSongSelect | PauseItemKind::ExitToSongSelect
+                    ) {
+                        dtx_ui::DialogAction::Destructive
+                    } else {
+                        dtx_ui::DialogAction::Custom(index as u16)
+                    };
+                    menu.spawn((
+                        *item,
+                        Button,
+                        dtx_ui::ActionButton::new(action, tone),
+                        Text::new(item.label()),
+                        Theme::hud_font(),
+                        dtx_ui::SemanticText(dtx_ui::TypographyRole::Hud),
+                        TextColor(theme.text_secondary),
+                    ));
+                }
+            });
+            root.spawn((
+                QuickSettingsContent,
+                Visibility::Hidden,
+                Node {
+                    flex_direction: FlexDirection::Column,
+                    align_items: AlignItems::Center,
+                    row_gap: Val::Px(16.0),
+                    ..default()
+                },
+            ))
+            .with_children(|quick| {
+                for (index, setting) in QUICK_SETTINGS.iter().enumerate() {
+                    quick.spawn((
+                        *setting,
+                        Button,
+                        dtx_ui::ActionButton::new(
+                            dtx_ui::DialogAction::Custom(index as u16),
+                            dtx_ui::InteractionTone::Focus,
+                        ),
+                        Text::new(""),
+                        Theme::hud_font(),
+                        dtx_ui::SemanticText(dtx_ui::TypographyRole::Hud),
+                        TextColor(theme.text_secondary),
+                    ));
+                }
+            });
             if midi.is_some_and(|m| m.0) {
                 dtx_ui::widget::nav_legend::spawn_nav_legend(
                     root,
@@ -355,6 +551,10 @@ fn pause_kb_emit(keys: Res<ButtonInput<KeyCode>>, mut out: MessageWriter<game_sh
         NavVerb::Down
     } else if keys.just_pressed(KeyCode::ArrowUp) {
         NavVerb::Up
+    } else if keys.just_pressed(KeyCode::ArrowLeft) {
+        NavVerb::Dec
+    } else if keys.just_pressed(KeyCode::ArrowRight) {
+        NavVerb::Inc
     } else if keys.just_pressed(KeyCode::Enter) || keys.just_pressed(KeyCode::Space) {
         NavVerb::Confirm
     } else {
@@ -367,70 +567,216 @@ fn pause_kb_emit(keys: Res<ButtonInput<KeyCode>>, mut out: MessageWriter<game_sh
     });
 }
 
-#[allow(clippy::too_many_arguments)]
-pub(crate) fn pause_menu_input(
-    mut actions: MessageReader<game_shell::NavAction>,
+fn pause_pointer_emit(
+    practice: Option<Res<crate::practice::PracticeSession>>,
     mut selection: ResMut<PauseSelection>,
-    mut next_pause: ResMut<NextState<PauseState>>,
+    mut quick_selection: ResMut<QuickSettingsSelection>,
+    mut view: ResMut<PauseView>,
+    menu_rows: Query<
+        (&PauseItemKind, &Interaction),
+        (Changed<Interaction>, Without<QuickSettingKind>),
+    >,
+    quick_rows: Query<
+        (&QuickSettingKind, &Interaction),
+        (Changed<Interaction>, Without<PauseItemKind>),
+    >,
+    mut out: MessageWriter<game_shell::NavAction>,
+) {
+    use game_shell::{NavAction, NavSource, NavVerb};
+    let context = if practice.is_some() {
+        PauseContext::Practice
+    } else {
+        PauseContext::Normal
+    };
+    for (item, interaction) in &menu_rows {
+        if *interaction != Interaction::Pressed {
+            continue;
+        }
+        if let Some(index) = pause_items(context).iter().position(|row| row == item) {
+            selection.0 = index;
+            *view = PauseView::Menu;
+            out.write(NavAction {
+                verb: NavVerb::Confirm,
+                source: NavSource::Keyboard,
+                coarse: false,
+            });
+        }
+    }
+    for (setting, interaction) in &quick_rows {
+        if *interaction != Interaction::Pressed {
+            continue;
+        }
+        if let Some(index) = QUICK_SETTINGS.iter().position(|row| row == setting) {
+            quick_selection.0 = index;
+            *view = PauseView::QuickSettings;
+            out.write(NavAction {
+                verb: if *setting == QuickSettingKind::Back {
+                    NavVerb::Confirm
+                } else {
+                    NavVerb::Inc
+                },
+                source: NavSource::Keyboard,
+                coarse: false,
+            });
+        }
+    }
+}
+
+pub(crate) fn pause_menu_input(
+    mut commands: Commands,
+    mut actions: MessageReader<game_shell::NavAction>,
+    mut state: PauseMenuState,
     mut requests: MessageWriter<TransitionRequest>,
     mut practice_actions: MessageWriter<crate::practice::actions::PracticeAction>,
     mut open_settings: MessageWriter<crate::practice::OpenPracticeSettings>,
-    mut rows: Query<(&PauseItemKind, &mut TextColor)>,
-    practice: Option<Res<crate::practice::PracticeSession>>,
+    mut ui: PauseMenuUi,
+    mut quick_runtime: crate::perf_hotkeys::PauseQuickSettings,
 ) {
     use game_shell::NavVerb;
-    let items = pause_items(practice.is_some());
-    let count = items.len();
+    let context = if state.practice.is_some() {
+        PauseContext::Practice
+    } else {
+        PauseContext::Normal
+    };
+    let items = pause_items(context);
     let mut confirm = false;
     let mut resume = false;
+    let mut adjustment = 0;
     for action in actions.read() {
-        match action.verb {
-            NavVerb::Down => selection.0 = (selection.0 + 1) % count,
-            NavVerb::Up => selection.0 = (selection.0 + count - 1) % count,
-            NavVerb::Confirm => confirm = true,
-            // SD resumes: the pad equivalent of Esc.
-            NavVerb::Back => resume = true,
-            _ => {}
+        match *state.view {
+            PauseView::Menu => match action.verb {
+                NavVerb::Down => state.selection.0 = (state.selection.0 + 1) % items.len(),
+                NavVerb::Up => {
+                    state.selection.0 = (state.selection.0 + items.len() - 1) % items.len();
+                }
+                NavVerb::Confirm => confirm = true,
+                NavVerb::Back => resume = true,
+                _ => {}
+            },
+            PauseView::QuickSettings => match action.verb {
+                NavVerb::Down => {
+                    state.quick_selection.0 = (state.quick_selection.0 + 1) % QUICK_SETTINGS.len();
+                }
+                NavVerb::Up => {
+                    state.quick_selection.0 =
+                        (state.quick_selection.0 + QUICK_SETTINGS.len() - 1) % QUICK_SETTINGS.len();
+                }
+                NavVerb::Dec => adjustment = -1,
+                NavVerb::Inc => adjustment = 1,
+                NavVerb::Confirm => confirm = true,
+                NavVerb::Back => *state.view = PauseView::Menu,
+                _ => {}
+            },
         }
     }
 
+    if resume {
+        state.next_pause.set(PauseState::Running);
+    }
+    match *state.view {
+        PauseView::Menu if confirm => {
+            let selected = items[state.selection.0 % items.len()];
+            match selected {
+                PauseItemKind::Resume => state.next_pause.set(PauseState::Running),
+                PauseItemKind::RestartSong => {
+                    state.next_pause.set(PauseState::Running);
+                    request_transition(&mut requests, AppState::SongLoading);
+                }
+                PauseItemKind::PracticeThisSection => {
+                    let request = practice_request_at(&state.timeline, state.clock.current_ms);
+                    let mut session = crate::practice::PracticeSession::default();
+                    let mut draft = crate::practice::PracticeDraft::default();
+                    let mut flow = crate::practice::PracticeFlow::default();
+                    crate::practice::begin_practice_setup(
+                        &request,
+                        &mut session,
+                        &mut draft,
+                        &mut flow,
+                    );
+                    *state.intent = PracticeIntent::Request(request);
+                    *state.completed_run = game_shell::CompletedRunContext::default();
+                    state.normal_events.clear();
+                    commands.insert_resource(crate::practice::PracticeSourceCatalog {
+                        recommended: Some(draft.clone()),
+                    });
+                    commands.insert_resource(session);
+                    commands.insert_resource(draft);
+                    commands.insert_resource(flow);
+                    state.next_pause.set(PauseState::Running);
+                }
+                PauseItemKind::QuickSettings => {
+                    state.quick_selection.0 = 0;
+                    *state.view = PauseView::QuickSettings;
+                }
+                PauseItemKind::ReturnToSongSelect | PauseItemKind::ExitToSongSelect => {
+                    state.next_pause.set(PauseState::Running);
+                    request_transition(&mut requests, AppState::SongSelect);
+                }
+                PauseItemKind::RestartLoop => {
+                    practice_actions.write(crate::practice::actions::PracticeAction::RestartLoop);
+                    state.next_pause.set(PauseState::Running);
+                }
+                PauseItemKind::PracticeSettings => {
+                    open_settings.write(crate::practice::OpenPracticeSettings);
+                }
+            }
+        }
+        PauseView::QuickSettings => {
+            let selected = QUICK_SETTINGS[state.quick_selection.0 % QUICK_SETTINGS.len()];
+            if confirm && selected == QuickSettingKind::Back {
+                *state.view = PauseView::Menu;
+            } else if adjustment != 0 && selected != QuickSettingKind::Back {
+                quick_runtime.adjust(selected, adjustment);
+            }
+        }
+        PauseView::Menu => {}
+    }
+
+    let quick_open = *state.view == PauseView::QuickSettings;
+    if let Ok(mut visibility) = ui.menu_visibility.single_mut() {
+        *visibility = if quick_open {
+            Visibility::Hidden
+        } else {
+            Visibility::Inherited
+        };
+    }
+    if let Ok(mut visibility) = ui.quick_visibility.single_mut() {
+        *visibility = if quick_open {
+            Visibility::Inherited
+        } else {
+            Visibility::Hidden
+        };
+    }
+
     let theme = Theme::default();
-    let selected = items[selection.0 % count];
-    for (item, mut color) in &mut rows {
-        color.0 = if *item == selected {
+    let selected_menu = items[state.selection.0 % items.len()];
+    for (item, mut text, mut color) in &mut ui.menu_rows {
+        let selected = *item == selected_menu;
+        text.0 = if selected {
+            format!("{} {}", dtx_ui::StateMarker::Focus.label(), item.label())
+        } else {
+            format!("  {}", item.label())
+        };
+        color.0 = if selected {
             theme.accent
         } else {
             theme.text_secondary
         };
     }
-
-    if resume {
-        next_pause.set(PauseState::Running);
-        return;
-    }
-    if confirm {
-        match selected {
-            PauseItemKind::Resume => next_pause.set(PauseState::Running),
-            PauseItemKind::Retry => {
-                // Reload the chart from the top via the loading screen.
-                next_pause.set(PauseState::Running);
-                request_transition(&mut requests, AppState::SongLoading);
-            }
-            PauseItemKind::Quit | PauseItemKind::ExitPractice => {
-                next_pause.set(PauseState::Running);
-                request_transition(&mut requests, AppState::SongSelect);
-            }
-            PauseItemKind::RestartLoop => {
-                // Reuse the quick-tier effect verbatim: apply_practice_actions
-                // (gated Running) reads this message the frame after the resume
-                // transition applies — messages live two update cycles.
-                practice_actions.write(crate::practice::actions::PracticeAction::RestartLoop);
-                next_pause.set(PauseState::Running);
-            }
-            PauseItemKind::PracticeSettings => {
-                open_settings.write(crate::practice::OpenPracticeSettings);
-            }
-        }
+    let selected_quick = QUICK_SETTINGS[state.quick_selection.0 % QUICK_SETTINGS.len()];
+    for (setting, mut text, mut color) in &mut ui.quick_rows {
+        let selected = *setting == selected_quick;
+        let value = quick_runtime.value(*setting);
+        text.0 = if selected {
+            format!("{} {value}", dtx_ui::StateMarker::Focus.label())
+        } else {
+            format!("  {value}")
+        };
+        color.0 = if selected {
+            theme.accent
+        } else {
+            theme.text_secondary
+        };
     }
 }
 
@@ -475,24 +821,45 @@ mod tests {
     }
 
     #[test]
-    fn pause_items_normal_vs_practice() {
+    fn pause_items_match_context_contracts() {
         assert_eq!(
-            pause_items(false),
+            pause_items(PauseContext::Normal),
             &[
                 PauseItemKind::Resume,
-                PauseItemKind::Retry,
-                PauseItemKind::Quit
+                PauseItemKind::RestartSong,
+                PauseItemKind::PracticeThisSection,
+                PauseItemKind::QuickSettings,
+                PauseItemKind::ReturnToSongSelect,
             ]
         );
         assert_eq!(
-            pause_items(true),
+            pause_items(PauseContext::Practice),
             &[
                 PauseItemKind::Resume,
                 PauseItemKind::RestartLoop,
                 PauseItemKind::PracticeSettings,
-                PauseItemKind::ExitPractice
+                PauseItemKind::ExitToSongSelect,
             ]
         );
+    }
+
+    #[test]
+    fn practice_this_section_builds_bar_aligned_normal_pause_request() {
+        let timeline = crate::timeline::ChipTimeline {
+            bar_ms: vec![0, 2_000, 4_000, 6_000, 8_000, 10_000],
+            end_ms: 10_000,
+            ..Default::default()
+        };
+
+        let request = practice_request_at(&timeline, 5_100);
+
+        assert_eq!(request.origin, game_shell::PracticeOrigin::NormalPause);
+        let game_shell::PracticeSeed::Recommended(section) = request.seed else {
+            panic!("recommended")
+        };
+        assert_eq!(section.loop_start_ms, 2_000);
+        assert_eq!(section.loop_end_ms, 8_000);
+        assert!(section.loop_start_ms <= 5_100 && section.loop_end_ms > 5_100);
     }
 
     fn dispatch_world(selection: usize) -> World {
@@ -503,8 +870,23 @@ mod tests {
         world.init_resource::<Messages<crate::practice::actions::PracticeAction>>();
         world.init_resource::<Messages<crate::practice::OpenPracticeSettings>>();
         world.insert_resource(PauseSelection(selection));
+        world.init_resource::<QuickSettingsSelection>();
+        world.init_resource::<PauseView>();
         world.init_resource::<NextState<PauseState>>();
         world.insert_resource(crate::practice::PracticeSession::default());
+        world.init_resource::<crate::timeline::ChipTimeline>();
+        world.init_resource::<crate::resources::GameplayClock>();
+        world.init_resource::<PracticeIntent>();
+        world.init_resource::<game_shell::CompletedRunContext>();
+        world.init_resource::<crate::results_analysis::NormalPlayEventStream>();
+        world.init_resource::<crate::perf_hotkeys::PerfHotkeyDraft>();
+        world.init_resource::<crate::resources::ScrollSettings>();
+        world.init_resource::<crate::resources::InputOffsetMs>();
+        world.init_resource::<crate::resources::BgmAdjustState>();
+        world.init_resource::<crate::resources::ShowTimingLines>();
+        world.init_resource::<crate::resources::DrumAudioSettings>();
+        world.init_resource::<dtx_audio::BgmHandle>();
+        world.init_resource::<Assets<AudioInstance>>();
         world.write_message(game_shell::NavAction {
             verb: game_shell::NavVerb::Confirm,
             source: game_shell::NavSource::Keyboard,

@@ -2128,6 +2128,162 @@ fn setup_wait_watcher_cannot_halt() {
 }
 
 #[test]
+fn normal_pause_practice_this_section_enters_loaded_setup_and_abandons_run() {
+    let mut app = build_lifecycle_app(PracticeIntent::None);
+    enter_performance(&mut app, chart_with_measures(8));
+    ready_clock(&mut app, 5_100);
+    app.world_mut()
+        .resource_mut::<gameplay_drums::results_analysis::NormalPlayEventStream>()
+        .truncated = true;
+    app.world_mut()
+        .resource_mut::<NextState<game_shell::PauseState>>()
+        .set(game_shell::PauseState::Paused);
+    app.update();
+    app.world_mut()
+        .resource_mut::<gameplay_drums::pause::PauseSelection>()
+        .0 = 2;
+    app.world_mut().write_message(game_shell::NavAction {
+        verb: game_shell::NavVerb::Confirm,
+        source: game_shell::NavSource::Keyboard,
+        coarse: false,
+    });
+
+    app.update();
+
+    let request = app
+        .world()
+        .resource::<PracticeIntent>()
+        .request()
+        .expect("normal pause creates a practice request");
+    assert_eq!(request.origin, PracticeOrigin::NormalPause);
+    let game_shell::PracticeSeed::Recommended(section) = request.seed else {
+        panic!("normal pause seeds a recommendation")
+    };
+    assert_eq!((section.loop_start_ms, section.loop_end_ms), (2_000, 8_000));
+    assert_eq!(
+        app.world().resource::<PracticeFlow>().phase,
+        PracticePhase::Setup
+    );
+    assert!(
+        !app.world()
+            .resource::<PracticeSession>()
+            .current_attempt_eligible
+    );
+    assert_eq!(
+        app.world()
+            .resource::<game_shell::CompletedRunContext>()
+            .kind,
+        game_shell::RunKind::Practice
+    );
+    let stream = app
+        .world()
+        .resource::<gameplay_drums::results_analysis::NormalPlayEventStream>();
+    assert!(stream.events.is_empty());
+    assert!(!stream.truncated);
+}
+
+#[test]
+fn tab_opens_settings_only_during_practice_running() {
+    assert_eq!(
+        gameplay_drums::practice::actions::action_for(
+            &gameplay_drums::practice::actions::PracticeBindings::default(),
+            KeyCode::Tab,
+        ),
+        Some(gameplay_drums::practice::actions::PracticeAction::OpenSettings)
+    );
+
+    let mut normal = build_lifecycle_app(PracticeIntent::None);
+    enter_performance(&mut normal, chart_with_measures(4));
+    normal
+        .world_mut()
+        .write_message(gameplay_drums::practice::actions::PracticeAction::OpenSettings);
+    normal.update();
+    assert!(!normal.world().contains_resource::<PracticeFlow>());
+
+    let mut setup = build_lifecycle_app(PracticeIntent::manual(PracticeOrigin::SongSelect));
+    enter_performance(&mut setup, chart_with_measures(4));
+    setup
+        .world_mut()
+        .write_message(gameplay_drums::practice::actions::PracticeAction::OpenSettings);
+    setup.update();
+    assert_eq!(
+        setup.world().resource::<PracticeFlow>().phase,
+        PracticePhase::Setup
+    );
+
+    let mut paused = build_lifecycle_app(PracticeIntent::manual(PracticeOrigin::SongSelect));
+    enter_performance(&mut paused, chart_with_measures(4));
+    paused.world_mut().resource_mut::<PracticeFlow>().phase = PracticePhase::Running;
+    paused
+        .world_mut()
+        .resource_mut::<NextState<game_shell::PauseState>>()
+        .set(game_shell::PauseState::Paused);
+    paused.update();
+    paused
+        .world_mut()
+        .write_message(gameplay_drums::practice::actions::PracticeAction::OpenSettings);
+    paused.update();
+    assert_eq!(
+        paused.world().resource::<PracticeFlow>().phase,
+        PracticePhase::Running
+    );
+
+    let mut running = build_lifecycle_app(PracticeIntent::manual(PracticeOrigin::SongSelect));
+    enter_performance(&mut running, chart_with_measures(4));
+    running.world_mut().resource_mut::<PracticeFlow>().phase = PracticePhase::Running;
+    running
+        .world_mut()
+        .write_message(gameplay_drums::practice::actions::PracticeAction::OpenSettings);
+    running.update();
+    assert_eq!(
+        running.world().resource::<PracticeFlow>().phase,
+        PracticePhase::Editing
+    );
+}
+
+#[test]
+fn bound_pause_opens_overlay_only_during_practice_running() {
+    let mut setup = build_lifecycle_app(PracticeIntent::manual(PracticeOrigin::SongSelect));
+    enter_performance(&mut setup, chart_with_measures(4));
+    setup
+        .world_mut()
+        .write_message(gameplay_drums::events::SystemVerbHit {
+            verb: dtx_input::SystemVerb::Pause,
+        });
+    setup.update();
+    setup.update();
+    assert_eq!(
+        *setup
+            .world()
+            .resource::<State<game_shell::PauseState>>()
+            .get(),
+        game_shell::PauseState::Running
+    );
+
+    let mut running = build_lifecycle_app(PracticeIntent::manual(PracticeOrigin::SongSelect));
+    enter_performance(&mut running, chart_with_measures(4));
+    running.world_mut().resource_mut::<PracticeFlow>().phase = PracticePhase::Running;
+    running
+        .world_mut()
+        .write_message(gameplay_drums::events::SystemVerbHit {
+            verb: dtx_input::SystemVerb::Pause,
+        });
+    running.update();
+    running.update();
+    assert_eq!(
+        *running
+            .world()
+            .resource::<State<game_shell::PauseState>>()
+            .get(),
+        game_shell::PauseState::Paused
+    );
+    assert_eq!(
+        running.world().resource::<PracticeFlow>().phase,
+        PracticePhase::Running
+    );
+}
+
+#[test]
 fn setup_chart_clock_stays_frozen_until_preview_plays() {
     let mut app = build_lifecycle_app(PracticeIntent::manual(PracticeOrigin::SongSelect));
     enter_performance(&mut app, chart_with_measures(4));
