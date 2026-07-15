@@ -1735,7 +1735,8 @@ fn rejected_paused_restart_cannot_resume_later() {
             end_ms: 6_000,
         });
         session.transport.preroll = gameplay_drums::practice::session::PrerollSetting::Off;
-        session.current_attempt.start_ms = 2_000;
+        session.current_attempt.start_ms = 1_000;
+        session.current_attempt.counts.perfect = 3;
     }
     ready_clock(&mut app, 5_000);
     app.world_mut()
@@ -1755,23 +1756,46 @@ fn rejected_paused_restart_cannot_resume_later() {
 
     app.world_mut().run_schedule(FixedUpdate);
     {
-        let mut session = app.world_mut().resource_mut::<PracticeSession>();
-        session.current_attempt = gameplay_drums::practice::session::AttemptStats {
-            start_ms: 2_000,
-            ..Default::default()
-        };
-        session.current_attempt_eligible = true;
+        let session = app.world().resource::<PracticeSession>();
+        assert_eq!(session.current_attempt.start_ms, 1_000);
+        assert_eq!(session.current_attempt.counts.perfect, 3);
+        assert!(!session.current_attempt_eligible);
+        assert!(session.attempt_history.is_empty());
     }
+
+    app.world_mut().write_message(game_shell::NavAction {
+        verb: game_shell::NavVerb::Back,
+        source: game_shell::NavSource::Keyboard,
+        coarse: false,
+    });
+    app.update();
     ready_clock(&mut app, 2_000);
-    app.world_mut().run_schedule(FixedUpdate);
     app.update();
 
     assert_eq!(
         *app.world()
             .resource::<State<game_shell::PauseState>>()
             .get(),
-        game_shell::PauseState::Paused
+        game_shell::PauseState::Running
     );
+    let session = app.world().resource::<PracticeSession>();
+    assert_eq!(session.current_attempt.start_ms, 1_000);
+    assert!(!session.current_attempt_eligible);
+    assert!(session.attempt_history.is_empty());
+
+    app.world_mut()
+        .resource_mut::<PracticeSession>()
+        .current_attempt
+        .counts
+        .perfect += 1;
+    ready_clock(&mut app, 6_100);
+    app.world_mut().run_schedule(FixedUpdate);
+
+    let session = app.world().resource::<PracticeSession>();
+    assert!(session.attempt_history.is_empty());
+    assert_eq!(session.current_attempt.start_ms, 2_000);
+    assert_eq!(session.current_attempt.counts.total(), 0);
+    assert!(session.current_attempt_eligible);
 }
 
 #[test]
@@ -1786,7 +1810,8 @@ fn out_of_range_paused_restart_is_cancelled_after_seek_clamps() {
             end_ms: 60_000,
         });
         session.transport.preroll = gameplay_drums::practice::session::PrerollSetting::Off;
-        session.current_attempt.start_ms = 50_000;
+        session.current_attempt.start_ms = 1_000;
+        session.current_attempt.counts.perfect = 3;
     }
     ready_clock(&mut app, 5_000);
     app.world_mut()
@@ -1817,6 +1842,60 @@ fn out_of_range_paused_restart_is_cancelled_after_seek_clamps() {
         50_000,
         "the seek engine clamps the invalid target while restart stays paused"
     );
+    let session = app.world().resource::<PracticeSession>();
+    assert_eq!(session.current_attempt.start_ms, 1_000);
+    assert_eq!(session.current_attempt.counts.perfect, 3);
+    assert!(!session.current_attempt_eligible);
+    assert!(session.attempt_history.is_empty());
+}
+
+#[test]
+fn competing_seek_cancels_paused_restart_without_starting_requested_attempt() {
+    let mut app = build_lifecycle_app(PracticeIntent::manual(PracticeOrigin::SongSelect));
+    enter_performance(&mut app, chart_with_measures(8));
+    app.world_mut().resource_mut::<PracticeFlow>().phase = PracticePhase::Running;
+    {
+        let mut session = app.world_mut().resource_mut::<PracticeSession>();
+        session.transport.loop_region = Some(LoopRegion {
+            start_ms: 2_000,
+            end_ms: 6_000,
+        });
+        session.transport.preroll = gameplay_drums::practice::session::PrerollSetting::Off;
+        session.current_attempt.start_ms = 1_000;
+        session.current_attempt.counts.perfect = 3;
+    }
+    ready_clock(&mut app, 5_000);
+    app.world_mut()
+        .resource_mut::<NextState<game_shell::PauseState>>()
+        .set(game_shell::PauseState::Paused);
+    app.update();
+    app.world_mut()
+        .resource_mut::<gameplay_drums::pause::PauseSelection>()
+        .0 = 1;
+    app.world_mut().write_message(game_shell::NavAction {
+        verb: game_shell::NavVerb::Confirm,
+        source: game_shell::NavSource::Keyboard,
+        coarse: false,
+    });
+    app.update();
+    app.world_mut().write_message(SeekToChartTime {
+        target_ms: 3_000,
+        snap: None,
+        attempt_start_ms: Some(3_000),
+    });
+
+    app.world_mut().run_schedule(FixedUpdate);
+    app.update();
+
+    assert_eq!(
+        *app.world()
+            .resource::<State<game_shell::PauseState>>()
+            .get(),
+        game_shell::PauseState::Paused
+    );
+    let session = app.world().resource::<PracticeSession>();
+    assert_ne!(session.current_attempt.start_ms, 2_000);
+    assert!(session.attempt_history.is_empty());
 }
 
 #[test]

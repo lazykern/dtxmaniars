@@ -74,6 +74,8 @@ pub fn track_attempt_stats(
     mut session: ResMut<PracticeSession>,
     mut combo: ResMut<Combo>,
     mut finalized: ResMut<LastFinalizedAttempt>,
+    paused_restart: Option<Res<crate::pause::PausedRestart>>,
+    acknowledgement: Res<crate::seek::SeekAcknowledgement>,
     wait_state: Option<Res<crate::practice::wait::WaitState>>,
     flow: Option<Res<crate::practice::PracticeFlow>>,
 ) {
@@ -123,6 +125,11 @@ pub fn track_attempt_stats(
         session.lane_diag.apply_overhit(eh.lane);
     }
     if let Some(seek) = seeks.read().last() {
+        if paused_restart
+            .is_some_and(|restart| restart.owns_acknowledged_seek(seek, &acknowledgement))
+        {
+            return;
+        }
         // Pre-seek clock, captured by apply_seek_system earlier this tick.
         let end_ms = last_seek_from.0.take().unwrap_or(clock.current_ms);
         let next_start = seek.attempt_start_ms.unwrap_or(seek.target_ms);

@@ -130,10 +130,24 @@ pub struct PauseSelection(pub usize);
 struct QuickSettingsSelection(usize);
 
 #[derive(Resource, Default)]
-pub(crate) struct PausedRestart {
+pub struct PausedRestart {
     target_ms: Option<i64>,
     attempt_start_ms: i64,
     seek_revision: u64,
+}
+
+impl PausedRestart {
+    pub(crate) fn owns_acknowledged_seek(
+        &self,
+        seek: &crate::seek::SeekToChartTime,
+        acknowledgement: &crate::seek::SeekAcknowledgement,
+    ) -> bool {
+        self.target_ms == Some(seek.target_ms)
+            && seek.snap.is_none()
+            && seek.attempt_start_ms.is_none()
+            && acknowledgement.revision == self.seek_revision
+            && acknowledgement.request == Some(*seek)
+    }
 }
 
 #[derive(SystemParam)]
@@ -336,7 +350,10 @@ fn clear_gameplay_input_queues(
 fn finish_paused_restart(
     mut restart: ResMut<PausedRestart>,
     acknowledgement: Res<crate::seek::SeekAcknowledgement>,
-    practice: Option<Res<crate::practice::PracticeSession>>,
+    mut practice: Option<ResMut<crate::practice::PracticeSession>>,
+    mut last_seek_from: ResMut<crate::seek::LastSeekFrom>,
+    mut combo: ResMut<crate::resources::Combo>,
+    mut finalized: ResMut<crate::practice::stats::LastFinalizedAttempt>,
     mut next_pause: ResMut<NextState<PauseState>>,
 ) {
     let Some(target_ms) = restart.target_ms else {
@@ -348,7 +365,8 @@ fn finish_paused_restart(
     if acknowledgement.revision != restart.seek_revision
         || acknowledgement.request.is_none_or(|request| {
             request.target_ms != target_ms
-                || request.attempt_start_ms != Some(restart.attempt_start_ms)
+                || request.snap.is_some()
+                || request.attempt_start_ms.is_some()
         })
     {
         warn!("paused restart cancelled by a competing seek");
@@ -359,6 +377,7 @@ fn finish_paused_restart(
         Some(crate::seek::SeekResult::Applied { resolved_ms }) if resolved_ms == target_ms => {}
         Some(crate::seek::SeekResult::Applied { resolved_ms }) => {
             warn!("paused restart cancelled: target {target_ms} resolved to {resolved_ms}");
+            last_seek_from.0 = None;
             *restart = PausedRestart::default();
             return;
         }
@@ -369,13 +388,15 @@ fn finish_paused_restart(
         }
         None => return,
     }
-    if practice.is_some_and(|session| {
-        session.current_attempt_eligible
-            && session.current_attempt.start_ms == restart.attempt_start_ms
-    }) {
+    let Some(session) = practice.as_deref_mut() else {
         *restart = PausedRestart::default();
-        next_pause.set(PauseState::Running);
-    }
+        return;
+    };
+    let end_ms = last_seek_from.0.take().unwrap_or(target_ms);
+    finalized.0 = session.roll_attempt(end_ms, restart.attempt_start_ms);
+    combo.current = 0;
+    *restart = PausedRestart::default();
+    next_pause.set(PauseState::Running);
 }
 
 fn toggle_pause(
@@ -903,7 +924,7 @@ pub(crate) fn pause_menu_input(
                         seeks.write(crate::seek::SeekToChartTime {
                             target_ms,
                             snap: None,
-                            attempt_start_ms: Some(attempt_start_ms),
+                            attempt_start_ms: None,
                         });
                         paused_restart.target_ms = Some(target_ms);
                         paused_restart.attempt_start_ms = attempt_start_ms;
@@ -1172,6 +1193,7 @@ mod tests {
             .copied()
             .collect();
         assert_eq!(seeks.len(), 1);
+        assert_eq!(seeks[0].attempt_start_ms, None);
         assert!(
             !world
                 .resource::<crate::practice::PracticeSession>()
