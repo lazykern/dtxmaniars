@@ -15,3 +15,4 @@ dtx-ui = { path = "../dtx-ui" }
 # events that dtx-audio consumes. Game→Engine is allowed.
 dtx-audio = { path = "../dtx-audio" }
 dtx-scoring = { path = "../dtx-scoring" }
+dtx-input = { workspace = true }

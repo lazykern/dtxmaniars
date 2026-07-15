@@ -5,6 +5,8 @@
 
 use bevy::prelude::*;
 
+pub use dtx_input::MidiConnected;
+
 /// What the input means, not what produced it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum NavVerb {
@@ -45,11 +47,6 @@ pub struct NavAction {
     pub coarse: bool,
 }
 
-/// True while a real MIDI device is connected. Written by gameplay-drums'
-/// `connect_midi`; read by legend bars (hidden when false).
-#[derive(Resource, Debug, Default, Clone, Copy)]
-pub struct MidiConnected(pub bool);
-
 /// Registers the `NavAction` message and `MidiConnected` resource.
 pub fn plugin(app: &mut App) {
     app.add_message::<NavAction>()
@@ -69,10 +66,5 @@ mod tests {
         };
         let b = a;
         assert_eq!(a, b);
-    }
-
-    #[test]
-    fn midi_connected_defaults_false() {
-        assert!(!MidiConnected::default().0);
     }
 }

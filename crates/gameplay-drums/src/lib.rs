@@ -460,19 +460,10 @@ mod midi_consumer {
     use bevy::time::common_conditions::on_real_timer;
     use dtx_input::midi::{MidiSource, VirtualSource};
 
+    pub use dtx_input::{LastMidiHit, PadNavHit};
+
     use super::events::InputHit;
     use crate::resources::GameplayClock;
-
-    /// Last MIDI NoteOn observed by `poll_midi`, written before the threshold
-    /// gate. Drives the bindings-tab velocity meter and MIDI note capture,
-    /// avoiding a second drain that would race `poll_midi`.
-    #[derive(Resource, Default, Debug, Clone, Copy)]
-    pub struct LastMidiHit {
-        pub note: u8,
-        pub velocity: u8,
-        pub below_threshold: bool,
-        pub at: Option<std::time::Instant>,
-    }
 
     /// Holds the live real-MIDI connection. Stored as a **non-send** resource
     /// because `midir` connections are not `Sync`; systems touching it run on
@@ -555,17 +546,6 @@ mod midi_consumer {
         for ev in buf {
             virt.push(ev);
         }
-    }
-
-    /// A resolved hit from a real pad, for menu navigation only.
-    ///
-    /// Separate from `LaneHit` on purpose: `LaneHit` is also written by autoplay
-    /// (which the Customize surface forces on) and by keyboard lane keys, and
-    /// neither should ever steer a menu.
-    #[derive(Debug, Clone, Copy, Message)]
-    pub struct PadNavHit {
-        /// Lane id per `crate::lane_map::LANE_ORDER`.
-        pub lane: u8,
     }
 
     /// Timestamp for an emitted `LaneHit`: the event's own stamp if it has one,

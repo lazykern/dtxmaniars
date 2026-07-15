@@ -31,9 +31,14 @@ pub mod midi;
 pub mod pad;
 #[allow(missing_docs)]
 pub mod profiles;
+pub mod pump;
 pub mod resolver;
 
 pub use events::{LaneHit, LaneHitKind, LaneId};
+pub use pump::{
+    InputPumpSet, LastMidiHit, MidiConnected, PadNavHit, RawInputOwned, ResolvedInputHit,
+    SystemVerbHit,
+};
 pub use resolver::{ActiveInputProfiles, BindResolver, LiveBindings};
 
 /// Key/MIDI binding schema (moved here from dtx-config: it serializes bevy's

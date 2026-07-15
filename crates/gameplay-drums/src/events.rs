@@ -55,13 +55,7 @@ pub struct EmptyHit {
     pub audio_ms: i64,
 }
 
-/// A bound system verb fired by a key or a pad. Emitted from `DrumsSets::Input`
-/// before the gameplay-ready gate, so it works during live play; consumers gate
-/// themselves (`pause.rs`).
-#[derive(Message, Debug, Clone, Copy, PartialEq, Eq)]
-pub struct SystemVerbHit {
-    pub verb: dtx_input::SystemVerb,
-}
+pub use dtx_input::SystemVerbHit;
 
 #[cfg(test)]
 mod tests {

@@ -3198,6 +3198,7 @@ version = "0.1.0"
 dependencies = [
  "bevy",
  "dtx-audio",
+ "dtx-input",
  "dtx-scoring",
  "dtx-ui",
 ]
