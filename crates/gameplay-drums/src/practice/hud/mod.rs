@@ -22,7 +22,7 @@ pub fn format_chart_time(ms: i64) -> String {
     format!("{m}:{s:02}.{d}")
 }
 
-/// Run condition: the practice rail owns the current pause (Tab opener).
+/// Run condition for explicit legacy callers that assign pause ownership to the rail.
 pub fn rail_surface_active(surface: Res<crate::pause::PracticePauseSurface>) -> bool {
     *surface == crate::pause::PracticePauseSurface::Rail
 }

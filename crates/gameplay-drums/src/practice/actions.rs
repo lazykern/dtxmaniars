@@ -3,15 +3,13 @@
 //! Keyboard (v2) is translated into `PracticeAction` messages; MIDI pad
 //! combos / foot control later bind here without touching any consumer.
 
-use bevy::prelude::*;
-use game_shell::PauseState;
-
 use super::hud::timeline_ui::bar_number;
 use super::session::{preroll_target, PracticeSession};
 use super::toast::ToastQueue;
 use crate::resources::GameplayClock;
 use crate::seek::SeekToChartTime;
 use crate::timeline::{ChipTimeline, SnapDivisor};
+use bevy::prelude::*;
 
 /// One quick-tier practice action. All hotkeys (and later MIDI combos)
 /// route through this so consumers never read raw input.
@@ -75,10 +73,8 @@ pub fn apply_practice_actions(
     timeline: Res<ChipTimeline>,
     clock: Res<GameplayClock>,
     mut seeks: MessageWriter<SeekToChartTime>,
-    mut next_pause: ResMut<NextState<PauseState>>,
     mut open_settings: Option<MessageWriter<super::OpenPracticeSettings>>,
     mut toasts: ResMut<ToastQueue>,
-    mut surface: ResMut<crate::pause::PracticePauseSurface>,
 ) {
     for action in actions.read() {
         match action {
@@ -142,11 +138,9 @@ pub fn apply_practice_actions(
                 toasts.push("restart");
             }
             PracticeAction::OpenSettings => {
-                *surface = crate::pause::PracticePauseSurface::Overlay;
                 if let Some(open_settings) = &mut open_settings {
                     open_settings.write(super::OpenPracticeSettings);
                 }
-                next_pause.set(PauseState::Running);
             }
             PracticeAction::ToggleRamp => {}
         }
@@ -197,8 +191,7 @@ mod tests {
     }
 
     #[test]
-    fn tab_opener_requests_settings_without_pausing() {
-        use crate::pause::PracticePauseSurface;
+    fn tab_opener_only_requests_settings() {
         use bevy::ecs::message::Messages;
         use bevy::ecs::system::RunSystemOnce;
         use bevy::prelude::*;
@@ -211,8 +204,6 @@ mod tests {
         world.init_resource::<crate::timeline::ChipTimeline>();
         world.init_resource::<crate::resources::GameplayClock>();
         world.init_resource::<crate::practice::toast::ToastQueue>();
-        world.init_resource::<NextState<PauseState>>();
-        world.init_resource::<PracticePauseSurface>();
         world.write_message(PracticeAction::OpenSettings);
 
         world
@@ -220,19 +211,11 @@ mod tests {
             .expect("apply_practice_actions runs");
 
         assert_eq!(
-            *world.resource::<PracticePauseSurface>(),
-            PracticePauseSurface::Overlay
-        );
-        assert_eq!(
             world
                 .resource::<Messages<crate::practice::OpenPracticeSettings>>()
                 .iter_current_update_messages()
                 .count(),
             1
         );
-        assert!(matches!(
-            world.resource::<NextState<PauseState>>(),
-            NextState::Pending(PauseState::Running)
-        ));
     }
 }

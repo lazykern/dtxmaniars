@@ -223,6 +223,27 @@ fn chart_with_overlapping_audio_slices() -> Chart {
     }
 }
 
+fn chart_with_repeated_primary_path() -> Chart {
+    let mut assets = DtxAssets::default();
+    assets.wav.insert(1, "shared-bgm.wav".into());
+    assets.wav.insert(2, "shared-bgm.wav".into());
+    assets.wav.insert(3, "distinct-layer.wav".into());
+    Chart {
+        metadata: Metadata {
+            bpm: Some(120.0),
+            ..Default::default()
+        },
+        chips: vec![
+            Chip::with_wav(0, EChannel::BGM, 0.0, 1),
+            Chip::with_wav(0, EChannel::BGM, 0.25, 2),
+            Chip::with_wav(0, EChannel::BGM, 0.5, 3),
+            Chip::new(2, EChannel::BassDrum, 0.0),
+        ],
+        assets,
+        ..Default::default()
+    }
+}
+
 fn ready_clock(app: &mut App, current_ms: i64) {
     let mut clock = app.world_mut().resource_mut::<GameplayClock>();
     clock.start();
@@ -1254,6 +1275,114 @@ fn preview_seek_starts_all_spanning_audio_slices() {
 #[test]
 fn normal_seek_starts_all_spanning_audio_slices() {
     assert_running_seek_starts_all_spanning_audio(PracticeIntent::None);
+}
+
+fn assert_running_seek_deduplicates_repeated_primary_path() {
+    let mut app = build_lifecycle_app(PracticeIntent::None);
+    enter_performance(&mut app, chart_with_repeated_primary_path());
+    ready_clock(&mut app, 250);
+
+    send_seek(&mut app, 1_500);
+    app.world_mut().run_schedule(FixedUpdate);
+
+    assert_eq!(
+        app.world().resource::<BgmHandle>().path.as_deref(),
+        Some("shared-bgm.wav")
+    );
+    let active = app
+        .world()
+        .resource::<gameplay_drums::resources::ActiveDrumSounds>();
+    assert_eq!(
+        active.layer_bgm_instances.len(),
+        1,
+        "the repeated primary path must not become a duplicate layer"
+    );
+}
+
+#[test]
+fn preview_seek_deduplicates_repeated_primary_path() {
+    let mut app = build_lifecycle_app(PracticeIntent::manual(PracticeOrigin::SongSelect));
+    enter_performance(&mut app, chart_with_repeated_primary_path());
+    app.world_mut().resource_mut::<PracticeFlow>().phase = PracticePhase::Editing;
+    ready_clock(&mut app, 250);
+
+    send_seek(&mut app, 1_500);
+    app.world_mut().run_schedule(FixedUpdate);
+
+    let primary = app
+        .world()
+        .resource::<gameplay_drums::seek::PendingBgmStart>()
+        .0
+        .as_ref()
+        .expect("one authoritative BGM is queued");
+    assert_eq!(primary.path, "shared-bgm.wav");
+    assert_eq!(
+        app.world()
+            .resource::<gameplay_drums::seek::PendingAudioStarts>()
+            .0
+            .iter()
+            .map(|slice| slice.path.as_str())
+            .collect::<Vec<_>>(),
+        vec!["distinct-layer.wav"],
+        "only the distinct BGM path remains a layer"
+    );
+}
+
+#[test]
+fn normal_running_seek_deduplicates_repeated_primary_path() {
+    assert_running_seek_deduplicates_repeated_primary_path();
+}
+
+#[test]
+fn pause_menu_settings_hands_off_to_editing_before_unpausing() {
+    let mut app = build_lifecycle_app(PracticeIntent::manual(PracticeOrigin::SongSelect));
+    enter_performance(&mut app, chart_with_measures(8));
+    app.world_mut().resource_mut::<PracticeFlow>().phase = PracticePhase::Running;
+    ready_clock(&mut app, 1_500);
+
+    app.world_mut()
+        .resource_mut::<NextState<game_shell::PauseState>>()
+        .set(game_shell::PauseState::Paused);
+    app.update();
+    app.world_mut()
+        .resource_mut::<gameplay_drums::pause::PauseSelection>()
+        .0 = 2;
+    let held_ms = app.world().resource::<GameplayClock>().current_ms;
+
+    app.world_mut().write_message(game_shell::NavAction {
+        verb: game_shell::NavVerb::Confirm,
+        source: game_shell::NavSource::Keyboard,
+        coarse: false,
+    });
+    app.update();
+
+    assert_eq!(
+        app.world().resource::<PracticeFlow>().phase,
+        PracticePhase::Editing
+    );
+    assert_eq!(
+        *app.world()
+            .resource::<State<game_shell::PauseState>>()
+            .get(),
+        game_shell::PauseState::Paused,
+        "the pause state cannot exit before Editing owns the chart"
+    );
+    assert_eq!(app.world().resource::<GameplayClock>().current_ms, held_ms);
+
+    app.update();
+    app.world_mut().run_schedule(FixedUpdate);
+
+    assert_eq!(
+        *app.world()
+            .resource::<State<game_shell::PauseState>>()
+            .get(),
+        game_shell::PauseState::Running
+    );
+    assert_eq!(
+        app.world().resource::<PracticeFlow>().phase,
+        PracticePhase::Editing
+    );
+    assert_eq!(app.world().resource::<GameplayClock>().current_ms, held_ms);
 }
 
 fn assert_gameplay_seek_rebuilds_judged(intent: PracticeIntent) {

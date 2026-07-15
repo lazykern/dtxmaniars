@@ -77,9 +77,9 @@ pub fn pause_items(practice: bool) -> &'static [PauseItemKind] {
 pub struct PauseSelection(pub usize);
 
 /// Which surface owns `PauseState::Paused` during practice. Esc opens the
-/// standard pause overlay; Tab opens the full practice rail. Irrelevant
-/// outside practice (the overlay always spawns); reset to `Overlay` on
-/// every return to `Running` for hygiene.
+/// standard pause overlay. `Rail` is retained only for explicit legacy callers;
+/// Tab and `OpenSettings` enter Editing without claiming it. Irrelevant outside
+/// practice; reset to `Overlay` on every return to `Running` for hygiene.
 #[derive(Resource, Default, Clone, Copy, PartialEq, Eq, Debug)]
 pub enum PracticePauseSurface {
     #[default]
@@ -398,7 +398,7 @@ fn pause_kb_emit(keys: Res<ButtonInput<KeyCode>>, mut out: MessageWriter<game_sh
 }
 
 #[allow(clippy::too_many_arguments)]
-fn pause_menu_input(
+pub(crate) fn pause_menu_input(
     mut actions: MessageReader<game_shell::NavAction>,
     mut selection: ResMut<PauseSelection>,
     mut next_pause: ResMut<NextState<PauseState>>,
@@ -464,7 +464,6 @@ fn pause_menu_input(
             }
             PauseItemKind::PracticeSettings => {
                 open_settings.write(crate::practice::OpenPracticeSettings);
-                next_pause.set(PauseState::Running);
             }
         }
     }
@@ -617,7 +616,7 @@ mod tests {
     }
 
     #[test]
-    fn practice_confirm_settings_requests_editing_and_resumes_pause_state() {
+    fn practice_confirm_settings_only_requests_editing() {
         use bevy::ecs::message::Messages;
         use bevy::ecs::system::RunSystemOnce;
         let mut world = dispatch_world(2);
@@ -626,7 +625,7 @@ mod tests {
             .expect("pause_menu_input runs");
         assert!(matches!(
             world.resource::<NextState<PauseState>>(),
-            NextState::Pending(PauseState::Running)
+            NextState::Unchanged
         ));
         assert_eq!(
             world
@@ -861,6 +860,12 @@ mod tests {
     fn stopped_practice_surface_owns_paused_chart_audio() {
         let mut flow = crate::practice::PracticeFlow::default();
         assert!(!should_resume_chart_audio(None, Some(&flow)));
+
+        flow.phase = crate::practice::PracticePhase::Editing;
+        assert!(
+            !should_resume_chart_audio(None, Some(&flow)),
+            "Editing owns frozen chart audio after the pause overlay exits"
+        );
 
         flow.preview = crate::practice::PreviewState::Playing;
         assert!(should_resume_chart_audio(None, Some(&flow)));

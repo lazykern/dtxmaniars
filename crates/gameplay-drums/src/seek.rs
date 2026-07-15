@@ -118,11 +118,13 @@ pub(crate) fn reset_seek_transients(
     mut pending_audio: ResMut<PendingAudioStarts>,
     mut stopped_rebuild: ResMut<StoppedSeekRebuild>,
     mut last_seek: ResMut<LastSeekFrom>,
+    mut seeks: ResMut<Messages<SeekToChartTime>>,
 ) {
     pending_bgm.0 = None;
     pending_audio.0.clear();
     stopped_rebuild.0 = false;
     last_seek.0 = None;
+    seeks.clear();
 }
 
 /// Rebuild all skip-sets for playback positioned at `target_ms`.
@@ -329,6 +331,10 @@ pub fn apply_seek_system(
         .collect::<Vec<_>>();
     active.sort_by_key(|(at_ms, slice)| (*at_ms, slice.chip_idx));
 
+    let authoritative_bgm_path = state
+        .primary_bgm
+        .0
+        .and_then(|primary| chip_wav_path(&chart.chart, primary, source_dir));
     let authoritative_bgm = state.primary_bgm.0.filter(|primary| {
         active.iter().any(|(_, slice)| {
             slice.chip_idx == *primary && slice.kind == PendingAudioKind::LayerBgm
@@ -345,6 +351,11 @@ pub fn apply_seek_system(
                 pan: slice.pan,
             });
         } else {
+            if slice.kind == PendingAudioKind::LayerBgm
+                && authoritative_bgm_path.as_deref() == Some(slice.path.as_str())
+            {
+                continue;
+            }
             if let PendingAudioKind::AutoSe(channel) = slice.kind {
                 if channel.is_se() {
                     audio.pending_slices.0.retain(|queued| {

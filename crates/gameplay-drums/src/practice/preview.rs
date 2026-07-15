@@ -49,7 +49,9 @@ pub(super) fn plugin(app: &mut App) {
         .add_systems(
             Update,
             (
-                open_practice_settings.after(super::actions::apply_practice_actions),
+                open_practice_settings
+                    .after(super::actions::apply_practice_actions)
+                    .after(crate::pause::pause_menu_input),
                 cancel_practice_settings,
                 apply_preview_actions,
             )
@@ -128,6 +130,7 @@ pub fn open_practice_settings(
     clock: Res<GameplayClock>,
     mut controller: ResMut<PreviewController>,
     mut next_pause: ResMut<NextState<PauseState>>,
+    mut surface: ResMut<crate::pause::PracticePauseSurface>,
     bgm: Res<dtx_audio::BgmHandle>,
     polyphony: Res<dtx_audio::DrumPolyphony>,
     active: Res<ActiveDrumSounds>,
@@ -138,10 +141,11 @@ pub fn open_practice_settings(
     }
     let chart_ms = clock.current_ms;
     let (next_flow, snapshot) = flow.clone().open_settings(chart_ms, &mut session);
+    crate::pause::pause_all_chart_audio(&bgm, &polyphony, &active, &mut instances);
     *flow = next_flow;
     *draft = PracticeDraft::from(&snapshot.session);
     controller.restore_ms = Some(chart_ms);
-    crate::pause::pause_all_chart_audio(&bgm, &polyphony, &active, &mut instances);
+    *surface = crate::pause::PracticePauseSurface::Overlay;
     next_pause.set(PauseState::Running);
 }
 
