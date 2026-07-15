@@ -44,9 +44,15 @@ Moves in from `gameplay-drums`:
 - **Keyboard system verbs** (`keyboard_system_verbs` from
   `gameplay-drums/src/input.rs`): same message, moved verbatim.
 - **New resource** `RawInputOwned(bool)`: capture/calibration surfaces own raw
-  input. Pump and keyboard-verb systems emit nothing while true.
-  `gameplay-drums` writes it (from `CaptureState`/`CalibrationState`) —
-  same gating as today, dependency direction inverted.
+  input. Gates the **keyboard system-verb translator only** (the one place
+  that checks `CaptureState` today). The MIDI pump stays unconditional,
+  exactly like today: `LastMidiHit` must keep updating during capture (note
+  capture reads it), and MIDI system verbs already fire during capture with
+  consumers gating themselves. Pad-nav suppression during capture continues
+  to happen at the context level (`ActiveNavContext = None`).
+  `gameplay-drums` writes `RawInputOwned` from
+  `CaptureState`/`CalibrationState` — same gating as today, dependency
+  direction inverted.
 
 Unchanged logic that moves along: velocity threshold filter, `lane_owner`
 lane-wins-ties collision rule, `stamp_audio_ms`.
@@ -117,15 +123,23 @@ device-side guard out is Agent A/B follow-up once per-device policy exists.
   `bindings.rs` tests → `dtx-input`, `midi_consumer` tests → `dtx-input`.
 - Source-scrape test (`mapper_consumes_pad_nav_hits_not_lane_hits`) updated
   for the new file path; invariant unchanged.
-- New: `RawInputOwned(true)` ⇒ pump and keyboard-verb systems emit nothing
-  (replaces the `CaptureState`-typed gating tests).
+- New: `RawInputOwned(true)` ⇒ keyboard-verb translator emits nothing
+  (replaces the `CaptureState`-typed gating tests). Pump tests assert
+  `LastMidiHit` updates regardless of `RawInputOwned`.
 - `active_context()` tests stay in `gameplay-drums` with the writer system.
 
 ## 6. Commit structure
 
-1. `refactor(input): move lane order, bind resolution, and MIDI pump to dtx-input`
-2. `refactor(shell): add game_shell::navigation (context, guard, pad mapper)`
-3. `refactor(drums): consume routed input; compat re-exports; test moves`
+Per-task commits (each green), in three logical groups:
+
+1. dtx-input: lane order → resolver → device messages → pump
+2. drums pump swap + keyboard verbs + `RawInputOwned`
+3. game-shell navigation module + drums context writer + compat adapter
+
+Double-emission hazards force atomic swap commits: the pump is moved but not
+wired until the drums swap commit (else two pumps drain `VirtualSource`), and
+the game-shell pad mapper is not registered until the same commit that deletes
+`menu_nav` (else two mappers each emit a `NavAction` per hit).
 
 ## Out of scope (explicitly)
 
