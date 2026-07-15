@@ -77,17 +77,6 @@ pub fn pause_items(practice: bool) -> &'static [PauseItemKind] {
 #[derive(Resource, Default)]
 pub struct PauseSelection(pub usize);
 
-/// Which surface owns `PauseState::Paused` during practice. Esc opens the
-/// standard pause overlay. `Rail` is retained only for explicit legacy callers;
-/// Tab and `OpenSettings` enter Editing without claiming it. Irrelevant outside
-/// practice; reset to `Overlay` on every return to `Running` for hygiene.
-#[derive(Resource, Default, Clone, Copy, PartialEq, Eq, Debug)]
-pub enum PracticePauseSurface {
-    #[default]
-    Overlay,
-    Rail,
-}
-
 /// Minimum gap between two accepted hits of the SAME system verb. Pads
 /// double-fire (flam/retrigger 20-40 ms apart), and an un-guarded verb would
 /// toggle pause straight back off. Same reason — and same window — as
@@ -127,8 +116,6 @@ impl VerbGuard {
 pub(super) fn plugin(app: &mut App) {
     app.init_resource::<PauseSelection>()
         .init_resource::<VerbGuard>()
-        .init_resource::<PracticePauseSurface>()
-        .add_systems(OnEnter(PauseState::Running), reset_pause_surface)
         // Always start a performance un-paused.
         .add_systems(OnEnter(AppState::Performance), force_running)
         .add_systems(OnExit(AppState::Performance), force_running)
@@ -165,10 +152,9 @@ fn toggle_pause(
     keys: Res<ButtonInput<KeyCode>>,
     state: Res<State<PauseState>>,
     mut next: ResMut<NextState<PauseState>>,
-    mut surface: ResMut<PracticePauseSurface>,
 ) {
     if keys.just_pressed(KeyCode::Escape) {
-        toggle(state.get(), &mut next, &mut surface);
+        toggle(state.get(), &mut next);
     }
 }
 
@@ -187,7 +173,6 @@ fn system_verb_pause(
     mut hits: MessageReader<crate::events::SystemVerbHit>,
     state: Res<State<PauseState>>,
     mut next: ResMut<NextState<PauseState>>,
-    mut surface: ResMut<PracticePauseSurface>,
     mut guard: ResMut<VerbGuard>,
 ) {
     // Drain first: the guard decides whether to ACT, never whether to READ.
@@ -197,7 +182,7 @@ fn system_verb_pause(
     if !guard.accept(SystemVerb::Pause, Instant::now()) {
         return; // pad retrigger a few frames later — not a second press
     }
-    toggle(state.get(), &mut next, &mut surface);
+    toggle(state.get(), &mut next);
 }
 
 /// `SystemVerb::Restart` — re-request `SongLoading`, exactly as the pause menu's
@@ -219,24 +204,12 @@ fn system_verb_restart(
     request_transition(&mut requests, AppState::SongLoading);
 }
 
-/// Shared by Escape and `SystemVerb::Pause`. Claims the overlay surface before
-/// pausing, or the practice rail would keep it.
-fn toggle(
-    state: &PauseState,
-    next: &mut NextState<PauseState>,
-    surface: &mut PracticePauseSurface,
-) {
+/// Shared by Escape and `SystemVerb::Pause`.
+fn toggle(state: &PauseState, next: &mut NextState<PauseState>) {
     match state {
-        PauseState::Running => {
-            *surface = PracticePauseSurface::Overlay;
-            next.set(PauseState::Paused);
-        }
+        PauseState::Running => next.set(PauseState::Paused),
         PauseState::Paused => next.set(PauseState::Running),
     }
-}
-
-fn reset_pause_surface(mut surface: ResMut<PracticePauseSurface>) {
-    *surface = PracticePauseSurface::Overlay;
 }
 
 pub(crate) fn pause_all_chart_audio(
@@ -303,12 +276,8 @@ pub fn spawn_overlay(
     mut commands: Commands,
     mut selection: ResMut<PauseSelection>,
     practice: Option<Res<crate::practice::PracticeSession>>,
-    surface: Res<PracticePauseSurface>,
     midi: Option<Res<game_shell::MidiConnected>>,
 ) {
-    if practice.is_some() && *surface == PracticePauseSurface::Rail {
-        return; // Explicit legacy-rail callers still own this paused frame.
-    }
     selection.0 = 0;
     let theme = Theme::default();
     commands
@@ -408,13 +377,8 @@ pub(crate) fn pause_menu_input(
     mut open_settings: MessageWriter<crate::practice::OpenPracticeSettings>,
     mut rows: Query<(&PauseItemKind, &mut TextColor)>,
     practice: Option<Res<crate::practice::PracticeSession>>,
-    surface: Res<PracticePauseSurface>,
 ) {
     use game_shell::NavVerb;
-    if practice.is_some() && *surface == PracticePauseSurface::Rail {
-        actions.clear(); // Current Practice Settings uses Editing; legacy rail owns this input.
-        return;
-    }
     let items = pause_items(practice.is_some());
     let count = items.len();
     let mut confirm = false;
@@ -477,22 +441,16 @@ mod tests {
     use bevy::ecs::system::RunSystemOnce;
 
     #[test]
-    fn esc_opener_sets_overlay_surface() {
+    fn esc_opener_pauses() {
         let mut world = World::new();
         let mut keys = ButtonInput::<KeyCode>::default();
         keys.press(KeyCode::Escape);
         world.insert_resource(keys);
         world.insert_resource(State::new(PauseState::Running));
         world.init_resource::<NextState<PauseState>>();
-        // Stale value from a previous Tab-opened rail must be overwritten.
-        world.insert_resource(PracticePauseSurface::Rail);
         world
             .run_system_once(toggle_pause)
             .expect("toggle_pause runs");
-        assert_eq!(
-            *world.resource::<PracticePauseSurface>(),
-            PracticePauseSurface::Overlay
-        );
         assert!(matches!(
             world.resource::<NextState<PauseState>>(),
             NextState::Pending(PauseState::Paused)
@@ -500,39 +458,20 @@ mod tests {
     }
 
     #[test]
-    fn esc_while_paused_resumes_and_leaves_surface_alone() {
+    fn esc_while_paused_resumes() {
         let mut world = World::new();
         let mut keys = ButtonInput::<KeyCode>::default();
         keys.press(KeyCode::Escape);
         world.insert_resource(keys);
         world.insert_resource(State::new(PauseState::Paused));
         world.init_resource::<NextState<PauseState>>();
-        world.insert_resource(PracticePauseSurface::Rail);
         world
             .run_system_once(toggle_pause)
             .expect("toggle_pause runs");
-        // The OnEnter(Running) reset handles hygiene; the toggle itself only closes.
-        assert_eq!(
-            *world.resource::<PracticePauseSurface>(),
-            PracticePauseSurface::Rail
-        );
         assert!(matches!(
             world.resource::<NextState<PauseState>>(),
             NextState::Pending(PauseState::Running)
         ));
-    }
-
-    #[test]
-    fn surface_resets_to_overlay_on_running() {
-        let mut world = World::new();
-        world.insert_resource(PracticePauseSurface::Rail);
-        world
-            .run_system_once(reset_pause_surface)
-            .expect("reset runs");
-        assert_eq!(
-            *world.resource::<PracticePauseSurface>(),
-            PracticePauseSurface::Overlay
-        );
     }
 
     #[test]
@@ -565,7 +504,6 @@ mod tests {
         world.init_resource::<Messages<crate::practice::OpenPracticeSettings>>();
         world.insert_resource(PauseSelection(selection));
         world.init_resource::<NextState<PauseState>>();
-        world.init_resource::<PracticePauseSurface>(); // Overlay
         world.insert_resource(crate::practice::PracticeSession::default());
         world.write_message(game_shell::NavAction {
             verb: game_shell::NavVerb::Confirm,
@@ -637,28 +575,6 @@ mod tests {
         );
     }
 
-    #[test]
-    fn rail_surface_clears_actions_and_does_nothing() {
-        use bevy::ecs::message::Messages;
-        use bevy::ecs::system::RunSystemOnce;
-        let mut world = dispatch_world(0);
-        world.insert_resource(PracticePauseSurface::Rail);
-        world
-            .run_system_once(pause_menu_input)
-            .expect("pause_menu_input runs");
-        assert!(matches!(
-            world.resource::<NextState<PauseState>>(),
-            NextState::Unchanged
-        ));
-        assert_eq!(
-            world
-                .resource::<Messages<TransitionRequest>>()
-                .iter_current_update_messages()
-                .count(),
-            0
-        );
-    }
-
     fn verb_world(state: PauseState, verb: dtx_input::SystemVerb) -> World {
         use bevy::ecs::message::Messages;
         let mut world = World::new();
@@ -667,8 +583,6 @@ mod tests {
         world.insert_resource(State::new(state));
         world.init_resource::<NextState<PauseState>>();
         world.init_resource::<VerbGuard>();
-        // Stale value from a previous Tab-opened rail must be overwritten.
-        world.insert_resource(PracticePauseSurface::Rail);
         world.write_message(crate::events::SystemVerbHit { verb });
         world
     }
@@ -682,16 +596,11 @@ mod tests {
     }
 
     #[test]
-    fn pause_verb_opens_the_overlay_surface() {
+    fn pause_verb_opens_pause() {
         let mut world = verb_world(PauseState::Running, dtx_input::SystemVerb::Pause);
         world
             .run_system_once(system_verb_pause)
             .expect("system_verb_pause runs");
-        assert_eq!(
-            *world.resource::<PracticePauseSurface>(),
-            PracticePauseSurface::Overlay,
-            "the practice rail must not steal the surface"
-        );
         assert!(matches!(
             world.resource::<NextState<PauseState>>(),
             NextState::Pending(PauseState::Paused)
@@ -783,7 +692,6 @@ mod tests {
         let mut app = App::new();
         app.add_plugins((MinimalPlugins, StatesPlugin))
             .init_state::<PauseState>()
-            .init_resource::<PracticePauseSurface>()
             // Debounce OFF: this test must fail on `any()` alone, so the drain
             // is what it proves — the min-interval guard is tested separately.
             .insert_resource(open_guard())

@@ -294,7 +294,6 @@ mod tests {
             .init_resource::<crate::timeline::ChipTimeline>()
             .init_resource::<crate::resources::GameplayClock>()
             .init_resource::<toast::ToastQueue>()
-            .init_resource::<crate::pause::PracticePauseSurface>()
             .add_message::<crate::seek::SeekToChartTime>()
             .insert_resource(PracticeSession::default())
             .insert_resource(crate::editor::EditorOpen(true));

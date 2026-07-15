@@ -1,13 +1,9 @@
-//! Practice HUD: mini strip, chip, and toasts during play. The retained full
-//! rail is shown only for explicit legacy `PracticePauseSurface::Rail` owners;
-//! current Tab navigation enters Practice Settings Editing, while Esc uses the
-//! standard pause overlay.
-//! Fixed overlay — deliberately NOT a dtx-layout widget (no
-//! editor-pillar dependency).
+//! Practice HUD: the setup/settings shell plus the compact running overlays.
 
 pub mod chip;
-pub mod full_hud;
 pub mod mini_strip;
+pub mod progress;
+pub mod setup;
 pub mod timeline_ui;
 pub mod wait_prompt;
 
@@ -22,45 +18,60 @@ pub fn format_chart_time(ms: i64) -> String {
     format!("{m}:{s:02}.{d}")
 }
 
-/// Run condition for explicit legacy callers that assign pause ownership to the rail.
-pub fn rail_surface_active(surface: Res<crate::pause::PracticePauseSurface>) -> bool {
-    *surface == crate::pause::PracticePauseSurface::Rail
-}
-
 /// Exposed `pub` (not `pub(super)`) so integration tests can build the real
 /// HUD plugin schedule headlessly; see `tests/practice_hud.rs`.
 pub fn plugin(app: &mut App) {
-    use game_shell::{AppState, PauseState};
+    use game_shell::AppState;
     mini_strip::plugin(app);
     chip::plugin(app);
     wait_prompt::plugin(app);
-    app.init_resource::<full_hud::RailSelection>()
-        .init_resource::<crate::pause::PracticePauseSurface>()
+    app.init_resource::<setup::PracticeTab>()
         .init_resource::<timeline_ui::TimelineGesture>()
         .init_resource::<crate::practice::toast::ToastQueue>()
         .add_systems(
-            OnEnter(PauseState::Paused),
-            full_hud::spawn_full_hud
-                .run_if(resource_exists::<crate::practice::PracticeSession>)
-                .run_if(rail_surface_active),
+            Update,
+            (setup::ensure_setup_shell, setup::update_tab_selection)
+                .chain()
+                .run_if(in_state(AppState::Performance))
+                .run_if(resource_exists::<crate::practice::PracticeFlow>),
         )
-        .add_systems(OnExit(PauseState::Paused), full_hud::despawn_full_hud)
+        .add_systems(OnExit(AppState::Performance), setup::despawn_setup_shell)
+        .add_systems(
+            Update,
+            sync_compact_hud_visibility
+                .run_if(in_state(AppState::Performance))
+                .run_if(resource_exists::<crate::practice::PracticeFlow>),
+        )
         .add_systems(
             Update,
             (
                 timeline_ui::timeline_mouse,
-                full_hud::full_hud_input,
-                full_hud::rail_mouse,
-                full_hud::transport_buttons,
-                full_hud::refresh_rail,
-                full_hud::update_full_hud_markers,
+                timeline_ui::preview_transport_buttons,
+                timeline_ui::update_timeline_markers,
+                timeline_ui::update_transport_label,
             )
                 .chain()
                 .run_if(in_state(AppState::Performance))
-                .run_if(in_state(PauseState::Paused))
-                .run_if(resource_exists::<crate::practice::PracticeSession>)
-                .run_if(rail_surface_active),
+                .run_if(resource_exists::<crate::practice::PracticeFlow>)
+                .run_if(crate::practice::practice_surface_open),
         );
+}
+
+fn sync_compact_hud_visibility(
+    flow: Res<crate::practice::PracticeFlow>,
+    mut compact: Query<
+        &mut Visibility,
+        Or<(With<mini_strip::MiniStripRoot>, With<chip::StatusChip>)>,
+    >,
+) {
+    let visibility = if flow.phase == crate::practice::PracticePhase::Running {
+        Visibility::Inherited
+    } else {
+        Visibility::Hidden
+    };
+    for mut current in &mut compact {
+        *current = visibility;
+    }
 }
 
 #[cfg(test)]

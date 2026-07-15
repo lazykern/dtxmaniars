@@ -1,506 +1,254 @@
-//! Headless HUD tests: full HUD spawn/despawn on pause, normal pause
-//! overlay suppressed while a practice session exists.
-
 use bevy::prelude::*;
 use game_shell::{AppState, PauseState};
-use gameplay_drums::pause::PracticePauseSurface;
-use gameplay_drums::practice::hud::full_hud::{
-    despawn_full_hud, spawn_full_hud, FullHudRoot, RailSelection,
+use gameplay_drums::practice::hud::setup::{
+    practice_layout_mode, PracticeLayoutMode, PracticePreviewRegion, PracticePrimaryAction,
+    PracticeSettingsPane, PracticeSetupLayout, PracticeSetupRoot,
 };
-use gameplay_drums::practice::session::PracticeSession;
+use gameplay_drums::practice::hud::timeline_ui::{
+    PracticeLoopFill, PracticeLoopHandle, PracticeTimelineRoot, PreviewTransportButton,
+};
+use gameplay_drums::practice::{PracticeDraft, PracticeFlow, PracticeSession};
 use gameplay_drums::resources::GameplayClock;
 use gameplay_drums::timeline::ChipTimeline;
 
-fn build_app() -> App {
+fn setup_hud_app(width: f32, height: f32, text_scale: dtx_config::TextScale) -> App {
     let mut app = App::new();
-    app.add_plugins((MinimalPlugins, bevy::state::app::StatesPlugin))
-        .init_state::<AppState>()
-        .init_state::<PauseState>()
-        .init_resource::<GameplayClock>()
-        .init_resource::<ChipTimeline>()
-        .init_resource::<RailSelection>()
-        .init_resource::<PracticePauseSurface>()
-        .add_systems(
-            OnEnter(PauseState::Paused),
-            spawn_full_hud
-                .run_if(resource_exists::<PracticeSession>)
-                .run_if(gameplay_drums::practice::hud::rail_surface_active),
-        )
-        .add_systems(OnExit(PauseState::Paused), despawn_full_hud);
+    app.add_plugins((
+        MinimalPlugins,
+        bevy::state::app::StatesPlugin,
+        bevy::input::InputPlugin,
+    ))
+    .init_state::<AppState>()
+    .init_state::<PauseState>()
+    .add_message::<game_shell::TransitionRequest>()
+    .add_message::<gameplay_drums::seek::SeekToChartTime>()
+    .add_message::<gameplay_drums::practice::actions::PracticeAction>()
+    .add_message::<gameplay_drums::practice::PreviewAction>()
+    .init_resource::<GameplayClock>()
+    .init_resource::<ChipTimeline>()
+    .insert_resource(gameplay_drums::layout::PlayfieldLayout::from_size(
+        width,
+        height,
+        &gameplay_drums::lanes::Lanes::default(),
+    ))
+    .insert_resource(dtx_ui::AccessibilityPolicy::from(
+        &dtx_config::AccessibilityConfig {
+            text_scale,
+            ..Default::default()
+        },
+    ))
+    .insert_resource(PracticeSession::default())
+    .insert_resource(PracticeDraft::default())
+    .insert_resource(PracticeFlow::default());
+
+    gameplay_drums::practice::hud::plugin(&mut app);
+    app.world_mut()
+        .resource_mut::<NextState<AppState>>()
+        .set(AppState::Performance);
+    app.update();
+    app.update();
     app
 }
 
-fn set_rail_surface(app: &mut App) {
-    app.world_mut().insert_resource(PracticePauseSurface::Rail);
+fn texts(app: &mut App) -> Vec<String> {
+    app.world_mut()
+        .query::<&Text>()
+        .iter(app.world())
+        .map(|text| text.0.clone())
+        .collect()
 }
 
-fn set_paused(app: &mut App, paused: bool) {
+fn count<T: Component>(app: &mut App) -> usize {
+    app.world_mut().query::<&T>().iter(app.world()).count()
+}
+
+#[test]
+fn reference_layout_is_split_and_xlarge_narrow_layout_is_tabbed() {
+    assert_eq!(
+        practice_layout_mode(1280.0, 720.0, 1.0),
+        PracticeLayoutMode::Split
+    );
+    assert_eq!(
+        practice_layout_mode(1920.0, 1080.0, 1.0),
+        PracticeLayoutMode::Split
+    );
+    assert_eq!(
+        practice_layout_mode(900.0, 720.0, 1.5),
+        PracticeLayoutMode::Tabbed
+    );
+    assert_eq!(
+        practice_layout_mode(900.0, 720.0, 1.0),
+        PracticeLayoutMode::Tabbed
+    );
+    assert_eq!(
+        practice_layout_mode(1920.0, 1080.0, 1.5),
+        PracticeLayoutMode::Split
+    );
+}
+
+#[test]
+fn setup_shell_labels_preview_as_not_judged() {
+    let mut app = setup_hud_app(1280.0, 720.0, dtx_config::TextScale::Standard);
+
+    assert!(texts(&mut app)
+        .iter()
+        .any(|text| text == "PREVIEW: INPUT IS NOT JUDGED"));
+    assert_eq!(count::<PracticeSetupRoot>(&mut app), 1);
+}
+
+#[test]
+fn setup_shell_despawns_when_leaving_performance() {
+    let mut app = setup_hud_app(1280.0, 720.0, dtx_config::TextScale::Standard);
     app.world_mut()
-        .resource_mut::<NextState<PauseState>>()
-        .set(if paused {
-            PauseState::Paused
-        } else {
-            PauseState::Running
+        .resource_mut::<NextState<AppState>>()
+        .set(AppState::SongSelect);
+    app.update();
+
+    assert_eq!(count::<PracticeSetupRoot>(&mut app), 0);
+}
+
+#[test]
+fn split_shell_has_settings_preview_and_persistent_full_width_timeline() {
+    let mut app = setup_hud_app(1280.0, 720.0, dtx_config::TextScale::Standard);
+
+    assert_eq!(count::<PracticeSettingsPane>(&mut app), 1);
+    assert_eq!(count::<PracticePreviewRegion>(&mut app), 1);
+    assert_eq!(count::<PracticeTimelineRoot>(&mut app), 1);
+    let mode = app
+        .world_mut()
+        .query::<&PracticeSetupLayout>()
+        .single(app.world())
+        .expect("one setup layout");
+    assert_eq!(mode.0, PracticeLayoutMode::Split);
+}
+
+#[test]
+fn xlarge_narrow_shell_uses_tabs_without_hiding_timeline() {
+    let mut app = setup_hud_app(900.0, 720.0, dtx_config::TextScale::XLarge);
+
+    let mode = app
+        .world_mut()
+        .query::<&PracticeSetupLayout>()
+        .single(app.world())
+        .expect("one setup layout");
+    assert_eq!(mode.0, PracticeLayoutMode::Tabbed);
+    assert_eq!(count::<PracticeTimelineRoot>(&mut app), 1);
+    assert!(texts(&mut app).iter().any(|text| text == "✓ Setup"));
+    assert!(texts(&mut app).iter().any(|text| text == "Progress"));
+    assert!(texts(&mut app).iter().any(|text| text == "Preview"));
+}
+
+#[test]
+fn editing_shell_uses_continue_as_the_pinned_primary_action() {
+    let mut app = setup_hud_app(1280.0, 720.0, dtx_config::TextScale::Standard);
+    app.world_mut().resource_mut::<PracticeFlow>().phase =
+        gameplay_drums::practice::PracticePhase::Editing;
+    app.update();
+
+    let action_text = app
+        .world_mut()
+        .query_filtered::<&Text, With<PracticePrimaryAction>>()
+        .single(app.world())
+        .expect("one primary action");
+    assert_eq!(action_text.0, "Continue Practice");
+}
+
+#[test]
+fn timeline_markers_follow_the_draft_not_the_committed_session() {
+    let mut app = setup_hud_app(1280.0, 720.0, dtx_config::TextScale::Standard);
+    app.world_mut().resource_mut::<ChipTimeline>().end_ms = 10_000;
+    app.world_mut().resource_mut::<PracticeDraft>().loop_region =
+        Some(gameplay_drums::practice::session::LoopRegion {
+            start_ms: 2_000,
+            end_ms: 6_000,
         });
-    app.update();
-}
-
-#[test]
-fn full_hud_spawns_on_pause_and_despawns_on_resume() {
-    let mut app = build_app();
-    app.world_mut().insert_resource(PracticeSession::default());
-    set_rail_surface(&mut app);
-    set_paused(&mut app, true);
-    let count = app
-        .world_mut()
-        .query::<&FullHudRoot>()
-        .iter(app.world())
-        .count();
-    assert_eq!(count, 1, "full HUD present while paused");
-
-    set_paused(&mut app, false);
-    let count = app
-        .world_mut()
-        .query::<&FullHudRoot>()
-        .iter(app.world())
-        .count();
-    assert_eq!(count, 0, "full HUD gone after resume");
-}
-
-#[test]
-fn xlarge_practice_rail_is_a_scroll_surface() {
-    let mut app = build_app();
-    app.world_mut().insert_resource(PracticeSession::default());
     app.world_mut()
-        .insert_resource(dtx_ui::AccessibilityPolicy::from(
-            &dtx_config::AccessibilityConfig {
-                text_scale: dtx_config::TextScale::XLarge,
-                ..Default::default()
-            },
-        ));
-    set_rail_surface(&mut app);
-    set_paused(&mut app, true);
-
-    let mut surfaces = app.world_mut().query::<(&Node, &ScrollPosition)>();
-    assert!(surfaces
-        .iter(app.world())
-        .any(|(node, _)| node.overflow.y == OverflowAxis::Scroll));
-}
-
-#[test]
-fn full_hud_absent_without_practice_session() {
-    let mut app = build_app();
-    set_paused(&mut app, true);
-    let count = app
-        .world_mut()
-        .query::<&FullHudRoot>()
-        .iter(app.world())
-        .count();
-    assert_eq!(count, 0, "normal pause never spawns the practice HUD");
-}
-
-#[test]
-fn overlay_spawns_in_practice_on_overlay_surface() {
-    let mut app = build_app();
-    app.init_resource::<gameplay_drums::pause::PauseSelection>()
-        .init_resource::<PracticePauseSurface>() // defaults to Overlay
-        .add_systems(
-            OnEnter(PauseState::Paused),
-            gameplay_drums::pause::spawn_overlay,
-        );
-    app.world_mut().insert_resource(PracticeSession::default());
-    set_paused(&mut app, true);
-    let overlays = app
-        .world_mut()
-        .query::<&gameplay_drums::pause::PauseOverlay>()
-        .iter(app.world())
-        .count();
-    assert_eq!(
-        overlays, 1,
-        "Esc surface shows the pause overlay in practice"
-    );
-}
-
-#[test]
-fn overlay_suppressed_on_rail_surface() {
-    let mut app = build_app();
-    app.init_resource::<gameplay_drums::pause::PauseSelection>()
-        .init_resource::<PracticePauseSurface>()
-        .add_systems(
-            OnEnter(PauseState::Paused),
-            gameplay_drums::pause::spawn_overlay,
-        );
-    app.world_mut().insert_resource(PracticeSession::default());
-    app.world_mut().insert_resource(PracticePauseSurface::Rail);
-    set_paused(&mut app, true);
-    let overlays = app
-        .world_mut()
-        .query::<&gameplay_drums::pause::PauseOverlay>()
-        .iter(app.world())
-        .count();
-    assert_eq!(
-        overlays, 0,
-        "Tab surface suppresses the overlay; the rail owns it"
-    );
-}
-
-// The top-level `gameplay_drums::plugin` also wires `orchestrator`, `autoplay`,
-// `bgm_scheduler`, `editor`, etc., which pull in real audio/asset/config-file
-// I/O — too heavy for a headless schedule-build smoke test. Instead we build
-// the real `practice::hud::plugin` (promoted from `pub(super)` to `pub` for
-// this test) directly, wired with the minimum states/resources/messages it
-// declares dependencies on (game_shell's AppState/PauseState/TransitionRequest,
-// GameplayClock, ChipTimeline, PracticeSession, SeekToChartTime,
-// PracticeAction), and drive it through OnEnter(Performance) +
-// OnEnter(Paused) + a couple of `Update` ticks. This proves the run-condition
-// chains and system params in the real plugin fn actually resolve, closing
-// the gap where every other HUD test hand-wires a handful of systems instead
-// of the real plugin registration.
-#[test]
-fn real_hud_plugin_schedule_builds_headlessly() {
-    let mut app = App::new();
-    app.add_plugins((
-        MinimalPlugins,
-        bevy::state::app::StatesPlugin,
-        bevy::input::InputPlugin,
-    ))
-    .init_state::<AppState>()
-    .init_state::<PauseState>()
-    .add_message::<game_shell::TransitionRequest>()
-    .add_message::<gameplay_drums::seek::SeekToChartTime>()
-    .add_message::<gameplay_drums::practice::actions::PracticeAction>()
-    .init_resource::<GameplayClock>()
-    .init_resource::<ChipTimeline>()
-    .world_mut()
-    .insert_resource(PracticeSession::default());
-
-    gameplay_drums::practice::hud::plugin(&mut app);
-
-    // Drive Performance + Paused so every run_if-gated system in the plugin
-    // (spawn/despawn, mouse/input/transport/marker update chain) actually
-    // gets scheduled at least once.
-    app.world_mut()
-        .resource_mut::<NextState<AppState>>()
-        .set(AppState::Performance);
-    app.update();
-    // Simulate the Tab opener: the rail owns this pause.
-    app.world_mut()
-        .insert_resource(gameplay_drums::pause::PracticePauseSurface::Rail);
-    app.world_mut()
-        .resource_mut::<NextState<PauseState>>()
-        .set(PauseState::Paused);
-    app.update();
-    app.update();
-
-    let huds = app
-        .world_mut()
-        .query::<&FullHudRoot>()
-        .iter(app.world())
-        .count();
-    assert_eq!(huds, 1, "real plugin schedule spawned the full HUD");
-}
-
-#[test]
-fn hud_plugin_overlay_surface_spawns_no_rail() {
-    let mut app = App::new();
-    app.add_plugins((
-        MinimalPlugins,
-        bevy::state::app::StatesPlugin,
-        bevy::input::InputPlugin,
-    ))
-    .init_state::<AppState>()
-    .init_state::<PauseState>()
-    .add_message::<game_shell::TransitionRequest>()
-    .add_message::<gameplay_drums::seek::SeekToChartTime>()
-    .add_message::<gameplay_drums::practice::actions::PracticeAction>()
-    .init_resource::<GameplayClock>()
-    .init_resource::<ChipTimeline>()
-    .world_mut()
-    .insert_resource(PracticeSession::default());
-
-    gameplay_drums::practice::hud::plugin(&mut app);
-
-    // Esc path: surface stays at its Overlay default.
-    app.world_mut()
-        .resource_mut::<NextState<AppState>>()
-        .set(AppState::Performance);
-    app.update();
-    app.world_mut()
-        .resource_mut::<NextState<PauseState>>()
-        .set(PauseState::Paused);
-    app.update();
-
-    let huds = app
-        .world_mut()
-        .query::<&FullHudRoot>()
-        .iter(app.world())
-        .count();
-    assert_eq!(huds, 0, "Esc surface must not spawn the rail");
-}
-
-#[test]
-fn quick_tier_entities_spawn_on_entering_performance() {
-    // Spec: mini strip + status chip must exist while playing (Running),
-    // independent of the full HUD which is pause-gated. Wire the real
-    // hud::plugin (mini_strip + chip + full_hud) headlessly and drive
-    // OnEnter(Performance) only — no pause.
-    let mut app = App::new();
-    app.add_plugins((
-        MinimalPlugins,
-        bevy::state::app::StatesPlugin,
-        bevy::input::InputPlugin,
-    ))
-    .init_state::<AppState>()
-    .init_state::<PauseState>()
-    .add_message::<game_shell::TransitionRequest>()
-    .add_message::<gameplay_drums::seek::SeekToChartTime>()
-    .add_message::<gameplay_drums::practice::actions::PracticeAction>()
-    .init_resource::<GameplayClock>()
-    .init_resource::<ChipTimeline>()
-    .world_mut()
-    .insert_resource(PracticeSession::default());
-
-    gameplay_drums::practice::hud::plugin(&mut app);
-
-    app.world_mut()
-        .resource_mut::<NextState<AppState>>()
-        .set(AppState::Performance);
-    app.update();
-
-    let mini_strips = app
-        .world_mut()
-        .query::<&gameplay_drums::practice::hud::mini_strip::MiniStripRoot>()
-        .iter(app.world())
-        .count();
-    assert_eq!(
-        mini_strips, 1,
-        "mini strip must spawn on entering Performance"
-    );
-
-    let chips = app
-        .world_mut()
-        .query::<&gameplay_drums::practice::hud::chip::StatusChip>()
-        .iter(app.world())
-        .count();
-    assert_eq!(chips, 1, "status chip must spawn on entering Performance");
-}
-
-use gameplay_drums::practice::hud::full_hud::{full_hud_input, RailItem};
-use gameplay_drums::practice::session::{LoopRegion, PracticeTransport};
-
-#[test]
-fn rail_clear_loop_disarms_the_ramp() {
-    // Regression: the rail "Clear loop" row must go through
-    // `session.clear_loop()` (which disarms) — a raw `loop_region = None`
-    // would leave the ramp armed against a now-different span.
-    let mut app = App::new();
-    app.add_plugins((MinimalPlugins, bevy::state::app::StatesPlugin))
-        .init_state::<AppState>()
-        .init_state::<PauseState>()
-        .add_message::<game_shell::TransitionRequest>()
-        .add_message::<gameplay_drums::seek::SeekToChartTime>()
-        .add_message::<gameplay_drums::practice::actions::PracticeAction>()
-        .init_resource::<ButtonInput<KeyCode>>()
-        .init_resource::<GameplayClock>()
-        .init_resource::<ChipTimeline>()
-        .init_resource::<RailSelection>()
-        .add_systems(Update, full_hud_input);
-
-    let mut session = PracticeSession {
-        transport: PracticeTransport {
-            loop_region: Some(LoopRegion {
-                start_ms: 2_000,
-                end_ms: 6_000,
-            }),
-            ..Default::default()
-        },
-        ..Default::default()
-    };
-    session.trainer.arm_ramp();
-    app.world_mut().insert_resource(session);
-
-    // Point the rail selection at the Clear-loop row and press Enter.
-    let idx = RailItem::ORDER
-        .iter()
-        .position(|i| *i == RailItem::ClearLoop)
-        .expect("ClearLoop is a rail row");
-    app.world_mut().resource_mut::<RailSelection>().0 = idx;
-    app.world_mut()
-        .resource_mut::<ButtonInput<KeyCode>>()
-        .press(KeyCode::Enter);
-    app.update();
-
-    let session = app.world().resource::<PracticeSession>();
-    assert!(
-        session.transport.loop_region.is_none(),
-        "rail Clear loop clears the region"
-    );
-    assert!(
-        !session.trainer.ramp_armed(),
-        "rail Clear loop must disarm the ramp"
-    );
-}
-
-use gameplay_drums::practice::hud::full_hud::{RailAdjustButton, RailRowButton};
-
-#[test]
-fn rail_spawns_17_rows_with_adjust_buttons_at_practice_z() {
-    let mut app = build_app();
-    app.world_mut().insert_resource(PracticeSession::default());
-    set_rail_surface(&mut app);
-    set_paused(&mut app, true);
-
-    let rows = app
-        .world_mut()
-        .query::<&RailRowButton>()
-        .iter(app.world())
-        .count();
-    assert_eq!(rows, 17, "one clickable row per RailItem");
-
-    let adjusts = app
-        .world_mut()
-        .query::<&RailAdjustButton>()
-        .iter(app.world())
-        .count();
-    assert_eq!(adjusts, 18, "9 value rows x (◂ + ▸)");
-
-    let z = app
-        .world_mut()
-        .query::<(&FullHudRoot, &GlobalZIndex)>()
-        .iter(app.world())
-        .map(|(_, z)| z.0)
-        .next()
-        .expect("full HUD root has a GlobalZIndex");
-    assert_eq!(z, 1000, "ui_z::PRACTICE_FULL_HUD");
-}
-
-use gameplay_drums::practice::hud::full_hud::{transport_buttons, TransportButton};
-
-/// 2 bars @ 120 BPM: bar starts at 0 and 2000.
-fn two_bar_timeline() -> ChipTimeline {
-    let chart = dtx_core::chart::Chart {
-        metadata: dtx_core::chart::Metadata {
-            bpm: Some(120.0),
-            ..Default::default()
-        },
-        chips: vec![dtx_core::chart::Chip::new(
-            0,
-            dtx_core::channel::EChannel::BassDrum,
-            0.0,
-        )],
-        ..Default::default()
-    };
-    let bpm = gameplay_drums::judge::BpmChangeList::from_chart(&chart);
-    let bar = gameplay_drums::judge::BarLengthChangeList::from_chart(&chart);
-    ChipTimeline::from_chart(&chart, &bpm, &bar, 0, 4_000)
-}
-
-#[test]
-fn next_bar_button_moves_scrub_cursor() {
-    let mut app = build_app();
-    app.add_systems(Update, transport_buttons);
-    app.world_mut().insert_resource(two_bar_timeline());
-    app.world_mut().insert_resource(PracticeSession {
-        transport: PracticeTransport {
-            scrub_cursor_ms: Some(0),
-            ..Default::default()
-        },
-        ..Default::default()
+        .resource_mut::<PracticeSession>()
+        .transport
+        .loop_region = Some(gameplay_drums::practice::session::LoopRegion {
+        start_ms: 7_000,
+        end_ms: 9_000,
     });
-    app.world_mut()
-        .spawn((Interaction::Pressed, TransportButton::NextBar));
-    app.update();
-    assert_eq!(
-        app.world()
-            .resource::<PracticeSession>()
-            .transport
-            .scrub_cursor_ms,
-        Some(2_000),
-        "next-bar button advances the scrub cursor one bar"
-    );
-}
-
-use gameplay_drums::practice::hud::full_hud::rail_mouse;
-
-#[test]
-fn adjust_button_click_steps_tempo_and_moves_selection() {
-    let mut app = build_app();
-    app.add_message::<gameplay_drums::seek::SeekToChartTime>()
-        .add_message::<gameplay_drums::practice::actions::PracticeAction>()
-        .add_systems(Update, rail_mouse);
-    app.world_mut().insert_resource(PracticeSession::default());
-    app.world_mut()
-        .spawn((Interaction::Pressed, RailAdjustButton(RailItem::Rate, 1)));
     app.update();
 
-    let session = app.world().resource::<PracticeSession>();
-    assert!(
-        (session.transport.user_tempo - 1.05).abs() < 1e-6,
-        "▸ on Tempo steps +0.05 like ArrowRight"
-    );
-    let rate_idx = RailItem::ORDER
-        .iter()
-        .position(|i| *i == RailItem::Rate)
-        .expect("Rate is a rail row");
+    let (node, visibility) = app
+        .world_mut()
+        .query_filtered::<(&Node, &Visibility), With<PracticeLoopFill>>()
+        .single(app.world())
+        .expect("one loop marker");
+    assert_eq!(node.left, Val::Percent(20.0));
+    assert_eq!(node.width, Val::Percent(40.0));
+    assert_eq!(*visibility, Visibility::Visible);
+
+    let handles: Vec<_> = app
+        .world_mut()
+        .query::<(&PracticeLoopHandle, &Node, &Visibility)>()
+        .iter(app.world())
+        .map(|(handle, node, visibility)| (*handle, node.left, *visibility))
+        .collect();
     assert_eq!(
-        app.world().resource::<RailSelection>().0,
-        rate_idx,
-        "mouse click moves the shared selection cursor"
+        handles,
+        vec![
+            (
+                PracticeLoopHandle::Start,
+                Val::Percent(20.0),
+                Visibility::Visible
+            ),
+            (
+                PracticeLoopHandle::End,
+                Val::Percent(60.0),
+                Visibility::Visible
+            ),
+        ]
     );
 }
 
 #[test]
-fn row_click_selects_and_activates_set_a() {
-    let mut app = build_app();
-    app.add_message::<gameplay_drums::seek::SeekToChartTime>()
-        .add_message::<gameplay_drums::practice::actions::PracticeAction>()
-        .add_systems(Update, rail_mouse);
-    app.world_mut().insert_resource(two_bar_timeline());
-    app.world_mut().insert_resource(PracticeSession {
-        transport: PracticeTransport {
-            scrub_cursor_ms: Some(2_500),
-            ..Default::default()
-        },
-        ..Default::default()
-    });
+fn preview_transport_buttons_keep_task_five_preview_actions() {
+    let mut app = setup_hud_app(1280.0, 720.0, dtx_config::TextScale::Standard);
     app.world_mut()
-        .spawn((Interaction::Pressed, RailRowButton(RailItem::SetA)));
+        .spawn((Interaction::Pressed, PreviewTransportButton::NextBar));
     app.update();
 
-    let session = app.world().resource::<PracticeSession>();
-    assert_eq!(
-        session.transport.loop_region.map(|r| r.start_ms),
-        Some(2_000),
-        "row click on Set A snaps the loop start to the bar"
-    );
-    let a_idx = RailItem::ORDER
-        .iter()
-        .position(|i| *i == RailItem::SetA)
-        .expect("SetA is a rail row");
-    assert_eq!(app.world().resource::<RailSelection>().0, a_idx);
-}
-
-#[test]
-fn value_row_click_selects_without_acting() {
-    let mut app = build_app();
-    app.add_message::<gameplay_drums::seek::SeekToChartTime>()
-        .add_message::<gameplay_drums::practice::actions::PracticeAction>()
-        .add_systems(Update, rail_mouse);
-    app.world_mut().insert_resource(PracticeSession::default());
-    app.world_mut()
-        .spawn((Interaction::Pressed, RailRowButton(RailItem::Scrub)));
-    app.update();
-
-    // Selection moved, but no seek was written (Scrub activation = "play here").
-    let scrub_idx = RailItem::ORDER
-        .iter()
-        .position(|i| *i == RailItem::Scrub)
-        .expect("Scrub is a rail row");
-    assert_eq!(app.world().resource::<RailSelection>().0, scrub_idx);
-    let seeks = app
+    let actions: Vec<_> = app
         .world()
-        .resource::<bevy::ecs::message::Messages<gameplay_drums::seek::SeekToChartTime>>()
+        .resource::<Messages<gameplay_drums::practice::PreviewAction>>()
         .iter_current_update_messages()
-        .count();
-    assert_eq!(seeks, 0, "value-row click must not trigger play-here");
+        .copied()
+        .collect();
+    assert_eq!(
+        actions,
+        vec![gameplay_drums::practice::PreviewAction::NextBar]
+    );
+}
+
+#[test]
+fn compact_running_hud_is_hidden_during_setup_and_restored_for_running() {
+    let mut app = setup_hud_app(1280.0, 720.0, dtx_config::TextScale::Standard);
+    let compact_visibility = |app: &mut App| {
+        let mini = app
+            .world_mut()
+            .query_filtered::<Option<&Visibility>, With<gameplay_drums::practice::hud::mini_strip::MiniStripRoot>>()
+            .single(app.world())
+            .expect("mini strip")
+            .copied();
+        let chip = app
+            .world_mut()
+            .query_filtered::<Option<&Visibility>, With<gameplay_drums::practice::hud::chip::StatusChip>>()
+            .single(app.world())
+            .expect("status chip");
+        (mini, chip.copied())
+    };
+    assert_eq!(
+        compact_visibility(&mut app),
+        (Some(Visibility::Hidden), Some(Visibility::Hidden))
+    );
+
+    app.world_mut().resource_mut::<PracticeFlow>().phase =
+        gameplay_drums::practice::PracticePhase::Running;
+    app.update();
+    assert_eq!(
+        compact_visibility(&mut app),
+        (Some(Visibility::Inherited), Some(Visibility::Inherited))
+    );
 }

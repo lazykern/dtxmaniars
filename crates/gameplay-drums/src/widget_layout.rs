@@ -334,16 +334,16 @@ fn apply_widget_layout(
     }
 }
 
-/// Hide the practice HUD roots (density strip + mini strip) when previewing a
+/// Hide the practice HUD roots (setup shell + mini strip) when previewing a
 /// non-Widgets Customize tab, so only lanes+notes show. These are separate roots
 /// (not widget containers), so they need their own gate. When practice isn't
 /// active the queries match nothing (harmless).
 fn hide_practice_hud_on_preview(
     state: Res<crate::editor::PreviewState>,
-    mut full_hud: Query<
+    mut setup: Query<
         &mut Visibility,
         (
-            With<crate::practice::hud::full_hud::FullHudRoot>,
+            With<crate::practice::hud::setup::PracticeSetupRoot>,
             Without<crate::practice::hud::mini_strip::MiniStripRoot>,
         ),
     >,
@@ -351,7 +351,7 @@ fn hide_practice_hud_on_preview(
         &mut Visibility,
         (
             With<crate::practice::hud::mini_strip::MiniStripRoot>,
-            Without<crate::practice::hud::full_hud::FullHudRoot>,
+            Without<crate::practice::hud::setup::PracticeSetupRoot>,
         ),
     >,
 ) {
@@ -361,7 +361,7 @@ fn hide_practice_hud_on_preview(
     } else {
         Visibility::Inherited
     };
-    for mut v in &mut full_hud {
+    for mut v in &mut setup {
         *v = vis;
     }
     for mut v in &mut mini_strip {

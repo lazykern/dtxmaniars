@@ -128,8 +128,238 @@ pub fn advance_gesture(g: TimelineGesture, i: GestureInput) -> (TimelineGesture,
     }
 }
 
-use crate::practice::session::PracticeSession;
-use crate::seek::SeekToChartTime;
+#[derive(Component)]
+pub struct PracticeTimelineRoot;
+
+#[derive(Component)]
+pub struct PracticeTimelineStrip;
+
+#[derive(Component)]
+pub struct PracticePlayhead;
+
+#[derive(Component)]
+pub struct PracticeLoopFill;
+
+#[derive(Component, Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PracticeLoopHandle {
+    Start,
+    End,
+}
+
+#[derive(Component)]
+pub struct PracticeTimeText;
+
+#[derive(Component)]
+pub(super) struct PreviewTransportText;
+
+#[derive(Component, Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PreviewTransportButton {
+    PrevBar,
+    PlayPause,
+    NextBar,
+}
+
+pub(super) fn spawn_timeline(
+    root: &mut ChildSpawnerCommands,
+    theme: &dtx_ui::Theme,
+    flow: &crate::practice::PracticeFlow,
+    draft: &crate::practice::PracticeDraft,
+    timeline: &crate::timeline::ChipTimeline,
+) {
+    root.spawn((
+        PracticeTimelineRoot,
+        Node {
+            width: Val::Percent(100.0),
+            min_height: Val::Px(88.0),
+            flex_direction: FlexDirection::Row,
+            flex_wrap: FlexWrap::Wrap,
+            align_items: AlignItems::Center,
+            column_gap: Val::Px(dtx_ui::SpacingRole::Md.px()),
+            row_gap: Val::Px(dtx_ui::SpacingRole::Sm.px()),
+            padding: UiRect::axes(Val::Px(16.0), Val::Px(10.0)),
+            flex_shrink: 0.0,
+            ..default()
+        },
+        BackgroundColor(Color::srgba(0.0, 0.0, 0.0, 0.88)),
+    ))
+    .with_children(|timeline_row| {
+        for button in [
+            PreviewTransportButton::PrevBar,
+            PreviewTransportButton::PlayPause,
+            PreviewTransportButton::NextBar,
+        ] {
+            timeline_row
+                .spawn((
+                    button,
+                    Button,
+                    Node {
+                        min_width: Val::Px(72.0),
+                        min_height: Val::Px(40.0),
+                        justify_content: JustifyContent::Center,
+                        align_items: AlignItems::Center,
+                        padding: UiRect::axes(Val::Px(10.0), Val::Px(6.0)),
+                        ..default()
+                    },
+                    BackgroundColor(Color::srgba(1.0, 1.0, 1.0, 0.08)),
+                ))
+                .with_children(|button_root| {
+                    let label = match button {
+                        PreviewTransportButton::PrevBar => "Previous bar",
+                        PreviewTransportButton::PlayPause
+                            if flow.preview == crate::practice::PreviewState::Playing =>
+                        {
+                            "Pause Preview"
+                        }
+                        PreviewTransportButton::PlayPause => "Play Preview",
+                        PreviewTransportButton::NextBar => "Next bar",
+                    };
+                    let text = super::setup::spawn_text(
+                        button_root,
+                        label,
+                        dtx_ui::TypographyRole::Label,
+                        theme.text_primary,
+                    );
+                    if button == PreviewTransportButton::PlayPause {
+                        button_root
+                            .commands()
+                            .entity(text)
+                            .insert(PreviewTransportText);
+                    }
+                });
+        }
+        timeline_row.spawn((
+            PracticeTimeText,
+            Text::new(super::format_chart_time(0)),
+            dtx_ui::Theme::font(dtx_ui::Typography.base_px(dtx_ui::TypographyRole::Label)),
+            dtx_ui::SemanticText(dtx_ui::TypographyRole::Label),
+            TextColor(theme.text_primary),
+        ));
+        let strip = dtx_ui::widget::density_strip::spawn_density_strip(
+            timeline_row,
+            &timeline.density,
+            theme,
+        );
+        timeline_row.commands().entity(strip).insert((
+            PracticeTimelineStrip,
+            Node {
+                min_width: Val::Px(220.0),
+                height: Val::Px(44.0),
+                flex_grow: 1.0,
+                flex_direction: FlexDirection::Row,
+                align_items: AlignItems::FlexEnd,
+                column_gap: Val::Px(1.0),
+                ..default()
+            },
+        ));
+        timeline_row
+            .commands()
+            .entity(strip)
+            .with_children(|markers| {
+                for &bar_ms in &timeline.bar_ms {
+                    markers.spawn((
+                        Node {
+                            position_type: PositionType::Absolute,
+                            left: Val::Percent(dtx_ui::widget::density_strip::time_to_pct(
+                                bar_ms,
+                                timeline.end_ms,
+                            )),
+                            top: Val::Px(0.0),
+                            width: Val::Px(1.0),
+                            height: Val::Px(10.0),
+                            ..default()
+                        },
+                        BackgroundColor(theme.text_secondary.with_alpha(0.7)),
+                    ));
+                }
+                markers.spawn((
+                    PracticeLoopFill,
+                    Node {
+                        position_type: PositionType::Absolute,
+                        left: Val::Percent(0.0),
+                        top: Val::Px(0.0),
+                        bottom: Val::Px(0.0),
+                        width: Val::Percent(0.0),
+                        ..default()
+                    },
+                    BackgroundColor(theme.selection_highlight),
+                    if draft.loop_region.is_some() {
+                        Visibility::Visible
+                    } else {
+                        Visibility::Hidden
+                    },
+                ));
+                markers.spawn((
+                    PracticePlayhead,
+                    Node {
+                        position_type: PositionType::Absolute,
+                        left: Val::Percent(0.0),
+                        top: Val::Px(0.0),
+                        bottom: Val::Px(0.0),
+                        width: Val::Px(2.0),
+                        ..default()
+                    },
+                    BackgroundColor(theme.accent),
+                ));
+                for (handle, label) in [
+                    (PracticeLoopHandle::Start, "A"),
+                    (PracticeLoopHandle::End, "B"),
+                ] {
+                    markers
+                        .spawn((
+                            handle,
+                            Node {
+                                position_type: PositionType::Absolute,
+                                left: Val::Percent(0.0),
+                                top: Val::Px(0.0),
+                                bottom: Val::Px(0.0),
+                                min_width: Val::Px(20.0),
+                                justify_content: JustifyContent::Center,
+                                align_items: AlignItems::Center,
+                                border: UiRect::all(Val::Px(1.0)),
+                                ..default()
+                            },
+                            BackgroundColor(theme.stage_bg),
+                            BorderColor::all(theme.accent),
+                            if draft.loop_region.is_some() {
+                                Visibility::Visible
+                            } else {
+                                Visibility::Hidden
+                            },
+                        ))
+                        .with_children(|marker| {
+                            super::setup::spawn_text(
+                                marker,
+                                label,
+                                dtx_ui::TypographyRole::Hint,
+                                theme.text_primary,
+                            );
+                        });
+                }
+            });
+    });
+}
+
+pub(super) fn preview_transport_buttons(
+    interactions: Query<(&Interaction, &PreviewTransportButton), Changed<Interaction>>,
+    flow: Res<crate::practice::PracticeFlow>,
+    mut actions: MessageWriter<crate::practice::PreviewAction>,
+) {
+    for (interaction, button) in &interactions {
+        if *interaction != Interaction::Pressed {
+            continue;
+        }
+        actions.write(match button {
+            PreviewTransportButton::PrevBar => crate::practice::PreviewAction::PrevBar,
+            PreviewTransportButton::PlayPause
+                if flow.preview == crate::practice::PreviewState::Playing =>
+            {
+                crate::practice::PreviewAction::Pause
+            }
+            PreviewTransportButton::PlayPause => crate::practice::PreviewAction::Play,
+            PreviewTransportButton::NextBar => crate::practice::PreviewAction::NextBar,
+        });
+    }
+}
 
 /// Logical-px rect of the timeline strip node (same math as
 /// editor/picking.rs `node_rect`; duplicated to avoid coupling the
@@ -144,21 +374,15 @@ fn strip_rect(node: &ComputedNode, gt: &bevy::ui::UiGlobalTransform) -> Rect {
     Rect::from_center_size(center, size)
 }
 
-/// Mouse on the full-HUD timeline: press+release = seek (snapped via the
-/// seek message's `snap` field), press+drag = select A/B region
-/// (bar-snapped, min one bar, committed live while dragging).
+/// Mouse on the setup timeline: click seeks the preview and drag edits the draft loop.
 pub fn timeline_mouse(
     windows: Query<&Window>,
     buttons: Res<ButtonInput<MouseButton>>,
-    strips: Query<
-        (&ComputedNode, &bevy::ui::UiGlobalTransform),
-        With<super::full_hud::FullHudTimelineStrip>,
-    >,
+    strips: Query<(&ComputedNode, &bevy::ui::UiGlobalTransform), With<PracticeTimelineStrip>>,
     mut gesture: ResMut<TimelineGesture>,
-    mut session: ResMut<PracticeSession>,
+    mut draft: ResMut<crate::practice::PracticeDraft>,
     timeline: Res<ChipTimeline>,
-    mut seeks: MessageWriter<SeekToChartTime>,
-    mut toasts: ResMut<crate::practice::toast::ToastQueue>,
+    mut actions: MessageWriter<crate::practice::PreviewAction>,
 ) {
     let Ok(window) = windows.single() else { return };
     let Some(pos) = window.cursor_position() else {
@@ -181,24 +405,80 @@ pub fn timeline_mouse(
     match effect {
         GestureEffect::None => {}
         GestureEffect::Seek { target_ms } => {
-            session.invalidate_current_attempt();
-            let snapped = timeline.resolve_snap(target_ms, session.transport.snap);
-            session.transport.scrub_cursor_ms = Some(snapped);
-            seeks.write(SeekToChartTime {
-                target_ms,
-                snap: Some(session.transport.snap),
-                attempt_start_ms: Some(snapped),
-            });
+            let snapped = timeline.resolve_snap(target_ms, draft.snap);
+            actions.write(crate::practice::PreviewAction::Seek(snapped));
         }
         GestureEffect::LoopPreview { anchor_ms } => {
-            session.invalidate_current_attempt();
-            if session.trainer.ramp_armed() {
-                session.trainer.disarm_ramp();
-                toasts.push("ramp off (loop changed)");
-            }
-            session.lane_diag.clear();
-            session.transport.loop_region = Some(drag_region(&timeline, anchor_ms, cursor_ms));
+            draft.loop_region = Some(drag_region(&timeline, anchor_ms, cursor_ms));
+            draft.source = crate::practice::PracticeDraftSource::Custom;
         }
+    }
+}
+
+pub(super) fn update_timeline_markers(
+    clock: Res<crate::resources::GameplayClock>,
+    draft: Res<crate::practice::PracticeDraft>,
+    timeline: Res<ChipTimeline>,
+    mut time_text: Query<&mut Text, With<PracticeTimeText>>,
+    mut markers: ParamSet<(
+        Query<&mut Node, With<PracticePlayhead>>,
+        Query<(&mut Node, &mut Visibility), With<PracticeLoopFill>>,
+        Query<(&PracticeLoopHandle, &mut Node, &mut Visibility)>,
+    )>,
+) {
+    if let Ok(mut text) = time_text.single_mut() {
+        text.0 = super::format_chart_time(clock.current_ms);
+    }
+    if let Ok(mut playhead) = markers.p0().single_mut() {
+        playhead.left = Val::Percent(dtx_ui::widget::density_strip::time_to_pct(
+            clock.current_ms,
+            timeline.end_ms,
+        ));
+    }
+    let region = draft.loop_region.filter(|region| region.end_ms != i64::MAX);
+    if let Ok((mut fill, mut visibility)) = markers.p1().single_mut() {
+        match region {
+            Some(region) => {
+                let start =
+                    dtx_ui::widget::density_strip::time_to_pct(region.start_ms, timeline.end_ms);
+                let end =
+                    dtx_ui::widget::density_strip::time_to_pct(region.end_ms, timeline.end_ms);
+                fill.left = Val::Percent(start);
+                fill.width = Val::Percent((end - start).max(0.0));
+                *visibility = Visibility::Visible;
+            }
+            None => *visibility = Visibility::Hidden,
+        }
+    }
+    for (handle, mut node, mut visibility) in &mut markers.p2() {
+        match region {
+            Some(region) => {
+                let marker_ms = match handle {
+                    PracticeLoopHandle::Start => region.start_ms,
+                    PracticeLoopHandle::End => region.end_ms,
+                };
+                node.left = Val::Percent(dtx_ui::widget::density_strip::time_to_pct(
+                    marker_ms,
+                    timeline.end_ms,
+                ));
+                *visibility = Visibility::Visible;
+            }
+            None => *visibility = Visibility::Hidden,
+        }
+    }
+}
+
+pub(super) fn update_transport_label(
+    flow: Res<crate::practice::PracticeFlow>,
+    mut labels: Query<&mut Text, With<PreviewTransportText>>,
+) {
+    let label = if flow.preview == crate::practice::PreviewState::Playing {
+        "Pause Preview"
+    } else {
+        "Play Preview"
+    };
+    for mut text in &mut labels {
+        text.0 = label.to_owned();
     }
 }
 

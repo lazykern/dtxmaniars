@@ -130,7 +130,6 @@ pub fn open_practice_settings(
     clock: Res<GameplayClock>,
     mut controller: ResMut<PreviewController>,
     mut next_pause: ResMut<NextState<PauseState>>,
-    mut surface: ResMut<crate::pause::PracticePauseSurface>,
     bgm: Res<dtx_audio::BgmHandle>,
     polyphony: Res<dtx_audio::DrumPolyphony>,
     active: Res<ActiveDrumSounds>,
@@ -145,7 +144,6 @@ pub fn open_practice_settings(
     *flow = next_flow;
     *draft = PracticeDraft::from(&snapshot.session);
     controller.restore_ms = Some(chart_ms);
-    *surface = crate::pause::PracticePauseSurface::Overlay;
     next_pause.set(PauseState::Running);
 }
 
@@ -158,7 +156,6 @@ pub fn cancel_practice_settings(
     mut pending_cancel: ResMut<PendingCancel>,
     mut seeks: MessageWriter<SeekToChartTime>,
     mut next_pause: ResMut<NextState<PauseState>>,
-    mut surface: ResMut<crate::pause::PracticePauseSurface>,
     bgm: Res<dtx_audio::BgmHandle>,
     polyphony: Res<dtx_audio::DrumPolyphony>,
     active: Res<ActiveDrumSounds>,
@@ -181,7 +178,6 @@ pub fn cancel_practice_settings(
         snap: None,
         attempt_start_ms: None,
     });
-    *surface = crate::pause::PracticePauseSurface::Overlay;
     pending_cancel.0 = true;
     next_pause.set(PauseState::Paused);
 }

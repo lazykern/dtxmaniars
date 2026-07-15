@@ -85,7 +85,6 @@ fn build_app() -> App {
     .init_resource::<gameplay_drums::seek::PreviewSkippedChips>()
     .init_resource::<gameplay_drums::seek::StoppedSeekRebuild>()
     .init_resource::<dtx_bga::BgaClock>()
-    .init_resource::<gameplay_drums::pause::PracticePauseSurface>()
     .init_resource::<game_shell::EditorSession>()
     .add_message::<game_shell::TransitionRequest>()
     .add_message::<gameplay_drums::seek::SeekToChartTime>()
@@ -2238,11 +2237,6 @@ fn preview_cancel_editing_restores_frozen_session_and_cursor() {
     assert_eq!(flow.phase, PracticePhase::Running);
     assert_eq!(flow.preview, PreviewState::Stopped);
     assert_eq!(app.world().resource::<GameplayClock>().current_ms, 5_000);
-    assert_eq!(
-        *app.world()
-            .resource::<gameplay_drums::pause::PracticePauseSurface>(),
-        gameplay_drums::pause::PracticePauseSurface::Overlay
-    );
     assert!(matches!(
         app.world().resource::<NextState<game_shell::PauseState>>(),
         NextState::Pending(game_shell::PauseState::Paused)
