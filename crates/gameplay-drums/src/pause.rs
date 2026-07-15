@@ -4,6 +4,7 @@
 //! during `AppState::Performance` toggles it. While paused the gameplay clock
 //! is frozen (see `lib.rs`), input is dropped (see `input.rs`), the BGM
 //! instance is paused, chart drum/layer voices are paused, and an overlay menu
+//! handles resume, restart, settings, and exit actions.
 //!
 //! UX is redesigned (ADR-0014); mechanics-neutral. Loosely mirrors
 //! `dtxpt/src/overlays/pause.rs`.

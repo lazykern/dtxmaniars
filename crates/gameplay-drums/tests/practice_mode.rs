@@ -228,6 +228,8 @@ fn chart_with_repeated_primary_path() -> Chart {
     assets.wav.insert(1, "shared-bgm.wav".into());
     assets.wav.insert(2, "shared-bgm.wav".into());
     assets.wav.insert(3, "distinct-layer.wav".into());
+    assets.wav.volumes.insert(1, 37);
+    assets.wav.pans.insert(1, -41);
     Chart {
         metadata: Metadata {
             bpm: Some(120.0),
@@ -1193,6 +1195,103 @@ fn seek_does_not_reconstruct_a_decoded_slice_past_its_duration() {
         .0
         .iter()
         .any(|slice| slice.wav_slot == 1));
+}
+
+fn install_short_primary(app: &mut App) {
+    use bevy_kira_audio::prelude::{Frame, StaticSoundData, StaticSoundSettings};
+    use bevy_kira_audio::AudioSource as KiraAudioSource;
+
+    let source = app
+        .world_mut()
+        .resource_mut::<Assets<KiraAudioSource>>()
+        .add(KiraAudioSource {
+            sound: StaticSoundData {
+                sample_rate: 1_000,
+                frames: vec![Frame::from_mono(0.0); 500].into(),
+                settings: StaticSoundSettings::default(),
+                slice: None,
+            },
+        });
+    app.world_mut()
+        .resource_mut::<dtx_audio::ChartSoundBank>()
+        .insert(
+            1,
+            dtx_audio::LoadedChartSound {
+                handle: source,
+                path: "shared-bgm.wav".into(),
+                volume: 37,
+                pan: -41,
+            },
+        );
+}
+
+fn assert_short_primary_pending(app: &App, expected_offset: f64) {
+    let pending = app
+        .world()
+        .resource::<gameplay_drums::seek::PendingBgmStart>()
+        .0
+        .as_ref()
+        .expect("the looped primary remains authoritative");
+    assert_eq!(pending.wav_slot, 1);
+    assert_eq!(pending.path, "shared-bgm.wav");
+    assert!((pending.start_seconds - expected_offset).abs() < f64::EPSILON);
+    assert_eq!((pending.volume, pending.pan), (37, -41));
+    assert_eq!(
+        pending.playback_mix(app.world().resource::<dtx_audio::ChartSoundBank>()),
+        (37, -41)
+    );
+    assert!(!app
+        .world()
+        .resource::<gameplay_drums::seek::PendingAudioStarts>()
+        .0
+        .iter()
+        .any(|slice| slice.path == "shared-bgm.wav"));
+}
+
+#[test]
+fn preview_seek_wraps_short_decoded_primary_offset() {
+    let mut app = build_lifecycle_app(PracticeIntent::manual(PracticeOrigin::SongSelect));
+    enter_performance(&mut app, chart_with_repeated_primary_path());
+    app.world_mut().resource_mut::<PracticeFlow>().phase = PracticePhase::Editing;
+    *app.world_mut().resource_mut::<EffectivePlaybackRate>() =
+        EffectivePlaybackRate::practice(0.75);
+    install_short_primary(&mut app);
+    ready_clock(&mut app, 250);
+
+    send_seek(&mut app, 750);
+    app.world_mut().run_schedule(FixedUpdate);
+
+    assert_short_primary_pending(&app, 0.25);
+    assert!((app.world().resource::<EffectivePlaybackRate>().value - 0.75).abs() < f64::EPSILON);
+}
+
+#[test]
+fn paused_normal_seek_wraps_short_decoded_primary_multiple_times() {
+    let mut app = build_lifecycle_app(PracticeIntent::None);
+    enter_performance(&mut app, chart_with_repeated_primary_path());
+    *app.world_mut().resource_mut::<EffectivePlaybackRate>() =
+        EffectivePlaybackRate::practice(0.75);
+    install_short_primary(&mut app);
+    ready_clock(&mut app, 250);
+    app.world_mut()
+        .resource_mut::<NextState<game_shell::PauseState>>()
+        .set(game_shell::PauseState::Paused);
+    app.update();
+
+    send_seek(&mut app, 1_500);
+    app.world_mut().run_schedule(FixedUpdate);
+
+    assert_short_primary_pending(&app, 0.0);
+    assert_eq!(
+        app.world()
+            .resource::<gameplay_drums::seek::PendingAudioStarts>()
+            .0
+            .iter()
+            .map(|slice| slice.path.as_str())
+            .collect::<Vec<_>>(),
+        vec!["distinct-layer.wav"]
+    );
+    assert!((app.world().resource::<EffectivePlaybackRate>().value - 0.75).abs() < f64::EPSILON);
 }
 
 #[test]

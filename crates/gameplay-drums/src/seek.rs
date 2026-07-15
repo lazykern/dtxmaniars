@@ -283,6 +283,10 @@ pub fn apply_seek_system(
     audio.pending_slices.0.clear();
     dtx_audio::stop_bgm(&audio.audio, &mut audio.bgm, &mut audio.instances);
     let source_dir = chart.source_path.as_ref().and_then(|p| p.parent());
+    let authoritative_bgm_path = state
+        .primary_bgm
+        .0
+        .and_then(|primary| chip_wav_path(&chart.chart, primary, source_dir));
     let mut active = timeline
         .entries
         .iter()
@@ -301,14 +305,17 @@ pub fn apply_seek_system(
             {
                 return None;
             }
-            let start_seconds = (resolved - entry.auto_ms).max(0) as f64 / 1000.0;
-            let within_slice = audio
+            let mut start_seconds = (resolved - entry.auto_ms).max(0) as f64 / 1000.0;
+            let decoded_duration = audio
                 .sound_bank
                 .get(chip.wav_slot)
                 .and_then(|sound| audio.sources.get(&sound.handle))
-                .map(|source| start_seconds < source.sound.duration().as_secs_f64())
-                .unwrap_or(true);
-            if !within_slice {
+                .map(|source| source.sound.duration().as_secs_f64());
+            if state.primary_bgm.0 == Some(entry.chip_idx) {
+                if let Some(duration) = decoded_duration.filter(|duration| *duration > 0.0) {
+                    start_seconds %= duration;
+                }
+            } else if decoded_duration.is_some_and(|duration| start_seconds >= duration) {
                 return None;
             }
             Some((
@@ -331,10 +338,6 @@ pub fn apply_seek_system(
         .collect::<Vec<_>>();
     active.sort_by_key(|(at_ms, slice)| (*at_ms, slice.chip_idx));
 
-    let authoritative_bgm_path = state
-        .primary_bgm
-        .0
-        .and_then(|primary| chip_wav_path(&chart.chart, primary, source_dir));
     let authoritative_bgm = state.primary_bgm.0.filter(|primary| {
         active.iter().any(|(_, slice)| {
             slice.chip_idx == *primary && slice.kind == PendingAudioKind::LayerBgm
