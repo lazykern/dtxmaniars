@@ -138,6 +138,7 @@ pub(super) fn plugin(app: &mut App) {
             FixedUpdate,
             apply_gauge_on_judgment
                 .run_if(in_state(AppState::Performance))
+                .run_if(in_state(game_shell::PauseState::Running))
                 .run_if(crate::practice::gameplay_input_active),
         );
 }

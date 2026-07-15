@@ -132,6 +132,7 @@ pub fn plugin(app: &mut App) {
             sync_phrase_meter,
             sync_phrase_playhead,
             sync_hud_judgment,
+            sync_lane_display,
             keyboard_viz::decay_key_cap_flashes,
             sample_accuracy_history.run_if(crate::practice::gameplay_input_active),
             sync_live_graph,
@@ -149,6 +150,7 @@ fn spawn_hud(
     lanes: Res<crate::lanes::Lanes>,
     mut history: ResMut<AccuracyHistory>,
     no_fail: Res<crate::resources::NoFailEnabled>,
+    lane_display: Res<crate::resources::LaneDisplayState>,
 ) {
     if *mode != EGameMode::Drums {
         return;
@@ -231,6 +233,7 @@ fn spawn_hud(
             },
             BackgroundColor(Color::BLACK.with_alpha(LANE_BACKDROP_ALPHA)),
             ZIndex(-1),
+            lane_backdrop_visibility(*lane_display),
         ));
 
         root.spawn((
@@ -311,6 +314,27 @@ fn spawn_hud(
     // transform (align/shrink with the scene in the Customize editor) and sit in
     // its stacking context behind lanes/HUD via negative ZIndex.
     commands.insert_resource(dtx_bga::BgaParent(Some(root)));
+}
+
+fn sync_lane_display(
+    lane_display: Res<crate::resources::LaneDisplayState>,
+    mut backdrops: Query<&mut Visibility, With<LaneBackdrop>>,
+) {
+    if !lane_display.is_changed() {
+        return;
+    }
+    let visibility = lane_backdrop_visibility(*lane_display);
+    for mut current in &mut backdrops {
+        *current = visibility;
+    }
+}
+
+fn lane_backdrop_visibility(lane_display: crate::resources::LaneDisplayState) -> Visibility {
+    if lane_display.shows_lane_backgrounds() {
+        Visibility::Inherited
+    } else {
+        Visibility::Hidden
+    }
 }
 
 fn apply_backboard_layout(
@@ -870,6 +894,23 @@ mod tests {
     fn no_fail_badge_combines_text_and_non_color_marker() {
         assert_eq!(no_fail_badge_text(false), None);
         assert_eq!(no_fail_badge_text(true), Some("NO FAIL ◈"));
+    }
+
+    #[test]
+    fn all_runtime_modes_drive_lane_backdrop_visibility() {
+        use dtx_config::LaneDisplay::*;
+        for (mode, expected) in [
+            (AllOn, Visibility::Inherited),
+            (Half, Visibility::Hidden),
+            (LineOff, Visibility::Inherited),
+            (AllOff, Visibility::Hidden),
+        ] {
+            assert_eq!(
+                lane_backdrop_visibility(crate::resources::LaneDisplayState(mode)),
+                expected,
+                "{mode:?}"
+            );
+        }
     }
 
     fn unique_temp_dir(tag: &str) -> std::path::PathBuf {

@@ -129,6 +129,57 @@ pub struct MetronomeEnabled(pub bool);
 #[derive(Resource, Debug, Clone, Copy, Default)]
 pub struct ShowTimingLines(pub bool);
 
+/// Full runtime mirror of `nLaneDisp.Drums`.
+///
+/// NX renders lane backgrounds for values 0/2 and timing lines for 0/1
+/// (`CActPerfDrumsLaneFlushD.cs:146-153,197-198` and
+/// `CStagePerfCommonScreen.cs:3520`).
+#[derive(Resource, Debug, Clone, Copy, PartialEq, Eq)]
+pub struct LaneDisplayState(pub dtx_config::LaneDisplay);
+
+impl Default for LaneDisplayState {
+    fn default() -> Self {
+        Self(dtx_config::LaneDisplay::AllOn)
+    }
+}
+
+impl LaneDisplayState {
+    pub const fn shows_lane_backgrounds(self) -> bool {
+        matches!(
+            self.0,
+            dtx_config::LaneDisplay::AllOn | dtx_config::LaneDisplay::LineOff
+        )
+    }
+
+    pub const fn shows_timing_lines(self) -> bool {
+        matches!(
+            self.0,
+            dtx_config::LaneDisplay::AllOn | dtx_config::LaneDisplay::Half
+        )
+    }
+}
+
+#[cfg(test)]
+mod lane_display_tests {
+    use super::*;
+
+    #[test]
+    fn all_lane_display_modes_have_distinct_runtime_semantics() {
+        use dtx_config::LaneDisplay::*;
+        let cases = [
+            (AllOn, true, true),
+            (Half, false, true),
+            (LineOff, true, false),
+            (AllOff, false, false),
+        ];
+        for (mode, lanes, lines) in cases {
+            let state = LaneDisplayState(mode);
+            assert_eq!(state.shows_lane_backgrounds(), lanes, "{mode:?}");
+            assert_eq!(state.shows_timing_lines(), lines, "{mode:?}");
+        }
+    }
+}
+
 /// Assisted modifier: gauge depletion never ends the stage.
 #[derive(Resource, Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct NoFailEnabled(pub bool);

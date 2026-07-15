@@ -59,7 +59,7 @@ pub const RAMP_STEP_DEFAULT: f32 = 0.05;
 pub const RAMP_THRESHOLD_DEFAULT: f32 = 90.0;
 pub const RAMP_STREAK_DEFAULT: u8 = 1;
 
-/// Accuracy-gated tempo-ramp configuration (rail-editable).
+/// Accuracy-gated tempo-ramp configuration edited in Practice Settings.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct RampConfig {
     pub start_tempo: f32,
@@ -175,7 +175,7 @@ pub struct PracticeTransport {
     /// Count-in click during pre-roll (spec: count-in metronome).
     pub metronome: bool,
     pub loop_region: Option<LoopRegion>,
-    /// Scrub cursor while paused (chart ms). None = cursor at playhead.
+    /// Timeline edit cursor in Setup/Settings (chart ms). None = playhead.
     pub scrub_cursor_ms: Option<i64>,
 }
 

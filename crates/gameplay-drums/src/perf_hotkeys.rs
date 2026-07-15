@@ -170,6 +170,7 @@ pub(crate) struct PauseQuickSettings<'w> {
     input_offset: ResMut<'w, InputOffsetMs>,
     bgm_adjust: ResMut<'w, BgmAdjustState>,
     show_timing_lines: ResMut<'w, crate::resources::ShowTimingLines>,
+    lane_display: ResMut<'w, crate::resources::LaneDisplayState>,
     audio_settings: ResMut<'w, crate::resources::DrumAudioSettings>,
     bgm: Res<'w, dtx_audio::BgmHandle>,
     instances: ResMut<'w, Assets<AudioInstance>>,
@@ -186,6 +187,7 @@ impl PauseQuickSettings<'_> {
             &mut self.bgm_adjust,
         );
         self.show_timing_lines.0 = self.draft.cfg.gameplay.lane_display.shows_timing_lines();
+        self.lane_display.0 = self.draft.cfg.gameplay.lane_display;
         self.audio_settings.bgm_volume = self.draft.cfg.audio.bgm_volume;
         if self.audio_settings.bgm_enabled {
             dtx_audio::set_bgm_volume(
@@ -470,5 +472,21 @@ mod tests {
         assert_eq!(cfg.gameplay.lane_display, dtx_config::LaneDisplay::Half);
         assert!((cfg.audio.bgm_volume - 0.65).abs() < f32::EPSILON);
         assert_eq!(cfg.gameplay.input_offset_ms, 10);
+    }
+
+    #[test]
+    fn quick_settings_use_one_bounded_reducer_in_both_directions() {
+        let mut cfg = Config::default();
+        for setting in [
+            crate::pause::QuickSettingKind::ScrollSpeed,
+            crate::pause::QuickSettingKind::LaneVisibility,
+            crate::pause::QuickSettingKind::BgmVolume,
+            crate::pause::QuickSettingKind::InputOffset,
+        ] {
+            let before = cfg.clone();
+            adjust_quick_setting_config(&mut cfg, setting, 1);
+            adjust_quick_setting_config(&mut cfg, setting, -1);
+            assert_eq!(cfg, before, "round trip for {setting:?}");
+        }
     }
 }

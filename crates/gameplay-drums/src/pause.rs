@@ -116,6 +116,12 @@ struct PauseMenuContent;
 #[derive(Component)]
 struct QuickSettingsContent;
 
+#[derive(Component, Debug, Clone, Copy)]
+struct QuickAdjustButton {
+    setting: QuickSettingKind,
+    direction: i32,
+}
+
 /// Currently highlighted pause-menu row.
 #[derive(Resource, Default)]
 pub struct PauseSelection(pub usize);
@@ -123,18 +129,27 @@ pub struct PauseSelection(pub usize);
 #[derive(Resource, Default)]
 struct QuickSettingsSelection(usize);
 
+#[derive(Resource, Default)]
+pub(crate) struct PausedRestart {
+    target_ms: Option<i64>,
+    attempt_start_ms: i64,
+}
+
 #[derive(SystemParam)]
 pub(crate) struct PauseMenuState<'w> {
     selection: ResMut<'w, PauseSelection>,
     quick_selection: ResMut<'w, QuickSettingsSelection>,
     view: ResMut<'w, PauseView>,
     next_pause: ResMut<'w, NextState<PauseState>>,
-    practice: Option<Res<'w, crate::practice::PracticeSession>>,
+    practice: Option<ResMut<'w, crate::practice::PracticeSession>>,
     timeline: Res<'w, crate::timeline::ChipTimeline>,
     clock: Res<'w, crate::resources::GameplayClock>,
     intent: ResMut<'w, PracticeIntent>,
     completed_run: ResMut<'w, game_shell::CompletedRunContext>,
     normal_events: ResMut<'w, crate::results_analysis::NormalPlayEventStream>,
+    pending_inputs: ResMut<'w, crate::input::PendingLaneInputs>,
+    lane_hits: ResMut<'w, Messages<crate::events::LaneHit>>,
+    input_hits: ResMut<'w, Messages<crate::events::InputHit>>,
 }
 
 #[derive(SystemParam)]
@@ -240,6 +255,7 @@ pub(super) fn plugin(app: &mut App) {
     app.init_resource::<PauseSelection>()
         .init_resource::<QuickSettingsSelection>()
         .init_resource::<PauseView>()
+        .init_resource::<PausedRestart>()
         .init_resource::<VerbGuard>()
         // Always start a performance un-paused.
         .add_systems(OnEnter(AppState::Performance), force_running)
@@ -251,27 +267,79 @@ pub(super) fn plugin(app: &mut App) {
             // pad hit is idempotent — no ordering constraint needed.
             (toggle_pause, system_verb_pause, system_verb_restart)
                 .run_if(in_state(AppState::Performance))
-                .run_if(crate::practice::gameplay_input_active)
                 .run_if(crate::editor::editor_closed),
         )
         .add_systems(
             OnEnter(PauseState::Paused),
-            (pause_chart_audio, spawn_overlay),
+            (
+                pause_chart_audio,
+                clear_gameplay_input_queues,
+                spawn_overlay,
+            )
+                .chain(),
         )
         .add_systems(
             OnExit(PauseState::Paused),
-            (resume_chart_audio, despawn_overlay),
+            (
+                clear_gameplay_input_queues,
+                resume_chart_audio,
+                despawn_overlay,
+            )
+                .chain(),
         )
         .add_systems(
             Update,
             (pause_kb_emit, pause_pointer_emit, pause_menu_input)
                 .chain()
                 .run_if(in_state(PauseState::Paused)),
+        )
+        .add_systems(
+            FixedUpdate,
+            finish_paused_restart
+                .after(crate::seek::apply_seek_system)
+                .after(crate::practice::stats::track_attempt_stats)
+                .run_if(in_state(PauseState::Paused)),
         );
 }
 
 fn force_running(mut next: ResMut<NextState<PauseState>>) {
     next.set(PauseState::Running);
+}
+
+fn clear_gameplay_input_queues(
+    mut pending: ResMut<crate::input::PendingLaneInputs>,
+    mut lane_hits: ResMut<Messages<crate::events::LaneHit>>,
+    mut input_hits: ResMut<Messages<crate::events::InputHit>>,
+    mut judgments: ResMut<Messages<crate::events::JudgmentEvent>>,
+    mut misses: ResMut<Messages<crate::events::NoteMissed>>,
+    mut empty_hits: ResMut<Messages<crate::events::EmptyHit>>,
+) {
+    crate::input::clear_pending_lane_inputs_now(&mut pending);
+    lane_hits.clear();
+    input_hits.clear();
+    judgments.clear();
+    misses.clear();
+    empty_hits.clear();
+}
+
+fn finish_paused_restart(
+    mut restart: ResMut<PausedRestart>,
+    clock: Res<crate::resources::GameplayClock>,
+    practice: Option<Res<crate::practice::PracticeSession>>,
+    mut next_pause: ResMut<NextState<PauseState>>,
+) {
+    let Some(target_ms) = restart.target_ms else {
+        return;
+    };
+    if clock.current_ms == target_ms
+        && practice.is_some_and(|session| {
+            session.current_attempt_eligible
+                && session.current_attempt.start_ms == restart.attempt_start_ms
+        })
+    {
+        restart.target_ms = None;
+        next_pause.set(PauseState::Running);
+    }
 }
 
 fn toggle_pause(
@@ -300,9 +368,13 @@ fn system_verb_pause(
     state: Res<State<PauseState>>,
     mut next: ResMut<NextState<PauseState>>,
     mut guard: ResMut<VerbGuard>,
+    flow: Option<Res<crate::practice::PracticeFlow>>,
 ) {
     // Drain first: the guard decides whether to ACT, never whether to READ.
     if !drain_verb(&mut hits, SystemVerb::Pause) {
+        return;
+    }
+    if !system_verbs_active(flow.as_deref()) {
         return;
     }
     if !guard.accept(SystemVerb::Pause, Instant::now()) {
@@ -319,8 +391,12 @@ fn system_verb_restart(
     mut next_pause: ResMut<NextState<PauseState>>,
     mut requests: MessageWriter<TransitionRequest>,
     mut guard: ResMut<VerbGuard>,
+    flow: Option<Res<crate::practice::PracticeFlow>>,
 ) {
     if !drain_verb(&mut hits, SystemVerb::Restart) {
+        return;
+    }
+    if !system_verbs_active(flow.as_deref()) {
         return;
     }
     if !guard.accept(SystemVerb::Restart, Instant::now()) {
@@ -328,6 +404,10 @@ fn system_verb_restart(
     }
     next_pause.set(PauseState::Running);
     request_transition(&mut requests, AppState::SongLoading);
+}
+
+fn system_verbs_active(flow: Option<&crate::practice::PracticeFlow>) -> bool {
+    flow.is_none_or(|flow| flow.phase == crate::practice::PracticePhase::Running)
 }
 
 /// Shared by Escape and `SystemVerb::Pause`.
@@ -509,7 +589,7 @@ fn spawn_overlay(
             ))
             .with_children(|quick| {
                 for (index, setting) in QUICK_SETTINGS.iter().enumerate() {
-                    quick.spawn((
+                    let mut row = quick.spawn((
                         *setting,
                         Button,
                         dtx_ui::ActionButton::new(
@@ -521,6 +601,22 @@ fn spawn_overlay(
                         dtx_ui::SemanticText(dtx_ui::TypographyRole::Hud),
                         TextColor(theme.text_secondary),
                     ));
+                    if *setting != QuickSettingKind::Back {
+                        row.with_children(|row| {
+                            for (label, direction) in [("−", -1), ("+", 1)] {
+                                row.spawn((
+                                    QuickAdjustButton {
+                                        setting: *setting,
+                                        direction,
+                                    },
+                                    Button,
+                                    Text::new(label),
+                                    Theme::hud_font(),
+                                    TextColor(theme.text_primary),
+                                ));
+                            }
+                        });
+                    }
                 }
             });
             if midi.is_some_and(|m| m.0) {
@@ -580,6 +676,14 @@ fn pause_pointer_emit(
         (&QuickSettingKind, &Interaction),
         (Changed<Interaction>, Without<PauseItemKind>),
     >,
+    adjust_buttons: Query<
+        (&QuickAdjustButton, &Interaction),
+        (
+            Changed<Interaction>,
+            Without<PauseItemKind>,
+            Without<QuickSettingKind>,
+        ),
+    >,
     mut out: MessageWriter<game_shell::NavAction>,
 ) {
     use game_shell::{NavAction, NavSource, NavVerb};
@@ -620,6 +724,27 @@ fn pause_pointer_emit(
             });
         }
     }
+    for (button, interaction) in &adjust_buttons {
+        if *interaction != Interaction::Pressed {
+            continue;
+        }
+        if let Some(index) = QUICK_SETTINGS
+            .iter()
+            .position(|setting| *setting == button.setting)
+        {
+            quick_selection.0 = index;
+            *view = PauseView::QuickSettings;
+            out.write(NavAction {
+                verb: if button.direction < 0 {
+                    NavVerb::Dec
+                } else {
+                    NavVerb::Inc
+                },
+                source: NavSource::Keyboard,
+                coarse: false,
+            });
+        }
+    }
 }
 
 pub(crate) fn pause_menu_input(
@@ -627,8 +752,9 @@ pub(crate) fn pause_menu_input(
     mut actions: MessageReader<game_shell::NavAction>,
     mut state: PauseMenuState,
     mut requests: MessageWriter<TransitionRequest>,
-    mut practice_actions: MessageWriter<crate::practice::actions::PracticeAction>,
     mut open_settings: MessageWriter<crate::practice::OpenPracticeSettings>,
+    mut seeks: MessageWriter<crate::seek::SeekToChartTime>,
+    mut paused_restart: ResMut<PausedRestart>,
     mut ui: PauseMenuUi,
     mut quick_runtime: crate::perf_hotkeys::PauseQuickSettings,
 ) {
@@ -671,13 +797,18 @@ pub(crate) fn pause_menu_input(
     }
 
     if resume {
+        clear_menu_gameplay_queues(&mut state);
         state.next_pause.set(PauseState::Running);
     }
     match *state.view {
         PauseView::Menu if confirm => {
+            clear_menu_gameplay_queues(&mut state);
             let selected = items[state.selection.0 % items.len()];
             match selected {
-                PauseItemKind::Resume => state.next_pause.set(PauseState::Running),
+                PauseItemKind::Resume => {
+                    clear_menu_gameplay_queues(&mut state);
+                    state.next_pause.set(PauseState::Running);
+                }
                 PauseItemKind::RestartSong => {
                     state.next_pause.set(PauseState::Running);
                     request_transition(&mut requests, AppState::SongLoading);
@@ -713,8 +844,26 @@ pub(crate) fn pause_menu_input(
                     request_transition(&mut requests, AppState::SongSelect);
                 }
                 PauseItemKind::RestartLoop => {
-                    practice_actions.write(crate::practice::actions::PracticeAction::RestartLoop);
-                    state.next_pause.set(PauseState::Running);
+                    if let Some(session) = state.practice.as_deref_mut() {
+                        session.invalidate_current_attempt();
+                        let attempt_start_ms = session
+                            .transport
+                            .loop_region
+                            .map(|region| region.start_ms)
+                            .unwrap_or(session.current_attempt.start_ms);
+                        let target_ms = crate::practice::session::preroll_target(
+                            &state.timeline,
+                            session.transport.preroll,
+                            attempt_start_ms,
+                        );
+                        seeks.write(crate::seek::SeekToChartTime {
+                            target_ms,
+                            snap: None,
+                            attempt_start_ms: Some(attempt_start_ms),
+                        });
+                        paused_restart.target_ms = Some(target_ms);
+                        paused_restart.attempt_start_ms = attempt_start_ms;
+                    }
                 }
                 PauseItemKind::PracticeSettings => {
                     open_settings.write(crate::practice::OpenPracticeSettings);
@@ -725,7 +874,10 @@ pub(crate) fn pause_menu_input(
             let selected = QUICK_SETTINGS[state.quick_selection.0 % QUICK_SETTINGS.len()];
             if confirm && selected == QuickSettingKind::Back {
                 *state.view = PauseView::Menu;
-            } else if adjustment != 0 && selected != QuickSettingKind::Back {
+            } else if selected != QuickSettingKind::Back && confirm {
+                adjustment = 1;
+            }
+            if adjustment != 0 && selected != QuickSettingKind::Back {
                 quick_runtime.adjust(selected, adjustment);
             }
         }
@@ -778,6 +930,12 @@ pub(crate) fn pause_menu_input(
             theme.text_secondary
         };
     }
+}
+
+fn clear_menu_gameplay_queues(state: &mut PauseMenuState) {
+    crate::input::clear_pending_lane_inputs_now(&mut state.pending_inputs);
+    state.lane_hits.clear();
+    state.input_hits.clear();
 }
 
 #[cfg(test)]
@@ -869,9 +1027,14 @@ mod tests {
         world.init_resource::<Messages<TransitionRequest>>();
         world.init_resource::<Messages<crate::practice::actions::PracticeAction>>();
         world.init_resource::<Messages<crate::practice::OpenPracticeSettings>>();
+        world.init_resource::<Messages<crate::seek::SeekToChartTime>>();
+        world.init_resource::<Messages<crate::events::LaneHit>>();
+        world.init_resource::<Messages<crate::events::InputHit>>();
         world.insert_resource(PauseSelection(selection));
         world.init_resource::<QuickSettingsSelection>();
         world.init_resource::<PauseView>();
+        world.init_resource::<PausedRestart>();
+        world.init_resource::<crate::input::PendingLaneInputs>();
         world.init_resource::<NextState<PauseState>>();
         world.insert_resource(crate::practice::PracticeSession::default());
         world.init_resource::<crate::timeline::ChipTimeline>();
@@ -884,6 +1047,7 @@ mod tests {
         world.init_resource::<crate::resources::InputOffsetMs>();
         world.init_resource::<crate::resources::BgmAdjustState>();
         world.init_resource::<crate::resources::ShowTimingLines>();
+        world.init_resource::<crate::resources::LaneDisplayState>();
         world.init_resource::<crate::resources::DrumAudioSettings>();
         world.init_resource::<dtx_audio::BgmHandle>();
         world.init_resource::<Assets<AudioInstance>>();
@@ -916,8 +1080,7 @@ mod tests {
     }
 
     #[test]
-    fn practice_confirm_restart_loop_emits_action_and_resumes() {
-        use crate::practice::actions::PracticeAction;
+    fn practice_confirm_restart_loop_queues_seek_before_resume() {
         use bevy::ecs::message::Messages;
         use bevy::ecs::system::RunSystemOnce;
         let mut world = dispatch_world(1); // Restart loop row
@@ -926,14 +1089,19 @@ mod tests {
             .expect("pause_menu_input runs");
         assert!(matches!(
             world.resource::<NextState<PauseState>>(),
-            NextState::Pending(PauseState::Running)
+            NextState::Unchanged
         ));
-        let actions: Vec<PracticeAction> = world
-            .resource::<Messages<PracticeAction>>()
+        let seeks: Vec<crate::seek::SeekToChartTime> = world
+            .resource::<Messages<crate::seek::SeekToChartTime>>()
             .iter_current_update_messages()
             .copied()
             .collect();
-        assert_eq!(actions, vec![PracticeAction::RestartLoop]);
+        assert_eq!(seeks.len(), 1);
+        assert!(
+            !world
+                .resource::<crate::practice::PracticeSession>()
+                .current_attempt_eligible
+        );
     }
 
     #[test]

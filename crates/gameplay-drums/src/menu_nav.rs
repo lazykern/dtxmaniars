@@ -47,6 +47,8 @@ pub(crate) fn verb_for_lane(lane: u8) -> Option<NavVerb> {
         6 | 8 => Some(NavVerb::Down),
         2 => Some(NavVerb::Confirm),
         1 => Some(NavVerb::Back),
+        3 => Some(NavVerb::Dec),
+        4 => Some(NavVerb::Inc),
         5 => Some(NavVerb::Practice),
         _ => None,
     }
@@ -182,8 +184,15 @@ mod tests {
         assert_eq!(verb_for_lane(2), Some(NavVerb::Confirm)); // BD
         assert_eq!(verb_for_lane(1), Some(NavVerb::Back)); // SD
         assert_eq!(verb_for_lane(5), Some(NavVerb::Practice)); // FT
-        assert_eq!(verb_for_lane(3), None); // HT unmapped
+        assert_eq!(verb_for_lane(3), Some(NavVerb::Dec)); // HT
+        assert_eq!(verb_for_lane(4), Some(NavVerb::Inc)); // LT
         assert_eq!(verb_for_lane(10), None); // LP unmapped
+    }
+
+    #[test]
+    fn toms_supply_explicit_quick_setting_adjustment_verbs() {
+        assert_eq!(verb_for_lane(3), Some(NavVerb::Dec));
+        assert_eq!(verb_for_lane(4), Some(NavVerb::Inc));
     }
 
     #[test]

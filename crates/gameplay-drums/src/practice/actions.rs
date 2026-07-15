@@ -54,8 +54,13 @@ pub fn action_for(bindings: &PracticeBindings, key: KeyCode) -> Option<PracticeA
 pub fn emit_practice_actions(
     keys: Res<ButtonInput<KeyCode>>,
     bindings: Res<PracticeBindings>,
+    flow: Res<super::PracticeFlow>,
+    pause: Res<State<game_shell::PauseState>>,
     mut out: MessageWriter<PracticeAction>,
 ) {
+    if !action_context_active(&flow, pause.get()) {
+        return;
+    }
     for key in keys.get_just_pressed() {
         if let Some(action) = action_for(&bindings, *key) {
             out.write(action);
@@ -75,8 +80,14 @@ pub fn apply_practice_actions(
     mut seeks: MessageWriter<SeekToChartTime>,
     mut open_settings: Option<MessageWriter<super::OpenPracticeSettings>>,
     mut toasts: ResMut<ToastQueue>,
+    flow: Res<super::PracticeFlow>,
+    pause: Res<State<game_shell::PauseState>>,
 ) {
+    let active = action_context_active(&flow, pause.get());
     for action in actions.read() {
+        if !active {
+            continue;
+        }
         match action {
             PracticeAction::SetLoopStart => {
                 let was_armed = session.trainer.ramp_armed();
@@ -147,6 +158,10 @@ pub fn apply_practice_actions(
     }
 }
 
+fn action_context_active(flow: &super::PracticeFlow, pause: &game_shell::PauseState) -> bool {
+    flow.phase == super::PracticePhase::Running && *pause == game_shell::PauseState::Running
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -204,6 +219,8 @@ mod tests {
         world.init_resource::<crate::timeline::ChipTimeline>();
         world.init_resource::<crate::resources::GameplayClock>();
         world.init_resource::<crate::practice::toast::ToastQueue>();
+        world.insert_resource(crate::practice::PracticeFlow::running());
+        world.insert_resource(State::new(game_shell::PauseState::Running));
         world.write_message(PracticeAction::OpenSettings);
 
         world

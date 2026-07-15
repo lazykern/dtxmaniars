@@ -50,7 +50,7 @@ pub(super) fn plugin(app: &mut App) {
 }
 
 #[derive(Resource, Default, Debug)]
-struct PendingLaneInputs {
+pub(crate) struct PendingLaneInputs {
     events: Vec<CapturedLaneInput>,
 }
 
@@ -62,6 +62,10 @@ struct CapturedLaneInput {
 
 pub(crate) fn clear_pending_lane_inputs(commands: &mut Commands) {
     commands.insert_resource(PendingLaneInputs::default());
+}
+
+pub(crate) fn clear_pending_lane_inputs_now(pending: &mut PendingLaneInputs) {
+    pending.events.clear();
 }
 
 fn capture_key_to_lane_input(

@@ -26,6 +26,7 @@ pub(super) fn plugin(app: &mut App) {
         (update_score_system, update_miss_system)
             .in_set(super::DrumsSets::Score)
             .run_if(in_state(game_shell::AppState::Performance))
+            .run_if(in_state(game_shell::PauseState::Running))
             .run_if(crate::practice::gameplay_input_active),
     );
 }

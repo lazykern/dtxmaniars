@@ -13,8 +13,9 @@ use crate::interp::RenderClock;
 use crate::judge::{BarLengthChangeList, BpmChangeList};
 use crate::layout::PlayfieldLayout;
 use crate::resources::{
-    ActiveChart, DrumAudioSettings, GameplayClock, MetronomeEnabled, MetronomeSound,
-    ScrollSettings, ShowPerfInfo, ShowTimingLines, TimingLineCrossed, TimingLineList,
+    ActiveChart, DrumAudioSettings, GameplayClock, LaneDisplayState, MetronomeEnabled,
+    MetronomeSound, ScrollSettings, ShowPerfInfo, ShowTimingLines, TimingLineCrossed,
+    TimingLineList,
 };
 use crate::scroll::{lookahead_ms, top_for_note_f};
 use game_shell::{AppState, EGameMode, PauseState};
@@ -55,6 +56,7 @@ pub(super) fn plugin(app: &mut App) {
         .add_systems(
             Update,
             (
+                sync_timing_line_visibility,
                 spawn_timing_lines,
                 scroll_timing_lines,
                 despawn_timing_lines,
@@ -72,6 +74,28 @@ pub(super) fn plugin(app: &mut App) {
                 .run_if(in_state(PauseState::Running))
                 .run_if(crate::practice::gameplay_input_active),
         );
+}
+
+fn sync_timing_line_visibility(
+    lane_display: Res<LaneDisplayState>,
+    show_lines: Res<ShowTimingLines>,
+    mut visuals: Query<&mut Visibility, Or<(With<TimingLineVisual>, With<BarMeasureLabel>)>>,
+) {
+    if !lane_display.is_changed() && !show_lines.is_changed() {
+        return;
+    }
+    let visibility = timing_line_visibility(*lane_display, show_lines.0);
+    for mut current in &mut visuals {
+        *current = visibility;
+    }
+}
+
+fn timing_line_visibility(lane_display: LaneDisplayState, override_lines: bool) -> Visibility {
+    if override_lines || lane_display.shows_timing_lines() {
+        Visibility::Inherited
+    } else {
+        Visibility::Hidden
+    }
 }
 
 fn preload_metronome_sound(asset_server: Res<AssetServer>, mut metronome: ResMut<MetronomeSound>) {
@@ -97,13 +121,18 @@ fn spawn_timing_lines(
     layout: Res<PlayfieldLayout>,
     scroll: Res<ScrollSettings>,
     show_lines: Res<ShowTimingLines>,
+    lane_display: Res<LaneDisplayState>,
     show_perf_info: Res<ShowPerfInfo>,
     theme: Res<ThemeResource>,
     existing_lines: Query<&TimingLineVisual>,
     existing_labels: Query<&BarMeasureLabel>,
     hud_root: Query<Entity, With<HudRoot>>,
 ) {
-    if *mode != EGameMode::Drums || !clock.is_ready() || lines.lines.is_empty() || !show_lines.0 {
+    if *mode != EGameMode::Drums
+        || !clock.is_ready()
+        || lines.lines.is_empty()
+        || (!show_lines.0 && !lane_display.shows_timing_lines())
+    {
         return;
     }
     let Ok(hud) = hud_root.single() else {
@@ -256,6 +285,7 @@ fn tick_metronome_on_cross(
     mode: Res<EGameMode>,
     lines: Res<TimingLineList>,
     show_lines: Res<ShowTimingLines>,
+    lane_display: Res<LaneDisplayState>,
     metronome_on: Res<MetronomeEnabled>,
     metronome_sound: Res<MetronomeSound>,
     audio_settings: Res<DrumAudioSettings>,
@@ -266,7 +296,7 @@ fn tick_metronome_on_cross(
 ) {
     if *mode != EGameMode::Drums
         || !clock.is_ready()
-        || !show_lines.0
+        || (!show_lines.0 && !lane_display.shows_timing_lines())
         || !metronome_on.0
         || lines.lines.is_empty()
     {
@@ -330,5 +360,26 @@ mod tests {
         let (beat_h, beat_c) = line_style(TimingLineKind::Beat, 1.0);
         assert_eq!(bar_h, beat_h);
         assert!(bar_c.alpha() > beat_c.alpha());
+    }
+
+    #[test]
+    fn all_runtime_modes_drive_existing_timing_line_visibility() {
+        use dtx_config::LaneDisplay::*;
+        for (mode, expected) in [
+            (AllOn, Visibility::Inherited),
+            (Half, Visibility::Inherited),
+            (LineOff, Visibility::Hidden),
+            (AllOff, Visibility::Hidden),
+        ] {
+            assert_eq!(
+                timing_line_visibility(LaneDisplayState(mode), false),
+                expected
+            );
+        }
+        assert_eq!(
+            timing_line_visibility(LaneDisplayState(AllOff), true),
+            Visibility::Inherited,
+            "calibration may temporarily force timing lines"
+        );
     }
 }

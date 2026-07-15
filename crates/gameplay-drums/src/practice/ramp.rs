@@ -87,13 +87,17 @@ use crate::timeline::ChipTimeline;
 /// start and restarts the loop so the first pass is clean.
 pub fn handle_toggle_ramp(
     mut actions: MessageReader<super::actions::PracticeAction>,
+    flow: Res<super::PracticeFlow>,
+    pause: Res<State<game_shell::PauseState>>,
     mut session: ResMut<PracticeSession>,
     timeline: Res<ChipTimeline>,
     mut seeks: MessageWriter<SeekToChartTime>,
     mut toasts: ResMut<ToastQueue>,
 ) {
+    let active = flow.phase == super::PracticePhase::Running
+        && *pause.get() == game_shell::PauseState::Running;
     for action in actions.read() {
-        if *action != super::actions::PracticeAction::ToggleRamp {
+        if !active || *action != super::actions::PracticeAction::ToggleRamp {
             continue;
         }
         if session.trainer.ramp_armed() {
@@ -172,12 +176,11 @@ pub(super) fn plugin(app: &mut App) {
     use game_shell::AppState;
     app.add_systems(
         Update,
-        // Not Running-gated: the rail's ramp row (Task 12) toggles while
-        // paused via the same message.
+        // Always registered so stale action messages are drained outside
+        // Running; the consumer predicates mutation on the live flow state.
         handle_toggle_ramp
             .run_if(in_state(AppState::Performance))
-            .run_if(resource_exists::<PracticeSession>)
-            .run_if(super::gameplay_input_active),
+            .run_if(resource_exists::<PracticeSession>),
     )
     .add_systems(
         FixedUpdate,

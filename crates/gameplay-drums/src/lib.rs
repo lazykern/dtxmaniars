@@ -105,6 +105,7 @@ pub fn plugin(app: &mut App) {
     .init_resource::<resources::ShowPerfInfo>()
     .init_resource::<resources::MetronomeEnabled>()
     .init_resource::<resources::ShowTimingLines>()
+    .init_resource::<resources::LaneDisplayState>()
     .init_resource::<resources::NoFailEnabled>()
     .init_resource::<resources::JudgmentCounts>()
     .init_resource::<resources::ScrollSettings>()
@@ -376,6 +377,7 @@ fn apply_config_on_enter(
     mut show_perf_info: ResMut<resources::ShowPerfInfo>,
     mut metronome_on: ResMut<resources::MetronomeEnabled>,
     mut show_timing_lines: ResMut<resources::ShowTimingLines>,
+    mut lane_display: ResMut<resources::LaneDisplayState>,
     mut no_fail: ResMut<resources::NoFailEnabled>,
     mut bga_settings: ResMut<dtx_bga::BgaSettings>,
     chart: Res<resources::ActiveChart>,
@@ -395,6 +397,7 @@ fn apply_config_on_enter(
     show_perf_info.0 = cfg.system.show_perf_info;
     metronome_on.0 = cfg.system.metronome;
     show_timing_lines.0 = cfg.gameplay.lane_display.shows_timing_lines();
+    lane_display.0 = cfg.gameplay.lane_display;
     no_fail.0 = cfg.gameplay.fail_mode() == dtx_config::FailMode::NoFail;
     bgm_adjust.song_ms = chart
         .source_path
@@ -580,6 +583,7 @@ mod midi_consumer {
         chart: Res<crate::resources::ActiveChart>,
         clock: Res<GameplayClock>,
         flow: Option<Res<crate::practice::PracticeFlow>>,
+        pause: Res<State<game_shell::PauseState>>,
         mut hits: MessageWriter<InputHit>,
         mut nav_hits: MessageWriter<PadNavHit>,
         mut verb_hits: MessageWriter<super::events::SystemVerbHit>,
@@ -590,9 +594,12 @@ mod midi_consumer {
         }
         let mut buf: Vec<dtx_input::midi::MidiEvent> = Vec::new();
         (*source).poll(&mut buf);
-        let gameplay_ready = !chart.chart.chips.is_empty()
-            && clock.is_ready()
-            && crate::practice::gameplay_input_active(flow);
+        let gameplay_ready = gameplay_ready(
+            !chart.chart.chips.is_empty(),
+            clock.is_ready(),
+            crate::practice::gameplay_input_active(flow),
+            pause.get(),
+        );
         let consumed =
             consume_midi_events(buf, &resolver, gameplay_ready, clock.current_ms, &mut last);
         for hit in consumed.hits {
@@ -604,6 +611,15 @@ mod midi_consumer {
         for verb in consumed.verbs {
             verb_hits.write(super::events::SystemVerbHit { verb });
         }
+    }
+
+    fn gameplay_ready(
+        chart_ready: bool,
+        clock_ready: bool,
+        practice_ready: bool,
+        pause: &game_shell::PauseState,
+    ) -> bool {
+        chart_ready && clock_ready && practice_ready && *pause == game_shell::PauseState::Running
     }
 
     struct ConsumedMidi {
@@ -745,6 +761,40 @@ mod midi_consumer {
 
             assert!(gated.hits.is_empty());
             assert!(next.hits.is_empty());
+        }
+
+        #[test]
+        fn paused_midi_keeps_navigation_and_verbs_but_never_gameplay() {
+            use dtx_input::{BindSource, InputBindings, SystemVerb};
+            let mut bindings = InputBindings::default();
+            bindings.bind_system(SystemVerb::Pause, BindSource::Midi { note: 100 });
+            let resolver = crate::bindings::BindResolver::from_bindings(&bindings);
+            let mut last = LastMidiHit::default();
+
+            let out = consume_midi_events(
+                [
+                    dtx_input::midi::MidiEvent::NoteOn {
+                        note: 38,
+                        velocity: 100,
+                        audio_ms: 2_000,
+                        captured_at: std::time::Instant::now(),
+                    },
+                    dtx_input::midi::MidiEvent::NoteOn {
+                        note: 100,
+                        velocity: 100,
+                        audio_ms: 2_000,
+                        captured_at: std::time::Instant::now(),
+                    },
+                ],
+                &resolver,
+                gameplay_ready(true, true, true, &game_shell::PauseState::Paused),
+                2_000,
+                &mut last,
+            );
+
+            assert!(out.hits.is_empty());
+            assert_eq!(out.nav_lanes, vec![1]);
+            assert_eq!(out.verbs, vec![SystemVerb::Pause]);
         }
 
         #[test]

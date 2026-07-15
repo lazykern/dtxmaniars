@@ -1,4 +1,5 @@
-//! Practice mode: seek/scrub, A/B loop, playback rate, attempt stats.
+//! Practice mode: Setup/Settings timeline editing, A/B loop, playback rate,
+//! and attempt stats.
 //!
 //! `PracticeSession` present = practice; absent = normal play with zero
 //! behavior change. Inserted on Performance enter when
@@ -61,9 +62,7 @@ fn add_action_systems(app: &mut App) {
             )
                 .chain()
                 .run_if(in_state(AppState::Performance))
-                .run_if(in_state(game_shell::PauseState::Running))
                 .run_if(resource_exists::<PracticeSession>)
-                .run_if(gameplay_input_active)
                 .run_if(crate::editor::editor_closed),
         );
 }
@@ -332,6 +331,7 @@ mod tests {
             .init_resource::<toast::ToastQueue>()
             .add_message::<crate::seek::SeekToChartTime>()
             .insert_resource(PracticeSession::default())
+            .insert_resource(PracticeFlow::running())
             .insert_resource(crate::editor::EditorOpen(true));
         add_action_systems(&mut app);
         app.world_mut()
