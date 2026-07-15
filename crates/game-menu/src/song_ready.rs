@@ -315,7 +315,9 @@ fn manage_song_ready_ui(
 ) {
     if state.layer == SongReadyLayer::Closed {
         for entity in &existing {
-            commands.entity(entity).despawn();
+            commands
+                .entity(entity)
+                .queue_silenced(bevy::ecs::system::entity_command::despawn());
         }
         return;
     }

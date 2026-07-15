@@ -635,13 +635,12 @@ pub fn plugin(app: &mut App) {
                 )
                     .chain(),
                 update_song_select_legend,
-                install_song_select_pointer_targets,
+                (respawn_wheel_on_change, install_song_select_pointer_targets).chain(),
                 song_select_pointer_input,
                 render_song_select_focus,
                 update_scan_problem_summary,
                 update_discovery_summary,
                 (search_input, render_search_on_change).chain(),
-                respawn_wheel_on_change,
                 wheel_layout_system,
                 update_left_cluster,
                 render_difficulty_grid,
@@ -1854,10 +1853,20 @@ fn install_song_select_pointer_targets(
     difficulties: Query<Entity, Added<DifficultySlotPanel>>,
 ) {
     for entity in &rows {
-        commands.entity(entity).insert(Button);
+        commands
+            .entity(entity)
+            .queue_silenced(bevy::ecs::system::entity_command::insert(
+                Button,
+                bevy::ecs::bundle::InsertMode::Replace,
+            ));
     }
     for entity in &difficulties {
-        commands.entity(entity).insert(Button);
+        commands
+            .entity(entity)
+            .queue_silenced(bevy::ecs::system::entity_command::insert(
+                Button,
+                bevy::ecs::bundle::InsertMode::Replace,
+            ));
     }
 }
 
@@ -3219,6 +3228,21 @@ mod tests {
             .init_resource::<crate::song_ready::SongReadyState>()
             .init_resource::<crate::song_ready::ReadyConfigDraft>();
         plugin(&mut app);
+
+        app.update();
+    }
+
+    #[test]
+    fn pointer_target_installation_tolerates_same_frame_row_rebuild() {
+        fn despawn_rows(mut commands: Commands, rows: Query<Entity, With<WheelRow>>) {
+            for entity in &rows {
+                commands.entity(entity).despawn();
+            }
+        }
+
+        let mut app = App::new();
+        app.world_mut().spawn(WheelRow { index: 0 });
+        app.add_systems(Update, (despawn_rows, install_song_select_pointer_targets));
 
         app.update();
     }
