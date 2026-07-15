@@ -1,4 +1,4 @@
-//! Pure math for the full-HUD timeline: cursor x ↔ chart ms, drag→loop
+//! Pure math for the Practice Setup timeline: cursor x ↔ chart ms, drag→loop
 //! region snapping, bar numbering, and the press/drag gesture machine.
 
 use bevy::prelude::*;
@@ -45,7 +45,7 @@ pub fn bar_number(bar_ms: &[i64], ms: i64) -> usize {
     }
 }
 
-/// Mouse gesture on the full-HUD timeline strip.
+/// Mouse gesture on the Practice Setup timeline strip.
 #[derive(Resource, Debug, Default, Clone, Copy, PartialEq)]
 pub enum TimelineGesture {
     #[default]

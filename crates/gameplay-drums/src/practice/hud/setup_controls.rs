@@ -153,6 +153,8 @@ pub enum PracticeUiAction {
     CancelPresetPrompt,
     StartOrContinue,
     Preview(PreviewAction),
+    SelectTab(super::setup::PracticeTab),
+    MoveTab(i8),
     Confirm,
     Back,
 }
@@ -162,9 +164,45 @@ pub struct StartOrContinueRequested;
 
 pub fn keyboard_actions(
     keys: Res<ButtonInput<KeyCode>>,
+    tab: Res<super::setup::PracticeTab>,
+    flow: Res<PracticeFlow>,
     mut actions: MessageWriter<PracticeUiAction>,
 ) {
-    let action = if keys.just_pressed(KeyCode::ArrowUp) {
+    let action = if keys.just_pressed(KeyCode::Tab) {
+        Some(PracticeUiAction::MoveTab(1))
+    } else if *tab == super::setup::PracticeTab::Preview && keys.just_pressed(KeyCode::ArrowLeft) {
+        Some(PracticeUiAction::Preview(PreviewAction::PrevBar))
+    } else if *tab == super::setup::PracticeTab::Preview && keys.just_pressed(KeyCode::ArrowRight) {
+        Some(PracticeUiAction::Preview(PreviewAction::NextBar))
+    } else if *tab == super::setup::PracticeTab::Preview
+        && (keys.just_pressed(KeyCode::Enter) || keys.just_pressed(KeyCode::Space))
+    {
+        Some(PracticeUiAction::Preview(
+            if flow.preview == PreviewState::Playing {
+                PreviewAction::Pause
+            } else {
+                PreviewAction::Play
+            },
+        ))
+    } else if *tab == super::setup::PracticeTab::Progress
+        && (keys.just_pressed(KeyCode::ArrowUp) || keys.just_pressed(KeyCode::ArrowLeft))
+    {
+        Some(PracticeUiAction::MoveTab(-1))
+    } else if *tab == super::setup::PracticeTab::Progress
+        && (keys.just_pressed(KeyCode::ArrowDown) || keys.just_pressed(KeyCode::ArrowRight))
+    {
+        Some(PracticeUiAction::MoveTab(1))
+    } else if *tab == super::setup::PracticeTab::Progress
+        && (keys.just_pressed(KeyCode::Enter) || keys.just_pressed(KeyCode::Space))
+    {
+        Some(PracticeUiAction::SelectTab(
+            super::setup::PracticeTab::Setup,
+        ))
+    } else if *tab == super::setup::PracticeTab::Preview && keys.just_pressed(KeyCode::ArrowUp) {
+        Some(PracticeUiAction::MoveTab(-1))
+    } else if *tab == super::setup::PracticeTab::Preview && keys.just_pressed(KeyCode::ArrowDown) {
+        Some(PracticeUiAction::MoveTab(1))
+    } else if keys.just_pressed(KeyCode::ArrowUp) {
         Some(PracticeUiAction::MoveSelection(-1))
     } else if keys.just_pressed(KeyCode::ArrowDown) {
         Some(PracticeUiAction::MoveSelection(1))
@@ -186,17 +224,59 @@ pub fn keyboard_actions(
 
 pub fn nav_actions(
     mut nav: MessageReader<game_shell::NavAction>,
+    tab: Res<super::setup::PracticeTab>,
+    flow: Res<PracticeFlow>,
     mut actions: MessageWriter<PracticeUiAction>,
 ) {
     for action in nav.read() {
-        let action = match action.verb {
-            game_shell::NavVerb::Up => PracticeUiAction::MoveSelection(-1),
-            game_shell::NavVerb::Down => PracticeUiAction::MoveSelection(1),
-            game_shell::NavVerb::Dec => PracticeUiAction::Adjust(-1),
-            game_shell::NavVerb::Inc => PracticeUiAction::Adjust(1),
-            game_shell::NavVerb::Confirm => PracticeUiAction::Confirm,
-            game_shell::NavVerb::Back => PracticeUiAction::Back,
-            game_shell::NavVerb::Practice => continue,
+        let action = match (*tab, action.verb) {
+            (_, game_shell::NavVerb::Back) => PracticeUiAction::Back,
+            (_, game_shell::NavVerb::Practice) => PracticeUiAction::MoveTab(1),
+            (super::setup::PracticeTab::Setup, game_shell::NavVerb::Up) => {
+                PracticeUiAction::MoveSelection(-1)
+            }
+            (super::setup::PracticeTab::Setup, game_shell::NavVerb::Down) => {
+                PracticeUiAction::MoveSelection(1)
+            }
+            (super::setup::PracticeTab::Setup, game_shell::NavVerb::Dec) => {
+                PracticeUiAction::Adjust(-1)
+            }
+            (super::setup::PracticeTab::Setup, game_shell::NavVerb::Inc) => {
+                PracticeUiAction::Adjust(1)
+            }
+            (super::setup::PracticeTab::Setup, game_shell::NavVerb::Confirm) => {
+                PracticeUiAction::Confirm
+            }
+            (
+                super::setup::PracticeTab::Progress,
+                game_shell::NavVerb::Up | game_shell::NavVerb::Dec,
+            )
+            | (super::setup::PracticeTab::Preview, game_shell::NavVerb::Up) => {
+                PracticeUiAction::MoveTab(-1)
+            }
+            (
+                super::setup::PracticeTab::Progress,
+                game_shell::NavVerb::Down | game_shell::NavVerb::Inc,
+            )
+            | (super::setup::PracticeTab::Preview, game_shell::NavVerb::Down) => {
+                PracticeUiAction::MoveTab(1)
+            }
+            (super::setup::PracticeTab::Progress, game_shell::NavVerb::Confirm) => {
+                PracticeUiAction::SelectTab(super::setup::PracticeTab::Setup)
+            }
+            (super::setup::PracticeTab::Preview, game_shell::NavVerb::Dec) => {
+                PracticeUiAction::Preview(PreviewAction::PrevBar)
+            }
+            (super::setup::PracticeTab::Preview, game_shell::NavVerb::Inc) => {
+                PracticeUiAction::Preview(PreviewAction::NextBar)
+            }
+            (super::setup::PracticeTab::Preview, game_shell::NavVerb::Confirm) => {
+                PracticeUiAction::Preview(if flow.preview == PreviewState::Playing {
+                    PreviewAction::Pause
+                } else {
+                    PreviewAction::Play
+                })
+            }
         };
         actions.write(action);
     }
@@ -205,6 +285,7 @@ pub fn nav_actions(
 pub fn apply_ui_actions(
     mut actions: MessageReader<PracticeUiAction>,
     mut selection: ResMut<SetupSelection>,
+    mut tab: ResMut<super::setup::PracticeTab>,
     mut draft: ResMut<PracticeDraft>,
     mut flow: ResMut<PracticeFlow>,
     mut prompt: ResMut<PracticePresetPrompt>,
@@ -371,6 +452,10 @@ pub fn apply_ui_actions(
             }
             PracticeUiAction::Preview(action) => {
                 previews.write(action);
+            }
+            PracticeUiAction::SelectTab(next) => *tab = next,
+            PracticeUiAction::MoveTab(direction) => {
+                *tab = tab.offset(direction);
             }
             PracticeUiAction::Confirm => activate_selected(
                 selection.0,
@@ -656,12 +741,15 @@ pub(super) fn plugin(app: &mut App) {
         .add_systems(OnEnter(game_shell::AppState::Performance), reset_selection)
         .add_systems(
             Update,
-            (keyboard_actions, nav_actions).before(apply_ui_actions),
+            (keyboard_actions, nav_actions)
+                .run_if(crate::practice::practice_surface_open)
+                .before(apply_ui_actions),
         )
         .add_systems(
             Update,
             apply_ui_actions
                 .after(super::setup::setup_button_actions)
+                .after(super::setup::update_tab_selection)
                 .after(super::timeline_ui::timeline_mouse)
                 .after(super::timeline_ui::preview_transport_buttons)
                 .before(super::setup::ensure_setup_shell)

@@ -65,6 +65,7 @@ pub fn spawn_chip(
         StatusChip,
         Text::new(chip_text(&session, &timeline.bar_ms)),
         Theme::label_font(),
+        dtx_ui::SemanticText(dtx_ui::TypographyRole::Label),
         TextColor(theme.text_primary),
         Node {
             position_type: PositionType::Absolute,

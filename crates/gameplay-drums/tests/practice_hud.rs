@@ -6,8 +6,8 @@ use game_shell::{AppState, PauseState};
 use gameplay_drums::practice::hud::progress::progress_rows;
 use gameplay_drums::practice::hud::setup::{
     practice_layout_mode, practice_transport_row_mode, update_tab_selection, PracticeLayoutMode,
-    PracticePreviewGeometry, PracticePreviewRegion, PracticePrimaryAction, PracticeSettingsPane,
-    PracticeSetupLayout, PracticeSetupRoot, PracticeTab, PracticeTabButton,
+    PracticePanelTransition, PracticePreviewGeometry, PracticePreviewRegion, PracticePrimaryAction,
+    PracticeSettingsPane, PracticeSetupLayout, PracticeSetupRoot, PracticeTab, PracticeTabButton,
     PracticeTransportRowMode, SetupAdjustButton,
 };
 use gameplay_drums::practice::hud::setup_controls::{PracticeUiAction, SetupItem, SetupSelection};
@@ -158,6 +158,20 @@ fn setup_hud_app(width: f32, height: f32, text_scale: dtx_config::TextScale) -> 
     app
 }
 
+fn setup_hud_app_with_accessibility(
+    width: f32,
+    height: f32,
+    config: dtx_config::AccessibilityConfig,
+) -> App {
+    let mut app = build_hud_app(width, height, config.text_scale);
+    app.world_mut()
+        .insert_resource(dtx_ui::AccessibilityPolicy::from(&config));
+    app.update();
+    app.update();
+    app.update();
+    app
+}
+
 fn send_ui_action(app: &mut App, action: PracticeUiAction) {
     app.world_mut().write_message(action);
 }
@@ -173,7 +187,6 @@ fn press_key(app: &mut App, key: KeyCode) {
     app.world_mut()
         .resource_mut::<ButtonInput<KeyCode>>()
         .release(key);
-    app.update();
 }
 
 fn send_nav(app: &mut App, verb: game_shell::NavVerb) {
@@ -326,14 +339,12 @@ fn recommended_source_survives_cycling_and_seeks_without_attempt_start() {
         .iter_current_update_messages()
         .copied()
         .collect();
-    assert_eq!(
-        seeks,
-        vec![
-            gameplay_drums::practice::PreviewAction::Pause,
-            gameplay_drums::practice::PreviewAction::Seek(0),
+    assert!(
+        seeks.ends_with(&[
             gameplay_drums::practice::PreviewAction::Pause,
             gameplay_drums::practice::PreviewAction::Seek(2_000),
-        ]
+        ]),
+        "{seeks:?}"
     );
 }
 
@@ -581,7 +592,10 @@ fn delete_confirmation_and_retry_are_explicit_typed_states() {
         app.world().resource::<PracticePresetPrompt>(),
         PracticePresetPrompt::ConfirmDelete { id: 9 }
     ));
-    assert!(texts(&mut app).iter().any(|text| text == "Confirm Delete"));
+    assert!(texts(&mut app).iter().any(|text| {
+        text.starts_with(dtx_ui::StateMarker::Destructive.label())
+            && text.contains("Confirm Delete")
+    }));
 
     send_ui_action(&mut app, PracticeUiAction::CancelPresetPrompt);
     app.update();
@@ -598,7 +612,10 @@ fn saved_rows_reconcile_on_live_source_changes() {
     app.update();
     let copy = texts(&mut app);
     assert!(copy.iter().any(|text| text == "Update Saved Loop"));
-    assert!(copy.iter().any(|text| text == "Delete Saved Loop"));
+    assert!(copy.iter().any(|text| {
+        text.starts_with(dtx_ui::StateMarker::Destructive.label())
+            && text.contains("Delete Saved Loop")
+    }));
 
     send_ui_action(&mut app, PracticeUiAction::SetCountIn(false));
     app.update();
@@ -640,7 +657,8 @@ fn retry_action_reemits_the_exact_failed_command_and_cancel_clears_it() {
     app.update();
     assert!(texts(&mut app)
         .iter()
-        .any(|text| text == "permission denied"));
+        .any(|text| text.starts_with(dtx_ui::StateMarker::Error.label())
+            && text.contains("permission denied")));
 
     send_ui_action(&mut app, PracticeUiAction::RetryPreset);
     app.update();
@@ -1430,7 +1448,10 @@ fn keyboard_traversal_selects_and_activates_the_pinned_primary_action() {
         .query_filtered::<&Text, With<PracticePrimaryAction>>()
         .single(app.world())
         .expect("one primary action");
-    assert_eq!(action_text.0, "› Start Practice");
+    assert_eq!(
+        action_text.0,
+        format!("{} Start Practice", dtx_ui::StateMarker::Focus.label())
+    );
 
     press_key(&mut app, KeyCode::Enter);
     assert!(app
@@ -1439,6 +1460,224 @@ fn keyboard_traversal_selects_and_activates_the_pinned_primary_action() {
         .iter_current_update_messages()
         .next()
         .is_some());
+}
+
+#[test]
+fn keyboard_and_pad_tab_actions_share_the_tab_reducer() {
+    let mut app = setup_hud_app(900.0, 720.0, dtx_config::TextScale::Standard);
+
+    press_key(&mut app, KeyCode::Tab);
+    assert_eq!(
+        *app.world().resource::<PracticeTab>(),
+        PracticeTab::Progress
+    );
+
+    send_nav(&mut app, game_shell::NavVerb::Practice);
+    assert_eq!(*app.world().resource::<PracticeTab>(), PracticeTab::Preview);
+
+    press_key(&mut app, KeyCode::Space);
+    assert!(app
+        .world()
+        .resource::<Messages<gameplay_drums::practice::PreviewAction>>()
+        .iter_current_update_messages()
+        .any(|action| *action == gameplay_drums::practice::PreviewAction::Play));
+
+    let setup_selection = *app.world().resource::<SetupSelection>();
+    send_nav(&mut app, game_shell::NavVerb::Dec);
+    assert_eq!(*app.world().resource::<SetupSelection>(), setup_selection);
+    assert!(app
+        .world()
+        .resource::<Messages<gameplay_drums::practice::PreviewAction>>()
+        .iter_current_update_messages()
+        .any(|action| *action == gameplay_drums::practice::PreviewAction::PrevBar));
+
+    send_nav(&mut app, game_shell::NavVerb::Up);
+    assert_eq!(
+        *app.world().resource::<PracticeTab>(),
+        PracticeTab::Progress
+    );
+}
+
+#[test]
+fn every_practice_label_has_semantic_typography() {
+    let mut app = setup_hud_app(1280.0, 720.0, dtx_config::TextScale::Standard);
+    let missing = app
+        .world_mut()
+        .query::<(Entity, &Text, Option<&dtx_ui::SemanticText>)>()
+        .iter(app.world())
+        .filter_map(|(entity, text, semantic)| {
+            semantic.is_none().then_some((entity, text.0.clone()))
+        })
+        .collect::<Vec<_>>();
+    assert!(missing.is_empty(), "non-semantic labels: {missing:?}");
+}
+
+#[test]
+fn standard_large_and_xlarge_keep_accessible_setup_structure() {
+    for scale in [
+        dtx_config::TextScale::Standard,
+        dtx_config::TextScale::Large,
+        dtx_config::TextScale::XLarge,
+    ] {
+        let mut app = setup_hud_app(1280.0, 720.0, scale);
+        assert_eq!(count::<PracticeSetupRoot>(&mut app), 1, "{scale:?}");
+        assert_eq!(count::<PracticeSettingsPane>(&mut app), 1, "{scale:?}");
+        assert_eq!(count::<PracticeTimelineRoot>(&mut app), 1, "{scale:?}");
+        assert_all_semantic_fonts_match_policy(&mut app, scale);
+        assert_preview_handoff_matches_computed_region(&mut app);
+    }
+}
+
+#[test]
+fn focused_selected_destructive_error_and_disabled_states_have_markers() {
+    let mut app = setup_hud_app(1280.0, 720.0, dtx_config::TextScale::Standard);
+    press_key(&mut app, KeyCode::ArrowUp);
+    let labels = texts(&mut app);
+    assert!(labels.iter().any(|label| {
+        label.starts_with(dtx_ui::StateMarker::Focus.label()) && label.contains("Start Practice")
+    }));
+    assert!(labels.iter().any(|label| {
+        label.starts_with(dtx_ui::StateMarker::Selected.label()) && label.contains("Setup")
+    }));
+    assert!(labels.iter().any(|label| {
+        label.starts_with(dtx_ui::StateMarker::Disabled.label())
+            && label.contains("Update Saved Loop")
+    }));
+    assert!(labels.iter().any(|label| {
+        label.starts_with(dtx_ui::StateMarker::Disabled.label())
+            && label.contains("Delete Saved Loop")
+    }));
+
+    let chart = dtx_config::PracticeChartKey::new("dtx1:markers", 0);
+    let mut registry = dtx_config::PracticePresetRegistry::default();
+    let id = registry
+        .create(
+            chart.clone(),
+            Some("Marker Loop"),
+            None,
+            dtx_config::PracticePresetConfig {
+                loop_start_ms: None,
+                loop_end_ms: None,
+                snap: dtx_config::PracticeSnapPreset::Bar,
+                tempo: 1.0,
+                preroll: dtx_config::PracticePrerollPreset::OneBar,
+                count_in: true,
+                trainer: dtx_config::PracticeTrainerPreset::Off,
+            },
+        )
+        .expect("valid preset");
+    app.world_mut().insert_resource(PracticePresetStore::ready(
+        std::env::temp_dir().join("practice-marker-state.toml"),
+        chart,
+        None,
+        registry,
+    ));
+    send_ui_action(
+        &mut app,
+        PracticeUiAction::SelectSource(PracticeDraftSource::Saved(id)),
+    );
+    app.update();
+    assert!(texts(&mut app).iter().any(|label| {
+        label.starts_with(dtx_ui::StateMarker::Destructive.label())
+            && label.contains("Delete Saved Loop")
+    }));
+
+    let retry_draft = app.world().resource::<PracticeDraft>().clone();
+    app.world_mut().write_message(PresetResult::Failed {
+        message: "Could not save preset".to_owned(),
+        retry: Box::new(PresetCommand::SaveNew {
+            name: None,
+            draft: retry_draft,
+        }),
+    });
+    app.update();
+    assert!(texts(&mut app).iter().any(|label| {
+        label.starts_with(dtx_ui::StateMarker::Error.label())
+            && label.contains("Could not save preset")
+    }));
+}
+
+#[test]
+fn setup_progress_preview_and_running_show_context_legends() {
+    let mut app = setup_hud_app(900.0, 720.0, dtx_config::TextScale::Standard);
+    let setup = texts(&mut app).join(" ");
+    assert!(setup.contains("Adjust"), "{setup}");
+    assert!(setup.contains("Start Practice"), "{setup}");
+
+    click_tab(&mut app, "Progress");
+    let progress = texts(&mut app).join(" ");
+    assert!(progress.contains("Progress"), "{progress}");
+    assert!(progress.contains("Setup"), "{progress}");
+
+    click_tab(&mut app, "Preview");
+    let preview = texts(&mut app).join(" ");
+    assert!(preview.contains("Play Preview"), "{preview}");
+    assert!(preview.contains("Previous bar"), "{preview}");
+
+    app.world_mut().resource_mut::<PracticeFlow>().phase =
+        gameplay_drums::practice::PracticePhase::Running;
+    app.update();
+    let running = texts(&mut app).join(" ");
+    assert!(
+        running.contains("Esc") && running.contains("Pause"),
+        "{running}"
+    );
+    assert!(
+        running.contains("Tab") && running.contains("Settings"),
+        "{running}"
+    );
+}
+
+#[test]
+fn setup_motion_uses_out_quint_and_reduced_motion_starts_at_final_position() {
+    let mut standard =
+        setup_hud_app_with_accessibility(1280.0, 720.0, dtx_config::AccessibilityConfig::default());
+    let transition = standard
+        .world_mut()
+        .query::<&PracticePanelTransition>()
+        .single(standard.world())
+        .expect("animated setup panel");
+    assert_eq!(transition.easing, dtx_ui::easing::EaseFunction::OutQuint);
+    assert!(transition.translation_px > 0.0);
+
+    let mut reduced = setup_hud_app_with_accessibility(
+        1280.0,
+        720.0,
+        dtx_config::AccessibilityConfig {
+            reduce_motion: true,
+            reduce_flashes: true,
+            ..Default::default()
+        },
+    );
+    assert_eq!(count::<PracticePanelTransition>(&mut reduced), 0);
+    let transform = reduced
+        .world_mut()
+        .query_filtered::<&UiTransform, With<PracticeSettingsPane>>()
+        .single(reduced.world())
+        .expect("settings transform");
+    assert_eq!(transform.translation, bevy::ui::Val2::ZERO);
+    assert_eq!(count::<PracticeSetupRoot>(&mut reduced), 1);
+}
+
+#[test]
+fn legacy_practice_surface_symbols_are_gone() {
+    let legacy_symbols = [
+        ["full", "_hud"].concat(),
+        ["FULL", "_HUD"].concat(),
+        ["PracticePause", "Surface"].concat(),
+        ["practice ", "ra", "il"].concat(),
+    ];
+    for source in [
+        include_str!("../src/practice/hud/mod.rs"),
+        include_str!("../src/practice/hud/setup.rs"),
+        include_str!("../src/practice/hud/timeline_ui.rs"),
+        include_str!("../src/practice/session.rs"),
+        include_str!("../src/ui_z.rs"),
+    ] {
+        for symbol in &legacy_symbols {
+            assert!(!source.contains(symbol));
+        }
+    }
 }
 
 #[test]

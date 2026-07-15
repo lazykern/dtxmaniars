@@ -707,6 +707,7 @@ fn spawn_overlay(
                                     Button,
                                     Text::new(label),
                                     Theme::hud_font(),
+                                    dtx_ui::SemanticText(dtx_ui::TypographyRole::Hud),
                                     TextColor(theme.text_primary),
                                 ));
                             }
@@ -714,18 +715,18 @@ fn spawn_overlay(
                     }
                 }
             });
-            if midi.is_some_and(|m| m.0) {
-                dtx_ui::widget::nav_legend::spawn_nav_legend(
-                    root,
-                    &theme,
-                    &[
-                        ("HH", "up"),
-                        ("CY", "down"),
-                        ("BD", "select"),
-                        ("SD", "resume"),
-                    ],
-                );
-            }
+            let legend: &[dtx_ui::widget::nav_legend::LegendItem<'_>] = if midi.is_some_and(|m| m.0)
+            {
+                &[
+                    ("HH", "up"),
+                    ("CY", "down"),
+                    ("BD", "select"),
+                    ("SD", "resume"),
+                ]
+            } else {
+                &[("↑/↓", "move"), ("Enter", "select"), ("Esc", "resume")]
+            };
+            dtx_ui::widget::nav_legend::spawn_nav_legend(root, &theme, legend);
         });
 }
 

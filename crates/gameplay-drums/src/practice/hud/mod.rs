@@ -54,6 +54,7 @@ pub fn plugin(app: &mut App) {
                 timeline_ui::preview_transport_buttons
                     .run_if(crate::practice::practice_surface_open),
                 setup::ensure_setup_shell,
+                setup::animate_setup_transitions,
                 timeline_ui::update_timeline_markers.run_if(crate::practice::practice_surface_open),
                 timeline_ui::update_transport_label.run_if(crate::practice::practice_surface_open),
                 setup::refresh_setup_copy.run_if(crate::practice::practice_surface_open),

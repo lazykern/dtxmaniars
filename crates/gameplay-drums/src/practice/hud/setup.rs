@@ -21,6 +21,20 @@ impl PracticeTab {
             Self::Preview => "Preview",
         }
     }
+
+    pub(super) fn offset(self, direction: i8) -> Self {
+        let current = Self::ALL
+            .iter()
+            .position(|candidate| *candidate == self)
+            .unwrap_or(0);
+        let len = Self::ALL.len();
+        let next = if direction >= 0 {
+            (current + 1) % len
+        } else {
+            (current + len - 1) % len
+        };
+        Self::ALL[next]
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -137,6 +151,21 @@ pub struct PracticePreviewRegion;
 #[derive(Component)]
 pub struct PracticePrimaryAction;
 
+#[derive(Component, Debug, Clone, Copy, PartialEq)]
+pub struct PracticePanelTransition {
+    pub elapsed_ms: f32,
+    pub duration_ms: f32,
+    pub translation_px: f32,
+    pub easing: dtx_ui::easing::EaseFunction,
+}
+
+#[derive(Component, Debug, Clone, Copy, PartialEq)]
+pub struct PracticeTabCrossfade {
+    elapsed_ms: f32,
+    duration_ms: f32,
+    easing: dtx_ui::easing::EaseFunction,
+}
+
 #[derive(Component)]
 pub(super) struct PrimaryActionButton;
 
@@ -227,6 +256,9 @@ pub(super) fn ensure_setup_shell(
     let text_multiplier = accessibility
         .as_deref()
         .map_or(1.0, dtx_ui::AccessibilityPolicy::text_multiplier);
+    let allow_motion = accessibility
+        .as_deref()
+        .is_none_or(|policy| policy.motion_decision() == dtx_ui::MotionDecision::Full);
     let mode = practice_layout_mode(width, height, text_multiplier);
     let chrome = PracticeChromeGeometry::resolve(width, text_multiplier);
     let (settings_width, preview_min_width) = required_pane_widths(width, height, text_multiplier);
@@ -274,6 +306,7 @@ pub(super) fn ensure_setup_shell(
         &session,
         &timeline,
         &prompt,
+        allow_motion,
     );
 }
 
@@ -315,6 +348,7 @@ fn spawn_setup_shell(
     session: &PracticeSession,
     timeline: &crate::timeline::ChipTimeline,
     prompt: &super::setup_controls::PracticePresetPrompt,
+    allow_motion: bool,
 ) {
     let theme = dtx_ui::Theme::default();
     commands
@@ -332,7 +366,7 @@ fn spawn_setup_shell(
                 min_height: Val::Px(0.0),
                 ..default()
             },
-            GlobalZIndex(crate::ui_z::PRACTICE_FULL_HUD),
+            GlobalZIndex(crate::ui_z::PRACTICE_SETUP),
         ))
         .with_children(|root| {
             spawn_tab_chrome(root, &theme, mode, tab, chrome.tab_height);
@@ -356,6 +390,7 @@ fn spawn_setup_shell(
                     session,
                     timeline,
                     prompt,
+                    allow_motion,
                 );
                 spawn_preview(main, &theme, mode, preview_min_width, tab);
             });
@@ -457,7 +492,27 @@ fn spawn_tab_chrome(
                     });
                 }
             });
+        spawn_text(
+            chrome,
+            practice_legend(tab),
+            dtx_ui::TypographyRole::Hint,
+            theme.text_secondary,
+        );
     });
+}
+
+const fn practice_legend(tab: PracticeTab) -> &'static str {
+    match tab {
+        PracticeTab::Setup => {
+            "HH/CY Focus · HT/LT Adjust · BD Select · SD Back · Keyboard arrows / Enter / Esc"
+        }
+        PracticeTab::Progress => {
+            "HH Previous tab · CY/FT Next tab · BD Setup · SD Back · Tab Next tab"
+        }
+        PracticeTab::Preview => {
+            "HT Previous bar · LT Next bar · BD Play/Pause · HH/CY Tabs · SD Back"
+        }
+    }
 }
 
 fn spawn_settings(
@@ -471,9 +526,10 @@ fn spawn_settings(
     session: &PracticeSession,
     timeline: &crate::timeline::ChipTimeline,
     prompt: &super::setup_controls::PracticePresetPrompt,
+    allow_motion: bool,
 ) {
     let visible = mode == PracticeLayoutMode::Split || tab != PracticeTab::Preview;
-    main.spawn((
+    let mut settings = main.spawn((
         PracticeSettingsPane,
         Node {
             width: if mode == PracticeLayoutMode::Split {
@@ -496,8 +552,17 @@ fn spawn_settings(
         },
         BackgroundColor(theme.stage_bg),
         Visibility::Inherited,
-    ))
-    .with_children(|pane| {
+        UiTransform::default(),
+    ));
+    if allow_motion {
+        settings.insert(PracticePanelTransition {
+            elapsed_ms: 0.0,
+            duration_ms: 180.0,
+            translation_px: 20.0,
+            easing: dtx_ui::easing::EaseFunction::OutQuint,
+        });
+    }
+    settings.with_children(|pane| {
         pane.spawn((
             Node {
                 width: Val::Percent(100.0),
@@ -550,6 +615,26 @@ fn spawn_settings(
                 super::setup_controls::SetupItem::StartOrContinue,
             ));
         });
+
+        if allow_motion {
+            pane.spawn((
+                PracticeTabCrossfade {
+                    elapsed_ms: 0.0,
+                    duration_ms: 140.0,
+                    easing: dtx_ui::easing::EaseFunction::OutQuint,
+                },
+                Pickable::IGNORE,
+                Node {
+                    position_type: PositionType::Absolute,
+                    left: Val::Px(0.0),
+                    right: Val::Px(0.0),
+                    top: Val::Px(0.0),
+                    bottom: Val::Px(0.0),
+                    ..default()
+                },
+                BackgroundColor(theme.stage_bg),
+            ));
+        }
     });
 }
 
@@ -687,6 +772,9 @@ fn spawn_setup_content(
             super::setup_controls::SetupItem::DeleteSaved,
             "Delete Saved Loop",
         );
+    } else {
+        spawn_disabled_action_row(content, theme, "Update Saved Loop");
+        spawn_disabled_action_row(content, theme, "Delete Saved Loop");
     }
     match prompt {
         super::setup_controls::PracticePresetPrompt::ConfirmDelete { .. } => {
@@ -706,7 +794,7 @@ fn spawn_setup_content(
         super::setup_controls::PracticePresetPrompt::Retry { message, .. } => {
             spawn_text(
                 content,
-                message,
+                format!("{} {message}", dtx_ui::StateMarker::Error.label()),
                 dtx_ui::TypographyRole::Hint,
                 theme.text_secondary,
             );
@@ -871,6 +959,13 @@ fn spawn_action_row(
     item: super::setup_controls::SetupItem,
     label: &'static str,
 ) {
+    let label = if item == super::setup_controls::SetupItem::DeleteSaved
+        || item == super::setup_controls::SetupItem::ConfirmDelete
+    {
+        format!("{} {label}", dtx_ui::StateMarker::Destructive.label())
+    } else {
+        label.to_owned()
+    };
     parent
         .spawn((
             SetupRow(item),
@@ -892,6 +987,29 @@ fn spawn_action_row(
                 theme.text_primary,
             );
             row.commands().entity(entity).insert(SetupRowLabel(item));
+        });
+}
+
+fn spawn_disabled_action_row(
+    parent: &mut ChildSpawnerCommands,
+    theme: &dtx_ui::Theme,
+    label: &'static str,
+) {
+    parent
+        .spawn(Node {
+            width: Val::Percent(100.0),
+            min_height: Val::Px(40.0),
+            align_items: AlignItems::Center,
+            padding: UiRect::axes(Val::Px(10.0), Val::Px(6.0)),
+            ..default()
+        })
+        .with_children(|row| {
+            spawn_text(
+                row,
+                format!("{} {label}", dtx_ui::StateMarker::Disabled.label()),
+                dtx_ui::TypographyRole::Label,
+                theme.text_secondary,
+            );
         });
 }
 
@@ -950,15 +1068,20 @@ pub(super) fn refresh_setup_copy(
     for mut text in &mut primary {
         let label = primary_action_label(flow.phase);
         text.0 = if selection.0 == super::setup_controls::SetupItem::StartOrContinue {
-            format!("› {label}")
+            format!("{} {label}", dtx_ui::StateMarker::Focus.label())
         } else {
             label.to_owned()
         };
     }
     for (row, mut text) in &mut labels {
-        let raw = text.0.trim_start_matches("› ").to_owned();
+        let focus_prefix = format!("{} ", dtx_ui::StateMarker::Focus.label());
+        let raw = text
+            .0
+            .strip_prefix(&focus_prefix)
+            .unwrap_or(&text.0)
+            .to_owned();
         text.0 = if row.0 == selection.0 {
-            format!("› {raw}")
+            format!("{focus_prefix}{raw}")
         } else {
             raw
         };
@@ -1063,16 +1186,43 @@ const fn trainer_label(mode: crate::practice::PracticeTrainerMode) -> &'static s
 
 pub fn update_tab_selection(
     clicks: Query<(&Interaction, &PracticeTabButton), Changed<Interaction>>,
-    mut tab: ResMut<PracticeTab>,
-    roots: Query<Entity, With<PracticeSetupRoot>>,
-    mut commands: Commands,
+    mut actions: MessageWriter<super::setup_controls::PracticeUiAction>,
 ) {
     for (interaction, button) in &clicks {
-        if *interaction == Interaction::Pressed && *tab != button.0 {
-            *tab = button.0;
-            for root in &roots {
-                commands.entity(root).despawn();
-            }
+        if *interaction == Interaction::Pressed {
+            actions.write(super::setup_controls::PracticeUiAction::SelectTab(button.0));
+        }
+    }
+}
+
+pub(super) fn animate_setup_transitions(
+    time: Res<Time>,
+    mut commands: Commands,
+    mut panels: Query<(Entity, &mut PracticePanelTransition, &mut UiTransform)>,
+    mut fades: Query<
+        (Entity, &mut PracticeTabCrossfade, &mut BackgroundColor),
+        Without<PracticePanelTransition>,
+    >,
+) {
+    let delta_ms = (time.delta_secs() * 1000.0).min(50.0);
+    for (entity, mut transition, mut transform) in &mut panels {
+        transition.elapsed_ms += delta_ms;
+        let progress = transition
+            .easing
+            .ease(transition.elapsed_ms / transition.duration_ms);
+        transform.translation =
+            bevy::ui::Val2::px(-transition.translation_px * (1.0 - progress), 0.0);
+        if transition.elapsed_ms >= transition.duration_ms {
+            transform.translation = bevy::ui::Val2::ZERO;
+            commands.entity(entity).remove::<PracticePanelTransition>();
+        }
+    }
+    for (entity, mut fade, mut background) in &mut fades {
+        fade.elapsed_ms += delta_ms;
+        let progress = fade.easing.ease(fade.elapsed_ms / fade.duration_ms);
+        background.0 = background.0.with_alpha(1.0 - progress);
+        if fade.elapsed_ms >= fade.duration_ms {
+            commands.entity(entity).despawn();
         }
     }
 }

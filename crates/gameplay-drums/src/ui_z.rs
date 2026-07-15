@@ -4,8 +4,8 @@
 
 /// Practice HUD chip + mini strip.
 pub const PRACTICE: i32 = 900;
-/// Practice full HUD root.
-pub const PRACTICE_FULL_HUD: i32 = 1000;
+/// Practice Setup/Settings root.
+pub const PRACTICE_SETUP: i32 = 1000;
 /// Pause overlay.
 pub const PAUSE: i32 = 1000;
 /// Stage-end results overlay.

@@ -463,6 +463,20 @@ fn setup_ready_midi_does_not_emit_gameplay_input() {
     let mut app = build_lifecycle_app(PracticeIntent::manual(PracticeOrigin::SongSelect));
     enter_performance(&mut app, chart_with_measures(1));
     ready_clock(&mut app, 2_000);
+    assert_eq!(
+        app.world().resource::<State<AppState>>().get(),
+        &AppState::Performance
+    );
+    assert_eq!(
+        app.world().resource::<PracticeFlow>().phase,
+        PracticePhase::Setup
+    );
+    assert_eq!(
+        app.world()
+            .resource::<State<game_shell::PauseState>>()
+            .get(),
+        &game_shell::PauseState::Running
+    );
     queue_bass_drum_midi(&mut app);
 
     app.world_mut().run_schedule(FixedUpdate);
@@ -550,6 +564,39 @@ fn setup_ready_midi_keeps_raw_hit_and_pad_navigation() {
         .collect::<Vec<_>>();
     assert_eq!(nav_hits.len(), 1);
     assert_eq!(nav_hits[0].lane, 2);
+}
+
+#[test]
+fn setup_real_midi_pad_reduces_to_ui_action_without_gameplay_output() {
+    let mut app = build_lifecycle_app(PracticeIntent::manual(PracticeOrigin::SongSelect));
+    enter_performance(&mut app, chart_with_measures(1));
+    ready_clock(&mut app, 2_000);
+    {
+        let mut guard = app
+            .world_mut()
+            .resource_mut::<gameplay_drums::menu_nav::NavGuard>();
+        guard.clear_context();
+        guard.enter_context(
+            gameplay_drums::menu_nav::NavContext::PracticeSetup,
+            std::time::Instant::now() - std::time::Duration::from_millis(600),
+        );
+    }
+    queue_midi_notes(&mut app, &[42]);
+
+    app.world_mut().run_schedule(FixedUpdate);
+    app.update();
+    app.update();
+    app.update();
+
+    assert_eq!(
+        app.world()
+            .resource::<gameplay_drums::practice::hud::setup_controls::SetupSelection>()
+            .0,
+        gameplay_drums::practice::hud::setup_controls::SetupItem::StartOrContinue,
+    );
+    assert!(app.world().resource::<Messages<InputHit>>().is_empty());
+    assert!(app.world().resource::<JudgedChips>().0.is_empty());
+    assert_eq!(app.world().resource::<Score>().0, 0);
 }
 
 fn assert_stale_gameplay_messages_do_not_flash_key_caps(phase: PracticePhase) {

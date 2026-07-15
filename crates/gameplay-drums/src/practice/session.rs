@@ -260,7 +260,7 @@ pub struct PracticeSession {
     pub current_attempt: AttemptStats,
     pub current_attempt_eligible: bool,
     pub attempt_history: Vec<AttemptRecord>,
-    /// Per-lane diagnosis for the current loop region (full-HUD panel).
+    /// Per-lane diagnosis for the current loop region (Progress panel).
     pub lane_diag: super::diagnosis::LaneDiagnosis,
 }
 

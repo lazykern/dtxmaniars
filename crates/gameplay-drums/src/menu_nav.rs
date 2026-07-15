@@ -38,6 +38,8 @@ pub enum NavContext {
     Editor,
     /// Chart/audio load in progress. Pads may cancel it (SD = Back).
     Loading,
+    /// Practice Setup or Settings, including non-judged preview playback.
+    PracticeSetup,
 }
 
 /// GITADORA-ish convention. Lane ids per [`crate::lane_map::LANE_ORDER`].
@@ -109,6 +111,7 @@ fn active_context(
     editor_open: bool,
     capture_armed: bool,
     calibrating: bool,
+    practice_phase: Option<crate::practice::PracticePhase>,
 ) -> Option<NavContext> {
     if capture_armed || calibrating {
         return None;
@@ -123,6 +126,13 @@ fn active_context(
                 Some(NavContext::Editor)
             } else if *pause == PauseState::Paused {
                 Some(NavContext::Paused)
+            } else if matches!(
+                practice_phase,
+                Some(
+                    crate::practice::PracticePhase::Setup | crate::practice::PracticePhase::Editing
+                )
+            ) {
+                Some(NavContext::PracticeSetup)
             } else {
                 None
             }
@@ -137,6 +147,7 @@ fn pad_nav_mapper(
     editor_open: Res<crate::editor::EditorOpen>,
     capture: Res<CaptureState>,
     calibration: Res<CalibrationState>,
+    practice: Option<Res<crate::practice::PracticeFlow>>,
     mut hits: MessageReader<PadNavHit>,
     mut guard: ResMut<NavGuard>,
     mut out: MessageWriter<NavAction>,
@@ -148,6 +159,7 @@ fn pad_nav_mapper(
         editor_open.0,
         !matches!(*capture, CaptureState::Idle),
         !matches!(*calibration, CalibrationState::Idle),
+        practice.as_deref().map(|flow| flow.phase),
     );
     let Some(ctx) = ctx else {
         guard.clear_context();
@@ -252,7 +264,8 @@ mod tests {
                 &PauseState::Running,
                 false,
                 false,
-                false
+                false,
+                None,
             ),
             None
         );
@@ -262,7 +275,8 @@ mod tests {
                 &PauseState::Running,
                 true,
                 true,
-                false
+                false,
+                None,
             ),
             None
         );
@@ -272,7 +286,8 @@ mod tests {
                 &PauseState::Running,
                 false,
                 false,
-                true
+                true,
+                None,
             ),
             None
         );
@@ -282,7 +297,8 @@ mod tests {
                 &PauseState::Paused,
                 false,
                 false,
-                false
+                false,
+                None,
             ),
             Some(NavContext::Paused)
         );
@@ -292,7 +308,8 @@ mod tests {
                 &PauseState::Running,
                 true,
                 false,
-                false
+                false,
+                None,
             ),
             Some(NavContext::Editor)
         );
@@ -302,9 +319,42 @@ mod tests {
                 &PauseState::Running,
                 false,
                 false,
-                false
+                false,
+                None,
             ),
             Some(NavContext::Loading)
+        );
+    }
+
+    #[test]
+    fn practice_setup_and_editing_own_pad_navigation_but_running_does_not() {
+        for phase in [
+            crate::practice::PracticePhase::Setup,
+            crate::practice::PracticePhase::Editing,
+        ] {
+            assert_eq!(
+                active_context(
+                    &AppState::Performance,
+                    &PauseState::Running,
+                    false,
+                    false,
+                    false,
+                    Some(phase),
+                ),
+                Some(NavContext::PracticeSetup),
+                "{phase:?}",
+            );
+        }
+        assert_eq!(
+            active_context(
+                &AppState::Performance,
+                &PauseState::Running,
+                false,
+                false,
+                false,
+                Some(crate::practice::PracticePhase::Running),
+            ),
+            None,
         );
     }
 
