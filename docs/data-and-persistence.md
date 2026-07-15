@@ -84,11 +84,14 @@ directory. Launching the game from different directories can therefore appear
 to produce different histories. Set an absolute path for predictable installed
 use.
 
-A qualifying result is normal play at exactly `1.00x` with Standard fail mode.
-Practice, modified Play Speed, and No Fail runs do not append native history or
-update compatible score records. Qualifying results merge best/last/play/clear
-data into `<chart>.score.ini`; the chart directory must be writable. Existing
-DTXManiaNX `.dtx.score.ini` data can be read/imported by the scoring layer.
+An ordinary qualifying result is normal play at exactly `1.00x` with Standard
+fail mode. Practice and modified Play Speed runs do not append native history
+or update compatible score records. At `1.00x`, No Fail runs append assisted
+`no_fail` entries to native history, but the game excludes them from personal
+bests and player skill and never writes them to `<chart>.score.ini`. Ordinary
+qualifying results merge best/last/play/clear data into `<chart>.score.ini`;
+the chart directory must be writable. The scoring layer can read and import
+existing DTXManiaNX `.dtx.score.ini` data.
 
 Native JSON and chart-side INI are complementary. Removing `scores.json` does
 not remove chart-side files, and removing `.score.ini` files does not remove

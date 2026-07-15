@@ -5,9 +5,10 @@ drums game.
 
 Audience: keyboard and electronic-drum players.
 
-Status: Maintained and verified against the current desktop implementation.
-Hardware enumeration, audio output, and feel still require a manual check on
-the player's machine.
+Status: Maintained and verified against current source and automated tests. The
+latest bounded desktop launch attempts timed out during compilation, so desktop
+startup, window-size layout, mouse and saved-loop interaction, audible
+synchronization, and physical MIDI behavior remain manual QA items.
 
 Neighboring guides: [roadmap](roadmap.md),
 [compatibility](compatibility.md), and
@@ -73,9 +74,12 @@ Default keyboard lane keys are:
 | Left pedal | `NonConvert` |
 | Left bass drum | `Left Alt` |
 
-`Esc` always toggles pause during a performance. Pause and Restart are also
-bindable system actions for a distant kit; they are deliberately unbound by
-default because pad notes vary by device. Pad retriggers are debounced.
+`Esc` toggles Pause during normal play and while Practice is Running, provided
+Customize is closed. In normal-play Quick Settings, `Esc` returns to the Pause
+menu. Practice Setup/Settings and Customize use `Esc` for their own back,
+cancel, and close flows. Pause and Restart are also bindable system actions for
+a distant kit; they are unbound by default because pad notes vary by device.
+Pad retriggers are debounced.
 
 The Lanes tab controls display-lane profiles and the Widgets tab controls HUD
 placement. These change presentation, not judgment-channel identity.
