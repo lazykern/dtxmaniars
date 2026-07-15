@@ -1,6 +1,7 @@
-//! Two-tier practice HUD: quick tier (mini strip, chip, toasts) during
-//! play, full HUD (timeline + right rail) on the **Tab** pause tier
-//! (`PracticePauseSurface::Rail`); Esc pauses get the standard overlay.
+//! Practice HUD: mini strip, chip, and toasts during play. The retained full
+//! rail is shown only for explicit legacy `PracticePauseSurface::Rail` owners;
+//! current Tab navigation enters Practice Settings Editing, while Esc uses the
+//! standard pause overlay.
 //! Fixed overlay — deliberately NOT a dtx-layout widget (no
 //! editor-pillar dependency).
 

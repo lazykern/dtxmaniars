@@ -46,6 +46,16 @@ pub struct PendingBgm {
     pub wav_slot: u32,
     pub path: String,
     pub start_seconds: f64,
+    pub volume: i32,
+    pub pan: i32,
+}
+
+impl PendingBgm {
+    pub fn playback_mix(&self, sound_bank: &dtx_audio::ChartSoundBank) -> (i32, i32) {
+        sound_bank
+            .get(self.wav_slot)
+            .map_or((self.volume, self.pan), |sound| (sound.volume, sound.pan))
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -60,7 +70,17 @@ pub struct PendingAudioSlice {
     pub wav_slot: u32,
     pub path: String,
     pub start_seconds: f64,
+    pub volume: i32,
+    pub pan: i32,
     pub kind: PendingAudioKind,
+}
+
+impl PendingAudioSlice {
+    pub fn playback_mix(&self, sound_bank: &dtx_audio::ChartSoundBank) -> (i32, i32) {
+        sound_bank
+            .get(self.wav_slot)
+            .map_or((self.volume, self.pan), |sound| (sound.volume, sound.pan))
+    }
 }
 
 #[derive(Resource, Default, Debug, Clone)]
@@ -296,6 +316,8 @@ pub fn apply_seek_system(
                     wav_slot: chip.wav_slot,
                     path: chip_wav_path(&chart.chart, entry.chip_idx, source_dir)?,
                     start_seconds,
+                    volume: chart.chart.assets.wav.volume(chip.wav_slot),
+                    pan: chart.chart.assets.wav.pan(chip.wav_slot),
                     kind: if entry.channel == dtx_core::EChannel::BGM {
                         PendingAudioKind::LayerBgm
                     } else {
@@ -319,6 +341,8 @@ pub fn apply_seek_system(
                 wav_slot: slice.wav_slot,
                 path: slice.path,
                 start_seconds: slice.start_seconds,
+                volume: slice.volume,
+                pan: slice.pan,
             });
         } else {
             if let PendingAudioKind::AutoSe(channel) = slice.kind {
@@ -360,6 +384,8 @@ pub fn apply_seek_system(
                         wav_slot: 0,
                         path: bgm_path.to_string_lossy().to_string(),
                         start_seconds: resolved.max(0) as f64 / 1000.0,
+                        volume: 100,
+                        pan: 0,
                     });
                 }
             }
@@ -400,6 +426,7 @@ pub fn start_pending_bgm(
                     .as_ref()
                     .is_none_or(|eligibility| eligibility.is_slot_eligible(p.wav_slot)))
         {
+            let (volume, pan) = p.playback_mix(&sound_bank);
             if let Some(sound) = sound_bank.get(p.wav_slot) {
                 dtx_audio::play_bgm_handle_with_mix_from_seconds(
                     &audio,
@@ -414,14 +441,20 @@ pub fn start_pending_bgm(
                     0,
                 );
             } else {
-                dtx_audio::play_bgm_from_seconds_with_volume(
+                let source = asset_server
+                    .load_builder()
+                    .override_unapproved()
+                    .load(p.path.clone());
+                dtx_audio::play_bgm_handle_with_mix_from_seconds(
                     &audio,
-                    &asset_server,
-                    &mut bgm,
                     &mut instances,
+                    &mut bgm,
+                    source,
                     &p.path,
-                    p.start_seconds,
+                    volume,
+                    pan,
                     settings.bgm_gain(),
+                    p.start_seconds,
                     0,
                 );
             }
@@ -444,9 +477,7 @@ pub fn start_pending_bgm(
             },
             |sound| sound.handle.clone(),
         );
-        let (volume, pan) = sound_bank
-            .get(slice.wav_slot)
-            .map_or((100, 0), |sound| (sound.volume, sound.pan));
+        let (volume, pan) = slice.playback_mix(&sound_bank);
         match slice.kind {
             PendingAudioKind::LayerBgm if settings.bgm_enabled => {
                 let handle = dtx_audio::play_sfx_handle_from_seconds(

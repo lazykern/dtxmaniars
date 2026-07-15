@@ -198,6 +198,14 @@ fn chart_with_overlapping_audio_slices() -> Chart {
     ] {
         assets.wav.insert(slot, path.into());
     }
+    assets
+        .wav
+        .volumes
+        .extend([(1, 37), (2, 48), (3, 59), (4, 63)]);
+    assets
+        .wav
+        .pans
+        .extend([(1, -41), (2, 22), (3, -13), (4, 34)]);
     Chart {
         metadata: Metadata {
             bpm: Some(120.0),
@@ -1041,6 +1049,12 @@ fn stopped_cancel_seek_queues_all_spanning_audio_with_choke() {
         .expect("the active primary BGM is queued as clock authority");
     assert_eq!(bgm.wav_slot, 1);
     assert!((bgm.start_seconds - 1.5).abs() < f64::EPSILON);
+    assert_eq!((bgm.volume, bgm.pan), (37, -41));
+    assert_eq!(
+        bgm.playback_mix(app.world().resource::<dtx_audio::ChartSoundBank>()),
+        (37, -41),
+        "uncached primary BGM playback uses authored mix"
+    );
     assert_eq!(app.world().resource::<GameStartMs>().0, 0);
     let slices = &app
         .world()
@@ -1053,6 +1067,67 @@ fn stopped_cancel_seek_queues_all_spanning_audio_with_choke() {
             .collect::<Vec<_>>(),
         vec![2, 4],
         "the later BGM stays a layer while SE01 choke keeps only its newest slice"
+    );
+    assert_eq!(
+        slices
+            .iter()
+            .map(|slice| (slice.wav_slot, slice.start_seconds, slice.volume, slice.pan))
+            .collect::<Vec<_>>(),
+        vec![(2, 0.5, 48, 22), (4, 0.5, 63, 34)],
+        "uncached layer BGM and SE reconstruction retain authored mix and offset"
+    );
+    let sound_bank = app.world().resource::<dtx_audio::ChartSoundBank>();
+    assert_eq!(slices[0].playback_mix(sound_bank), (48, 22));
+    assert_eq!(slices[1].playback_mix(sound_bank), (63, 34));
+}
+
+#[test]
+fn cached_seek_slice_keeps_cached_mix_authority() {
+    use bevy_kira_audio::prelude::{Frame, StaticSoundData, StaticSoundSettings};
+    use bevy_kira_audio::AudioSource as KiraAudioSource;
+
+    let mut app = build_lifecycle_app(PracticeIntent::manual(PracticeOrigin::SongSelect));
+    enter_performance(&mut app, chart_with_overlapping_audio_slices());
+    app.world_mut().resource_mut::<PracticeFlow>().phase = PracticePhase::Editing;
+    let source = app
+        .world_mut()
+        .resource_mut::<Assets<KiraAudioSource>>()
+        .add(KiraAudioSource {
+            sound: StaticSoundData {
+                sample_rate: 1_000,
+                frames: vec![Frame::from_mono(0.0); 10_000].into(),
+                settings: StaticSoundSettings::default(),
+                slice: None,
+            },
+        });
+    app.world_mut()
+        .resource_mut::<dtx_audio::ChartSoundBank>()
+        .insert(
+            2,
+            dtx_audio::LoadedChartSound {
+                handle: source,
+                path: "cached-layer.wav".into(),
+                volume: 71,
+                pan: -28,
+            },
+        );
+    ready_clock(&mut app, 250);
+
+    send_seek(&mut app, 1_500);
+    app.world_mut().run_schedule(FixedUpdate);
+
+    let layer = app
+        .world()
+        .resource::<gameplay_drums::seek::PendingAudioStarts>()
+        .0
+        .iter()
+        .find(|slice| slice.wav_slot == 2)
+        .expect("layer BGM is queued");
+    assert_eq!((layer.volume, layer.pan), (48, 22));
+    assert_eq!(
+        layer.playback_mix(app.world().resource::<dtx_audio::ChartSoundBank>()),
+        (71, -28),
+        "the cached playback path keeps the preloaded sound's mix authority"
     );
 }
 
@@ -1103,6 +1178,8 @@ fn seek_does_not_reconstruct_a_decoded_slice_past_its_duration() {
 fn seek_reconstruction_respects_configured_polyphony() {
     let mut assets = DtxAssets::default();
     assets.wav.insert(3, "system.wav".into());
+    assets.wav.volumes.insert(3, 52);
+    assets.wav.pans.insert(3, -19);
     let chart = Chart {
         metadata: Metadata {
             bpm: Some(120.0),
@@ -1133,6 +1210,8 @@ fn seek_reconstruction_respects_configured_polyphony() {
         .0;
     assert_eq!(slices.len(), 1);
     assert_eq!(slices[0].chip_idx, 1);
+    assert!((slices[0].start_seconds - 0.5).abs() < f64::EPSILON);
+    assert_eq!((slices[0].volume, slices[0].pan), (52, -19));
 }
 
 fn assert_running_seek_starts_all_spanning_audio(intent: PracticeIntent) {
@@ -1854,6 +1933,8 @@ fn preview_transients_do_not_leak_across_performance_reentry() {
         wav_slot: 99,
         path: "stale.wav".into(),
         start_seconds: 4.0,
+        volume: 100,
+        pan: 0,
     });
     app.world_mut()
         .resource_mut::<gameplay_drums::seek::PendingAudioStarts>()
@@ -1863,6 +1944,8 @@ fn preview_transients_do_not_leak_across_performance_reentry() {
             wav_slot: 99,
             path: "stale-layer.wav".into(),
             start_seconds: 4.0,
+            volume: 100,
+            pan: 0,
             kind: gameplay_drums::seek::PendingAudioKind::LayerBgm,
         });
     app.world_mut()

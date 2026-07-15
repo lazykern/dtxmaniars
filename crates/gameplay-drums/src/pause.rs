@@ -306,7 +306,7 @@ pub fn spawn_overlay(
     midi: Option<Res<game_shell::MidiConnected>>,
 ) {
     if practice.is_some() && *surface == PracticePauseSurface::Rail {
-        return; // The legacy rail surface owns this paused frame.
+        return; // Explicit legacy-rail callers still own this paused frame.
     }
     selection.0 = 0;
     let theme = Theme::default();
@@ -411,7 +411,7 @@ fn pause_menu_input(
 ) {
     use game_shell::NavVerb;
     if practice.is_some() && *surface == PracticePauseSurface::Rail {
-        actions.clear(); // Don't double-handle input while the legacy rail is active.
+        actions.clear(); // Current Practice Settings uses Editing; legacy rail owns this input.
         return;
     }
     let items = pause_items(practice.is_some());
