@@ -1659,17 +1659,28 @@ mod tests {
             .resource_mut::<NextState<AppState>>()
             .set(AppState::SongSelect);
         app.update();
-        app.world_mut()
-            .resource_mut::<SongReadyState>()
-            .open(ReadyMode::Normal);
+        for _ in 0..3 {
+            app.world_mut()
+                .resource_mut::<SongReadyState>()
+                .open(ReadyMode::Normal);
+            app.update();
+            assert_eq!(
+                app.world_mut()
+                    .query::<&ReadyCardNode>()
+                    .iter(app.world())
+                    .count(),
+                5
+            );
 
-        app.update();
-
-        let card_count = app
-            .world_mut()
-            .query::<&ReadyCardNode>()
-            .iter(app.world())
-            .count();
-        assert_eq!(card_count, 5);
+            app.world_mut().resource_mut::<SongReadyState>().close();
+            app.update();
+            assert_eq!(
+                app.world_mut()
+                    .query::<&SongReadyEntity>()
+                    .iter(app.world())
+                    .count(),
+                0
+            );
+        }
     }
 }
