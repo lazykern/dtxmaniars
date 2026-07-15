@@ -27,6 +27,7 @@ keep a library elsewhere.
 | Keyboard profiles | `CONFIG_DIR/keyboard-profiles.toml` | TOML registry, version 1 | Atomic replacement |
 | MIDI profiles | `CONFIG_DIR/midi-profiles.toml` | TOML registry, version 1 | Atomic replacement |
 | Lane profiles | `CONFIG_DIR/lane-profiles.toml` | TOML registry, version 1 | Atomic replacement |
+| Saved practice loops | `CONFIG_DIR/practice-presets.toml` | TOML registry, version 1 | Atomic replacement after explicit Save as New, Update Saved Loop, or Delete; Last Used updates when Practice starts or continues |
 | Legacy bindings | `CONFIG_DIR/bindings.toml` | TOML, version 1 | Migration input; direct replacement only through the legacy API |
 | Favorites | `CONFIG_DIR/library-preferences.json` | JSON, version 1 | Direct replacement |
 | Native score history | `DTX_SCORES_PATH`, otherwise `./scores.json` | JSON, version 2 | Direct replacement |
@@ -56,6 +57,19 @@ timestamped `.backup-*` file when an existing registry can be preserved. Use
 that flow when possible. A newer unsupported version is not silently
 downgraded.
 
+Saved practice loops are separate from general settings. Each lookup uses both
+the chart's canonical hash and its selected difficulty index, so a loop saved
+for one difficulty is not offered for another. The source path is retained only
+as display and recovery metadata. Editing a loaded loop changes a session draft;
+it is not persisted until the player chooses Save as New or Update Saved Loop.
+Deleting a saved loop is also explicit. Last Used is the one automatic snapshot
+per chart and difficulty, written only when Start Practice or Continue Practice
+commits the draft.
+
+If `practice-presets.toml` is missing, Practice starts with an empty registry. A
+corrupt, unreadable, or newer-version file is preserved and the registry stays
+read-only for that session rather than overwriting recoverable data.
+
 ## Scores and qualification
 
 The native score store path is intentionally independent of `CONFIG_DIR`:
@@ -84,7 +98,7 @@ native history already stored in JSON.
 With the game closed, preserve:
 
 1. the entire `CONFIG_DIR`, including imported songs if it is also the song
-   root;
+   root and including `practice-presets.toml` for saved practice loops;
 2. the file named by `DTX_SCORES_PATH`, or the launch directory's
    `scores.json`;
 3. external `DTX_SONG_DIR` libraries, including chart-side `.score.ini` files.
@@ -101,6 +115,9 @@ or launch with the same environment overrides.
   registry exists, it remains authoritative for lanes.
 - Invalid profile registry: preserve the original, use the in-app reset/backup
   action, then recreate or copy the affected user profile.
+- Invalid `practice-presets.toml`: preserve or rename the original before
+  recovery. Practice treats it as read-only for that session; do not overwrite
+  it or edit its version number to force a load.
 - Missing favorites: deleting `library-preferences.json` safely resets only
   favorites, but the change is irreversible without a backup.
 - Missing native scores: confirm the launch directory and

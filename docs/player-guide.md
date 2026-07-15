@@ -123,8 +123,9 @@ audio stack on behalf of the player, so that final feel check is manual.
 
 Normal play judges mapped inputs against the audio-owned chart clock. `Esc` or
 a bound Pause action freezes chart time and chart audio. The normal pause menu
-offers Resume, Retry, and Quit to Song Select. A bound Restart action reloads
-the current chart from either running or paused play.
+offers Resume, Restart Song, Practice This Section, Quick Settings, and Return
+to Song Select. A bound Restart action reloads the current chart from either
+running or paused play.
 
 Gameplay Play Speed ranges from `0.50x` to `2.00x` and changes both notes and
 audio; pitch changes because pitch-preserving stretch is not implemented.
@@ -135,8 +136,17 @@ saved.
 ## Practice transport
 
 Start Practice with `Shift+Enter`, FT at the kit difficulty level, or the
-Practice action on Results. Practice never saves a normal record and loops
-rather than ending at chart end.
+Practice action on Results. Every route opens Practice Setup before any attempt
+begins. Setup uses the loaded playfield, notes, BGA, audio, and timeline as a
+preview, but preview starts stopped and drum input is not judged. Preview does
+not change score, combo, gauge, attempt history, lane diagnosis, Wait, or Ramp.
+
+Setup contains loop, tempo, snap, pre-roll, count-in, trainer, and saved-loop
+controls. Trainer is exactly one of Off, Wait, or Ramp. The Progress tab shows
+only completed loop attempts; an interrupted or partially edited attempt is not
+added. Choose Start Practice to commit the draft and begin from the configured
+pre-roll/count-in. Practice never saves a normal record and loops rather than
+ending at chart end.
 
 While Practice is running:
 
@@ -148,12 +158,24 @@ While Practice is running:
 | `-` / `=` | Lower / raise tempo |
 | `R` | Restart the loop or current attempt |
 | `T` | Toggle tempo ramp |
-| `Tab` | Pause and open the full Practice rail |
-| `Esc` | Open the compact Practice pause menu |
+| `Tab` | Open Practice Settings |
+| `Esc` | Open the Practice pause menu |
 
-The full rail exposes loop, tempo, pre-roll, wait, ramp, attempt, and diagnosis
-controls. Changing the loop or manually changing tempo disarms an active ramp.
-The compact Practice pause menu offers Resume, Restart loop, and Exit Practice.
+Practice Settings reuses the Setup and Progress surface. It starts with preview
+stopped and marks the interrupted attempt ineligible. Continue Practice commits
+the draft and starts a fresh attempt from the configured pre-roll/count-in.
+Changing the loop or manually changing tempo disarms an active Ramp.
+
+The Practice pause menu offers Resume, Restart Loop, Practice Settings, and Exit
+to Song Select. Resume continues from the exact frozen chart/audio position;
+Restart Loop and Continue Practice seek through pre-roll instead.
+
+Saved loops live in `CONFIG_DIR/practice-presets.toml`. They are isolated by
+canonical chart hash and selected difficulty. Draft edits are session-only
+until Save as New or Update Saved Loop is selected; Delete is confirmed before
+the stored loop is removed. Last Used updates automatically only when Start
+Practice or Continue Practice commits the draft. See
+[Data and Persistence](data-and-persistence.md) for backup and recovery.
 
 ## Results and recommended practice
 

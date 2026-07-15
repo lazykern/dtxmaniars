@@ -1,6 +1,6 @@
 # DTXManiaRS Player User Stories
 
-Date: 2026-07-12
+Updated: 2026-07-15
 Status: Behavioral-research baseline
 Source: `docs/notes/2026-07-11-player-manual-current-behavior.md`
 
@@ -27,8 +27,9 @@ from keyboard/pad navigation described by the design but not wired to the
 visible panels.
 
 This document does evaluate whether a player can reach routine actions after
-setup. For example, inability to pause from a distant drum kit remains in scope
-because it affects active play, not input configuration.
+setup. For example, the requirement to configure a system Pause binding before
+a distant-kit session remains in scope because it affects active play, not only
+input configuration.
 
 Also excluded:
 
@@ -265,6 +266,9 @@ has no player-visible error or retry.
 
 Practice behavior is richer than starting a loop:
 
+- Every Practice request first opens Setup with preview stopped. Preview uses
+  the real chart presentation, but input is not judged and creates no gameplay
+  or Progress data.
 - Without A/B points, the entire song loops and does not end automatically.
 - `[` and `]` set bar-snapped A/B points; `Backspace` clears the loop.
 - Snap cycles Bar, Beat, and half-beat.
@@ -274,10 +278,15 @@ Practice behavior is richer than starting a loop:
 - Ramp defaults to 0.70x start, 1.00x target, 0.05x step, 90% pass, and one
   required successful pass. Two failed passes step down; reaching the target
   completes and disarms the ramp.
-- Wait mode stops at unhit notes. Wait and ramp are mutually exclusive.
-- Attempt history, timing bias, flow, and per-lane diagnosis are available in
-  the full HUD.
-- Exit Practice requires a second confirmation.
+- Trainer is exactly one of Off, Wait, or Ramp. Wait stops at unhit notes; Ramp
+  owns accuracy-based tempo progression.
+- Only completed attempts enter Progress and Ramp evaluation. Progress exposes
+  accuracy or Wait flow, timing bias, and per-lane diagnosis.
+- `Esc` opens Pause during a run; Resume continues from the exact frozen
+  position. `Tab` opens Practice Settings; Continue Practice starts a fresh
+  attempt from pre-roll/count-in.
+- Saved loops require explicit Save as New, Update Saved Loop, or confirmed
+  Delete. They are isolated by canonical chart hash and selected difficulty.
 
 - **PRACTICE-1:** As a learner, I want whole-song versus A/B looping to be
   explicit so I understand why practice does not finish.
@@ -287,8 +296,8 @@ Practice behavior is richer than starting a loop:
   notes measure flow rather than normal timing accuracy.
 - **PRACTICE-4:** As a player changing tempo, I want to know that current tempo
   changes pitch before choosing it as a practice method.
-- **PRACTICE-5:** As a player exiting practice, I want the confirmation to
-  prevent accidents without trapping a distant-kit session.
+- **PRACTICE-5:** As a player exiting practice, I want Pause to provide a clear
+  Exit to Song Select action without confusing it with Practice Settings.
 
 ## 5. Player Type 1: Keyboard and Mouse
 
@@ -362,7 +371,7 @@ These motivations and concerns are hypotheses until validated with players.
 | Choose difficulty | Compare levels and past performance | Difficulty slots, level, achievement, rank, density, BPM, skill, and history are visible | Information density may exceed what casual keyboard players need |
 | Start | Press `Enter` | Normal play starts | Direct and repeatable |
 | Adjust | Correct speed or offsets during play | Press `Up`/`Down` for scroll speed, `Left`/`Right` for input offset, add `Ctrl` for fine input adjustment, or press `Shift+Up`/`Shift+Down` for song BGM offset | Accidental adjustment is possible because arrows are active during play |
-| Pause | Interrupt safely | Press `Esc`; press `Up`/`Down` to select Resume/Retry/Quit and `Enter`/`Space` to activate, or `Esc` to resume | Fully reachable |
+| Pause | Interrupt safely | Press `Esc`; select Resume, Restart Song, Practice This Section, Quick Settings, or Return to Song Select; `Esc` resumes | Fully reachable |
 | Finish | Inspect score and judgments | Results presents score, combo, rank, counts, and percentages | Diagnostic depth may not answer why performance was weak |
 | Return | Press `Enter` or `Esc` | Song selection returns and a save is attempted | Navigation is reachable; save failure is silent |
 
@@ -370,17 +379,19 @@ These motivations and concerns are hypotheses until validated with players.
 
 | Stage | Player intent | Current action/path | Outcome |
 |---|---|---|---|
-| Enter practice | Practice instead of recording a score | `Shift+Enter` on song selection | Practice session starts |
+| Enter practice | Configure practice instead of recording a score | `Shift+Enter` on song selection | Stopped, non-judged Setup opens before any attempt |
+| Preview | Inspect the exercise before starting | Use preview transport/timeline | Audio, notes, BGA, and timeline move without judgments or Progress data |
 | Mark section | Repeat a difficult span | `[` sets A; `]` sets B | Bar-snapped A/B loop |
-| Clear section | Return to whole-song practice | Press `Backspace`; in full HUD, select Clear Loop with `Up`/`Down` and press `Enter`/`Space` | A/B clears and active ramp disarms |
+| Clear section | Return to whole-song practice | Press `Backspace` while running, or clear A/B in Setup/Settings | A/B clears and active Ramp disarms |
 | Change tempo | Reduce or increase difficulty | `-` / `=` | 0.50x to 1.50x tempo |
 | Restart | Repeat immediately | `R` | Current span restarts with pre-roll |
-| Automate progression | Raise tempo after accurate passes | Press `T`; or press `Tab`/`Esc`, select Ramp with `Up`/`Down`, and press `Enter`/`Space` | Accuracy ramp controls tempo progression |
-| Change attempt entry | Control seek precision and readiness time | Press `Tab`/`Esc`, select Snap/Pre-roll/Count-in with `Up`/`Down`, use `Left`/`Right` for values, and `Enter`/`Space` for Count-in | Bar/beat/half-beat snap and one-bar/two-second/off pre-roll |
-| Wait for notes | Practice note recognition without timing pressure | Press `Tab`/`Esc`, select Wait with `Up`/`Down`, then press `Enter`/`Space` | Playback stops at unhit notes; ramp is disabled |
-| Inspect attempts | Compare accuracy and timing | `Tab`/`Esc` opens full practice HUD | Timeline, history, diagnosis, and trainer controls appear |
+| Automate progression | Raise tempo after accurate passes | Press `T` while running, or choose Ramp in Setup/Settings | Ramp evaluates only completed eligible attempts |
+| Change attempt entry | Control seek precision and readiness time | Press `Tab`, then edit Snap/Pre-roll/Count-in and choose Continue Practice | Continue starts a fresh attempt from pre-roll/count-in |
+| Wait for notes | Practice note recognition without timing pressure | Choose Wait as the trainer in Setup/Settings | Playback stops at unhit notes; Ramp is not simultaneously active |
+| Inspect attempts | Compare accuracy and timing | Open the Progress tab in Setup/Settings | Only completed attempts, timing, and diagnosis appear |
 | Seek precisely | Choose another location | Mouse timeline click/drag and transport buttons | Seek and loop editing are reachable |
-| Exit | Leave without writing a score | Press `Tab`/`Esc`, select Exit Practice with `Up`/`Down`, then press `Enter`/`Space` twice | Returns without normal score persistence |
+| Pause/resume | Interrupt without restarting the exercise | Press `Esc`, then choose Resume | Continues from the exact frozen position |
+| Exit | Leave without writing a score | Press `Esc`, then choose Exit to Song Select | Returns without normal score persistence |
 
 Practice tempo currently changes pitch, and whole-song practice loops rather
 than ending automatically. These are current facts to explain before measuring
@@ -447,7 +458,7 @@ Possible concerns:
 | Learn menu grammar | Navigate without immediately reaching for keyboard | Hit HH/CY to move, BD to enter/confirm, SD to go back, and FT to start practice at difficulty level | Title, song wheel, difficulty, play, practice, results, and open pause are partially navigable | Are lane-to-command associations memorable? |
 | Load chart | Wait or correct a mistaken selection | Observe progress; reach keyboard `Esc` to cancel | Failure returns automatically; kit has no cancel action | Does the fallback occur before the player settles into play posture? |
 | First play | Play primarily from the kit | Hit HH/CY to choose song, BD to enter difficulty, HH/CY to choose difficulty, BD to start, then hit mapped pads at the judgment line | Normal drum gameplay is reachable | Are pad/audio/judgment responses perceived as simultaneous? |
-| Recover | Handle first failure or interruption | Press keyboard `Esc`; press `Up`/`Down` and `Enter`, or hit HH/CY and BD, to choose Retry/Quit; hit SD to resume directly | Retry and quit are available | Does reaching away feel acceptable or disruptive? |
+| Recover | Handle first failure or interruption | Open Pause; press `Up`/`Down` and `Enter`, or hit HH/CY and BD, to choose Restart Song or Return to Song Select; hit SD to resume directly | Restart and return are available | Does reaching away feel acceptable or disruptive? |
 
 ### First-time acceptance stories
 
@@ -481,27 +492,29 @@ Possible concerns:
 
 ### Returning practice journey
 
-The player can start practice from the kit with floor tom, but the detailed
-practice workflow is keyboard/mouse-led.
+The player can start practice from the kit with floor tom. Setup, Settings,
+Progress, preview transport, and Pause consume the shared pad-navigation verbs;
+physical-kit behavior remains a manual research item.
 
 | Need | Current path | Device switch |
 |---|---|---|
-| Start whole-song practice | FT on difficulty selection | None |
-| Set A/B loop | `[` / `]` or mouse timeline | Kit to keyboard/mouse |
-| Change tempo | Press `-`/`=`; or press `Tab`/`Esc`, select Tempo with `Up`/`Down`, and press `Left`/`Right` | Kit to keyboard |
+| Open Setup | FT on difficulty selection | None |
+| Set A/B loop | Navigate Setup controls, or use `[` / `]` or mouse while running | None in wired pad navigation; keyboard/mouse fallback remains |
+| Change tempo | Navigate Setup/Settings controls, or press `-`/`=` while running | None in wired pad navigation; keyboard fallback remains |
 | Restart section | `R` | Kit to keyboard |
-| Inspect history/diagnosis | `Tab`/`Esc` | Kit to keyboard |
-| Seek/drag a section | Mouse timeline | Kit to mouse |
-| Configure ramp/wait mode | Press `Tab`/`Esc`, use `Up`/`Down` to select Ramp or Wait, then `Enter`/`Space`; use `Left`/`Right` on ramp values | Kit to keyboard |
-| Resume playing | Use `Up`/`Down` to select Resume and press `Enter`/`Space`, or click Resume transport | Keyboard or mouse, then back to kit |
-| Exit practice | Use `Up`/`Down` to select Exit Practice, then press `Enter`/`Space` twice | Kit to keyboard |
+| Inspect completed Progress | Navigate to Progress in Setup/Settings | None in wired pad navigation |
+| Seek a section | Navigate preview transport; mouse timeline remains available | None for bar transport; mouse for direct dragging |
+| Configure Off/Wait/Ramp | Navigate Trainer and Ramp rows in Setup/Settings | None in wired pad navigation |
+| Resume exactly | Open Pause with a configured system Pause binding and choose Resume | No device switch after binding |
+| Continue after editing | Choose Continue Practice in Settings | None in wired pad navigation |
+| Exit practice | Open Pause and choose Exit to Song Select | No device switch after binding |
 
 ### Nearby-MIDI blockers and workarounds
 
 | Issue | Classification | Workaround |
 |---|---|---|
-| Kit cannot open pause during active play | Friction, not blocker when computer is reachable | Press keyboard `Esc` |
-| Advanced practice cannot be operated from pads | Friction | Use nearby keyboard/mouse |
+| System Pause is unbound by default | Setup requirement | Assign a kit note in the MIDI profile or press keyboard `Esc` |
+| Physical-kit practice navigation is not live-verified | Research gap | Test with representative modules/interfaces |
 | Search, sort, import, and opening settings are not pad workflows | Friction | Use nearby keyboard/mouse; four settings tabs accept pads after opening |
 | Physical reconnect and latency behavior is not live-verified | Research gap | Test with representative modules/interfaces |
 
@@ -585,8 +598,8 @@ alone. The player must temporarily access the computer or receive help.
 | Start normal play | BD | Performance begins | Reachable |
 | Cancel loading | No pad action | Loading continues unless it fails or computer input intervenes | **Blocker** |
 | Play | Mapped pads | Notes are judged | Reachable |
-| Pause during play | No pad action | Performance continues | **Blocker** |
-| Resume/retry/quit after pause is open | HH/CY/BD/SD | Pause menu works | Reachable only if someone opened pause |
+| Pause during play | Configured system Pause note | Performance freezes and Pause opens | Reachable after setup-time binding |
+| Resume/restart/quit after pause is open | HH/CY/BD/SD | Pause menu works | Reachable |
 | Leave results | BD or SD | Returns to songs and triggers a save attempt | Reachable; save failure is silent |
 | Return to title | SD from song wheel | Title appears | Reachable |
 | Quit application | No kit action on title | Requires keyboard `Esc` | **Blocker** |
@@ -603,7 +616,8 @@ Current sequence:
 2. No pad navigation context exists while performance is running.
 3. The player must leave the kit and press keyboard `Esc`, ask another person,
    or allow the song to continue.
-4. Once paused, the kit can operate Resume, Retry, and Quit.
+4. Once paused, the kit can operate Resume, Restart Song, Practice This Section,
+   Quick Settings, and Return to Song Select.
 
 This is a current blocker for a self-contained distant-kit session.
 
@@ -626,26 +640,27 @@ The recovery is reachable but requires a full Results-to-song-selection cycle.
 | Practice need | Kit-only support | Reachability |
 |---|---|---|
 | Start practice | FT on difficulty level | Reachable |
-| Play whole-song loop | Normal mapped pads | Reachable |
-| Set A/B section | None | **Blocker** |
-| Change tempo | None | **Blocker** |
-| Restart section | None | **Blocker** |
-| Open detailed practice HUD | None | **Blocker** |
-| Seek timeline | None | **Blocker** |
-| Configure ramp or wait mode | None | **Blocker** |
-| Exit practice | Requires detailed HUD/computer input | **Blocker** |
+| Configure Setup and start | Shared pad navigation | Wired; physical kit unverified |
+| Play whole-song or A/B loop | Normal mapped pads | Reachable after Setup |
+| Change loop, tempo, or Off/Wait/Ramp | Practice Setup/Settings navigation | Wired; physical kit unverified |
+| Restart section | Bound system Restart or Pause menu | Reachable after binding |
+| Inspect completed Progress | Progress tab navigation | Wired; physical kit unverified |
+| Seek preview | Previous/next bar transport | Wired; direct timeline drag still needs mouse |
+| Pause and resume exactly | Bound system Pause, then Resume | Reachable after binding |
+| Exit practice | Bound system Pause, then Exit to Song Select | Reachable after binding |
 
-Starting practice from floor tom is therefore not equivalent to a complete
-kit-only practice workflow. Without computer access, the player receives a
-whole-song repeating practice session but cannot shape or end it normally.
+Starting practice from floor tom now enters mandatory Setup rather than an
+already-running whole-song loop. A complete distant-kit workflow depends on
+configured system Pause/Restart bindings. Its source/test reachability is known,
+but it still requires physical-kit and room-distance validation.
 
 ### Distant-MIDI blockers and workarounds
 
 | Blocker | Workaround | Behavioral cost |
 |---|---|---|
-| Cannot pause active play from kit | Walk to keyboard or ask another person | Breaks posture, timing, and independence |
-| Cannot operate advanced practice | Keep wireless keyboard/mouse nearby | Changes the assumed equipment setup |
-| Cannot exit practice normally from kit | Walk to computer | Player may avoid practice or terminate app externally |
+| Pause/Restart notes are unbound by default | Configure them before moving away from the computer | Requires setup-time device knowledge |
+| Direct timeline dragging requires a mouse | Use pad previous/next-bar transport | Less precise than pointer seeking |
+| Physical practice navigation is not live-verified | Keep wireless keyboard/mouse nearby during validation | Temporary fallback until representative-kit checks pass |
 | Cannot quit from title with kit | Walk to computer or close application remotely | Session cannot be completed kit-only |
 | Cannot search/sort/import from kit | Pre-plan library choices or use computer | Limits spontaneous song selection |
 | Cannot visually verify distant readability from source review | Conduct room-distance testing | Unknown until observed |
@@ -682,13 +697,13 @@ Legend:
 | Start practice | Yes | Yes, kit | Yes, kit |
 | Cancel loading | Yes, `Esc` | Keyboard fallback | No |
 | Play drum notes | Yes | Yes, kit | Yes, kit |
-| Open pause during play | Yes | Fallback | No |
+| Open pause during play | Yes | Yes after system binding | Yes after system binding |
 | Operate an open pause menu | Yes | Yes, kit | Yes, kit |
 | Leave results and trigger save attempt | Yes | Yes, kit | Yes, kit |
-| Define practice A/B | Yes | Fallback | No |
-| Change practice tempo | Yes | Fallback | No |
-| Inspect practice feedback | Yes | Fallback | No |
-| Exit practice normally | Yes | Fallback | No |
+| Define practice A/B | Yes | Yes, pad navigation | Yes, pad navigation |
+| Change practice tempo | Yes | Yes, pad navigation | Yes, pad navigation |
+| Inspect practice feedback | Yes | Yes, Progress navigation | Yes, Progress navigation |
+| Exit practice normally | Yes | Yes after system binding | Yes after system binding |
 | Calibrate | Yes | Fallback plus kit taps | Setup only |
 | Change Gameplay/Audio/Drums/System after editor opens | Yes | Yes, pads or fallback | Setup only |
 | Edit Keyboard/MIDI profiles and bindings | Yes, mouse-led | Computer fallback plus pad capture | Setup only |
@@ -790,7 +805,7 @@ The visible song wheel is not mouse-clickable for routine browse/start actions.
 | Intent | Keyboard/mouse action | MIDI action |
 |---|---|---|
 | Play a note | Press its configured drum key | Hit its mapped pad above threshold |
-| Open pause | Press `Esc` | No pad action |
+| Open pause | Press `Esc` | Hit the configured system Pause note; unbound by default |
 | Increase/decrease scroll speed | Press `Up`/`Down` | No pad action |
 | Adjust input offset | Press `Left`/`Right`; hold `Ctrl` for fine adjustment | No pad action |
 | Adjust per-song BGM offset | Press `Shift+Up`/`Shift+Down`; add `Ctrl` for fine adjustment | No pad action |
@@ -803,7 +818,7 @@ The visible song wheel is not mouse-clickable for routine browse/start actions.
 | Intent | Keyboard/mouse action | MIDI action |
 |---|---|---|
 | Move pause selection | Press `Up`/`Down` | Hit hi-hat/cymbal or ride |
-| Activate Resume/Retry/Quit | Press `Enter` or `Space` | Hit bass drum |
+| Activate Resume/Restart/Settings/Exit actions | Press `Enter` or `Space` | Hit bass drum |
 | Resume directly | Press `Esc` | Hit snare after pause is open |
 | Leave Results | Press `Enter` or `Esc` | Hit bass drum or snare |
 | Trigger result save attempt | Leave Results using an action above | Leave Results using an action above |
@@ -819,27 +834,30 @@ Main pause and Results rows are not mouse-clickable.
 | Tempo down/up | Press `-` / `=` | No pad action |
 | Restart section | Press `R` | No pad action |
 | Toggle ramp | Press `T` | No pad action |
-| Open full practice HUD | Press `Tab` or `Esc` | No pad action |
+| Open Practice Settings | Press `Tab` | Navigate through Practice Pause, or use keyboard fallback |
+| Open Practice Pause | Press `Esc` | Hit the configured system Pause note |
 | Continue playing notes | Press configured drum keys | Hit mapped pads |
 
-#### Full practice HUD
+#### Practice Setup, Settings, and Progress
 
 | Intent | Keyboard action | Mouse action | MIDI action |
 |---|---|---|---|
-| Move rail selection | Press `Up`/`Down` | Not required | No pad action |
-| Change selected rail value | Press `Left`/`Right` | No rail-row mouse action documented | No pad action |
-| Activate selected rail row | Press `Enter` or `Space` | No rail-row mouse action documented | No pad action |
-| Seek | Press `Up`/`Down` until Scrub is selected, press `Left`/`Right`, then `Enter`/`Space` to play there | Click timeline | No pad action |
-| Create A/B span | Press `Up`/`Down` to Set A or Set B and press `Enter`/`Space` on each | Mouse-drag across timeline | No pad action |
-| Previous/next bar | Select Scrub with `Up`/`Down`, then press `Left`/`Right` | Click previous/next-bar transport button | No pad action |
-| Resume | Select Resume with `Up`/`Down`, then press `Enter`/`Space` | Click Resume transport button | No pad action |
-| Exit practice | Select Exit Practice with `Up`/`Down`, then press `Enter`/`Space` twice | No mouse exit action documented | No pad action |
+| Move setting selection | Press `Up`/`Down` | Click a setting row | Hit hi-hat/cymbal or ride |
+| Change selected value | Press `Left`/`Right` | Click its adjustment control | Use decrement/increment navigation verbs |
+| Activate selected action | Press `Enter` or `Space` | Click the action | Hit bass drum |
+| Switch Setup/Progress/Preview | Press `Tab` or directional navigation according to layout | Click a tab | Use shared navigation verbs |
+| Seek | Use Preview previous/next bar or the timeline | Click timeline | Focus previous/next-bar transport and activate |
+| Create A/B span | Adjust loop start/end rows | Mouse-drag across timeline | Navigate loop rows and adjust |
+| Play/pause non-judged preview | Focus Preview transport and activate | Click preview play/pause | Focus preview transport and activate |
+| Start or continue from pre-roll | Activate Start Practice or Continue Practice | Click the primary action | Navigate to the primary action and confirm |
+| Save/update/delete a loop | Activate the explicit preset rows; confirm Delete | Click the corresponding action | Navigate to the preset action and confirm |
+| Return from Settings to Pause | Press `Esc` | Use the Back action | Hit snare/back |
 
 #### Gameplay, Audio, Drums, and System settings
 
 | Intent | Keyboard action | Mouse action | MIDI action after editor is open |
 |---|---|---|---|
-| Change tab | Press `PageUp`/`PageDown` or use rail arrows | Click tab | At tab bar, hit hi-hat/cymbal or ride |
+| Change tab | Press `PageUp`/`PageDown` or use tab arrows | Click tab | At tab bar, hit hi-hat/cymbal or ride |
 | Enter settings rows | Press `Down` or `Enter` from tab bar | Click/drag a row control directly | Hit bass drum |
 | Move row | Press `Up`/`Down` | Click desired row control | Hit hi-hat/cymbal or ride |
 | Change value | Press `Left`/`Right`; hold `Shift` for coarse change | Click stepper/toggle or drag slider | Hit BD to enter adjust, HH/CY to change, BD to keep |
@@ -871,8 +889,8 @@ The same software action has different cost by physical context.
 
 | Handoff | Keyboard/mouse | Nearby MIDI | Distant MIDI |
 |---|---|---|---|
-| Kit to keyboard for pause | Not applicable | Short interruption | Leaves play position; may be impossible quickly |
-| Kit to mouse for timeline | Not applicable | Expected advanced action | Practice blocker |
+| Configure a system Pause/Restart note | Not applicable | Setup-time interruption | Must be completed before the distant session |
+| Kit to mouse for direct timeline dragging | Not applicable | Optional advanced action | Pad bar transport remains available |
 | Kit to keyboard for search | Not applicable | Occasional fallback | Unavailable during seated session |
 | Keyboard to mouse in Customize | Low cost | Setup-time cost | Requires leaving kit |
 | Results to song wheel | Same device | Same kit grammar | Same kit grammar |
@@ -891,8 +909,8 @@ first-time users may repeatedly attempt to click visible song or menu elements.
 
 ### H2: Nearby MIDI players tolerate fallback at natural breaks
 
-They may accept keyboard/mouse for import, setup, and detailed practice, but
-reject reaching away during live performance.
+They may accept keyboard/mouse for import, device setup, and direct timeline
+dragging, but reject reaching away during live performance.
 
 ### H3: Pad navigation is learnable when legends change with context
 
@@ -901,9 +919,9 @@ meaning change between song wheel and difficulty selection must be observed.
 
 ### H4: Distant players interpret floor-tom Practice as a complete promise
 
-Because practice can be started from the kit, players may expect section,
-tempo, restart, and exit actions to remain kit-accessible and feel trapped when
-they are not.
+Because practice can be started from the kit, players may expect Setup,
+section, tempo, restart, Progress, and exit actions to remain understandable at
+room distance. This needs physical-kit and readability testing.
 
 ### H5: Save-on-leaving-Results is not visible enough
 
@@ -942,9 +960,9 @@ Ask the participant to:
    play.
 8. Press `Enter` or `Esc` to leave Results, then inspect whether the result
    appears in history.
-9. Press `Shift+Enter`, press `[`/`]` for a section, press `Tab`, select Ramp or
-   Wait with `Up`/`Down`, activate with `Enter`, then select Exit Practice and
-   press `Up`/`Down` until it is selected and `Enter` twice.
+9. Press `Shift+Enter`, verify Setup preview is stopped, configure a section and
+   Off/Wait/Ramp, start from pre-roll, open Settings with `Tab`, continue from
+   pre-roll, then press `Esc` and choose Exit to Song Select.
 10. Return to title with `Esc`, press `Esc` again, and wait for application exit.
 
 Observe attempted mouse clicks, shortcut discovery, mapping comprehension,
@@ -965,11 +983,11 @@ Ask the participant to:
 5. From title, hit BD, use HH/CY to choose the wrong song, hit BD to enter its
    difficulties, hit BD to start loading, then press keyboard `Esc` to cancel.
 6. Use HH/CY to choose a song, hit BD to enter difficulty and BD again to start,
-   press keyboard `Esc`, use HH/CY to select Retry, hit BD to activate it, then
+   press keyboard `Esc`, use HH/CY to select Restart Song, hit BD to activate it, then
    hit BD or SD to leave Results.
-7. Use HH/CY to choose a song, hit BD to enter difficulty, hit FT to start
-   practice, press `[`/`]` for the two-bar section, press `-` until 0.75x, press
-   `Tab`, select Ramp or Wait with `Up`/`Down`, and press `Enter`.
+7. Use HH/CY to choose a song, hit BD to enter difficulty, hit FT to open
+   Practice Setup, configure a two-bar section and 0.75x tempo with pad
+   navigation, choose Off, Wait, or Ramp, then start from pre-roll.
 
 Observe readiness assumptions, pad-command learning, computer handoffs,
 calibration confidence, and whether practice remains kit-centered. Do not
@@ -985,20 +1003,19 @@ participant to:
    choose difficulty, and BD to start.
 3. Start loading the wrong chart and attempt to cancel it; explicitly record
    that no pad action is available.
-4. Respond to a simulated interruption during play; explicitly record that no
-   pad action opens pause.
+4. Respond to a simulated interruption with the configured system Pause note;
+   verify Pause opens and Resume returns to the exact position.
 5. After failure, hit BD or SD to leave Results, navigate back with HH/CY and
    BD, and hit BD to retry.
-6. Hit FT to enter practice, then attempt to set the requested section and
-   slower tempo using only pads; record that no pad action exists.
-7. Attempt to exit practice and return to normal play using only pads; record
-   that no pad action exists.
+6. Hit FT to enter stopped Practice Setup, set the requested section and slower
+   tempo using pads, start, then open Settings and inspect completed Progress.
+7. Open Pause with the configured system binding and exit Practice using pads.
 8. Return to title with SD from the song wheel, then attempt to quit using pads;
    record that no pad action exists.
 
 Do not rescue the participant immediately. Record the first attempted pad,
-time-to-blocker, whether they leave the throne, and whether they believe the
-missing action is hidden or unavailable.
+time-to-action, whether they leave the throne, and whether system bindings,
+Setup state, and preview state remain understandable.
 
 ### Session D: First-time distant readiness
 
@@ -1028,12 +1045,12 @@ MIDI player. Ask each participant to:
 2. Use remembered selection, then type a different song title and press
    `Backspace` if correction is needed.
 3. Press `Enter` or hit BD to start, press `Up`/`Down` once for scroll speed,
-   press keyboard `Esc`, select Retry with arrows or HH/CY, and activate with
+   press keyboard `Esc`, select Restart Song with arrows or HH/CY, and activate with
    `Enter`/BD.
 4. Press `Enter`/`Esc` or hit BD/SD to leave Results, then inspect history.
-5. Press `Shift+Enter` or hit FT, press `[`/`]` or mouse-drag an A/B span, press
-   `-`/`=`, press `R`, press `Tab`, select Exit Practice with `Up`/`Down`, then
-   press `Enter`/`Space` twice.
+5. Press `Shift+Enter` or hit FT, configure and start an A/B span, press `R`,
+   press `Tab` to open Settings, continue from pre-roll, then press `Esc` and
+   choose Exit to Song Select.
 6. Press `F1`, click Audio, click/drag a BGM or drum volume, close with `Esc` or
    SD from the tab bar, and press `F11` during the next play.
 7. Press `Esc` or hit SD to return to title, then press keyboard `Esc` to quit.

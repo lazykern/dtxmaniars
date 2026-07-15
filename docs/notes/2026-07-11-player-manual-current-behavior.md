@@ -1,6 +1,6 @@
 # DTXManiaRS Player Manual: Current Behavior
 
-Date: 2026-07-12
+Updated: 2026-07-15
 Purpose: factual player-facing baseline for later behavioral research and UX evaluation
 
 ## 1. Scope and evidence
@@ -39,19 +39,20 @@ those screens.
 ### Keyboard, mouse, and a nearby MIDI drum kit
 
 **Available.** The kit can play drum notes and perform the main song-menu
-navigation actions. The keyboard and mouse remain available for actions the kit
-cannot perform, including opening settings, pausing from active play, detailed
-practice control, searching, importing, and layout editing.
+navigation actions. Bound system Pause/Restart actions and Practice Setup menu
+navigation are wired for a kit, while keyboard and mouse remain available for
+searching, importing, Customize, and layout editing. Physical MIDI behavior was
+not verified during this documentation pass.
 
 ### MIDI drum kit with the computer out of reach
 
 **Limited.** The kit can start from the title screen, move through songs and
-difficulties, start normal play or practice, operate an already-open normal
-pause menu, and leave results. A kit cannot currently open the pause menu while
-a song is running. It also cannot open Customize, operate advanced practice, or
-edit Controls, Lanes, and Widgets without keyboard or mouse access. If a nearby
-person opens Customize, the kit can operate the Gameplay, Audio, Drums, and
-System settings tabs.
+difficulties, start normal play or practice, navigate Practice Setup and open
+pause when a system Pause note has been configured, operate pause, and leave
+results. It cannot open Customize or edit Controls, Lanes, and Widgets without
+keyboard or mouse access. If a nearby person opens Customize, the kit can
+operate the Gameplay, Audio, Drums, and System settings tabs. This reachability
+is confirmed from wiring and tests, not a physical kit check.
 
 ## 3. Starting the game
 
@@ -328,8 +329,8 @@ input offset, and the performance-information toggle are saved shortly after
 the last change. The selected song's BGM adjustment is written immediately
 when its hotkey changes the value.
 
-**Unavailable:** opening pause from a drum pad while the performance is
-running.
+Opening pause from a drum pad requires assigning a system Pause note in the
+active MIDI profile; it is deliberately unbound by default.
 
 ## 9. Performance HUD
 
@@ -358,11 +359,9 @@ Lane lines can be shown as All On, Half, Line Off, or All Off.
 Press `Esc` during normal performance to pause. Pausing freezes the gameplay
 clock and pauses the chart's background and drum audio.
 
-The normal pause menu contains:
-
-1. Resume
-2. Retry
-3. Quit to Song Select
+The normal pause menu contains Resume, Restart Song, Practice This Section,
+Quick Settings, and Return to Song Select. Quick Settings contains scroll speed,
+lane visibility, BGM volume, and input offset.
 
 ### Pause controls
 
@@ -376,8 +375,9 @@ The normal pause menu contains:
 | Bass drum | Activate selection |
 | Snare | Resume/back |
 
-**Limited:** pad controls work after the pause menu is already open; a pad
-cannot open it from active play.
+**Limited:** pad controls work after the pause menu is open. Opening it from
+active play requires a configured system Pause binding; no pad is bound by
+default.
 
 ## 11. Stage clear, failure, and results
 
@@ -428,7 +428,14 @@ miss analysis.
 ## 12. Practice mode
 
 Start practice by selecting a song and pressing `Shift+Enter`, or by striking
-the floor tom on song selection.
+the floor tom on song selection. The Practice action on Results can also seed a
+recommended section. Every route opens Practice Setup before the first attempt.
+
+Setup starts with preview stopped. The preview uses the real playfield, notes,
+BGA, audio, and timeline, but input is not judged and cannot create misses,
+score, combo, gauge changes, attempt records, lane diagnosis, Wait halts, or
+Ramp evaluation. Start Practice commits the draft and begins from its configured
+pre-roll/count-in.
 
 Practice uses the normal drum playfield but changes the session rules:
 
@@ -451,8 +458,8 @@ Practice uses the normal drum playfield but changes the session rules:
 | `=` | Increase tempo by 0.05x |
 | `R` | Restart the current section |
 | `T` | Arm or disarm the accuracy ramp |
-| `Tab` | Open the full practice HUD |
-| `Esc` | Open the full practice HUD through pause |
+| `Tab` | Open Practice Settings |
+| `Esc` | Open the Practice pause menu |
 
 Tempo ranges from 0.50x to 1.50x and defaults to 1.00x.
 
@@ -460,46 +467,39 @@ Tempo ranges from 0.50x to 1.50x and defaults to 1.00x.
 
 Without an A/B region, the whole song is the practice span. Set A and B to
 repeat a smaller section. If B is placed before A, the points are reordered.
-Mouse-dragging a region on the full timeline snaps it to bars and enforces a
+Mouse-dragging a region on the Setup timeline snaps it to bars and enforces a
 minimum one-bar region.
 
 Changing or clearing a loop disarms an active tempo ramp because the ramp is
 tied to the practiced section.
 
-### Full practice HUD
+### Setup, Settings, and Progress
 
-The full practice HUD pauses playback and provides a bottom density timeline,
-mouse seek/region selection, transport buttons, attempt history, lane
-diagnosis, and an 18-row control rail:
+Setup and Practice Settings share loop, transport, trainer, saved-loop,
+Progress, preview, and timeline controls. Use `Up`/`Down` to select a visible
+setting, `Left`/`Right` to adjust it, and `Enter` or `Space` to activate it.
+Trainer mode is one mutually exclusive value: Off, Wait, or Ramp. Ramp detail
+rows appear only in Ramp mode.
 
-1. Resume
-2. Scrub
-3. Restart section
-4. Tempo
-5. Snap
-6. Pre-roll
-7. Count-in
-8. Set A
-9. Set B
-10. Clear loop
-11. Ramp on/off
-12. Ramp start
-13. Ramp target
-14. Ramp step
-15. Ramp pass threshold
-16. Ramp streak
-17. Wait mode
-18. Exit practice
-
-Use `Up`/`Down` to select a row, `Left`/`Right` to change a row's value, and
-`Enter` or `Space` to activate it. Exit Practice requires a second confirmation
-press.
+Practice Settings opens with preview stopped and invalidates the interrupted
+attempt. Continue Practice commits its draft and begins a fresh attempt from
+pre-roll/count-in. `Esc` during a run instead opens the small Practice pause
+menu. Pause Resume restores the exact frozen audio/chart position; its other
+choices are Restart Loop, Practice Settings, and Exit to Song Select.
 
 The mouse can:
 
 - click the timeline to seek;
 - drag the timeline to create an A/B loop; and
-- press previous-bar, resume, and next-bar transport buttons.
+- press previous-bar, preview play/pause, and next-bar transport buttons.
+
+### Saved loops
+
+Saved loops are stored in `CONFIG_DIR/practice-presets.toml` and looked up by
+the chart's canonical hash plus selected difficulty index. Save as New creates
+a preset; Update Saved Loop changes the selected saved source; Delete requires
+confirmation. Merely editing a draft never changes a named saved loop. Last
+Used updates only when Start Practice or Continue Practice commits the draft.
 
 ### Snap and pre-roll
 
@@ -538,21 +538,25 @@ and ends the ramp. Manually changing tempo disarms the ramp.
 
 Wait mode stops at unhit notes until the player clears them. Notes cleared
 while waiting are tracked separately from timing judgments, and the HUD reports
-flow percentage. Wait mode and the accuracy ramp are mutually exclusive.
+flow percentage. Selecting Wait replaces Off or Ramp; selecting Ramp replaces
+Off or Wait.
 
 ### Attempt feedback
 
-Practice retains up to 20 attempt records. The full HUD shows up to eight recent
-attempts for the current section, including accuracy, mean timing error, and
-tempo. It also aggregates lane tendencies such as rushing, dragging, or on-time
-play. Small reports and notifications appear when loops wrap or settings change.
+Practice retains up to 20 completed attempt records. Progress shows completed
+attempts for the current section, using accuracy for Off/Ramp and flow for Wait,
+along with mean timing error, tempo, and lane diagnosis. Interrupted, partial,
+preview, and settings-invalidated attempts do not enter Progress or Ramp
+evaluation. Small reports and notifications appear when loops wrap or settings
+change.
 
 ### Practice limitations
 
 - **Limited:** changing playback rate changes pitch; pitch-preserving tempo is
   unavailable.
-- **Limited:** advanced practice navigation is keyboard/mouse-oriented. A kit
-  can start practice but cannot fully operate the practice rail.
+- **Limited:** source and automated tests cover keyboard, mouse, and pad
+  navigation, but physical MIDI operation and room-distance readability were
+  not checked during this documentation pass.
 - **Unavailable:** saving a practice result as a normal score.
 - **Unavailable:** ending practice automatically at song completion; the song
   is treated as a repeating practice span.

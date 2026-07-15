@@ -4,8 +4,8 @@ Purpose: canonical status index for the approved end-to-end improvement program.
 
 Audience: players, contributors, and maintainers deciding what is current.
 
-Status: Maintained. Cycles 0–8 and the approved improvement program are
-complete. Final local verification evidence is recorded in the
+Status: Maintained. Cycles 0–9 and the approved improvement program are
+complete. Earlier final local verification evidence is recorded in the
 [documentation inventory](notes/2026-07-13-documentation-inventory.md).
 
 Neighboring guides: [player guide](player-guide.md),
@@ -25,6 +25,7 @@ Neighboring guides: [player guide](player-guide.md),
 | 6 | Accessibility and design-system consolidation | Complete | [Design](superpowers/specs/2026-07-13-accessibility-design-system-design.md), [plan](superpowers/plans/2026-07-13-cycle-6-accessibility-design-system.md) |
 | 7 | Extended format/media compatibility | Complete | [Design](superpowers/specs/2026-07-13-extended-compatibility-design.md), [plan](superpowers/plans/2026-07-13-cycle-7-extended-compatibility.md) |
 | 8 | Documentation and repository truth repair | Complete | [Design](superpowers/specs/2026-07-13-documentation-truth-repair-design.md), [plan](superpowers/plans/2026-07-13-cycle-8-documentation-truth-repair.md) |
+| 9 | Mandatory Practice Setup, non-judged preview, saved loops, and completed-attempt Progress | Complete | [Design](superpowers/specs/2026-07-14-practice-mode-overhaul-design.md), [plan](superpowers/plans/2026-07-14-practice-mode-overhaul.md) |
 
 Two approved supporting initiatives are also complete: [distant-kit system
 binds design](superpowers/specs/2026-07-13-distant-kit-system-binds-design.md)
@@ -42,6 +43,12 @@ The program is complete only when all of the following remain true:
 - supported media plays or produces an explicit diagnosis and recovery path;
 - calibration reports confidence and cannot auto-apply weak evidence;
 - Results explains a weakness and can open Practice at the recommended loop;
+- every Practice request opens stopped, non-judged Setup before a run; Pause
+  resumes exactly, while Settings continues from pre-roll;
+- trainer mode is Off, Wait, or Ramp; only completed loop attempts enter
+  Progress;
+- saved practice loops require explicit lifecycle actions and remain isolated
+  by canonical chart hash and selected difficulty;
 - large libraries have explicit, composable discovery controls;
 - focus and state never rely on color alone, motion can be reduced, and
   critical text can be scaled;
