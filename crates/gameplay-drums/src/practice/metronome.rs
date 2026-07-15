@@ -208,6 +208,7 @@ pub fn spawn_countdown(mut commands: Commands) {
         CountdownText,
         Text::new(""),
         Theme::title_font(),
+        dtx_ui::SemanticText(dtx_ui::TypographyRole::Display),
         TextColor(theme.text_primary),
         Node {
             position_type: PositionType::Absolute,

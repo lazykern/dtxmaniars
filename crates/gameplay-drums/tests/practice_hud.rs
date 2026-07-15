@@ -7,8 +7,9 @@ use gameplay_drums::practice::hud::progress::progress_rows;
 use gameplay_drums::practice::hud::setup::{
     practice_layout_mode, practice_transport_row_mode, update_tab_selection, PracticeLayoutMode,
     PracticePanelTransition, PracticePreviewGeometry, PracticePreviewRegion, PracticePrimaryAction,
-    PracticeSettingsPane, PracticeSetupLayout, PracticeSetupRoot, PracticeTab, PracticeTabButton,
-    PracticeTransportRowMode, SetupAdjustButton,
+    PracticeSettingsPane, PracticeSetupLayout, PracticeSetupRoot, PracticeSurfaceFocus,
+    PracticeTab, PracticeTabButton, PracticeTabCrossfade, PracticeTransportRowMode,
+    SetupAdjustButton,
 };
 use gameplay_drums::practice::hud::setup_controls::{PracticeUiAction, SetupItem, SetupSelection};
 use gameplay_drums::practice::hud::timeline_ui::{
@@ -1529,6 +1530,64 @@ fn standard_large_and_xlarge_keep_accessible_setup_structure() {
 }
 
 #[test]
+fn running_toast_and_countdown_scale_semantically_in_the_spawn_update() {
+    for scale in [
+        dtx_config::TextScale::Standard,
+        dtx_config::TextScale::Large,
+        dtx_config::TextScale::XLarge,
+    ] {
+        let mut app = setup_hud_app(1280.0, 720.0, scale);
+        app.world_mut().resource_mut::<PracticeFlow>().phase =
+            gameplay_drums::practice::PracticePhase::Running;
+        app.world_mut()
+            .resource_mut::<gameplay_drums::practice::toast::ToastQueue>()
+            .push("Practice saved");
+        app.add_systems(
+            Update,
+            (
+                gameplay_drums::practice::toast::toast_ui,
+                gameplay_drums::practice::metronome::spawn_countdown,
+            )
+                .chain()
+                .before(dtx_ui::SemanticTypographyUpdate),
+        );
+
+        app.update();
+
+        let toast_font = app
+            .world_mut()
+            .query_filtered::<
+                (&dtx_ui::SemanticText, &TextFont),
+                With<gameplay_drums::practice::toast::ToastText>,
+            >()
+            .iter(app.world())
+            .next()
+            .map(|(semantic, font)| (semantic.0, font.font_size))
+            .expect("semantic practice toast");
+        assert_eq!(toast_font.0, dtx_ui::TypographyRole::Label);
+        assert_eq!(
+            toast_font.1,
+            bevy::text::FontSize::Px(dtx_ui::Typography.px(dtx_ui::TypographyRole::Label, scale))
+        );
+
+        let countdown_font = app
+            .world_mut()
+            .query_filtered::<
+                (&dtx_ui::SemanticText, &TextFont),
+                With<gameplay_drums::practice::metronome::CountdownText>,
+            >()
+            .single(app.world())
+            .map(|(semantic, font)| (semantic.0, font.font_size))
+            .expect("semantic countdown");
+        assert_eq!(countdown_font.0, dtx_ui::TypographyRole::Display);
+        assert_eq!(
+            countdown_font.1,
+            bevy::text::FontSize::Px(dtx_ui::Typography.px(dtx_ui::TypographyRole::Display, scale))
+        );
+    }
+}
+
+#[test]
 fn focused_selected_destructive_error_and_disabled_states_have_markers() {
     let mut app = setup_hud_app(1280.0, 720.0, dtx_config::TextScale::Standard);
     press_key(&mut app, KeyCode::ArrowUp);
@@ -1657,6 +1716,286 @@ fn setup_motion_uses_out_quint_and_reduced_motion_starts_at_final_position() {
         .expect("settings transform");
     assert_eq!(transform.translation, bevy::ui::Val2::ZERO);
     assert_eq!(count::<PracticeSetupRoot>(&mut reduced), 1);
+}
+
+fn ancestor_with<T: Component>(app: &App, mut entity: Entity) -> bool {
+    loop {
+        if app.world().get::<T>(entity).is_some() {
+            return true;
+        }
+        let Some(parent) = app.world().get::<ChildOf>(entity) else {
+            return false;
+        };
+        entity = parent.parent();
+    }
+}
+
+#[test]
+fn split_keyboard_and_pad_reach_every_transport_without_mutating_settings() {
+    for (width, height) in [(1280.0, 720.0), (1920.0, 1080.0)] {
+        for pad in [false, true] {
+            let mut app = setup_hud_app(width, height, dtx_config::TextScale::Standard);
+            let original = app.world().resource::<PracticeDraft>().clone();
+
+            if pad {
+                send_nav(&mut app, game_shell::NavVerb::Practice);
+            } else {
+                press_key(&mut app, KeyCode::Tab);
+            }
+            assert_eq!(
+                *app.world().resource::<PracticeSurfaceFocus>(),
+                PracticeSurfaceFocus::Preview(PreviewTransportButton::Back)
+            );
+            assert!(texts(&mut app).iter().any(|label| {
+                label.starts_with(dtx_ui::StateMarker::Focus.label()) && label.contains("Back")
+            }));
+            assert_eq!(
+                texts(&mut app)
+                    .iter()
+                    .filter(|label| label.starts_with(dtx_ui::StateMarker::Focus.label()))
+                    .count(),
+                1,
+                "only the active Split surface may carry the focus marker"
+            );
+            if pad {
+                send_nav(&mut app, game_shell::NavVerb::Confirm);
+            } else {
+                press_key(&mut app, KeyCode::Enter);
+            }
+            assert!(app
+                .world()
+                .resource::<Messages<gameplay_drums::practice::InitialSetupCancelRequested>>()
+                .iter_current_update_messages()
+                .next()
+                .is_some());
+
+            for (button, action) in [
+                (
+                    PreviewTransportButton::PrevBar,
+                    gameplay_drums::practice::PreviewAction::PrevBar,
+                ),
+                (
+                    PreviewTransportButton::PlayPause,
+                    gameplay_drums::practice::PreviewAction::Play,
+                ),
+                (
+                    PreviewTransportButton::NextBar,
+                    gameplay_drums::practice::PreviewAction::NextBar,
+                ),
+            ] {
+                if pad {
+                    send_nav(&mut app, game_shell::NavVerb::Inc);
+                    send_nav(&mut app, game_shell::NavVerb::Confirm);
+                } else {
+                    press_key(&mut app, KeyCode::ArrowRight);
+                    press_key(&mut app, KeyCode::Enter);
+                }
+                assert_eq!(
+                    *app.world().resource::<PracticeSurfaceFocus>(),
+                    PracticeSurfaceFocus::Preview(button)
+                );
+                assert!(app
+                    .world()
+                    .resource::<Messages<gameplay_drums::practice::PreviewAction>>()
+                    .iter_current_update_messages()
+                    .any(|seen| *seen == action));
+            }
+
+            app.world_mut().resource_mut::<PracticeFlow>().preview =
+                gameplay_drums::practice::PreviewState::Playing;
+            if pad {
+                send_nav(&mut app, game_shell::NavVerb::Dec);
+                send_nav(&mut app, game_shell::NavVerb::Confirm);
+            } else {
+                press_key(&mut app, KeyCode::ArrowLeft);
+                press_key(&mut app, KeyCode::Enter);
+            }
+            assert!(app
+                .world()
+                .resource::<Messages<gameplay_drums::practice::PreviewAction>>()
+                .iter_current_update_messages()
+                .any(|seen| *seen == gameplay_drums::practice::PreviewAction::Pause));
+
+            if pad {
+                send_nav(&mut app, game_shell::NavVerb::Practice);
+            } else {
+                press_key(&mut app, KeyCode::Tab);
+            }
+            assert_eq!(
+                *app.world().resource::<PracticeSurfaceFocus>(),
+                PracticeSurfaceFocus::Settings
+            );
+            assert_eq!(
+                texts(&mut app)
+                    .iter()
+                    .filter(|label| label.starts_with(dtx_ui::StateMarker::Focus.label()))
+                    .count(),
+                1,
+                "focus must return exclusively to the settings cursor"
+            );
+            assert_eq!(*app.world().resource::<PracticeDraft>(), original);
+            assert_eq!(count::<PracticeSettingsPane>(&mut app), 1);
+
+            if pad {
+                send_nav(&mut app, game_shell::NavVerb::Back);
+            } else {
+                press_key(&mut app, KeyCode::Escape);
+            }
+            assert!(app
+                .world()
+                .resource::<Messages<gameplay_drums::practice::InitialSetupCancelRequested>>()
+                .iter_current_update_messages()
+                .next()
+                .is_some());
+        }
+    }
+}
+
+#[test]
+fn progress_hides_primary_action_and_cannot_focus_or_activate_it() {
+    for width in [900.0, 1280.0, 1920.0] {
+        let mut app = setup_hud_app(width, 720.0, dtx_config::TextScale::Standard);
+        app.world_mut().resource_mut::<SetupSelection>().0 = SetupItem::StartOrContinue;
+        click_tab(&mut app, "Progress");
+
+        assert_eq!(count::<PracticePrimaryAction>(&mut app), 0);
+        assert_ne!(
+            app.world().resource::<SetupSelection>().0,
+            SetupItem::StartOrContinue
+        );
+        assert!(!texts(&mut app)
+            .iter()
+            .any(|label| label.contains("Start Practice")));
+
+        press_key(&mut app, KeyCode::Enter);
+        assert_eq!(*app.world().resource::<PracticeTab>(), PracticeTab::Setup);
+        assert!(app
+            .world()
+            .resource::<Messages<gameplay_drums::practice::hud::setup_controls::StartOrContinueRequested>>()
+            .iter_current_update_messages()
+            .next()
+            .is_none());
+
+        click_tab(&mut app, "Progress");
+        send_nav(&mut app, game_shell::NavVerb::Confirm);
+        assert_eq!(*app.world().resource::<PracticeTab>(), PracticeTab::Setup);
+        assert!(app
+            .world()
+            .resource::<Messages<gameplay_drums::practice::hud::setup_controls::StartOrContinueRequested>>()
+            .iter_current_update_messages()
+            .next()
+            .is_none());
+    }
+}
+
+#[test]
+fn panel_entry_motion_only_marks_fresh_surface_entries() {
+    let mut app = setup_hud_app(1280.0, 720.0, dtx_config::TextScale::Standard);
+    assert_eq!(count::<PracticePanelTransition>(&mut app), 1);
+    app.world_mut()
+        .query::<&mut PracticePanelTransition>()
+        .single_mut(app.world_mut())
+        .expect("panel transition")
+        .elapsed_ms = 180.0;
+    app.update();
+    assert_eq!(count::<PracticePanelTransition>(&mut app), 0);
+
+    app.world_mut().resource_mut::<PracticeDraft>().trainer.mode = PracticeTrainerMode::Ramp;
+    app.update();
+    assert_eq!(count::<PracticePanelTransition>(&mut app), 0);
+    assert_eq!(count::<PracticeTabCrossfade>(&mut app), 0);
+    app.world_mut().resource_mut::<PracticeDraft>().source = PracticeDraftSource::Saved(7);
+    app.update();
+    assert_eq!(count::<PracticePanelTransition>(&mut app), 0);
+    app.world_mut()
+        .insert_resource(PracticePresetPrompt::ConfirmDelete { id: 7 });
+    app.update();
+    assert_eq!(count::<PracticePanelTransition>(&mut app), 0);
+
+    app.world_mut().resource_mut::<PracticeFlow>().phase =
+        gameplay_drums::practice::PracticePhase::Running;
+    app.update();
+    app.world_mut().resource_mut::<PracticeFlow>().phase =
+        gameplay_drums::practice::PracticePhase::Editing;
+    app.update();
+    assert_eq!(count::<PracticePanelTransition>(&mut app), 1);
+}
+
+#[test]
+fn tab_crossfade_belongs_to_the_new_visible_surface_and_cleans_up() {
+    let mut app = setup_hud_app(900.0, 720.0, dtx_config::TextScale::Standard);
+    assert_eq!(count::<PracticeTabCrossfade>(&mut app), 0);
+
+    click_tab(&mut app, "Preview");
+    let fade = app
+        .world_mut()
+        .query_filtered::<Entity, With<PracticeTabCrossfade>>()
+        .single(app.world())
+        .expect("preview crossfade");
+    assert!(ancestor_with::<PracticePreviewRegion>(&app, fade));
+
+    app.world_mut()
+        .query::<&mut PracticeTabCrossfade>()
+        .single_mut(app.world_mut())
+        .expect("tab crossfade")
+        .elapsed_ms = 140.0;
+    app.update();
+    assert_eq!(count::<PracticeTabCrossfade>(&mut app), 0);
+
+    click_tab(&mut app, "Setup");
+    let fade = app
+        .world_mut()
+        .query_filtered::<Entity, With<PracticeTabCrossfade>>()
+        .single(app.world())
+        .expect("settings crossfade");
+    assert!(ancestor_with::<PracticeSettingsPane>(&app, fade));
+    app.world_mut()
+        .query::<&mut PracticeTabCrossfade>()
+        .single_mut(app.world_mut())
+        .expect("setup crossfade")
+        .elapsed_ms = 140.0;
+    app.update();
+
+    click_tab(&mut app, "Progress");
+    app.world_mut()
+        .query::<&mut PracticeTabCrossfade>()
+        .single_mut(app.world_mut())
+        .expect("progress crossfade")
+        .elapsed_ms = 140.0;
+    app.update();
+    click_tab(&mut app, "Preview");
+    let fade = app
+        .world_mut()
+        .query_filtered::<Entity, With<PracticeTabCrossfade>>()
+        .single(app.world())
+        .expect("progress to preview crossfade");
+    assert!(ancestor_with::<PracticePreviewRegion>(&app, fade));
+    app.world_mut()
+        .query::<&mut PracticeTabCrossfade>()
+        .single_mut(app.world_mut())
+        .expect("preview crossfade")
+        .elapsed_ms = 140.0;
+    app.update();
+    click_tab(&mut app, "Progress");
+    let fade = app
+        .world_mut()
+        .query_filtered::<Entity, With<PracticeTabCrossfade>>()
+        .single(app.world())
+        .expect("preview to progress crossfade");
+    assert!(ancestor_with::<PracticeSettingsPane>(&app, fade));
+
+    let mut reduced = setup_hud_app_with_accessibility(
+        900.0,
+        720.0,
+        dtx_config::AccessibilityConfig {
+            reduce_motion: true,
+            ..Default::default()
+        },
+    );
+    click_tab(&mut reduced, "Preview");
+    assert_eq!(count::<PracticeTabCrossfade>(&mut reduced), 0);
+    click_tab(&mut reduced, "Progress");
+    assert_eq!(count::<PracticeTabCrossfade>(&mut reduced), 0);
 }
 
 #[test]

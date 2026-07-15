@@ -153,6 +153,9 @@ pub enum PracticeUiAction {
     CancelPresetPrompt,
     StartOrContinue,
     Preview(PreviewAction),
+    ToggleSurfaceFocus,
+    MoveTransportFocus(i8),
+    ActivateTransport,
     SelectTab(super::setup::PracticeTab),
     MoveTab(i8),
     Confirm,
@@ -165,10 +168,39 @@ pub struct StartOrContinueRequested;
 pub fn keyboard_actions(
     keys: Res<ButtonInput<KeyCode>>,
     tab: Res<super::setup::PracticeTab>,
+    focus: Res<super::setup::PracticeSurfaceFocus>,
+    layouts: Query<&super::setup::PracticeSetupLayout>,
     flow: Res<PracticeFlow>,
     mut actions: MessageWriter<PracticeUiAction>,
 ) {
-    let action = if keys.just_pressed(KeyCode::Tab) {
+    let split = layouts
+        .single()
+        .is_ok_and(|layout| layout.0 == super::setup::PracticeLayoutMode::Split);
+    let action = if keys.just_pressed(KeyCode::Escape) {
+        Some(PracticeUiAction::Back)
+    } else if split && keys.just_pressed(KeyCode::Tab) {
+        Some(PracticeUiAction::ToggleSurfaceFocus)
+    } else if split
+        && matches!(*focus, super::setup::PracticeSurfaceFocus::Preview(_))
+        && keys.just_pressed(KeyCode::ArrowLeft)
+    {
+        Some(PracticeUiAction::MoveTransportFocus(-1))
+    } else if split
+        && matches!(*focus, super::setup::PracticeSurfaceFocus::Preview(_))
+        && keys.just_pressed(KeyCode::ArrowRight)
+    {
+        Some(PracticeUiAction::MoveTransportFocus(1))
+    } else if split
+        && matches!(*focus, super::setup::PracticeSurfaceFocus::Preview(_))
+        && (keys.just_pressed(KeyCode::ArrowUp) || keys.just_pressed(KeyCode::ArrowDown))
+    {
+        Some(PracticeUiAction::ToggleSurfaceFocus)
+    } else if split
+        && matches!(*focus, super::setup::PracticeSurfaceFocus::Preview(_))
+        && (keys.just_pressed(KeyCode::Enter) || keys.just_pressed(KeyCode::Space))
+    {
+        Some(PracticeUiAction::ActivateTransport)
+    } else if keys.just_pressed(KeyCode::Tab) {
         Some(PracticeUiAction::MoveTab(1))
     } else if *tab == super::setup::PracticeTab::Preview && keys.just_pressed(KeyCode::ArrowLeft) {
         Some(PracticeUiAction::Preview(PreviewAction::PrevBar))
@@ -212,8 +244,6 @@ pub fn keyboard_actions(
         Some(PracticeUiAction::Adjust(1))
     } else if keys.just_pressed(KeyCode::Enter) || keys.just_pressed(KeyCode::Space) {
         Some(PracticeUiAction::Confirm)
-    } else if keys.just_pressed(KeyCode::Escape) {
-        Some(PracticeUiAction::Back)
     } else {
         None
     };
@@ -225,57 +255,108 @@ pub fn keyboard_actions(
 pub fn nav_actions(
     mut nav: MessageReader<game_shell::NavAction>,
     tab: Res<super::setup::PracticeTab>,
+    focus: Res<super::setup::PracticeSurfaceFocus>,
+    layouts: Query<&super::setup::PracticeSetupLayout>,
     flow: Res<PracticeFlow>,
     mut actions: MessageWriter<PracticeUiAction>,
 ) {
+    let split = layouts
+        .single()
+        .is_ok_and(|layout| layout.0 == super::setup::PracticeLayoutMode::Split);
     for action in nav.read() {
-        let action = match (*tab, action.verb) {
-            (_, game_shell::NavVerb::Back) => PracticeUiAction::Back,
-            (_, game_shell::NavVerb::Practice) => PracticeUiAction::MoveTab(1),
-            (super::setup::PracticeTab::Setup, game_shell::NavVerb::Up) => {
-                PracticeUiAction::MoveSelection(-1)
+        let action = if *tab == super::setup::PracticeTab::Progress {
+            match action.verb {
+                game_shell::NavVerb::Back => PracticeUiAction::Back,
+                game_shell::NavVerb::Up | game_shell::NavVerb::Dec => PracticeUiAction::MoveTab(-1),
+                game_shell::NavVerb::Down
+                | game_shell::NavVerb::Inc
+                | game_shell::NavVerb::Practice => PracticeUiAction::MoveTab(1),
+                game_shell::NavVerb::Confirm => {
+                    PracticeUiAction::SelectTab(super::setup::PracticeTab::Setup)
+                }
             }
-            (super::setup::PracticeTab::Setup, game_shell::NavVerb::Down) => {
-                PracticeUiAction::MoveSelection(1)
+        } else if split {
+            match (*focus, action.verb) {
+                (_, game_shell::NavVerb::Back) => PracticeUiAction::Back,
+                (_, game_shell::NavVerb::Practice) => PracticeUiAction::ToggleSurfaceFocus,
+                (super::setup::PracticeSurfaceFocus::Preview(_), game_shell::NavVerb::Dec) => {
+                    PracticeUiAction::MoveTransportFocus(-1)
+                }
+                (super::setup::PracticeSurfaceFocus::Preview(_), game_shell::NavVerb::Inc) => {
+                    PracticeUiAction::MoveTransportFocus(1)
+                }
+                (super::setup::PracticeSurfaceFocus::Preview(_), game_shell::NavVerb::Confirm) => {
+                    PracticeUiAction::ActivateTransport
+                }
+                (
+                    super::setup::PracticeSurfaceFocus::Preview(_),
+                    game_shell::NavVerb::Up | game_shell::NavVerb::Down,
+                ) => PracticeUiAction::ToggleSurfaceFocus,
+                (super::setup::PracticeSurfaceFocus::Settings, game_shell::NavVerb::Up) => {
+                    PracticeUiAction::MoveSelection(-1)
+                }
+                (super::setup::PracticeSurfaceFocus::Settings, game_shell::NavVerb::Down) => {
+                    PracticeUiAction::MoveSelection(1)
+                }
+                (super::setup::PracticeSurfaceFocus::Settings, game_shell::NavVerb::Dec) => {
+                    PracticeUiAction::Adjust(-1)
+                }
+                (super::setup::PracticeSurfaceFocus::Settings, game_shell::NavVerb::Inc) => {
+                    PracticeUiAction::Adjust(1)
+                }
+                (super::setup::PracticeSurfaceFocus::Settings, game_shell::NavVerb::Confirm) => {
+                    PracticeUiAction::Confirm
+                }
             }
-            (super::setup::PracticeTab::Setup, game_shell::NavVerb::Dec) => {
-                PracticeUiAction::Adjust(-1)
-            }
-            (super::setup::PracticeTab::Setup, game_shell::NavVerb::Inc) => {
-                PracticeUiAction::Adjust(1)
-            }
-            (super::setup::PracticeTab::Setup, game_shell::NavVerb::Confirm) => {
-                PracticeUiAction::Confirm
-            }
-            (
-                super::setup::PracticeTab::Progress,
-                game_shell::NavVerb::Up | game_shell::NavVerb::Dec,
-            )
-            | (super::setup::PracticeTab::Preview, game_shell::NavVerb::Up) => {
-                PracticeUiAction::MoveTab(-1)
-            }
-            (
-                super::setup::PracticeTab::Progress,
-                game_shell::NavVerb::Down | game_shell::NavVerb::Inc,
-            )
-            | (super::setup::PracticeTab::Preview, game_shell::NavVerb::Down) => {
-                PracticeUiAction::MoveTab(1)
-            }
-            (super::setup::PracticeTab::Progress, game_shell::NavVerb::Confirm) => {
-                PracticeUiAction::SelectTab(super::setup::PracticeTab::Setup)
-            }
-            (super::setup::PracticeTab::Preview, game_shell::NavVerb::Dec) => {
-                PracticeUiAction::Preview(PreviewAction::PrevBar)
-            }
-            (super::setup::PracticeTab::Preview, game_shell::NavVerb::Inc) => {
-                PracticeUiAction::Preview(PreviewAction::NextBar)
-            }
-            (super::setup::PracticeTab::Preview, game_shell::NavVerb::Confirm) => {
-                PracticeUiAction::Preview(if flow.preview == PreviewState::Playing {
-                    PreviewAction::Pause
-                } else {
-                    PreviewAction::Play
-                })
+        } else {
+            match (*tab, action.verb) {
+                (_, game_shell::NavVerb::Back) => PracticeUiAction::Back,
+                (_, game_shell::NavVerb::Practice) => PracticeUiAction::MoveTab(1),
+                (super::setup::PracticeTab::Setup, game_shell::NavVerb::Up) => {
+                    PracticeUiAction::MoveSelection(-1)
+                }
+                (super::setup::PracticeTab::Setup, game_shell::NavVerb::Down) => {
+                    PracticeUiAction::MoveSelection(1)
+                }
+                (super::setup::PracticeTab::Setup, game_shell::NavVerb::Dec) => {
+                    PracticeUiAction::Adjust(-1)
+                }
+                (super::setup::PracticeTab::Setup, game_shell::NavVerb::Inc) => {
+                    PracticeUiAction::Adjust(1)
+                }
+                (super::setup::PracticeTab::Setup, game_shell::NavVerb::Confirm) => {
+                    PracticeUiAction::Confirm
+                }
+                (
+                    super::setup::PracticeTab::Progress,
+                    game_shell::NavVerb::Up | game_shell::NavVerb::Dec,
+                )
+                | (super::setup::PracticeTab::Preview, game_shell::NavVerb::Up) => {
+                    PracticeUiAction::MoveTab(-1)
+                }
+                (
+                    super::setup::PracticeTab::Progress,
+                    game_shell::NavVerb::Down | game_shell::NavVerb::Inc,
+                )
+                | (super::setup::PracticeTab::Preview, game_shell::NavVerb::Down) => {
+                    PracticeUiAction::MoveTab(1)
+                }
+                (super::setup::PracticeTab::Progress, game_shell::NavVerb::Confirm) => {
+                    PracticeUiAction::SelectTab(super::setup::PracticeTab::Setup)
+                }
+                (super::setup::PracticeTab::Preview, game_shell::NavVerb::Dec) => {
+                    PracticeUiAction::Preview(PreviewAction::PrevBar)
+                }
+                (super::setup::PracticeTab::Preview, game_shell::NavVerb::Inc) => {
+                    PracticeUiAction::Preview(PreviewAction::NextBar)
+                }
+                (super::setup::PracticeTab::Preview, game_shell::NavVerb::Confirm) => {
+                    PracticeUiAction::Preview(if flow.preview == PreviewState::Playing {
+                        PreviewAction::Pause
+                    } else {
+                        PreviewAction::Play
+                    })
+                }
             }
         };
         actions.write(action);
@@ -286,6 +367,7 @@ pub fn apply_ui_actions(
     mut actions: MessageReader<PracticeUiAction>,
     mut selection: ResMut<SetupSelection>,
     mut tab: ResMut<super::setup::PracticeTab>,
+    mut focus: ResMut<super::setup::PracticeSurfaceFocus>,
     mut draft: ResMut<PracticeDraft>,
     mut flow: ResMut<PracticeFlow>,
     mut prompt: ResMut<PracticePresetPrompt>,
@@ -453,9 +535,77 @@ pub fn apply_ui_actions(
             PracticeUiAction::Preview(action) => {
                 previews.write(action);
             }
-            PracticeUiAction::SelectTab(next) => *tab = next,
+            PracticeUiAction::ToggleSurfaceFocus => {
+                *focus = match *focus {
+                    super::setup::PracticeSurfaceFocus::Settings => {
+                        super::setup::PracticeSurfaceFocus::Preview(
+                            super::timeline_ui::PreviewTransportButton::Back,
+                        )
+                    }
+                    super::setup::PracticeSurfaceFocus::Preview(_) => {
+                        super::setup::PracticeSurfaceFocus::Settings
+                    }
+                };
+            }
+            PracticeUiAction::MoveTransportFocus(direction) => {
+                let current = match *focus {
+                    super::setup::PracticeSurfaceFocus::Preview(button) => button,
+                    super::setup::PracticeSurfaceFocus::Settings => {
+                        super::timeline_ui::PreviewTransportButton::Back
+                    }
+                };
+                *focus = super::setup::PracticeSurfaceFocus::Preview(transport_offset(
+                    current, direction,
+                ));
+            }
+            PracticeUiAction::ActivateTransport => {
+                let button = match *focus {
+                    super::setup::PracticeSurfaceFocus::Preview(button) => button,
+                    super::setup::PracticeSurfaceFocus::Settings => {
+                        super::timeline_ui::PreviewTransportButton::Back
+                    }
+                };
+                match button {
+                    super::timeline_ui::PreviewTransportButton::Back => {
+                        flow.preview = PreviewState::Stopped;
+                        match flow.phase {
+                            PracticePhase::Setup => {
+                                initial_cancels.write(crate::practice::InitialSetupCancelRequested);
+                            }
+                            PracticePhase::Editing => {
+                                cancels.write(crate::practice::CancelPracticeSettings);
+                            }
+                            PracticePhase::Running => {}
+                        }
+                    }
+                    super::timeline_ui::PreviewTransportButton::PrevBar => {
+                        previews.write(PreviewAction::PrevBar);
+                    }
+                    super::timeline_ui::PreviewTransportButton::PlayPause => {
+                        previews.write(if flow.preview == PreviewState::Playing {
+                            PreviewAction::Pause
+                        } else {
+                            PreviewAction::Play
+                        });
+                    }
+                    super::timeline_ui::PreviewTransportButton::NextBar => {
+                        previews.write(PreviewAction::NextBar);
+                    }
+                }
+            }
+            PracticeUiAction::SelectTab(next) => {
+                *tab = next;
+                *focus = super::setup::PracticeSurfaceFocus::Settings;
+                if next == super::setup::PracticeTab::Progress {
+                    selection.0 = SetupItem::Source;
+                }
+            }
             PracticeUiAction::MoveTab(direction) => {
                 *tab = tab.offset(direction);
+                *focus = super::setup::PracticeSurfaceFocus::Settings;
+                if *tab == super::setup::PracticeTab::Progress {
+                    selection.0 = SetupItem::Source;
+                }
             }
             PracticeUiAction::Confirm => activate_selected(
                 selection.0,
@@ -487,6 +637,24 @@ pub fn apply_ui_actions(
         *draft = validated.draft;
         normalize_selection(&mut selection, &draft, &prompt);
     }
+}
+
+fn transport_offset(
+    current: super::timeline_ui::PreviewTransportButton,
+    direction: i8,
+) -> super::timeline_ui::PreviewTransportButton {
+    use super::timeline_ui::PreviewTransportButton::{Back, NextBar, PlayPause, PrevBar};
+    let all = [Back, PrevBar, PlayPause, NextBar];
+    let index = all
+        .iter()
+        .position(|button| *button == current)
+        .unwrap_or(0);
+    let next = if direction >= 0 {
+        (index + 1) % all.len()
+    } else {
+        (index + all.len() - 1) % all.len()
+    };
+    all[next]
 }
 
 pub fn apply_preset_results(

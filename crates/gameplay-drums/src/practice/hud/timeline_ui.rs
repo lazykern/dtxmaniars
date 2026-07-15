@@ -170,6 +170,7 @@ pub(super) fn spawn_timeline(
     timeline: &crate::timeline::ChipTimeline,
     height: f32,
     row_mode: super::setup::PracticeTransportRowMode,
+    focus: super::setup::PracticeSurfaceFocus,
 ) {
     root.spawn((
         PracticeTimelineRoot,
@@ -237,6 +238,12 @@ pub(super) fn spawn_timeline(
                                 PreviewTransportButton::PlayPause => "Play Preview",
                                 PreviewTransportButton::NextBar => "Next bar",
                             };
+                            let label =
+                                if focus == super::setup::PracticeSurfaceFocus::Preview(button) {
+                                    format!("{} {label}", dtx_ui::StateMarker::Focus.label())
+                                } else {
+                                    label.to_owned()
+                                };
                             let text = super::setup::spawn_text(
                                 button_root,
                                 label,

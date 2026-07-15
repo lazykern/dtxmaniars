@@ -35,6 +35,8 @@ pub fn plugin(app: &mut App) {
     chip::plugin(app);
     wait_prompt::plugin(app);
     app.init_resource::<setup::PracticeTab>()
+        .init_resource::<setup::PracticeSurfaceFocus>()
+        .init_resource::<setup::PracticeSurfaceLifecycle>()
         .init_resource::<setup::PracticePreviewGeometry>()
         .init_resource::<timeline_ui::TimelineGesture>()
         .init_resource::<crate::practice::toast::ToastQueue>()

@@ -10,6 +10,9 @@ pub type ToastQueue = dtx_ui::NotificationQueue;
 #[derive(Component)]
 pub struct ToastRoot;
 
+#[derive(Component)]
+pub struct ToastText;
+
 /// Rebuild the top-center toast column each frame (≤4 small texts, so a
 /// rebuild is cheaper than diffing).
 pub fn toast_ui(
@@ -42,8 +45,10 @@ pub fn toast_ui(
         .with_children(|col| {
             for notification in queue.iter() {
                 col.spawn((
+                    ToastText,
                     Text::new(notification.message.clone()),
                     Theme::label_font(),
+                    dtx_ui::SemanticText(dtx_ui::TypographyRole::Label),
                     TextColor(theme.text_primary),
                     BackgroundColor(Color::srgba(0.0, 0.0, 0.0, 0.65)),
                     Node {

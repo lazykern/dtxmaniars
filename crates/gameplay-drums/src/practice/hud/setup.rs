@@ -43,6 +43,19 @@ pub enum PracticeLayoutMode {
     Tabbed,
 }
 
+#[derive(Resource, Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum PracticeSurfaceFocus {
+    #[default]
+    Settings,
+    Preview(super::timeline_ui::PreviewTransportButton),
+}
+
+#[derive(Resource, Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub(super) struct PracticeSurfaceLifecycle {
+    open: bool,
+    tab: PracticeTab,
+}
+
 const SETTINGS_REF_MIN: f32 = 400.0;
 const PREVIEW_REF_MIN: f32 = 520.0;
 const TAB_CHROME_MIN_HEIGHT: f32 = 48.0;
@@ -137,6 +150,7 @@ pub(super) struct PracticeShellGeometry(PracticeChromeGeometry);
 #[derive(Component, Debug, Clone, PartialEq)]
 pub(super) struct PracticeShellSignature {
     tab: PracticeTab,
+    focus: PracticeSurfaceFocus,
     ramp_rows: bool,
     saved_rows: bool,
     prompt: super::setup_controls::PracticePresetPrompt,
@@ -161,9 +175,9 @@ pub struct PracticePanelTransition {
 
 #[derive(Component, Debug, Clone, Copy, PartialEq)]
 pub struct PracticeTabCrossfade {
-    elapsed_ms: f32,
-    duration_ms: f32,
-    easing: dtx_ui::easing::EaseFunction,
+    pub elapsed_ms: f32,
+    pub duration_ms: f32,
+    pub easing: dtx_ui::easing::EaseFunction,
 }
 
 #[derive(Component)]
@@ -222,6 +236,8 @@ pub(super) fn ensure_setup_shell(
     windows: Query<&Window, With<PrimaryWindow>>,
     accessibility: Option<Res<dtx_ui::AccessibilityPolicy>>,
     mut tab: ResMut<PracticeTab>,
+    mut focus: ResMut<PracticeSurfaceFocus>,
+    mut lifecycle: ResMut<PracticeSurfaceLifecycle>,
     mut selection: ResMut<super::setup_controls::SetupSelection>,
     prompt: Res<super::setup_controls::PracticePresetPrompt>,
     mut preview_geometry: ResMut<PracticePreviewGeometry>,
@@ -241,6 +257,8 @@ pub(super) fn ensure_setup_shell(
 ) {
     let surface_open = matches!(flow.phase, PracticePhase::Setup | PracticePhase::Editing);
     if !surface_open {
+        lifecycle.open = false;
+        *focus = PracticeSurfaceFocus::Settings;
         preview_geometry.0 = None;
         for (root, _, _, _) in &roots {
             commands.entity(root).despawn();
@@ -265,14 +283,23 @@ pub(super) fn ensure_setup_shell(
     if mode == PracticeLayoutMode::Split && *tab == PracticeTab::Preview {
         *tab = PracticeTab::Setup;
     }
+    if *tab == PracticeTab::Progress {
+        selection.0 = super::setup_controls::SetupItem::Source;
+        *focus = PracticeSurfaceFocus::Settings;
+    }
     super::setup_controls::normalize_selection(&mut selection, &draft, &prompt);
     let signature = PracticeShellSignature {
         tab: *tab,
+        focus: *focus,
         ramp_rows: draft.trainer_mode() == crate::practice::PracticeTrainerMode::Ramp,
         saved_rows: matches!(draft.source, crate::practice::PracticeDraftSource::Saved(_)),
         prompt: prompt.clone(),
     };
     preview_geometry.0 = preview_stage_rect(width, height, mode, settings_width, *tab, chrome);
+    let fresh_entry = !lifecycle.open;
+    let tab_changed = lifecycle.open && lifecycle.tab != *tab;
+    lifecycle.open = true;
+    lifecycle.tab = *tab;
 
     if let Ok((_, current, current_chrome, current_signature)) = roots.single() {
         if current.0 == mode && current_chrome.0 == chrome && *current_signature == signature {
@@ -306,7 +333,9 @@ pub(super) fn ensure_setup_shell(
         &session,
         &timeline,
         &prompt,
-        allow_motion,
+        allow_motion && fresh_entry,
+        allow_motion && tab_changed,
+        *focus,
     );
 }
 
@@ -348,7 +377,9 @@ fn spawn_setup_shell(
     session: &PracticeSession,
     timeline: &crate::timeline::ChipTimeline,
     prompt: &super::setup_controls::PracticePresetPrompt,
-    allow_motion: bool,
+    animate_entry: bool,
+    animate_tab: bool,
+    focus: PracticeSurfaceFocus,
 ) {
     let theme = dtx_ui::Theme::default();
     commands
@@ -369,7 +400,7 @@ fn spawn_setup_shell(
             GlobalZIndex(crate::ui_z::PRACTICE_SETUP),
         ))
         .with_children(|root| {
-            spawn_tab_chrome(root, &theme, mode, tab, chrome.tab_height);
+            spawn_tab_chrome(root, &theme, mode, tab, focus, chrome.tab_height);
             root.spawn(Node {
                 width: Val::Percent(100.0),
                 flex_grow: 1.0,
@@ -390,9 +421,17 @@ fn spawn_setup_shell(
                     session,
                     timeline,
                     prompt,
-                    allow_motion,
+                    animate_entry,
+                    animate_tab && tab != PracticeTab::Preview,
                 );
-                spawn_preview(main, &theme, mode, preview_min_width, tab);
+                spawn_preview(
+                    main,
+                    &theme,
+                    mode,
+                    preview_min_width,
+                    tab,
+                    animate_tab && tab == PracticeTab::Preview,
+                );
             });
             super::timeline_ui::spawn_timeline(
                 root,
@@ -402,6 +441,7 @@ fn spawn_setup_shell(
                 timeline,
                 chrome.timeline_height,
                 chrome.transport_rows,
+                focus,
             );
         });
 }
@@ -411,6 +451,7 @@ fn spawn_tab_chrome(
     theme: &dtx_ui::Theme,
     mode: PracticeLayoutMode,
     tab: PracticeTab,
+    focus: PracticeSurfaceFocus,
     height: f32,
 ) {
     root.spawn((
@@ -494,14 +535,28 @@ fn spawn_tab_chrome(
             });
         spawn_text(
             chrome,
-            practice_legend(tab),
+            practice_legend(mode, tab, focus),
             dtx_ui::TypographyRole::Hint,
             theme.text_secondary,
         );
     });
 }
 
-const fn practice_legend(tab: PracticeTab) -> &'static str {
+fn practice_legend(
+    mode: PracticeLayoutMode,
+    tab: PracticeTab,
+    focus: PracticeSurfaceFocus,
+) -> &'static str {
+    if mode == PracticeLayoutMode::Split {
+        return match focus {
+            PracticeSurfaceFocus::Settings => {
+                "SETTINGS FOCUS · Tab/FT Preview controls · HH/CY Move · HT/LT Adjust · BD Select · SD Back"
+            }
+            PracticeSurfaceFocus::Preview(_) => {
+                "PREVIEW FOCUS · Tab/FT Settings · HT/LT Choose control · BD Activate · SD Back"
+            }
+        };
+    }
     match tab {
         PracticeTab::Setup => {
             "HH/CY Focus · HT/LT Adjust · BD Select · SD Back · Keyboard arrows / Enter / Esc"
@@ -526,7 +581,8 @@ fn spawn_settings(
     session: &PracticeSession,
     timeline: &crate::timeline::ChipTimeline,
     prompt: &super::setup_controls::PracticePresetPrompt,
-    allow_motion: bool,
+    animate_entry: bool,
+    animate_tab: bool,
 ) {
     let visible = mode == PracticeLayoutMode::Split || tab != PracticeTab::Preview;
     let mut settings = main.spawn((
@@ -554,7 +610,7 @@ fn spawn_settings(
         Visibility::Inherited,
         UiTransform::default(),
     ));
-    if allow_motion {
+    if animate_entry {
         settings.insert(PracticePanelTransition {
             elapsed_ms: 0.0,
             duration_ms: 180.0,
@@ -586,54 +642,40 @@ fn spawn_settings(
             }
         });
 
-        pane.spawn((
-            SetupRow(super::setup_controls::SetupItem::StartOrContinue),
-            PrimaryActionButton,
-            Button,
-            Node {
-                width: Val::Percent(100.0),
-                min_height: Val::Px(52.0),
-                justify_content: JustifyContent::Center,
-                align_items: AlignItems::Center,
-                padding: UiRect::axes(Val::Px(16.0), Val::Px(10.0)),
-                flex_shrink: 0.0,
-                ..default()
-            },
-            BackgroundColor(theme.accent),
-        ))
-        .with_children(|button| {
-            let label = button
-                .spawn((
-                    PracticePrimaryAction,
-                    Text::new(primary_action_label(phase)),
-                    dtx_ui::Theme::font(16.0),
-                    dtx_ui::SemanticText(dtx_ui::TypographyRole::Label),
-                    TextColor(theme.stage_bg),
-                ))
-                .id();
-            button.commands().entity(label).insert(SetupRowLabel(
-                super::setup_controls::SetupItem::StartOrContinue,
-            ));
-        });
-
-        if allow_motion {
+        if tab != PracticeTab::Progress {
             pane.spawn((
-                PracticeTabCrossfade {
-                    elapsed_ms: 0.0,
-                    duration_ms: 140.0,
-                    easing: dtx_ui::easing::EaseFunction::OutQuint,
-                },
-                Pickable::IGNORE,
+                SetupRow(super::setup_controls::SetupItem::StartOrContinue),
+                PrimaryActionButton,
+                Button,
                 Node {
-                    position_type: PositionType::Absolute,
-                    left: Val::Px(0.0),
-                    right: Val::Px(0.0),
-                    top: Val::Px(0.0),
-                    bottom: Val::Px(0.0),
+                    width: Val::Percent(100.0),
+                    min_height: Val::Px(52.0),
+                    justify_content: JustifyContent::Center,
+                    align_items: AlignItems::Center,
+                    padding: UiRect::axes(Val::Px(16.0), Val::Px(10.0)),
+                    flex_shrink: 0.0,
                     ..default()
                 },
-                BackgroundColor(theme.stage_bg),
-            ));
+                BackgroundColor(theme.accent),
+            ))
+            .with_children(|button| {
+                let label = button
+                    .spawn((
+                        PracticePrimaryAction,
+                        Text::new(primary_action_label(phase)),
+                        dtx_ui::Theme::font(16.0),
+                        dtx_ui::SemanticText(dtx_ui::TypographyRole::Label),
+                        TextColor(theme.stage_bg),
+                    ))
+                    .id();
+                button.commands().entity(label).insert(SetupRowLabel(
+                    super::setup_controls::SetupItem::StartOrContinue,
+                ));
+            });
+        }
+
+        if animate_tab {
+            spawn_tab_crossfade(pane, theme);
         }
     });
 }
@@ -821,9 +863,10 @@ fn spawn_preview(
     mode: PracticeLayoutMode,
     preview_min_width: f32,
     tab: PracticeTab,
+    animate_tab: bool,
 ) {
     let visible = mode == PracticeLayoutMode::Split || tab == PracticeTab::Preview;
-    main.spawn((
+    let mut pane = main.spawn((
         PracticePreviewRegion,
         PreviewContent,
         Node {
@@ -855,8 +898,9 @@ fn spawn_preview(
             ..default()
         },
         Visibility::Inherited,
-    ))
-    .with_children(|preview| {
+        UiTransform::default(),
+    ));
+    pane.with_children(|preview| {
         preview.spawn((
             Node {
                 padding: UiRect::axes(Val::Px(10.0), Val::Px(6.0)),
@@ -870,7 +914,30 @@ fn spawn_preview(
                 TextColor(theme.text_primary),
             )],
         ));
+        if animate_tab {
+            spawn_tab_crossfade(preview, theme);
+        }
     });
+}
+
+fn spawn_tab_crossfade(parent: &mut ChildSpawnerCommands, theme: &dtx_ui::Theme) {
+    parent.spawn((
+        PracticeTabCrossfade {
+            elapsed_ms: 0.0,
+            duration_ms: 140.0,
+            easing: dtx_ui::easing::EaseFunction::OutQuint,
+        },
+        Pickable::IGNORE,
+        Node {
+            position_type: PositionType::Absolute,
+            left: Val::Px(0.0),
+            right: Val::Px(0.0),
+            top: Val::Px(0.0),
+            bottom: Val::Px(0.0),
+            ..default()
+        },
+        BackgroundColor(theme.stage_bg),
+    ));
 }
 
 fn spawn_section_heading(
@@ -1047,6 +1114,7 @@ pub(super) fn refresh_setup_copy(
     mut values: Query<(&SetupValueText, &mut Text), Without<PracticePrimaryAction>>,
     mut primary: Query<&mut Text, With<PracticePrimaryAction>>,
     selection: Res<super::setup_controls::SetupSelection>,
+    focus: Res<PracticeSurfaceFocus>,
     store: Option<Res<crate::practice::PracticePresetStore>>,
     timeline: Res<crate::timeline::ChipTimeline>,
     mut labels: Query<
@@ -1067,7 +1135,9 @@ pub(super) fn refresh_setup_copy(
     }
     for mut text in &mut primary {
         let label = primary_action_label(flow.phase);
-        text.0 = if selection.0 == super::setup_controls::SetupItem::StartOrContinue {
+        text.0 = if *focus == PracticeSurfaceFocus::Settings
+            && selection.0 == super::setup_controls::SetupItem::StartOrContinue
+        {
             format!("{} {label}", dtx_ui::StateMarker::Focus.label())
         } else {
             label.to_owned()
@@ -1080,7 +1150,7 @@ pub(super) fn refresh_setup_copy(
             .strip_prefix(&focus_prefix)
             .unwrap_or(&text.0)
             .to_owned();
-        text.0 = if row.0 == selection.0 {
+        text.0 = if *focus == PracticeSurfaceFocus::Settings && row.0 == selection.0 {
             format!("{focus_prefix}{raw}")
         } else {
             raw
@@ -1204,7 +1274,7 @@ pub(super) fn animate_setup_transitions(
         Without<PracticePanelTransition>,
     >,
 ) {
-    let delta_ms = (time.delta_secs() * 1000.0).min(50.0);
+    let delta_ms = time.delta_secs() * 1000.0;
     for (entity, mut transition, mut transform) in &mut panels {
         transition.elapsed_ms += delta_ms;
         let progress = transition
@@ -1236,6 +1306,12 @@ pub(super) fn despawn_setup_shell(
     }
 }
 
-pub(super) fn reset_tab(mut tab: ResMut<PracticeTab>) {
+pub(super) fn reset_tab(
+    mut tab: ResMut<PracticeTab>,
+    mut focus: ResMut<PracticeSurfaceFocus>,
+    mut lifecycle: ResMut<PracticeSurfaceLifecycle>,
+) {
     *tab = PracticeTab::Setup;
+    *focus = PracticeSurfaceFocus::Settings;
+    *lifecycle = PracticeSurfaceLifecycle::default();
 }

@@ -323,7 +323,12 @@ pub(super) fn plugin(app: &mut App) {
         )
         .add_systems(
             Update,
-            (pause_kb_emit, pause_pointer_emit, pause_menu_input)
+            (
+                pause_kb_emit,
+                pause_pointer_emit,
+                pause_menu_input,
+                refresh_pause_legend,
+            )
                 .chain()
                 .run_if(in_state(PauseState::Paused)),
         )
@@ -434,6 +439,7 @@ fn toggle_pause(
     keys: Res<ButtonInput<KeyCode>>,
     state: Res<State<PauseState>>,
     mut next: ResMut<NextState<PauseState>>,
+    mut view: Option<ResMut<PauseView>>,
     flow: Option<Res<crate::practice::PracticeFlow>>,
     editor_open: Option<Res<crate::editor::EditorOpen>>,
 ) {
@@ -441,6 +447,16 @@ fn toggle_pause(
         && !editor_open.is_some_and(|editor| editor.0)
         && system_verbs_active(flow.as_deref())
     {
+        if *state.get() == PauseState::Paused
+            && view
+                .as_deref()
+                .is_some_and(|view| *view == PauseView::QuickSettings)
+        {
+            if let Some(view) = view.as_deref_mut() {
+                *view = PauseView::Menu;
+            }
+            return;
+        }
         toggle(state.get(), &mut next);
     }
 }
@@ -715,19 +731,66 @@ fn spawn_overlay(
                     }
                 }
             });
-            let legend: &[dtx_ui::widget::nav_legend::LegendItem<'_>] = if midi.is_some_and(|m| m.0)
-            {
-                &[
-                    ("HH", "up"),
-                    ("CY", "down"),
-                    ("BD", "select"),
-                    ("SD", "resume"),
-                ]
-            } else {
-                &[("↑/↓", "move"), ("Enter", "select"), ("Esc", "resume")]
-            };
+            let legend = pause_legend(PauseView::Menu, midi.is_some_and(|m| m.0));
             dtx_ui::widget::nav_legend::spawn_nav_legend(root, &theme, legend);
         });
+}
+
+fn pause_legend(
+    view: PauseView,
+    midi: bool,
+) -> &'static [dtx_ui::widget::nav_legend::LegendItem<'static>] {
+    match (view, midi) {
+        (PauseView::Menu, true) => &[
+            ("HH", "up"),
+            ("CY", "down"),
+            ("BD", "select"),
+            ("SD", "resume"),
+        ],
+        (PauseView::Menu, false) => &[("↑/↓", "move"), ("Enter", "select"), ("Esc", "resume")],
+        (PauseView::QuickSettings, true) => &[
+            ("HH/CY", "move"),
+            ("HT/LT", "adjust"),
+            ("BD", "confirm"),
+            ("SD", "back"),
+        ],
+        (PauseView::QuickSettings, false) => &[
+            ("↑/↓", "move"),
+            ("←/→", "adjust"),
+            ("Enter", "confirm"),
+            ("Esc", "back"),
+        ],
+    }
+}
+
+fn refresh_pause_legend(
+    mut commands: Commands,
+    view: Res<PauseView>,
+    midi: Option<Res<game_shell::MidiConnected>>,
+    overlays: Query<Entity, With<PauseOverlay>>,
+    legends: Query<Entity, With<dtx_ui::widget::nav_legend::NavLegend>>,
+) {
+    if !view.is_changed()
+        && !midi
+            .as_ref()
+            .is_some_and(|connected| connected.is_changed())
+    {
+        return;
+    }
+    for legend in &legends {
+        commands.entity(legend).despawn();
+    }
+    let Ok(root) = overlays.single() else {
+        return;
+    };
+    let theme = Theme::default();
+    commands.entity(root).with_children(|overlay| {
+        dtx_ui::widget::nav_legend::spawn_nav_legend(
+            overlay,
+            &theme,
+            pause_legend(*view, midi.is_some_and(|connected| connected.0)),
+        );
+    });
 }
 
 fn despawn_overlay(mut commands: Commands, overlays: Query<Entity, With<PauseOverlay>>) {
@@ -1080,6 +1143,27 @@ mod tests {
     }
 
     #[test]
+    fn esc_in_quick_settings_returns_to_pause_menu() {
+        let mut world = World::new();
+        let mut keys = ButtonInput::<KeyCode>::default();
+        keys.press(KeyCode::Escape);
+        world.insert_resource(keys);
+        world.insert_resource(State::new(PauseState::Paused));
+        world.init_resource::<NextState<PauseState>>();
+        world.insert_resource(PauseView::QuickSettings);
+
+        world
+            .run_system_once(toggle_pause)
+            .expect("toggle_pause runs");
+
+        assert_eq!(*world.resource::<PauseView>(), PauseView::Menu);
+        assert!(matches!(
+            world.resource::<NextState<PauseState>>(),
+            NextState::Unchanged
+        ));
+    }
+
+    #[test]
     fn esc_is_owned_by_practice_setup_and_editing() {
         for phase in [
             crate::practice::PracticePhase::Setup,
@@ -1126,6 +1210,37 @@ mod tests {
                 PauseItemKind::RestartLoop,
                 PauseItemKind::PracticeSettings,
                 PauseItemKind::ExitToSongSelect,
+            ]
+        );
+    }
+
+    #[test]
+    fn pause_legend_is_generated_from_the_active_view() {
+        assert_eq!(
+            pause_legend(PauseView::Menu, true),
+            &[
+                ("HH", "up"),
+                ("CY", "down"),
+                ("BD", "select"),
+                ("SD", "resume"),
+            ]
+        );
+        assert_eq!(
+            pause_legend(PauseView::QuickSettings, true),
+            &[
+                ("HH/CY", "move"),
+                ("HT/LT", "adjust"),
+                ("BD", "confirm"),
+                ("SD", "back"),
+            ]
+        );
+        assert_eq!(
+            pause_legend(PauseView::QuickSettings, false),
+            &[
+                ("↑/↓", "move"),
+                ("←/→", "adjust"),
+                ("Enter", "confirm"),
+                ("Esc", "back"),
             ]
         );
     }
