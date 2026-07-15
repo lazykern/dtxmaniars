@@ -213,12 +213,16 @@ pub fn start_or_continue_practice(
 
 pub fn cancel_initial_setup(
     flow: Res<PracticeFlow>,
+    mut intent: ResMut<PracticeIntent>,
     mut result_return: ResMut<game_shell::ResultReturnState>,
     mut requests: MessageWriter<game_shell::TransitionRequest>,
     mut toasts: ResMut<toast::ToastQueue>,
 ) {
     if flow.phase != PracticePhase::Setup {
         return;
+    }
+    if flow.owns_initial_request(intent.request()) {
+        *intent = PracticeIntent::None;
     }
     let target = match flow.origin {
         game_shell::PracticeOrigin::SongSelect | game_shell::PracticeOrigin::NormalPause => {

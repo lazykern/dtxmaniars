@@ -30,26 +30,34 @@ pub struct PracticeFlow {
     pub preview: PreviewState,
     pub origin: PracticeOrigin,
     pub edit_snapshot: Option<PracticeEditSnapshot>,
+    initial_request: Option<PracticeRequest>,
 }
 
 impl Default for PracticeFlow {
     fn default() -> Self {
-        Self::setup(PracticeOrigin::SongSelect)
+        Self {
+            phase: PracticePhase::Setup,
+            preview: PreviewState::Stopped,
+            origin: PracticeOrigin::SongSelect,
+            edit_snapshot: None,
+            initial_request: None,
+        }
     }
 }
 
 impl PracticeFlow {
-    pub fn setup(origin: PracticeOrigin) -> Self {
+    pub fn setup(request: PracticeRequest) -> Self {
         Self {
             phase: PracticePhase::Setup,
             preview: PreviewState::Stopped,
-            origin,
+            origin: request.origin,
             edit_snapshot: None,
+            initial_request: Some(request),
         }
     }
 
     pub fn from_request(request: &PracticeRequest) -> Self {
-        Self::setup(request.origin)
+        Self::setup(*request)
     }
 
     pub fn running() -> Self {
@@ -73,6 +81,10 @@ impl PracticeFlow {
         self.preview = PreviewState::Stopped;
         self.edit_snapshot = Some(snapshot.clone());
         (self, snapshot)
+    }
+
+    pub(crate) fn owns_initial_request(&self, request: Option<PracticeRequest>) -> bool {
+        self.initial_request == request
     }
 }
 
@@ -167,6 +179,7 @@ mod tests {
             preview: PreviewState::Playing,
             origin: PracticeOrigin::Results,
             edit_snapshot: None,
+            initial_request: None,
         };
 
         let (flow, snapshot) = flow.open_settings(2_500, &mut session);

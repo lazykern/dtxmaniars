@@ -375,6 +375,47 @@ mod tests {
     }
 
     #[test]
+    fn retry_after_cancelling_results_practice_is_normal_play() {
+        let mut world = driver_world();
+        let practice_intent = PracticeIntent::manual(PracticeOrigin::Results);
+        let practice_request = practice_intent.request().expect("practice request");
+        world.insert_resource(practice_intent);
+        world.insert_resource(game_shell::ResultReturnState {
+            available: true,
+            skip_processing_once: false,
+        });
+        world.insert_resource(gameplay_drums::practice::PracticeFlow::setup(
+            practice_request,
+        ));
+        world.insert_resource(gameplay_drums::practice::toast::ToastQueue::default());
+
+        world
+            .run_system_once(gameplay_drums::practice::cancel_initial_setup)
+            .expect("cancel system runs");
+
+        assert_eq!(drain_requests(&mut world), vec![AppState::Result]);
+        assert_eq!(*world.resource::<PracticeIntent>(), PracticeIntent::None);
+        assert!(
+            world
+                .resource::<game_shell::ResultReturnState>()
+                .skip_processing_once
+        );
+
+        world.resource_scope(|world, mut state: Mut<game_shell::ResultReturnState>| {
+            let mut display = world.resource_mut::<ResultDisplaySnapshot>();
+            assert_eq!(crate::finish_result_entry(&mut state, &mut display), None);
+        });
+        assert!(world.resource::<ResultDisplaySnapshot>().0.is_some());
+
+        world.insert_resource(ResultVerb::Retry);
+        world.write_message(pad(NavVerb::Confirm));
+        world.run_system_once(result_nav).expect("driver runs");
+
+        assert_eq!(drain_requests(&mut world), vec![AppState::SongLoading]);
+        assert_eq!(*world.resource::<PracticeIntent>(), PracticeIntent::None);
+    }
+
+    #[test]
     fn result_nav_ft_jumps_to_practice() {
         let mut world = driver_world();
         world.write_message(pad(NavVerb::Practice));

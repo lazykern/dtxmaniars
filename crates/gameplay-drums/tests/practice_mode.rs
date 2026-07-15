@@ -2506,7 +2506,52 @@ fn setup_cancel_routes_origins_and_defends_results_snapshot() {
             warns,
             "{origin:?} available={available}"
         );
+        assert_eq!(
+            *app.world().resource::<PracticeIntent>(),
+            PracticeIntent::None,
+            "cancelling initial Setup must consume its practice request: {origin:?} available={available}"
+        );
     }
+}
+
+#[test]
+fn setup_cancel_does_not_clear_a_replacement_request_from_another_origin() {
+    let mut app = build_lifecycle_app(PracticeIntent::manual(PracticeOrigin::Results));
+    enter_performance(&mut app, chart_with_measures(4));
+    *app.world_mut().resource_mut::<PracticeIntent>() =
+        PracticeIntent::manual(PracticeOrigin::SongSelect);
+    app.world_mut()
+        .resource_mut::<game_shell::ResultReturnState>()
+        .available = true;
+
+    app.world_mut()
+        .run_system_once(cancel_initial_setup)
+        .expect("cancel system runs");
+
+    assert_eq!(
+        *app.world().resource::<PracticeIntent>(),
+        PracticeIntent::manual(PracticeOrigin::SongSelect)
+    );
+}
+
+#[test]
+fn setup_cancel_does_not_clear_a_replacement_request_with_a_different_seed() {
+    let mut app = build_lifecycle_app(PracticeIntent::manual(PracticeOrigin::Results));
+    enter_performance(&mut app, chart_with_measures(4));
+    let replacement = PracticeIntent::recommended(
+        PracticeOrigin::Results,
+        game_shell::PracticeRecommendation::weak_section(2_000, 4_000, Some(3)),
+    );
+    *app.world_mut().resource_mut::<PracticeIntent>() = replacement;
+    app.world_mut()
+        .resource_mut::<game_shell::ResultReturnState>()
+        .available = true;
+
+    app.world_mut()
+        .run_system_once(cancel_initial_setup)
+        .expect("cancel system runs");
+
+    assert_eq!(*app.world().resource::<PracticeIntent>(), replacement);
 }
 
 #[test]

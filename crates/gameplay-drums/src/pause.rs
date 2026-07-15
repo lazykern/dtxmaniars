@@ -1183,10 +1183,9 @@ mod tests {
             world.insert_resource(keys);
             world.insert_resource(State::new(PauseState::Running));
             world.init_resource::<NextState<PauseState>>();
-            world.insert_resource(crate::practice::PracticeFlow {
-                phase,
-                ..Default::default()
-            });
+            let mut flow = crate::practice::PracticeFlow::default();
+            flow.phase = phase;
+            world.insert_resource(flow);
 
             world
                 .run_system_once(toggle_pause)
