@@ -145,6 +145,12 @@ pub fn plugin(app: &mut App) {
                 .run_if(in_state(AppState::Performance)),
         )
         .add_systems(OnExit(AppState::Performance), close_editor_on_exit)
+        // After capture_binding so the published flag reflects this frame's
+        // settled CaptureState — same convention as controls_panel.
+        .add_systems(
+            Update,
+            sync_raw_input_owned.after(bindings_capture::capture_binding),
+        )
         .configure_sets(Update, (EditorPickSet, EditorGestureSet).chain())
         .add_plugins((
             (
@@ -175,6 +181,26 @@ pub fn plugin(app: &mut App) {
             footer::plugin,
             calibration::plugin,
         ));
+}
+
+/// Publish "a capture surface owns raw input" to dtx-input.
+/// Same-frame semantics as the old direct `CaptureState` read: the keyboard
+/// translator runs in PreUpdate and saw last frame's capture state either way.
+///
+/// Deliberately capture-only, matching the old keyboard gate exactly:
+/// calibration never suppressed keyboard system verbs, and this extraction
+/// changes no behavior. Calibration keeps suppressing pad navigation at the
+/// context level (`active_context` returns `None`). Folding calibration into
+/// `RawInputOwned` is a real behavior change that belongs to the navigation
+/// program, not this refactor.
+fn sync_raw_input_owned(
+    capture: Res<bindings_capture::CaptureState>,
+    mut owned: ResMut<dtx_input::RawInputOwned>,
+) {
+    let next = !matches!(*capture, bindings_capture::CaptureState::Idle);
+    if owned.0 != next {
+        owned.0 = next;
+    }
 }
 
 /// Leaving Performance with the editor still open (e.g. the song ended mid-edit)
@@ -673,6 +699,32 @@ pub fn editor_closed(open: Res<EditorOpen>) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The CaptureState → RawInputOwned glue: the published flag must track
+    /// capture arming and disarming (dtx-input's keyboard translator gates on
+    /// it instead of reading CaptureState directly).
+    #[test]
+    fn raw_input_owned_tracks_capture_state() {
+        let mut app = App::new();
+        app.init_resource::<bindings_capture::CaptureState>()
+            .init_resource::<dtx_input::RawInputOwned>()
+            .add_systems(Update, sync_raw_input_owned);
+
+        app.update();
+        assert!(!app.world().resource::<dtx_input::RawInputOwned>().0);
+
+        *app.world_mut()
+            .resource_mut::<bindings_capture::CaptureState>() =
+            bindings_capture::CaptureState::Keyboard(dtx_core::EChannel::Snare);
+        app.update();
+        assert!(app.world().resource::<dtx_input::RawInputOwned>().0);
+
+        *app.world_mut()
+            .resource_mut::<bindings_capture::CaptureState>() =
+            bindings_capture::CaptureState::Idle;
+        app.update();
+        assert!(!app.world().resource::<dtx_input::RawInputOwned>().0);
+    }
 
     // ===== Profile registry engine (pure reducers + closure-injected I/O) =====
 

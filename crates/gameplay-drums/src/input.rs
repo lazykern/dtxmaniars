@@ -35,7 +35,7 @@ pub(super) fn plugin(app: &mut App) {
         .add_systems(
             PreUpdate,
             // NO PauseState gate: this is the key that has to un-pause the song.
-            keyboard_system_verbs
+            dtx_input::keyboard::keyboard_system_verbs
                 .after(bevy::input::InputSystems)
                 .run_if(in_state(game_shell::AppState::Performance)),
         )
@@ -90,29 +90,6 @@ fn capture_key_to_lane_input(
             pending
                 .events
                 .push(CapturedLaneInput { lanes, captured_at });
-        }
-    }
-}
-
-/// Keyboard-bound system verbs → `SystemVerbHit`, on the same message the MIDI
-/// path writes. Deliberately NOT gated on `PauseState::Running`: the key that
-/// paused the song has to be able to un-pause it. Consumers (`pause.rs`) carry
-/// their own gates.
-fn keyboard_system_verbs(
-    keys: Res<ButtonInput<KeyCode>>,
-    resolver: Res<BindResolver>,
-    capture: Res<crate::editor::bindings_capture::CaptureState>,
-    mut out: MessageWriter<crate::events::SystemVerbHit>,
-) {
-    if !matches!(
-        *capture,
-        crate::editor::bindings_capture::CaptureState::Idle
-    ) {
-        return; // the capture flow owns the keyboard
-    }
-    for key in keys.get_just_pressed() {
-        for verb in resolver.system_for_key(*key) {
-            out.write(crate::events::SystemVerbHit { verb });
         }
     }
 }
@@ -173,72 +150,6 @@ mod tests {
         assert_eq!(
             compensated_audio_ms(1000, std::time::Duration::from_millis(12)),
             988
-        );
-    }
-
-    #[test]
-    fn bound_key_emits_the_system_verb() {
-        use crate::editor::bindings_capture::CaptureState;
-        use crate::events::SystemVerbHit;
-        use dtx_input::{BindSource, InputBindings, SystemVerb};
-
-        let mut bindings = InputBindings::default();
-        bindings.bind_system(SystemVerb::Pause, BindSource::Key(KeyCode::F9));
-
-        let mut app = App::new();
-        app.init_resource::<ButtonInput<KeyCode>>()
-            .init_resource::<CaptureState>()
-            .insert_resource(crate::bindings::BindResolver::from_bindings(&bindings))
-            .add_message::<SystemVerbHit>()
-            .add_systems(Update, keyboard_system_verbs);
-
-        app.world_mut()
-            .resource_mut::<ButtonInput<KeyCode>>()
-            .press(KeyCode::F9);
-        app.update();
-
-        let hits: Vec<SystemVerbHit> = app
-            .world()
-            .resource::<Messages<SystemVerbHit>>()
-            .iter_current_update_messages()
-            .copied()
-            .collect();
-        assert_eq!(
-            hits,
-            vec![SystemVerbHit {
-                verb: SystemVerb::Pause
-            }]
-        );
-    }
-
-    #[test]
-    fn an_armed_capture_swallows_the_system_verb() {
-        use crate::editor::bindings_capture::CaptureState;
-        use crate::events::SystemVerbHit;
-        use dtx_input::{BindSource, InputBindings, SystemVerb};
-
-        let mut bindings = InputBindings::default();
-        bindings.bind_system(SystemVerb::Pause, BindSource::Key(KeyCode::F9));
-
-        let mut app = App::new();
-        app.init_resource::<ButtonInput<KeyCode>>()
-            .insert_resource(CaptureState::Keyboard(dtx_core::EChannel::Snare))
-            .insert_resource(crate::bindings::BindResolver::from_bindings(&bindings))
-            .add_message::<SystemVerbHit>()
-            .add_systems(Update, keyboard_system_verbs);
-
-        app.world_mut()
-            .resource_mut::<ButtonInput<KeyCode>>()
-            .press(KeyCode::F9);
-        app.update();
-
-        assert_eq!(
-            app.world()
-                .resource::<Messages<SystemVerbHit>>()
-                .iter_current_update_messages()
-                .count(),
-            0,
-            "a key pressed while capturing must not fire a verb"
         );
     }
 

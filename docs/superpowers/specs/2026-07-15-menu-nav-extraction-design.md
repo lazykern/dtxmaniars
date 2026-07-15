@@ -43,16 +43,18 @@ Moves in from `gameplay-drums`:
   gating. `gameplay-drums` converts it downstream.
 - **Keyboard system verbs** (`keyboard_system_verbs` from
   `gameplay-drums/src/input.rs`): same message, moved verbatim.
-- **New resource** `RawInputOwned(bool)`: capture/calibration surfaces own raw
+- **New resource** `RawInputOwned(bool)`: a binding-capture surface owns raw
   input. Gates the **keyboard system-verb translator only** (the one place
   that checks `CaptureState` today). The MIDI pump stays unconditional,
   exactly like today: `LastMidiHit` must keep updating during capture (note
   capture reads it), and MIDI system verbs already fire during capture with
-  consumers gating themselves. Pad-nav suppression during capture continues
-  to happen at the context level (`ActiveNavContext = None`).
-  `gameplay-drums` writes `RawInputOwned` from
-  `CaptureState`/`CalibrationState` — same gating as today, dependency
-  direction inverted.
+  consumers gating themselves. Pad-nav suppression during capture AND
+  calibration continues to happen at the context level
+  (`ActiveNavContext = None`). `gameplay-drums` writes `RawInputOwned` from
+  `CaptureState` **only** — the old keyboard gate never checked
+  `CalibrationState`, and folding calibration in would suppress keyboard
+  Pause/Restart during the tap test, a real behavior change deferred to the
+  navigation program. Same gating as today, dependency direction inverted.
 
 Unchanged logic that moves along: velocity threshold filter, `lane_owner`
 lane-wins-ties collision rule, `stamp_audio_ms`.

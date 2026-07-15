@@ -74,12 +74,12 @@ pub struct LastMidiHit {
 #[derive(Resource, Debug, Default, Clone, Copy)]
 pub struct MidiConnected(pub bool);
 
-/// True while a capture/calibration surface owns raw input exclusively.
+/// True while a binding-capture surface owns raw input exclusively.
 /// Written by the surface that owns it (the gameplay-drums editor); read by
 /// the keyboard system-verb translator, which emits nothing while set. The
 /// MIDI pump deliberately does NOT check this: `LastMidiHit` must keep
-/// updating during capture (note capture reads it), and pad-nav suppression
-/// happens at the context level instead.
+/// updating during capture (note capture reads it), and pad-nav/calibration
+/// suppression happens at the context level instead.
 #[derive(Resource, Debug, Default, Clone, Copy, PartialEq, Eq)]
 pub struct RawInputOwned(pub bool);
 

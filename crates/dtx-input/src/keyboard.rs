@@ -1,9 +1,11 @@
-//! Keyboard → LaneHit helper.
+//! Keyboard → LaneHit helper + system-verb translator.
 //!
 //! Per ADR-0009 the actual Bevy system lives in the gameplay crate (which
 //! owns the concrete `LaneMap`). dtx-input provides:
 //! - [`KeyLaneMap`] trait that gameplay crates' LaneMap impls.
 //! - [`emit_pressed_lanes`] / [`emit_released_lanes`] helpers.
+//! - [`keyboard_system_verbs`]: bound keys → [`crate::SystemVerbHit`], the
+//!   consuming crate wires run conditions (menu-nav extraction, 2026-07-15).
 //!
 //! Gameplay crate pseudocode:
 //! ```ignore
@@ -18,6 +20,8 @@
 //! }
 //! ```
 
+use bevy::ecs::message::MessageWriter;
+use bevy::ecs::system::Res;
 use bevy::input::keyboard::KeyCode;
 use bevy::input::ButtonInput;
 
@@ -61,11 +65,34 @@ pub fn emit_released_lanes(
     }
 }
 
+/// Keyboard-bound system verbs → [`crate::SystemVerbHit`], on the same message
+/// the MIDI pump writes. Carries NO state gating — the consuming game crate
+/// wires run conditions (e.g. only during Performance, and deliberately not
+/// gated on pause: the key that paused the song has to un-pause it). Emits
+/// nothing while [`crate::RawInputOwned`] is set: a capture flow owns the
+/// keyboard.
+pub fn keyboard_system_verbs(
+    keys: Res<ButtonInput<KeyCode>>,
+    resolver: Res<crate::resolver::BindResolver>,
+    owned: Res<crate::RawInputOwned>,
+    mut out: MessageWriter<crate::SystemVerbHit>,
+) {
+    if owned.0 {
+        return;
+    }
+    for key in keys.get_just_pressed() {
+        for verb in resolver.system_for_key(*key) {
+            out.write(crate::SystemVerbHit { verb });
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::events::{LaneHit, LaneHitKind};
     use bevy::input::keyboard::KeyCode;
+    use bevy::prelude::*;
 
     struct TestMap;
 
@@ -100,5 +127,67 @@ mod tests {
             kind: LaneHitKind::Press,
         };
         assert_eq!(a, b);
+    }
+
+    #[test]
+    fn bound_key_emits_the_system_verb() {
+        use crate::{BindSource, InputBindings, RawInputOwned, SystemVerb, SystemVerbHit};
+
+        let mut bindings = InputBindings::default();
+        bindings.bind_system(SystemVerb::Pause, BindSource::Key(KeyCode::F9));
+
+        let mut app = App::new();
+        app.init_resource::<ButtonInput<KeyCode>>()
+            .init_resource::<RawInputOwned>()
+            .insert_resource(crate::resolver::BindResolver::from_bindings(&bindings))
+            .add_message::<SystemVerbHit>()
+            .add_systems(Update, keyboard_system_verbs);
+
+        app.world_mut()
+            .resource_mut::<ButtonInput<KeyCode>>()
+            .press(KeyCode::F9);
+        app.update();
+
+        let hits: Vec<SystemVerbHit> = app
+            .world()
+            .resource::<Messages<SystemVerbHit>>()
+            .iter_current_update_messages()
+            .copied()
+            .collect();
+        assert_eq!(
+            hits,
+            vec![SystemVerbHit {
+                verb: SystemVerb::Pause
+            }]
+        );
+    }
+
+    #[test]
+    fn owned_raw_input_swallows_the_system_verb() {
+        use crate::{BindSource, InputBindings, RawInputOwned, SystemVerb, SystemVerbHit};
+
+        let mut bindings = InputBindings::default();
+        bindings.bind_system(SystemVerb::Pause, BindSource::Key(KeyCode::F9));
+
+        let mut app = App::new();
+        app.init_resource::<ButtonInput<KeyCode>>()
+            .insert_resource(RawInputOwned(true))
+            .insert_resource(crate::resolver::BindResolver::from_bindings(&bindings))
+            .add_message::<SystemVerbHit>()
+            .add_systems(Update, keyboard_system_verbs);
+
+        app.world_mut()
+            .resource_mut::<ButtonInput<KeyCode>>()
+            .press(KeyCode::F9);
+        app.update();
+
+        assert_eq!(
+            app.world()
+                .resource::<Messages<SystemVerbHit>>()
+                .iter_current_update_messages()
+                .count(),
+            0,
+            "a key pressed while capture owns input must not fire a verb"
+        );
     }
 }
