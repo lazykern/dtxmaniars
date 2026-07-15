@@ -53,7 +53,8 @@ use dtx_ui::widget::song_wheel::{SongWheel, VISIBLE_HALF, WheelRow, WheelSpring,
 use dtx_ui::widget::stage_background::spawn_stage_background;
 use dtx_ui::widget::stage_panel::{BadgeValueText, panel, set_panel_selected, spawn_badge_row};
 use game_shell::{
-    AppState, NavAction, ScoreStoreResource, TransitionRequest, despawn_stage, request_transition,
+    AppState, NavAction, NavSource, NavVerb, ScoreStoreResource, TransitionRequest, despawn_stage,
+    request_transition,
 };
 
 use crate::chart_stats::ChartStatsMeasurement;
@@ -2201,6 +2202,28 @@ pub(crate) fn song_select_kb_emit(
     });
 }
 
+fn ready_mode_for_action(
+    source: NavSource,
+    focus: SongSelectFocus,
+    verb: NavVerb,
+) -> Option<crate::song_ready::ReadyMode> {
+    match (source, focus, verb) {
+        (NavSource::Keyboard, _, NavVerb::Confirm) => {
+            Some(crate::song_ready::ReadyMode::Normal)
+        }
+        (NavSource::Keyboard, _, NavVerb::Practice) => {
+            Some(crate::song_ready::ReadyMode::Practice)
+        }
+        (NavSource::Pad, SongSelectFocus::Difficulty, NavVerb::Confirm) => {
+            Some(crate::song_ready::ReadyMode::Normal)
+        }
+        (NavSource::Pad, SongSelectFocus::Difficulty, NavVerb::Practice) => {
+            Some(crate::song_ready::ReadyMode::Practice)
+        }
+        _ => None,
+    }
+}
+
 fn song_select_nav_consumer(
     mut actions: MessageReader<NavAction>,
     mut focus: ResMut<SongSelectFocus>,
@@ -2247,21 +2270,7 @@ fn song_select_nav_consumer(
             selection.difficulty = selection.difficulty.saturating_sub(1);
         }
 
-        let open_mode = match (action.source, *focus, action.verb) {
-            (NavSource::Keyboard, _, NavVerb::Confirm) => {
-                Some(crate::song_ready::ReadyMode::Normal)
-            }
-            (NavSource::Keyboard, _, NavVerb::Practice) => {
-                Some(crate::song_ready::ReadyMode::Practice)
-            }
-            (NavSource::Pad, SongSelectFocus::Difficulty, NavVerb::Confirm) => {
-                Some(crate::song_ready::ReadyMode::Normal)
-            }
-            (NavSource::Pad, SongSelectFocus::Difficulty, NavVerb::Practice) => {
-                Some(crate::song_ready::ReadyMode::Practice)
-            }
-            _ => None,
-        };
+        let open_mode = ready_mode_for_action(action.source, *focus, action.verb);
         if let Some(mode) = open_mode
             && open_song_ready(
                 mode,
@@ -2689,6 +2698,48 @@ mod tests {
         assert_eq!(
             SongSelectFocus::Songs.on_pad_verb(NavVerb::Back),
             SongSelectFocus::Songs
+        );
+    }
+
+    #[test]
+    fn keyboard_ready_entry_is_available_from_both_focus_regions() {
+        for focus in [SongSelectFocus::Songs, SongSelectFocus::Difficulty] {
+            assert_eq!(
+                ready_mode_for_action(
+                    game_shell::NavSource::Keyboard,
+                    focus,
+                    game_shell::NavVerb::Confirm,
+                ),
+                Some(crate::song_ready::ReadyMode::Normal)
+            );
+            assert_eq!(
+                ready_mode_for_action(
+                    game_shell::NavSource::Keyboard,
+                    focus,
+                    game_shell::NavVerb::Practice,
+                ),
+                Some(crate::song_ready::ReadyMode::Practice)
+            );
+        }
+    }
+
+    #[test]
+    fn pad_ready_entry_still_requires_difficulty_focus() {
+        assert_eq!(
+            ready_mode_for_action(
+                game_shell::NavSource::Pad,
+                SongSelectFocus::Songs,
+                game_shell::NavVerb::Confirm,
+            ),
+            None
+        );
+        assert_eq!(
+            ready_mode_for_action(
+                game_shell::NavSource::Pad,
+                SongSelectFocus::Difficulty,
+                game_shell::NavVerb::Confirm,
+            ),
+            Some(crate::song_ready::ReadyMode::Normal)
         );
     }
 
