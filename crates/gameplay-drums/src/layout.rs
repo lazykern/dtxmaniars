@@ -209,19 +209,43 @@ fn init_playfield_layout(
     }
 }
 
-fn sync_playfield_layout(
+#[doc(hidden)]
+pub fn sync_playfield_layout(
     windows: Query<&Window, With<PrimaryWindow>>,
     lanes: Res<Lanes>,
+    flow: Option<Res<crate::practice::PracticeFlow>>,
+    preview: Query<
+        (&ComputedNode, &bevy::ui::UiGlobalTransform),
+        With<crate::practice::hud::setup::PracticePreviewRegion>,
+    >,
     mut layout: ResMut<PlayfieldLayout>,
 ) {
-    // The playfield always lays out at FULL WINDOW size. The Customize surface's
-    // "shrink into a miniature" is a single UiTransform on `HudRoot` (osu
-    // SetCustomRect model — see `stage_rect::apply_stage_transform`), NOT a
-    // layout-space rescale, so this only rebuilds on a real resize or lane edit.
     let Ok(window) = windows.single() else {
         return;
     };
-    let want = PlayfieldLayout::from_window(window, &lanes);
+    let full = crate::stage_rect::StageRect::full(Vec2::new(window.width(), window.height()));
+    let preview_rect = flow
+        .as_deref()
+        .filter(|flow| {
+            matches!(
+                flow.phase,
+                crate::practice::PracticePhase::Setup | crate::practice::PracticePhase::Editing
+            )
+        })
+        .and_then(|_| preview.single().ok())
+        .and_then(|(node, transform)| {
+            let inverse_scale = node.inverse_scale_factor();
+            let size = node.size() * inverse_scale;
+            (size.x >= 1.0 && size.y >= 1.0).then(|| {
+                let center = transform.translation * inverse_scale;
+                let rect = Rect::from_center_size(center, size);
+                crate::stage_rect::StageRect {
+                    origin: rect.min,
+                    size: rect.size(),
+                }
+            })
+        });
+    let want = PlayfieldLayout::from_rect(preview_rect.unwrap_or(full), &lanes);
     if *layout != want {
         *layout = want;
     }

@@ -10,7 +10,7 @@ use gameplay_drums::practice::hud::setup::{
 };
 use gameplay_drums::practice::hud::timeline_ui::{
     PracticeLoopFill, PracticeLoopHandle, PracticeTimelineRoot, PracticeTimelineStrip,
-    PreviewTransportButton,
+    PreviewTransportButton, TimelineGesture,
 };
 use gameplay_drums::practice::session::{AttemptRecord, LoopRegion};
 use gameplay_drums::practice::{
@@ -44,6 +44,7 @@ fn setup_hud_app(width: f32, height: f32, text_scale: dtx_config::TextScale) -> 
     .add_message::<gameplay_drums::practice::PreviewAction>()
     .init_resource::<GameplayClock>()
     .init_resource::<ChipTimeline>()
+    .init_resource::<gameplay_drums::lanes::Lanes>()
     .insert_resource(gameplay_drums::layout::PlayfieldLayout::from_size(
         width,
         height,
@@ -87,6 +88,11 @@ fn setup_hud_app(width: f32, height: f32, text_scale: dtx_config::TextScale) -> 
     ));
 
     gameplay_drums::practice::hud::plugin(&mut app);
+    app.add_systems(
+        Update,
+        gameplay_drums::layout::sync_playfield_layout
+            .in_set(gameplay_drums::layout::PlayfieldLayoutSync),
+    );
     app.world_mut()
         .resource_mut::<NextState<AppState>>()
         .set(AppState::Performance);
@@ -187,6 +193,14 @@ fn node_rect(node: &ComputedNode, transform: &bevy::ui::UiGlobalTransform) -> Re
     )
 }
 
+fn computed_rect<T: Component>(app: &mut App) -> Rect {
+    app.world_mut()
+        .query_filtered::<(&ComputedNode, &bevy::ui::UiGlobalTransform), With<T>>()
+        .single(app.world())
+        .map(|(node, transform)| node_rect(node, transform))
+        .expect("one computed node")
+}
+
 #[test]
 fn reference_layout_is_split_and_xlarge_narrow_layout_is_tabbed() {
     assert_eq!(
@@ -277,6 +291,79 @@ fn tabbed_layout_collapses_inactive_pane_and_visible_pane_fills_content() {
     assert!(texts(&mut app)
         .iter()
         .any(|text| text == "PREVIEW: INPUT IS NOT JUDGED"));
+}
+
+#[test]
+fn tabbed_preview_keeps_navigation_visible_and_clickable_back_to_setup() {
+    let mut app = setup_hud_app(900.0, 720.0, dtx_config::TextScale::XLarge);
+
+    click_tab(&mut app, "Preview");
+    assert_eq!(count::<PracticeTabButton>(&mut app), 3);
+    let computed_tabs: Vec<_> = app
+        .world_mut()
+        .query::<(&PracticeTabButton, &ComputedNode)>()
+        .iter(app.world())
+        .map(|(tab, node)| (tab.0, node.size()))
+        .collect();
+    assert_eq!(computed_tabs.len(), 3);
+    assert!(computed_tabs
+        .iter()
+        .all(|(_, size)| size.x > 0.0 && size.y > 0.0));
+    assert!(texts(&mut app).iter().any(|text| text == "Setup"));
+    assert!(texts(&mut app).iter().any(|text| text == "✓ Preview"));
+    assert_eq!(computed_width::<PracticeSettingsPane>(&mut app), 0.0);
+    assert!((computed_width::<PracticePreviewRegion>(&mut app) - 900.0).abs() <= 1.0);
+
+    click_tab(&mut app, "Setup");
+    assert_eq!(*app.world().resource::<PracticeTab>(), PracticeTab::Setup);
+    assert!(texts(&mut app).iter().any(|text| text == "✓ Setup"));
+    assert!((computed_width::<PracticeSettingsPane>(&mut app) - 900.0).abs() <= 1.0);
+    assert_eq!(computed_width::<PracticePreviewRegion>(&mut app), 0.0);
+}
+
+#[test]
+fn computed_playfield_and_drum_strip_fit_the_live_preview_region() {
+    for (width, height, scale) in [
+        (1280.0, 720.0, dtx_config::TextScale::Standard),
+        (1920.0, 1080.0, dtx_config::TextScale::XLarge),
+    ] {
+        let mut app = setup_hud_app(width, height, scale);
+        app.update();
+        let preview = computed_rect::<PracticePreviewRegion>(&mut app);
+        let layout = app
+            .world()
+            .resource::<gameplay_drums::layout::PlayfieldLayout>();
+        let playfield = Rect::new(
+            layout.backboard_left(),
+            layout.backboard_top(),
+            layout.backboard_left() + layout.backboard_width(),
+            layout.backboard_top() + layout.backboard_height(),
+        );
+        let strip = Rect::new(
+            layout.strip_left(),
+            layout.lane_top(),
+            layout.strip_left() + layout.strip_width(),
+            layout.lane_top() + layout.lane_height(),
+        );
+        assert!(
+            preview.contains(playfield.min),
+            "{playfield:?} outside {preview:?}"
+        );
+        assert!(
+            preview.contains(playfield.max),
+            "{playfield:?} outside {preview:?}"
+        );
+        assert!(preview.contains(strip.min), "{strip:?} outside {preview:?}");
+        assert!(preview.contains(strip.max), "{strip:?} outside {preview:?}");
+        assert!(
+            strip.width() >= 300.0,
+            "drum strip is not usable: {strip:?}"
+        );
+        assert!(
+            strip.height() >= 300.0,
+            "playfield is not usable: {strip:?}"
+        );
+    }
 }
 
 #[test]
@@ -686,4 +773,108 @@ fn compact_running_hud_is_hidden_during_setup_and_restored_for_running() {
     );
     assert_eq!(count::<PracticeSetupRoot>(&mut app), 0);
     assert_eq!(count::<PracticeTimelineRoot>(&mut app), 0);
+    let layout = app
+        .world()
+        .resource::<gameplay_drums::layout::PlayfieldLayout>();
+    assert_eq!(layout.origin, Vec2::ZERO);
+    assert_eq!(layout.width, 1280.0);
+    assert_eq!(layout.height, 720.0);
+}
+
+#[test]
+fn fresh_performance_setup_resets_tab_while_editing_retains_it() {
+    let mut app = setup_hud_app(900.0, 720.0, dtx_config::TextScale::XLarge);
+    click_tab(&mut app, "Progress");
+    app.world_mut().resource_mut::<PracticeFlow>().phase =
+        gameplay_drums::practice::PracticePhase::Editing;
+    app.update();
+    assert_eq!(
+        *app.world().resource::<PracticeTab>(),
+        PracticeTab::Progress
+    );
+
+    app.world_mut()
+        .resource_mut::<NextState<AppState>>()
+        .set(AppState::SongSelect);
+    app.update();
+    app.update();
+    app.world_mut().resource_mut::<PracticeFlow>().phase =
+        gameplay_drums::practice::PracticePhase::Setup;
+    app.world_mut()
+        .resource_mut::<NextState<AppState>>()
+        .set(AppState::Performance);
+    app.update();
+    app.update();
+
+    assert_eq!(*app.world().resource::<PracticeTab>(), PracticeTab::Setup);
+}
+
+#[test]
+fn releasing_timeline_outside_does_not_leave_a_stale_seek_on_reentry() {
+    let mut app = setup_hud_app(1280.0, 720.0, dtx_config::TextScale::Standard);
+    app.world_mut().resource_mut::<ChipTimeline>().end_ms = 16_000;
+    app.update();
+    let strip = computed_rect::<PracticeTimelineStrip>(&mut app);
+    let inside = strip.center();
+    let outside = Vec2::new(strip.max.x + 20.0, strip.center().y);
+    let mut window = app
+        .world_mut()
+        .query_filtered::<&mut Window, With<PrimaryWindow>>()
+        .single_mut(app.world_mut())
+        .expect("primary window");
+    window.set_cursor_position(Some(inside));
+    write_mouse_button(&mut app, bevy::input::ButtonState::Pressed);
+    app.update();
+    app.world_mut()
+        .query_filtered::<&mut Window, With<PrimaryWindow>>()
+        .single_mut(app.world_mut())
+        .expect("primary window")
+        .set_cursor_position(Some(outside));
+    write_mouse_button(&mut app, bevy::input::ButtonState::Released);
+    app.update();
+    assert_eq!(
+        *app.world().resource::<TimelineGesture>(),
+        TimelineGesture::Idle
+    );
+    assert_eq!(
+        app.world()
+            .resource::<Messages<gameplay_drums::practice::PreviewAction>>()
+            .iter_current_update_messages()
+            .count(),
+        0
+    );
+
+    app.world_mut()
+        .query_filtered::<&mut Window, With<PrimaryWindow>>()
+        .single_mut(app.world_mut())
+        .expect("primary window")
+        .set_cursor_position(None);
+    app.world_mut()
+        .resource_mut::<TimelineGesture>()
+        .clone_from(&TimelineGesture::Pending {
+            press_x: inside.x,
+            press_ms: 4_000,
+        });
+    app.update();
+    assert_eq!(
+        *app.world().resource::<TimelineGesture>(),
+        TimelineGesture::Idle
+    );
+
+    app.world_mut()
+        .query_filtered::<&mut Window, With<PrimaryWindow>>()
+        .single_mut(app.world_mut())
+        .expect("primary window")
+        .set_cursor_position(Some(inside));
+    write_mouse_button(&mut app, bevy::input::ButtonState::Pressed);
+    app.update();
+    write_mouse_button(&mut app, bevy::input::ButtonState::Released);
+    app.update();
+    let actions: Vec<_> = app
+        .world()
+        .resource::<Messages<gameplay_drums::practice::PreviewAction>>()
+        .iter_current_update_messages()
+        .copied()
+        .collect();
+    assert_eq!(actions.len(), 1, "only the fresh re-entry click may seek");
 }

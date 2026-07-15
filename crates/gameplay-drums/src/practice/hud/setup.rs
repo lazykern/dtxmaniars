@@ -1,4 +1,5 @@
 use bevy::prelude::*;
+use bevy::window::PrimaryWindow;
 
 use crate::practice::{PracticeDraft, PracticeFlow, PracticePhase, PracticeSession};
 
@@ -101,7 +102,7 @@ pub(super) fn ensure_setup_shell(
     draft: Res<PracticeDraft>,
     session: Res<PracticeSession>,
     timeline: Res<crate::timeline::ChipTimeline>,
-    layout: Option<Res<crate::layout::PlayfieldLayout>>,
+    windows: Query<&Window, With<PrimaryWindow>>,
     accessibility: Option<Res<dtx_ui::AccessibilityPolicy>>,
     mut tab: ResMut<PracticeTab>,
     roots: Query<(Entity, &PracticeSetupLayout), With<PracticeSetupRoot>>,
@@ -118,10 +119,10 @@ pub(super) fn ensure_setup_shell(
         return;
     }
 
-    let (width, height) = layout
-        .as_deref()
-        .map_or((dtx_ui::REF_WIDTH, dtx_ui::REF_HEIGHT), |layout| {
-            (layout.width, layout.height)
+    let (width, height) = windows
+        .single()
+        .map_or((dtx_ui::REF_WIDTH, dtx_ui::REF_HEIGHT), |window| {
+            (window.width(), window.height())
         });
     let text_multiplier = accessibility
         .as_deref()
@@ -194,6 +195,7 @@ fn spawn_setup_shell(
             GlobalZIndex(crate::ui_z::PRACTICE_FULL_HUD),
         ))
         .with_children(|root| {
+            spawn_tab_chrome(root, &theme, mode, tab);
             root.spawn(Node {
                 width: Val::Percent(100.0),
                 flex_grow: 1.0,
@@ -217,6 +219,93 @@ fn spawn_setup_shell(
             });
             super::timeline_ui::spawn_timeline(root, &theme, flow, draft, timeline);
         });
+}
+
+fn spawn_tab_chrome(
+    root: &mut ChildSpawnerCommands,
+    theme: &dtx_ui::Theme,
+    mode: PracticeLayoutMode,
+    tab: PracticeTab,
+) {
+    root.spawn((
+        Node {
+            width: Val::Percent(100.0),
+            min_height: Val::Px(48.0),
+            flex_direction: FlexDirection::Row,
+            flex_wrap: FlexWrap::Wrap,
+            align_items: AlignItems::Center,
+            column_gap: Val::Px(dtx_ui::SpacingRole::Md.px()),
+            row_gap: Val::Px(dtx_ui::SpacingRole::Xs.px()),
+            padding: UiRect::axes(Val::Px(16.0), Val::Px(8.0)),
+            flex_shrink: 0.0,
+            ..default()
+        },
+        BackgroundColor(theme.stage_bg),
+    ))
+    .with_children(|chrome| {
+        spawn_text(
+            chrome,
+            "PRACTICE",
+            dtx_ui::TypographyRole::Heading,
+            theme.text_primary,
+        );
+        if mode == PracticeLayoutMode::Tabbed {
+            spawn_text(
+                chrome,
+                "PREVIEW: INPUT IS NOT JUDGED",
+                dtx_ui::TypographyRole::Hint,
+                theme.text_secondary,
+            );
+        }
+        chrome
+            .spawn(Node {
+                flex_direction: FlexDirection::Row,
+                column_gap: Val::Px(dtx_ui::SpacingRole::Sm.px()),
+                ..default()
+            })
+            .with_children(|tabs| {
+                for candidate in PracticeTab::ALL {
+                    if mode == PracticeLayoutMode::Split && candidate == PracticeTab::Preview {
+                        continue;
+                    }
+                    let selected = candidate == tab;
+                    tabs.spawn((
+                        PracticeTabButton(candidate),
+                        Button,
+                        Node {
+                            padding: UiRect::axes(Val::Px(10.0), Val::Px(6.0)),
+                            ..default()
+                        },
+                        BackgroundColor(if selected {
+                            theme.selection_highlight
+                        } else {
+                            Color::NONE
+                        }),
+                    ))
+                    .with_children(|button| {
+                        let label = if selected {
+                            format!(
+                                "{} {}",
+                                dtx_ui::StateMarker::Selected.label(),
+                                candidate.label()
+                            )
+                        } else {
+                            candidate.label().to_owned()
+                        };
+                        spawn_text(
+                            button,
+                            label,
+                            dtx_ui::TypographyRole::Label,
+                            if selected {
+                                theme.accent
+                            } else {
+                                theme.text_primary
+                            },
+                        );
+                    });
+                }
+            });
+    });
 }
 
 fn spawn_settings(
@@ -255,69 +344,6 @@ fn spawn_settings(
         Visibility::Inherited,
     ))
     .with_children(|pane| {
-        spawn_text(
-            pane,
-            "PRACTICE",
-            dtx_ui::TypographyRole::Heading,
-            theme.text_primary,
-        );
-        if mode == PracticeLayoutMode::Tabbed {
-            spawn_text(
-                pane,
-                "PREVIEW: INPUT IS NOT JUDGED",
-                dtx_ui::TypographyRole::Hint,
-                theme.text_primary,
-            );
-        }
-        pane.spawn(Node {
-            width: Val::Percent(100.0),
-            flex_direction: FlexDirection::Row,
-            column_gap: Val::Px(dtx_ui::SpacingRole::Sm.px()),
-            ..default()
-        })
-        .with_children(|tabs| {
-            for candidate in PracticeTab::ALL {
-                if mode == PracticeLayoutMode::Split && candidate == PracticeTab::Preview {
-                    continue;
-                }
-                let selected = candidate == tab;
-                tabs.spawn((
-                    PracticeTabButton(candidate),
-                    Button,
-                    Node {
-                        padding: UiRect::axes(Val::Px(10.0), Val::Px(6.0)),
-                        ..default()
-                    },
-                    BackgroundColor(if selected {
-                        theme.selection_highlight
-                    } else {
-                        Color::NONE
-                    }),
-                ))
-                .with_children(|button| {
-                    let label = if selected {
-                        format!(
-                            "{} {}",
-                            dtx_ui::StateMarker::Selected.label(),
-                            candidate.label()
-                        )
-                    } else {
-                        candidate.label().to_owned()
-                    };
-                    spawn_text(
-                        button,
-                        label,
-                        dtx_ui::TypographyRole::Label,
-                        if selected {
-                            theme.accent
-                        } else {
-                            theme.text_primary
-                        },
-                    );
-                });
-            }
-        });
-
         pane.spawn((
             Node {
                 width: Val::Percent(100.0),
@@ -645,4 +671,8 @@ pub(super) fn despawn_setup_shell(
     for root in &roots {
         commands.entity(root).despawn();
     }
+}
+
+pub(super) fn reset_tab(mut tab: ResMut<PracticeTab>) {
+    *tab = PracticeTab::Setup;
 }

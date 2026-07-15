@@ -28,6 +28,7 @@ pub fn plugin(app: &mut App) {
     app.init_resource::<setup::PracticeTab>()
         .init_resource::<timeline_ui::TimelineGesture>()
         .init_resource::<crate::practice::toast::ToastQueue>()
+        .add_systems(OnEnter(AppState::Performance), setup::reset_tab)
         .add_systems(
             Update,
             (
@@ -47,10 +48,17 @@ pub fn plugin(app: &mut App) {
         )
         .add_systems(OnExit(AppState::Performance), setup::despawn_setup_shell)
         .add_systems(
+            OnExit(AppState::Performance),
+            timeline_ui::reset_timeline_gesture,
+        )
+        .add_systems(
             Update,
-            sync_compact_hud_visibility
-                .run_if(in_state(AppState::Performance))
-                .run_if(resource_exists::<crate::practice::PracticeFlow>),
+            (
+                sync_compact_hud_visibility
+                    .run_if(resource_exists::<crate::practice::PracticeFlow>),
+                timeline_ui::reset_timeline_gesture,
+            )
+                .run_if(in_state(AppState::Performance)),
         );
 }
 

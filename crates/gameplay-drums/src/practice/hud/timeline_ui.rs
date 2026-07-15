@@ -99,12 +99,14 @@ pub fn advance_gesture(g: TimelineGesture, i: GestureInput) -> (TimelineGesture,
         }
         TimelineGesture::Pending { press_x, press_ms } => {
             if !i.pressed {
-                (
-                    TimelineGesture::Idle,
+                let effect = if i.inside_strip {
                     GestureEffect::Seek {
                         target_ms: press_ms,
-                    },
-                )
+                    }
+                } else {
+                    GestureEffect::None
+                };
+                (TimelineGesture::Idle, effect)
             } else if (i.cursor_x - press_x).abs() > CLICK_SLOP_PX {
                 (
                     TimelineGesture::DragLoop {
@@ -393,11 +395,16 @@ pub fn timeline_mouse(
     timeline: Res<ChipTimeline>,
     mut actions: MessageWriter<crate::practice::PreviewAction>,
 ) {
-    let Ok(window) = windows.single() else { return };
+    let Ok(window) = windows.single() else {
+        *gesture = TimelineGesture::Idle;
+        return;
+    };
     let Some(pos) = window.cursor_position() else {
+        *gesture = TimelineGesture::Idle;
         return;
     };
     let Ok((node, gt)) = strips.single() else {
+        *gesture = TimelineGesture::Idle;
         return;
     };
     let rect = strip_rect(node, gt);
@@ -421,6 +428,20 @@ pub fn timeline_mouse(
             draft.loop_region = Some(drag_region(&timeline, anchor_ms, cursor_ms));
             draft.source = crate::practice::PracticeDraftSource::Custom;
         }
+    }
+}
+
+pub(super) fn reset_timeline_gesture(
+    flow: Option<Res<crate::practice::PracticeFlow>>,
+    mut gesture: ResMut<TimelineGesture>,
+) {
+    if !flow.is_some_and(|flow| {
+        matches!(
+            flow.phase,
+            crate::practice::PracticePhase::Setup | crate::practice::PracticePhase::Editing
+        )
+    }) {
+        *gesture = TimelineGesture::Idle;
     }
 }
 
