@@ -210,6 +210,7 @@ enum SetupValue {
     RampStep,
     RampThreshold,
     RampPasses,
+    PresetName,
 }
 
 #[derive(Component, Debug, Clone, Copy)]
@@ -794,6 +795,14 @@ fn spawn_setup_content(
     }
 
     spawn_section_heading(content, theme, "Saved presets");
+    spawn_setting_row(
+        content,
+        theme,
+        super::setup_controls::SetupItem::PresetName,
+        SetupValue::PresetName,
+        "Preset name (optional)",
+        "Automatic label",
+    );
     spawn_action_row(
         content,
         theme,
@@ -1104,6 +1113,7 @@ fn setup_value(field: SetupValue, draft: &PracticeDraft) -> String {
         SetupValue::RampStep => format!("{:.2}×", draft.trainer.ramp_config.step),
         SetupValue::RampThreshold => format!("{:.0}%", draft.trainer.ramp_config.threshold_pct),
         SetupValue::RampPasses => draft.trainer.ramp_config.required_successes.to_string(),
+        SetupValue::PresetName => "Automatic label".to_owned(),
     }
 }
 
@@ -1113,6 +1123,7 @@ pub(super) fn refresh_setup_copy(
     mut values: Query<(&SetupValueText, &mut Text), Without<PracticePrimaryAction>>,
     mut primary: Query<&mut Text, With<PracticePrimaryAction>>,
     selection: Res<super::setup_controls::SetupSelection>,
+    preset_name: Res<super::setup_controls::PresetNameInput>,
     focus: Res<PracticeSurfaceFocus>,
     store: Option<Res<crate::practice::PracticePresetStore>>,
     timeline: Res<crate::timeline::ChipTimeline>,
@@ -1128,6 +1139,12 @@ pub(super) fn refresh_setup_copy(
                 dtx_ui::StateMarker::Selected.label(),
                 selected_source_label(draft.source, store.as_deref(), &timeline)
             )
+        } else if field.0 == SetupValue::PresetName {
+            if preset_name.value.is_empty() {
+                "Automatic label".to_owned()
+            } else {
+                preset_name.value.clone()
+            }
         } else {
             setup_value(field.0, &draft)
         };

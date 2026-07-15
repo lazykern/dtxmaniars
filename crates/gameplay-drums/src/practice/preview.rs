@@ -5,7 +5,7 @@ use game_shell::{AppState, PauseState};
 use super::ab_loop::active_region;
 use super::{PracticeDraft, PracticeFlow, PracticePhase, PracticeSession, PreviewState};
 use crate::resources::{ActiveDrumSounds, EffectivePlaybackRate, GameplayClock};
-use crate::seek::SeekToChartTime;
+use crate::seek::{SeekAcknowledgement, SeekResult, SeekToChartTime};
 use crate::timeline::{ChipTimeline, SnapDivisor};
 
 #[derive(Message, Debug, Clone, Copy, PartialEq, Eq)]
@@ -31,11 +31,102 @@ pub struct PreviewController {
 
 #[doc(hidden)]
 #[derive(Resource, Debug, Clone, Copy, Default)]
-pub struct PendingCancel(bool);
+pub struct PendingCancel {
+    stage: CancelStage,
+}
+
+#[derive(Debug, Clone, Copy, Default)]
+enum CancelStage {
+    #[default]
+    Idle,
+    Restoring {
+        revision: u64,
+        request: SeekToChartTime,
+        fallback_target_ms: i64,
+        attempt_start_ms: i64,
+    },
+    FallingBack {
+        revision: u64,
+        request: SeekToChartTime,
+    },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum CancelAdvance {
+    Wait,
+    Restored,
+    Fallback(SeekToChartTime),
+    FallbackApplied(i64),
+    FallbackFailed,
+}
+
+impl PendingCancel {
+    fn restoring(
+        revision: u64,
+        request: SeekToChartTime,
+        fallback_target_ms: i64,
+        attempt_start_ms: i64,
+    ) -> Self {
+        Self {
+            stage: CancelStage::Restoring {
+                revision,
+                request,
+                fallback_target_ms,
+                attempt_start_ms,
+            },
+        }
+    }
+
+    fn advance(&self, acknowledgement: &SeekAcknowledgement) -> CancelAdvance {
+        let (revision, request) = match self.stage {
+            CancelStage::Idle => return CancelAdvance::Wait,
+            CancelStage::Restoring {
+                revision, request, ..
+            }
+            | CancelStage::FallingBack { revision, request } => (revision, request),
+        };
+        if acknowledgement.revision < revision {
+            return CancelAdvance::Wait;
+        }
+        let matches_request =
+            acknowledgement.revision == revision && acknowledgement.request == Some(request);
+        match self.stage {
+            CancelStage::Restoring { .. }
+                if matches_request
+                    && matches!(acknowledgement.result, Some(SeekResult::Applied { .. })) =>
+            {
+                CancelAdvance::Restored
+            }
+            CancelStage::Restoring {
+                fallback_target_ms,
+                attempt_start_ms,
+                ..
+            } => CancelAdvance::Fallback(SeekToChartTime {
+                target_ms: fallback_target_ms,
+                snap: None,
+                attempt_start_ms: Some(attempt_start_ms),
+            }),
+            CancelStage::FallingBack { .. }
+                if matches_request
+                    && matches!(acknowledgement.result, Some(SeekResult::Applied { .. })) =>
+            {
+                CancelAdvance::FallbackApplied(
+                    request.attempt_start_ms.unwrap_or(request.target_ms),
+                )
+            }
+            CancelStage::FallingBack { .. } => CancelAdvance::FallbackFailed,
+            CancelStage::Idle => CancelAdvance::Wait,
+        }
+    }
+}
+
+#[derive(Resource, Debug, Clone, Copy, Default)]
+struct InitialSetupRebuild(bool);
 
 pub(super) fn plugin(app: &mut App) {
     app.init_resource::<PreviewController>()
         .init_resource::<PendingCancel>()
+        .init_resource::<InitialSetupRebuild>()
         .add_message::<PreviewAction>()
         .add_message::<OpenPracticeSettings>()
         .add_message::<CancelPracticeSettings>()
@@ -62,6 +153,12 @@ pub(super) fn plugin(app: &mut App) {
         .add_systems(
             FixedUpdate,
             (
+                (
+                    cancel_initial_rebuild_for_existing_seek,
+                    rebuild_initial_stopped_setup,
+                )
+                    .chain()
+                    .before(crate::seek::apply_seek_system),
                 wrap_preview_loop
                     .before(crate::seek::apply_seek_system)
                     .run_if(in_state(PauseState::Running)),
@@ -76,9 +173,12 @@ pub(super) fn plugin(app: &mut App) {
 fn reset_preview_transients(
     mut controller: ResMut<PreviewController>,
     mut pending_cancel: ResMut<PendingCancel>,
+    mut initial_rebuild: ResMut<InitialSetupRebuild>,
+    flow: Option<Res<PracticeFlow>>,
 ) {
     *controller = PreviewController::default();
     *pending_cancel = PendingCancel::default();
+    initial_rebuild.0 = flow.is_some_and(|flow| flow.phase == PracticePhase::Setup);
 }
 
 pub fn preview_tempo(draft: &PracticeDraft) -> f32 {
@@ -154,6 +254,8 @@ pub fn cancel_practice_settings(
     mut draft: ResMut<PracticeDraft>,
     mut controller: ResMut<PreviewController>,
     mut pending_cancel: ResMut<PendingCancel>,
+    acknowledgement: Res<SeekAcknowledgement>,
+    timeline: Res<ChipTimeline>,
     mut seeks: MessageWriter<SeekToChartTime>,
     mut next_pause: ResMut<NextState<PauseState>>,
     bgm: Res<dtx_audio::BgmHandle>,
@@ -173,22 +275,115 @@ pub fn cancel_practice_settings(
     *draft = PracticeDraft::from(&*session);
     flow.preview = PreviewState::Stopped;
     let restore_ms = controller.restore_ms.take().unwrap_or(snapshot.chart_ms);
-    seeks.write(SeekToChartTime {
+    let restore = SeekToChartTime {
         target_ms: restore_ms,
         snap: None,
         attempt_start_ms: None,
-    });
-    pending_cancel.0 = true;
+    };
+    seeks.write(restore);
+    let attempt_start_ms = session
+        .transport
+        .loop_region
+        .map_or(0, |region| region.start_ms);
+    *pending_cancel = PendingCancel::restoring(
+        acknowledgement.revision.wrapping_add(1),
+        restore,
+        super::session::preroll_target(&timeline, session.transport.preroll, attempt_start_ms),
+        attempt_start_ms,
+    );
     next_pause.set(PauseState::Paused);
 }
 
 fn finish_cancel_after_restore(
     mut flow: ResMut<PracticeFlow>,
     mut pending_cancel: ResMut<PendingCancel>,
+    acknowledgement: Res<SeekAcknowledgement>,
+    mut seeks: MessageWriter<SeekToChartTime>,
+    mut toasts: ResMut<super::toast::ToastQueue>,
+    mut session: ResMut<PracticeSession>,
+    mut combo: ResMut<crate::resources::Combo>,
 ) {
-    if pending_cancel.0 {
-        pending_cancel.0 = false;
-        flow.phase = PracticePhase::Running;
+    match pending_cancel.advance(&acknowledgement) {
+        CancelAdvance::Wait => {}
+        CancelAdvance::Restored => {
+            *pending_cancel = PendingCancel::default();
+            flow.phase = PracticePhase::Running;
+        }
+        CancelAdvance::Fallback(request) => {
+            toasts.push("Could not restore the frozen position — returning to pre-roll");
+            seeks.write(request);
+            pending_cancel.stage = CancelStage::FallingBack {
+                revision: acknowledgement.revision.wrapping_add(1),
+                request,
+            };
+        }
+        CancelAdvance::FallbackApplied(attempt_start_ms) => {
+            session.current_attempt = super::session::AttemptStats {
+                start_ms: attempt_start_ms,
+                ..Default::default()
+            };
+            session.current_attempt_lane_diag.clear();
+            session.current_attempt_eligible = true;
+            combo.current = 0;
+            *pending_cancel = PendingCancel::default();
+            flow.phase = PracticePhase::Running;
+        }
+        CancelAdvance::FallbackFailed => {
+            toasts.push("Could not seek to pre-roll — practice remains paused");
+            *pending_cancel = PendingCancel::default();
+            flow.phase = PracticePhase::Running;
+        }
+    }
+}
+
+fn initial_setup_rebuild_target(
+    flow: &PracticeFlow,
+    draft: &PracticeDraft,
+    clock_started: bool,
+    timeline_end_ms: i64,
+) -> Option<i64> {
+    (flow.phase == PracticePhase::Setup && flow.preview == PreviewState::Stopped && clock_started)
+        .then(|| {
+            draft
+                .loop_region
+                .map_or(0, |region| region.start_ms)
+                .clamp(0, timeline_end_ms.max(0))
+        })
+}
+
+fn rebuild_initial_stopped_setup(
+    mut pending: ResMut<InitialSetupRebuild>,
+    flow: Res<PracticeFlow>,
+    draft: Res<PracticeDraft>,
+    clock: Res<GameplayClock>,
+    timeline: Res<ChipTimeline>,
+    mut seeks: MessageWriter<SeekToChartTime>,
+) {
+    if !pending.0 {
+        return;
+    }
+    let Some(target_ms) =
+        initial_setup_rebuild_target(&flow, &draft, clock.is_started(), timeline.end_ms)
+    else {
+        if flow.phase != PracticePhase::Setup || flow.preview != PreviewState::Stopped {
+            pending.0 = false;
+        }
+        return;
+    };
+    seeks.write(SeekToChartTime {
+        target_ms,
+        snap: None,
+        attempt_start_ms: None,
+    });
+    pending.0 = false;
+}
+
+fn cancel_initial_rebuild_for_existing_seek(
+    mut seeks: MessageReader<SeekToChartTime>,
+    mut pending: ResMut<InitialSetupRebuild>,
+) {
+    if pending.0 && seeks.read().next().is_some() {
+        pending.0 = false;
     }
 }
 
@@ -314,5 +509,60 @@ mod tests {
         draft.trainer.mode = super::super::PracticeTrainerMode::Ramp;
         draft.trainer.ramp_config.start_tempo = 0.65;
         assert!((preview_tempo(&draft) - 0.65).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn cancel_restore_waits_for_applied_ack_and_rejects_to_preroll() {
+        use crate::seek::{SeekAcknowledgement, SeekRejection, SeekResult};
+
+        let restore = SeekToChartTime {
+            target_ms: 5_000,
+            snap: None,
+            attempt_start_ms: None,
+        };
+        let pending = PendingCancel::restoring(3, restore, 2_000, 4_000);
+        assert_eq!(
+            pending.advance(&SeekAcknowledgement::default()),
+            CancelAdvance::Wait
+        );
+        let rejected = SeekAcknowledgement {
+            revision: 3,
+            request: Some(restore),
+            result: Some(SeekResult::Rejected(SeekRejection::ClockNotStarted)),
+        };
+        assert_eq!(
+            pending.advance(&rejected),
+            CancelAdvance::Fallback(SeekToChartTime {
+                target_ms: 2_000,
+                snap: None,
+                attempt_start_ms: Some(4_000),
+            })
+        );
+        let applied = SeekAcknowledgement {
+            revision: 3,
+            request: Some(restore),
+            result: Some(SeekResult::Applied { resolved_ms: 5_000 }),
+        };
+        assert_eq!(pending.advance(&applied), CancelAdvance::Restored);
+    }
+
+    #[test]
+    fn initial_stopped_setup_rebuilds_at_draft_start_once_clock_is_ready() {
+        let flow = PracticeFlow::default();
+        let draft = PracticeDraft {
+            loop_region: Some(super::super::session::LoopRegion {
+                start_ms: 3_000,
+                end_ms: 6_000,
+            }),
+            ..Default::default()
+        };
+        assert_eq!(
+            initial_setup_rebuild_target(&flow, &draft, false, 10_000),
+            None
+        );
+        assert_eq!(
+            initial_setup_rebuild_target(&flow, &draft, true, 10_000),
+            Some(3_000)
+        );
     }
 }

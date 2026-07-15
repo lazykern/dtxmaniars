@@ -387,7 +387,7 @@ These motivations and concerns are hypotheses until validated with players.
 | Mark section | Repeat a difficult span | `[` sets A; `]` sets B | Bar-snapped A/B loop |
 | Clear section | Return to whole-song practice | Press `Backspace` while running, or clear A/B in Setup/Settings | A/B clears and active Ramp disarms |
 | Change tempo | Reduce or increase difficulty | `-` / `=` | 0.50x to 1.50x tempo |
-| Restart | Repeat immediately | `R` | Current span restarts with pre-roll |
+| Restart active attempt | Repeat the configured loop without creating a new Practice request | `R` | The current span restarts with pre-roll; entering Practice still opens mandatory stopped Setup |
 | Automate progression | Raise tempo after accurate passes | Press `T` while running, or choose Ramp in Setup/Settings | Ramp evaluates only completed eligible attempts |
 | Change attempt entry | Control seek precision and readiness time | Press `Tab`, then edit Snap/Pre-roll/Count-in and choose Continue Practice | Continue starts a fresh attempt from pre-roll/count-in |
 | Wait for notes | Practice note recognition without timing pressure | Choose Wait as the trainer in Setup/Settings | Playback stops at unhit notes; Ramp is not simultaneously active |

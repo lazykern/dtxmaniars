@@ -410,11 +410,14 @@ fn setup_stopped_gates_chart_audio_schedulers_until_preview() {
 
     app.world_mut().run_schedule(FixedUpdate);
 
-    assert!(app
-        .world()
-        .resource::<gameplay_drums::bgm_scheduler::PlayedBgmChips>()
-        .0
-        .is_empty());
+    assert_eq!(
+        app.world()
+            .resource::<gameplay_drums::bgm_scheduler::PlayedBgmChips>()
+            .0
+            .len(),
+        1,
+        "the stopped setup seek reconstructs BGM eligibility without playing it"
+    );
     assert!(app.world().resource::<PlayedSeChips>().0.is_empty());
     assert!(app.world().resource::<BgmHandle>().path.is_none());
 
@@ -1088,6 +1091,47 @@ fn stopped_setup_and_editing_seek_reconstruct_notes_and_bga_once() {
         app.world_mut().run_schedule(FixedUpdate);
         assert_eq!(app.world().resource::<GameplayClock>().current_ms, held);
     }
+}
+
+#[test]
+fn mandatory_stopped_setup_rebuilds_real_notes_without_starting_gameplay() {
+    let mut app = build_lifecycle_app(PracticeIntent::manual(PracticeOrigin::SongSelect));
+    enter_performance(
+        &mut app,
+        Chart {
+            metadata: Metadata {
+                bpm: Some(120.0),
+                ..Default::default()
+            },
+            chips: vec![Chip::new(0, EChannel::BassDrum, 0.1)],
+            ..Default::default()
+        },
+    );
+
+    app.world_mut().run_schedule(FixedUpdate);
+
+    let visible_notes = {
+        let world = app.world_mut();
+        let mut notes = world.query_filtered::<&Note, With<NoteVisual>>();
+        notes.iter(world).count()
+    };
+    assert!(visible_notes > 0);
+    assert_eq!(
+        app.world().resource::<PracticeFlow>().phase,
+        PracticePhase::Setup
+    );
+    assert_eq!(
+        app.world().resource::<PracticeFlow>().preview,
+        PreviewState::Stopped
+    );
+    assert_eq!(app.world().resource::<Score>().0, 0);
+    assert_eq!(app.world().resource::<JudgmentCounts>().total(), 0);
+    assert!(
+        !app.world()
+            .resource::<PracticeSession>()
+            .current_attempt_eligible
+    );
+    assert!(app.world().resource::<BgmHandle>().path.is_none());
 }
 
 fn assert_seek_past_mixer_remove_stops_bgm(intent: PracticeIntent, phase: Option<PracticePhase>) {
@@ -2668,7 +2712,8 @@ fn setup_stale_messages_cannot_mutate_outputs_or_attempts() {
     assert!(app
         .world()
         .resource::<Messages<SeekToChartTime>>()
-        .is_empty());
+        .iter_current_update_messages()
+        .all(|seek| seek.attempt_start_ms.is_none()));
     assert!(app
         .world()
         .resource::<gameplay_drums::resources::CurrentEmptyHitTemplates>()

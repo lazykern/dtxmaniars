@@ -10,7 +10,7 @@ use game_shell::{AppState, PauseState};
 
 use super::session::{preroll_target, PracticeSession, PrerollSetting};
 use crate::resources::{DrumAudioSettings, GameplayClock};
-use crate::seek::SeekToChartTime;
+use crate::seek::{SeekAcknowledgement, SeekResult};
 use crate::timeline::ChipTimeline;
 
 /// One scheduled count-in click.
@@ -112,6 +112,7 @@ pub fn build_metronome_sounds(
 pub struct ActiveClickSchedule {
     pub schedule: ClickSchedule,
     pub cursor: usize,
+    pub seek_revision: u64,
 }
 
 /// What the countdown UI shows right now.
@@ -148,22 +149,40 @@ pub fn due_clicks<'a>(
 
 /// Rebuild the schedule whenever a practice seek lands. Runs after
 /// `apply_seek_system` so it sees the same coalesced last-seek.
+pub fn count_in_intent(acknowledgement: &SeekAcknowledgement, last_revision: u64) -> Option<i64> {
+    if acknowledgement.revision == last_revision
+        || !matches!(acknowledgement.result, Some(SeekResult::Applied { .. }))
+    {
+        return None;
+    }
+    acknowledgement
+        .request
+        .and_then(|request| request.attempt_start_ms)
+}
+
 pub fn rebuild_click_schedule(
-    mut seeks: MessageReader<SeekToChartTime>,
+    acknowledgement: Res<SeekAcknowledgement>,
     session: Res<PracticeSession>,
     timeline: Res<ChipTimeline>,
     mut active: ResMut<ActiveClickSchedule>,
     mut display: ResMut<CountdownDisplay>,
 ) {
-    let Some(seek) = seeks.read().last().copied() else {
-        return;
-    };
-    display.current = None;
-    if !session.transport.metronome {
-        *active = ActiveClickSchedule::default();
+    if acknowledgement.revision == active.seek_revision {
         return;
     }
-    let intent = seek.attempt_start_ms.unwrap_or(seek.target_ms);
+    let last_revision = active.seek_revision;
+    active.seek_revision = acknowledgement.revision;
+    display.current = None;
+    let Some(intent) = count_in_intent(&acknowledgement, last_revision) else {
+        active.schedule = ClickSchedule::default();
+        active.cursor = 0;
+        return;
+    };
+    if !session.transport.metronome {
+        *active = ActiveClickSchedule::default();
+        active.seek_revision = acknowledgement.revision;
+        return;
+    }
     active.schedule = build_preroll_schedule(&timeline, session.transport.preroll, intent);
     active.cursor = 0;
 }
@@ -181,7 +200,9 @@ pub fn fire_clicks(
     if !clock.is_ready() {
         return;
     }
-    let ActiveClickSchedule { schedule, cursor } = &mut *active;
+    let ActiveClickSchedule {
+        schedule, cursor, ..
+    } = &mut *active;
     let mut last = None;
     for click in due_clicks(schedule, cursor, clock.current_ms) {
         let source = if click.accent {
@@ -330,6 +351,34 @@ mod tests {
         let s = build_preroll_schedule(&tl, PrerollSetting::OneBar, 4_000);
         assert!(s.clicks[0].accent);
         assert!(s.clicks[1..].iter().all(|c| !c.accent));
+    }
+
+    #[test]
+    fn only_applied_attempt_seek_schedules_count_in() {
+        use crate::seek::{SeekAcknowledgement, SeekResult, SeekToChartTime};
+
+        let editing_seek = SeekAcknowledgement {
+            revision: 1,
+            request: Some(SeekToChartTime {
+                target_ms: 2_000,
+                snap: None,
+                attempt_start_ms: None,
+            }),
+            result: Some(SeekResult::Applied { resolved_ms: 2_000 }),
+        };
+        assert_eq!(count_in_intent(&editing_seek, 0), None);
+
+        let run_seek = SeekAcknowledgement {
+            revision: 2,
+            request: Some(SeekToChartTime {
+                target_ms: 2_000,
+                snap: None,
+                attempt_start_ms: Some(4_000),
+            }),
+            result: Some(SeekResult::Applied { resolved_ms: 2_000 }),
+        };
+        assert_eq!(count_in_intent(&run_seek, 1), Some(4_000));
+        assert_eq!(count_in_intent(&run_seek, 2), None);
     }
 
     #[test]

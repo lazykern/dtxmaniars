@@ -177,6 +177,7 @@ impl PracticeDraft {
 
     pub fn apply_to_session(&self, session: &mut PracticeSession) {
         if session.transport.loop_region != self.loop_region {
+            session.current_attempt_lane_diag.clear();
             session.lane_diag.clear();
         }
         session.transport.loop_region = self.loop_region;

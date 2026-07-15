@@ -66,6 +66,17 @@ impl LaneDiagnosis {
         self.lanes.clear();
     }
 
+    pub fn merge(&mut self, other: &Self) {
+        for (&lane, source) in &other.lanes {
+            let target = self.lanes.entry(lane).or_default();
+            target.judged += source.judged;
+            target.misses += source.misses;
+            target.overhits += source.overhits;
+            target.delta_sum_ms += source.delta_sum_ms;
+            target.delta_count += source.delta_count;
+        }
+    }
+
     pub fn apply_judgment(&mut self, lane: LaneId, kind: JudgmentKind, delta_ms: i64) {
         let agg = self.lanes.entry(lane).or_default();
         agg.judged += 1;

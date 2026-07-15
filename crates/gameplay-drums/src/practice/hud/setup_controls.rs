@@ -1,3 +1,5 @@
+use bevy::ecs::system::SystemParam;
+use bevy::input::keyboard::{Key, KeyboardInput};
 use bevy::prelude::*;
 
 use crate::practice::session::{LoopRegion, PrerollSetting, RATE_MAX, RATE_MIN, RATE_STEP};
@@ -22,6 +24,7 @@ pub enum SetupItem {
     RampStep,
     RampThreshold,
     RampPasses,
+    PresetName,
     SaveAsNew,
     UpdateSaved,
     DeleteSaved,
@@ -32,7 +35,7 @@ pub enum SetupItem {
     StartOrContinue,
 }
 
-const SETUP_ITEMS: [SetupItem; 21] = [
+const SETUP_ITEMS: [SetupItem; 22] = [
     SetupItem::Source,
     SetupItem::LoopStart,
     SetupItem::LoopEnd,
@@ -46,6 +49,7 @@ const SETUP_ITEMS: [SetupItem; 21] = [
     SetupItem::RampStep,
     SetupItem::RampThreshold,
     SetupItem::RampPasses,
+    SetupItem::PresetName,
     SetupItem::SaveAsNew,
     SetupItem::UpdateSaved,
     SetupItem::DeleteSaved,
@@ -65,6 +69,38 @@ impl Default for SetupSelection {
     }
 }
 
+#[derive(Resource, Debug, Clone, Default, PartialEq, Eq)]
+pub struct PresetNameInput {
+    pub value: String,
+}
+
+impl PresetNameInput {
+    pub fn name(&self) -> Option<String> {
+        let trimmed = self.value.trim();
+        (!trimmed.is_empty()).then(|| trimmed.to_owned())
+    }
+}
+
+fn apply_preset_name_key(input: &mut PresetNameInput, key: &Key) {
+    match key {
+        Key::Character(value) => {
+            for character in value.chars() {
+                if input.value.chars().count() >= 48 {
+                    break;
+                }
+                if !character.is_control() {
+                    input.value.push(character);
+                }
+            }
+        }
+        Key::Space if input.value.chars().count() < 48 => input.value.push(' '),
+        Key::Backspace => {
+            input.value.pop();
+        }
+        _ => {}
+    }
+}
+
 #[derive(Resource, Debug, Clone, Default, PartialEq)]
 pub enum PracticePresetPrompt {
     #[default]
@@ -76,6 +112,12 @@ pub enum PracticePresetPrompt {
         message: String,
         command: Box<PresetCommand>,
     },
+}
+
+#[derive(SystemParam)]
+pub struct PresetUiState<'w> {
+    prompt: ResMut<'w, PracticePresetPrompt>,
+    preset_name: ResMut<'w, PresetNameInput>,
 }
 
 pub fn visible_setup_items(draft: &PracticeDraft, prompt: &PracticePresetPrompt) -> Vec<SetupItem> {
@@ -171,11 +213,15 @@ pub fn keyboard_actions(
     focus: Res<super::setup::PracticeSurfaceFocus>,
     layouts: Query<&super::setup::PracticeSetupLayout>,
     flow: Res<PracticeFlow>,
+    selection: Res<SetupSelection>,
     mut actions: MessageWriter<PracticeUiAction>,
 ) {
     let split = layouts
         .single()
         .is_ok_and(|layout| layout.0 == super::setup::PracticeLayoutMode::Split);
+    let editing_name = *tab == super::setup::PracticeTab::Setup
+        && matches!(*focus, super::setup::PracticeSurfaceFocus::Settings)
+        && selection.0 == SetupItem::PresetName;
     let action = if keys.just_pressed(KeyCode::Escape) {
         Some(PracticeUiAction::Back)
     } else if split && keys.just_pressed(KeyCode::Tab) {
@@ -242,6 +288,8 @@ pub fn keyboard_actions(
         Some(PracticeUiAction::Adjust(-1))
     } else if keys.just_pressed(KeyCode::ArrowRight) {
         Some(PracticeUiAction::Adjust(1))
+    } else if editing_name && keys.just_pressed(KeyCode::Space) {
+        None
     } else if keys.just_pressed(KeyCode::Enter) || keys.just_pressed(KeyCode::Space) {
         Some(PracticeUiAction::Confirm)
     } else {
@@ -249,6 +297,27 @@ pub fn keyboard_actions(
     };
     if let Some(action) = action {
         actions.write(action);
+    }
+}
+
+fn preset_name_keyboard_input(
+    mut events: MessageReader<KeyboardInput>,
+    selection: Res<SetupSelection>,
+    tab: Res<super::setup::PracticeTab>,
+    focus: Res<super::setup::PracticeSurfaceFocus>,
+    mut input: ResMut<PresetNameInput>,
+) {
+    if *tab != super::setup::PracticeTab::Setup
+        || !matches!(*focus, super::setup::PracticeSurfaceFocus::Settings)
+        || selection.0 != SetupItem::PresetName
+    {
+        events.clear();
+        return;
+    }
+    for event in events.read() {
+        if event.state.is_pressed() {
+            apply_preset_name_key(&mut input, &event.logical_key);
+        }
     }
 }
 
@@ -383,7 +452,7 @@ pub fn apply_ui_actions(
     mut focus: ResMut<super::setup::PracticeSurfaceFocus>,
     mut draft: ResMut<PracticeDraft>,
     mut flow: ResMut<PracticeFlow>,
-    mut prompt: ResMut<PracticePresetPrompt>,
+    preset_ui: PresetUiState,
     timeline: Res<ChipTimeline>,
     store: Option<Res<PracticePresetStore>>,
     catalog: Option<Res<PracticeSourceCatalog>>,
@@ -394,6 +463,10 @@ pub fn apply_ui_actions(
     mut initial_cancels: MessageWriter<crate::practice::InitialSetupCancelRequested>,
     mut toasts: ResMut<crate::practice::toast::ToastQueue>,
 ) {
+    let PresetUiState {
+        mut prompt,
+        mut preset_name,
+    } = preset_ui;
     for action in actions.read().copied() {
         match action {
             PracticeUiAction::SelectSource(source) => {
@@ -407,6 +480,14 @@ pub fn apply_ui_actions(
                         toasts.push(warning.clone());
                     }
                     *draft = validated.draft;
+                    preset_name.value = match source {
+                        PracticeDraftSource::Saved(id) => store
+                            .as_deref()
+                            .and_then(|store| store.registry.preset(id))
+                            .and_then(|preset| preset.name.clone())
+                            .unwrap_or_default(),
+                        _ => String::new(),
+                    };
                     flow.preview = PreviewState::Stopped;
                     previews.write(PreviewAction::Pause);
                     previews.write(PreviewAction::Seek(
@@ -518,12 +599,12 @@ pub fn apply_ui_actions(
             }),
             PracticeUiAction::SaveAsNew => {
                 preset_commands.write(PresetCommand::SaveNew {
-                    name: None,
+                    name: preset_name.name(),
                     draft: draft.clone(),
                 });
             }
             PracticeUiAction::UpdateSaved => {
-                write_update_command(&draft, store.as_deref(), &mut preset_commands)
+                write_update_command(&draft, preset_name.name(), &mut preset_commands)
             }
             PracticeUiAction::RequestDeleteSaved => {
                 if let PracticeDraftSource::Saved(id) = draft.source {
@@ -623,7 +704,7 @@ pub fn apply_ui_actions(
             PracticeUiAction::Confirm => activate_selected(
                 selection.0,
                 &draft,
-                store.as_deref(),
+                &preset_name,
                 &mut prompt,
                 &mut preset_commands,
                 &mut starts,
@@ -705,7 +786,7 @@ pub fn apply_preset_results(
 fn activate_selected(
     item: SetupItem,
     draft: &PracticeDraft,
-    store: Option<&PracticePresetStore>,
+    preset_name: &PresetNameInput,
     prompt: &mut PracticePresetPrompt,
     commands: &mut MessageWriter<PresetCommand>,
     starts: &mut MessageWriter<StartOrContinueRequested>,
@@ -713,11 +794,11 @@ fn activate_selected(
     match item {
         SetupItem::SaveAsNew => {
             commands.write(PresetCommand::SaveNew {
-                name: None,
+                name: preset_name.name(),
                 draft: draft.clone(),
             });
         }
-        SetupItem::UpdateSaved => write_update_command(draft, store, commands),
+        SetupItem::UpdateSaved => write_update_command(draft, preset_name.name(), commands),
         SetupItem::DeleteSaved => {
             if let PracticeDraftSource::Saved(id) = draft.source {
                 *prompt = PracticePresetPrompt::ConfirmDelete { id };
@@ -890,13 +971,10 @@ fn normalize_preroll(value: PrerollSetting) -> PrerollSetting {
 
 fn write_update_command(
     draft: &PracticeDraft,
-    store: Option<&PracticePresetStore>,
+    name: Option<String>,
     commands: &mut MessageWriter<PresetCommand>,
 ) {
     if let PracticeDraftSource::Saved(id) = draft.source {
-        let name = store
-            .and_then(|store| store.registry.preset(id))
-            .and_then(|preset| preset.name.clone());
         commands.write(PresetCommand::UpdateSaved {
             id,
             name,
@@ -908,21 +986,25 @@ fn write_update_command(
 pub(super) fn reset_selection(
     mut selection: ResMut<SetupSelection>,
     mut prompt: ResMut<PracticePresetPrompt>,
+    mut preset_name: ResMut<PresetNameInput>,
 ) {
     *selection = SetupSelection::default();
     *prompt = PracticePresetPrompt::None;
+    *preset_name = PresetNameInput::default();
 }
 
 pub(super) fn plugin(app: &mut App) {
     app.init_resource::<SetupSelection>()
         .init_resource::<PracticePresetPrompt>()
+        .init_resource::<PresetNameInput>()
         .add_message::<PracticeUiAction>()
         .add_message::<StartOrContinueRequested>()
         .add_message::<crate::practice::InitialSetupCancelRequested>()
         .add_systems(OnEnter(game_shell::AppState::Performance), reset_selection)
         .add_systems(
             Update,
-            (keyboard_actions, nav_actions)
+            (preset_name_keyboard_input, keyboard_actions, nav_actions)
+                .chain()
                 .run_if(crate::practice::practice_surface_open)
                 .before(apply_ui_actions),
         )
@@ -944,4 +1026,28 @@ pub(super) fn plugin(app: &mut App) {
                 .run_if(resource_exists::<PracticeDraft>)
                 .run_if(resource_exists::<crate::practice::PracticeSession>),
         );
+}
+
+#[cfg(test)]
+mod preset_name_tests {
+    use super::*;
+    use bevy::input::keyboard::Key;
+
+    #[test]
+    fn preset_name_input_is_optional_bounded_and_rejects_controls() {
+        let mut input = PresetNameInput::default();
+        apply_preset_name_key(&mut input, &Key::Character("Chorus".into()));
+        apply_preset_name_key(&mut input, &Key::Space);
+        apply_preset_name_key(&mut input, &Key::Character("A\nB".into()));
+        assert_eq!(input.value, "Chorus AB");
+        assert_eq!(input.name(), Some("Chorus AB".to_owned()));
+
+        apply_preset_name_key(&mut input, &Key::Backspace);
+        assert_eq!(input.value, "Chorus A");
+        apply_preset_name_key(&mut input, &Key::Character("x".repeat(100).into()));
+        assert_eq!(input.value.chars().count(), 48);
+
+        input.value = "   ".to_owned();
+        assert_eq!(input.name(), None);
+    }
 }

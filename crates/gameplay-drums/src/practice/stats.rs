@@ -105,7 +105,7 @@ pub fn track_attempt_stats(
         }
         apply_judgment(&mut session.current_attempt, ev.kind, ev.delta_ms);
         session
-            .lane_diag
+            .current_attempt_lane_diag
             .apply_judgment(ev.lane, ev.kind, ev.delta_ms);
     }
     for m in missed.read() {
@@ -119,11 +119,11 @@ pub fn track_attempt_stats(
         }
         session.current_attempt.counts.miss += 1;
         session.current_attempt.combo = 0;
-        session.lane_diag.apply_miss(m.lane);
+        session.current_attempt_lane_diag.apply_miss(m.lane);
     }
     for eh in empty_hits.read() {
         session.current_attempt.overhits += 1;
-        session.lane_diag.apply_overhit(eh.lane);
+        session.current_attempt_lane_diag.apply_overhit(eh.lane);
     }
     if let Some(seek) = seeks
         .read_with_id()

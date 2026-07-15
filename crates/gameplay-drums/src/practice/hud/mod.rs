@@ -77,11 +77,61 @@ pub fn plugin(app: &mut App) {
             (
                 sync_compact_hud_visibility
                     .run_if(resource_exists::<crate::practice::PracticeFlow>),
+                sync_performance_metric_visibility
+                    .after(crate::layout::PlayfieldLayoutConsumers)
+                    .run_if(resource_exists::<crate::practice::PracticeFlow>),
                 timeline_ui::reset_timeline_gesture,
             )
                 .run_if(in_state(AppState::Performance)),
         );
     setup_controls::plugin(app);
+}
+
+fn hide_widget_on_practice_surface(
+    kind: dtx_layout::WidgetKind,
+    phase: crate::practice::PracticePhase,
+) -> bool {
+    matches!(
+        phase,
+        crate::practice::PracticePhase::Setup | crate::practice::PracticePhase::Editing
+    ) && matches!(
+        kind,
+        dtx_layout::WidgetKind::Gauge
+            | dtx_layout::WidgetKind::ScorePanel
+            | dtx_layout::WidgetKind::Combo
+            | dtx_layout::WidgetKind::JudgmentPopup
+    )
+}
+
+fn sync_performance_metric_visibility(
+    flow: Res<crate::practice::PracticeFlow>,
+    layouts: Option<Res<crate::widget_layout::WidgetLayouts>>,
+    editor: Option<Res<crate::editor::PreviewState>>,
+    mut widgets: Query<(&crate::widget_layout::WidgetContainer, &mut Visibility)>,
+) {
+    for (container, mut visibility) in &mut widgets {
+        if !matches!(
+            container.0,
+            dtx_layout::WidgetKind::Gauge
+                | dtx_layout::WidgetKind::ScorePanel
+                | dtx_layout::WidgetKind::Combo
+                | dtx_layout::WidgetKind::JudgmentPopup
+        ) {
+            continue;
+        }
+        *visibility = if hide_widget_on_practice_surface(container.0, flow.phase)
+            || editor.as_deref().is_some_and(|editor| {
+                editor.open && editor.tab != game_shell::CustomizeTab::Widgets
+            }) {
+            Visibility::Hidden
+        } else if layouts.as_deref().is_none_or(|layouts| {
+            crate::widget_layout::widget_visible(layouts.get(container.0), true)
+        }) {
+            Visibility::Inherited
+        } else {
+            Visibility::Hidden
+        };
+    }
 }
 
 fn sync_compact_hud_visibility(
@@ -110,5 +160,34 @@ mod tests {
         assert_eq!(format_chart_time(0), "0:00.0");
         assert_eq!(format_chart_time(83_450), "1:23.4");
         assert_eq!(format_chart_time(-50), "0:00.0");
+    }
+
+    #[test]
+    fn setup_hides_performance_metrics_but_keeps_playfield_widgets() {
+        use dtx_layout::WidgetKind;
+
+        for kind in [
+            WidgetKind::Gauge,
+            WidgetKind::ScorePanel,
+            WidgetKind::Combo,
+            WidgetKind::JudgmentPopup,
+        ] {
+            assert!(hide_widget_on_practice_surface(
+                kind,
+                crate::practice::PracticePhase::Setup
+            ));
+            assert!(hide_widget_on_practice_surface(
+                kind,
+                crate::practice::PracticePhase::Editing
+            ));
+            assert!(!hide_widget_on_practice_surface(
+                kind,
+                crate::practice::PracticePhase::Running
+            ));
+        }
+        assert!(!hide_widget_on_practice_surface(
+            WidgetKind::SongProgress,
+            crate::practice::PracticePhase::Setup,
+        ));
     }
 }

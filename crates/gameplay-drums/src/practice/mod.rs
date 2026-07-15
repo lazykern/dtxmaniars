@@ -194,6 +194,7 @@ pub fn start_or_continue_practice(
         start_ms: attempt_start_ms,
         ..Default::default()
     };
+    session.current_attempt_lane_diag.clear();
     session.current_attempt_eligible = true;
     crate::input::clear_pending_lane_inputs(&mut commands);
     lane_hits.clear();

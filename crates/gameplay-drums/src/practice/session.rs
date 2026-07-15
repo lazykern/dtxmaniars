@@ -260,6 +260,9 @@ pub struct PracticeSession {
     pub current_attempt: AttemptStats,
     pub current_attempt_eligible: bool,
     pub attempt_history: Vec<AttemptRecord>,
+    /// Per-lane data for the running attempt. It is promoted to `lane_diag`
+    /// only when the attempt is eligible and reaches the current loop end.
+    pub current_attempt_lane_diag: super::diagnosis::LaneDiagnosis,
     /// Per-lane diagnosis for the current loop region (Progress panel).
     pub lane_diag: super::diagnosis::LaneDiagnosis,
 }
@@ -272,6 +275,7 @@ impl Default for PracticeSession {
             current_attempt: AttemptStats::default(),
             current_attempt_eligible: true,
             attempt_history: Vec::new(),
+            current_attempt_lane_diag: super::diagnosis::LaneDiagnosis::default(),
             lane_diag: super::diagnosis::LaneDiagnosis::default(),
         }
     }
@@ -292,6 +296,7 @@ impl PracticeSession {
     /// one specific section).
     pub fn clear_loop(&mut self) {
         self.invalidate_current_attempt();
+        self.current_attempt_lane_diag.clear();
         self.lane_diag.clear();
         self.transport.loop_region = None;
         self.trainer.disarm_ramp();
@@ -313,11 +318,19 @@ impl PracticeSession {
     /// judgements) and start a fresh one at `next_start_ms`. Returns the
     /// finalized record when it had data, `None` when the pass was empty.
     pub fn roll_attempt(&mut self, end_ms: i64, next_start_ms: i64) -> Option<AttemptRecord> {
+        let completed_region = self.transport.loop_region.is_some_and(|region| {
+            self.current_attempt.start_ms == region.start_ms && end_ms >= region.end_ms
+        });
+        let canonical_end_ms = self
+            .transport
+            .loop_region
+            .filter(|_| completed_region)
+            .map_or(end_ms, |region| region.end_ms);
         let record = if self.current_attempt_eligible && self.current_attempt.has_data() {
             let a = &self.current_attempt;
             let record = AttemptRecord {
                 start_ms: a.start_ms,
-                end_ms,
+                end_ms: canonical_end_ms,
                 tempo: self.effective_tempo(),
                 counts: a.counts,
                 max_combo: a.max_combo,
@@ -332,6 +345,9 @@ impl PracticeSession {
             if self.attempt_history.len() > MAX_ATTEMPT_HISTORY {
                 self.attempt_history.remove(0);
             }
+            if completed_region {
+                self.lane_diag.merge(&self.current_attempt_lane_diag);
+            }
             Some(record)
         } else {
             None
@@ -340,6 +356,7 @@ impl PracticeSession {
             start_ms: next_start_ms,
             ..Default::default()
         };
+        self.current_attempt_lane_diag.clear();
         self.current_attempt_eligible = true;
         record
     }
@@ -348,6 +365,7 @@ impl PracticeSession {
     /// enforced by the caller against bar data).
     pub fn set_loop_start(&mut self, ms: i64) {
         self.invalidate_current_attempt();
+        self.current_attempt_lane_diag.clear();
         self.lane_diag.clear();
         self.trainer.disarm_ramp();
         let end = self.transport.loop_region.map(|r| r.end_ms);
@@ -365,6 +383,7 @@ impl PracticeSession {
 
     pub fn set_loop_end(&mut self, ms: i64) {
         self.invalidate_current_attempt();
+        self.current_attempt_lane_diag.clear();
         self.lane_diag.clear();
         self.trainer.disarm_ramp();
         let start = self.transport.loop_region.map(|r| r.start_ms).unwrap_or(0);
@@ -474,6 +493,47 @@ mod tests {
         assert_eq!(s.attempt_history[0].end_ms, 8_000);
         assert!(!s.current_attempt.has_data());
         assert_eq!(s.current_attempt.start_ms, 4_000);
+    }
+
+    #[test]
+    fn completed_loop_overshoot_is_canonicalized_to_loop_end() {
+        let mut s = PracticeSession::default();
+        s.transport.loop_region = Some(LoopRegion {
+            start_ms: 4_000,
+            end_ms: 8_000,
+        });
+        s.current_attempt.start_ms = 4_000;
+        s.current_attempt.counts.perfect = 1;
+
+        let record = s.roll_attempt(8_017, 4_000).expect("completed attempt");
+
+        assert_eq!(record.end_ms, 8_000);
+    }
+
+    #[test]
+    fn lane_diagnosis_merges_only_eligible_completed_attempts() {
+        use dtx_scoring::JudgmentKind;
+
+        let mut s = PracticeSession::default();
+        s.transport.loop_region = Some(LoopRegion {
+            start_ms: 4_000,
+            end_ms: 8_000,
+        });
+        s.current_attempt.start_ms = 4_000;
+        s.current_attempt.counts.perfect = 1;
+        s.current_attempt_lane_diag
+            .apply_judgment(0, JudgmentKind::Perfect, -12);
+        s.invalidate_current_attempt();
+        assert!(s.roll_attempt(6_000, 4_000).is_none());
+        assert!(s.lane_diag.lanes.is_empty());
+        assert!(s.current_attempt_lane_diag.lanes.is_empty());
+
+        s.current_attempt.counts.perfect = 1;
+        s.current_attempt_lane_diag
+            .apply_judgment(0, JudgmentKind::Perfect, 4);
+        assert!(s.roll_attempt(8_020, 4_000).is_some());
+        assert_eq!(s.lane_diag.lanes[&0].judged, 1);
+        assert_eq!(s.lane_diag.lanes[&0].delta_sum_ms, 4);
     }
 
     #[test]

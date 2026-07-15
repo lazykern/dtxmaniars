@@ -11,7 +11,9 @@ use gameplay_drums::practice::hud::setup::{
     PracticeTab, PracticeTabButton, PracticeTabCrossfade, PracticeTransportRowMode,
     SetupAdjustButton,
 };
-use gameplay_drums::practice::hud::setup_controls::{PracticeUiAction, SetupItem, SetupSelection};
+use gameplay_drums::practice::hud::setup_controls::{
+    PracticeUiAction, PresetNameInput, SetupItem, SetupSelection,
+};
 use gameplay_drums::practice::hud::timeline_ui::{
     PracticeLoopFill, PracticeLoopHandle, PracticeTimelineRoot, PracticeTimelineStrip,
     PreviewTransportButton, TimelineGesture,
@@ -430,6 +432,30 @@ fn saved_edits_keep_identity_and_confirm_update_keeps_name() {
         command,
         PresetCommand::UpdateSaved { name: Some(name), .. } if name == "Verse"
     )));
+}
+
+#[test]
+fn optional_preset_name_is_used_by_save_and_blank_keeps_auto_label() {
+    let mut app = setup_hud_app(1280.0, 720.0, dtx_config::TextScale::Standard);
+    app.world_mut().resource_mut::<ChipTimeline>().end_ms = 10_000;
+
+    app.world_mut().resource_mut::<PresetNameInput>().value = "  Chorus  ".to_owned();
+    send_ui_action(&mut app, PracticeUiAction::SaveAsNew);
+    app.update();
+    assert!(app
+        .world()
+        .resource::<Messages<PresetCommand>>()
+        .iter_current_update_messages()
+        .any(|command| matches!(command, PresetCommand::SaveNew { name: Some(name), .. } if name == "Chorus")));
+
+    app.world_mut().resource_mut::<PresetNameInput>().value = "   ".to_owned();
+    send_ui_action(&mut app, PracticeUiAction::SaveAsNew);
+    app.update();
+    assert!(app
+        .world()
+        .resource::<Messages<PresetCommand>>()
+        .iter_current_update_messages()
+        .any(|command| matches!(command, PresetCommand::SaveNew { name: None, .. })));
 }
 
 #[test]
