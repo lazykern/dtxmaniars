@@ -18,7 +18,7 @@ default = []
 midi = ["dep:midir"]
 
 [dependencies]
-bevy = { workspace = true, default-features = false, features = ["serialize", "keyboard"] }
+bevy = { workspace = true, default-features = false, features = ["serialize", "keyboard", "bevy_log"] }
 dtx-core = { workspace = true }
 dtx-config = { path = "../dtx-config" }
 dtx-persistence = { path = "../dtx-persistence" }
