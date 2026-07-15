@@ -121,7 +121,6 @@ pub fn plugin(app: &mut App) {
     .init_resource::<dtx_audio::DrumPolyphony>()
     .init_resource::<lanes::Lanes>()
     .init_resource::<hud_cache::HudDisplayCache>()
-    .init_resource::<dtx_input::midi::VirtualSource>()
     .init_resource::<timeline::ChipTimeline>()
     .init_resource::<seek::PendingBgmStart>()
     .init_resource::<seek::PendingAudioStarts>()
@@ -170,7 +169,6 @@ pub fn plugin(app: &mut App) {
     .add_message::<events::JudgmentEvent>()
     .add_message::<events::NoteMissed>()
     .add_message::<events::EmptyHit>()
-    .add_message::<events::SystemVerbHit>()
     .add_message::<seek::SeekToChartTime>()
     .init_resource::<perf_common::PerformanceStageState>()
     .configure_sets(
@@ -243,7 +241,7 @@ pub fn plugin(app: &mut App) {
         bindings::plugin,
         beat_lines::plugin,
         se_scheduler::plugin,
-        midi_consumer::plugin,
+        midi_gate::plugin,
         pause::plugin,
         perf_hotkeys::plugin,
         stage_end::plugin,
@@ -447,150 +445,41 @@ fn sync_gameplay_clock(
     gameplay_clock.tick(rate.scaled_delta_secs(time.delta_secs_f64()), chart_ms);
 }
 
-mod midi_consumer {
-    //! Polls `dtx_input::midi::VirtualSource` and emits gameplay-drums `LaneHit`s.
+mod midi_gate {
+    //! Gates dtx-input's `ResolvedInputHit` into gameplay `InputHit`.
     //!
-    //! When the `midi` feature is enabled, a feature-gated `drain_real_midi`
-    //! system drains a real `midir`-backed source into `VirtualSource` first,
-    //! so real events flow through the exact same path as virtual ones and
-    //! `poll_midi` handles everything uniformly.
+    //! The pump (connection, drain, velocity filter, resolution) moved to
+    //! `dtx_input::pump` (menu-nav extraction, 2026-07-15 spec). This module
+    //! owns the only gameplay-specific part: deciding whether gameplay is
+    //! ready and restamping with the gameplay clock.
 
     use bevy::prelude::*;
-    #[cfg(feature = "midi")]
-    use bevy::time::common_conditions::on_real_timer;
-    use dtx_input::midi::{MidiSource, VirtualSource};
-
-    pub use dtx_input::{LastMidiHit, PadNavHit};
+    use dtx_input::ResolvedInputHit;
 
     use super::events::InputHit;
     use crate::resources::GameplayClock;
 
-    /// Holds the live real-MIDI connection. Stored as a **non-send** resource
-    /// because `midir` connections are not `Sync`; systems touching it run on
-    /// the main thread only.
-    #[cfg(feature = "midi")]
-    #[derive(Default)]
-    struct MidiConnection {
-        source: Option<dtx_input::midi::RealMidiSource>,
-        port_filter: Option<String>,
-    }
+    pub use dtx_input::{LastMidiHit, PadNavHit};
 
     pub(super) fn plugin(app: &mut App) {
-        // Not state-gated: pads navigate menus outside Performance too.
-        app.init_resource::<LastMidiHit>()
-            .add_message::<PadNavHit>()
-            .add_systems(FixedUpdate, poll_midi.in_set(super::DrumsSets::Input));
-
-        #[cfg(feature = "midi")]
-        {
-            app.insert_non_send(MidiConnection::default())
-                .add_systems(Startup, connect_midi)
-                .add_systems(
-                    Update,
-                    connect_midi.run_if(
-                        resource_changed::<crate::bindings::LiveBindings>
-                            .or_else(on_real_timer(std::time::Duration::from_secs(1))),
-                    ),
-                )
-                .add_systems(
-                    FixedUpdate,
-                    drain_real_midi
-                        .in_set(super::DrumsSets::Input)
-                        .before(poll_midi),
-                );
-        }
+        app.add_plugins(dtx_input::pump::plugin)
+            .configure_sets(
+                FixedUpdate,
+                dtx_input::InputPumpSet.before(super::DrumsSets::Input),
+            )
+            .add_systems(
+                FixedUpdate,
+                convert_resolved_hits.in_set(super::DrumsSets::Input),
+            );
     }
 
-    /// Connect (or reconnect) the real MIDI source using the port filter from
-    /// `LiveBindings`. Runs at startup, whenever the selected port changes,
-    /// and once per second so devices plugged in after boot are discovered.
-    /// Reconnect overwrites, dropping the old
-    /// connection. Non-send: runs on the main thread only.
-    #[cfg(feature = "midi")]
-    fn connect_midi(
-        mut conn: NonSendMut<MidiConnection>,
-        live: Res<crate::bindings::LiveBindings>,
-        mut connected: ResMut<game_shell::MidiConnected>,
-    ) {
-        let filter = live.0.midi.port.clone();
-        if conn.source.is_some() && conn.port_filter == filter {
-            return;
-        }
-        match dtx_input::midi::RealMidiSource::connect(filter.as_deref()) {
-            Ok((src, name)) => {
-                info!("MIDI connected: {name}");
-                conn.source = Some(src);
-                conn.port_filter = filter;
-                connected.0 = true;
-            }
-            Err(e) => {
-                warn!("MIDI connect failed: {e}");
-                conn.source = None;
-                conn.port_filter = filter;
-                connected.0 = false;
-            }
-        }
-    }
-
-    /// Drain the real MIDI source into `VirtualSource` so real events are
-    /// indistinguishable from virtual ones downstream. Real events carry
-    /// `audio_ms == 0`; `poll_midi` restamps them with the current
-    /// `GameplayClock`. Non-send: runs on the main thread only.
-    #[cfg(feature = "midi")]
-    fn drain_real_midi(mut conn: NonSendMut<MidiConnection>, mut virt: ResMut<VirtualSource>) {
-        let Some(src) = conn.source.as_mut() else {
-            return;
-        };
-        let mut buf: Vec<dtx_input::midi::MidiEvent> = Vec::new();
-        src.poll(&mut buf);
-        for ev in buf {
-            virt.push(ev);
-        }
-    }
-
-    /// Timestamp for an emitted `LaneHit`: the event's own stamp if it has one,
+    /// Timestamp for an emitted hit: the event's own stamp if it has one,
     /// else the gameplay clock, else 0 (menus don't care about timing).
     pub(crate) fn stamp_audio_ms(clock_ms: Option<i64>, event_ms: i64) -> i64 {
         if event_ms != 0 {
             event_ms
         } else {
             clock_ms.unwrap_or(0)
-        }
-    }
-
-    fn poll_midi(
-        mut source: ResMut<VirtualSource>,
-        resolver: Res<crate::bindings::BindResolver>,
-        chart: Res<crate::resources::ActiveChart>,
-        clock: Res<GameplayClock>,
-        flow: Option<Res<crate::practice::PracticeFlow>>,
-        pause: Res<State<game_shell::PauseState>>,
-        mut hits: MessageWriter<InputHit>,
-        mut nav_hits: MessageWriter<PadNavHit>,
-        mut verb_hits: MessageWriter<super::events::SystemVerbHit>,
-        mut last: ResMut<LastMidiHit>,
-    ) {
-        if source.is_empty() {
-            return;
-        }
-        let mut buf: Vec<dtx_input::midi::MidiEvent> = Vec::new();
-        (*source).poll(&mut buf);
-        let gameplay_ready = gameplay_ready(
-            !chart.chart.chips.is_empty(),
-            clock.is_ready(),
-            crate::practice::gameplay_input_active(flow),
-            pause.get(),
-        );
-        let consumed =
-            consume_midi_events(buf, &resolver, gameplay_ready, clock.current_ms, &mut last);
-        for hit in consumed.hits {
-            hits.write(hit);
-        }
-        for lane in consumed.nav_lanes {
-            nav_hits.write(PadNavHit { lane });
-        }
-        for verb in consumed.verbs {
-            verb_hits.write(super::events::SystemVerbHit { verb });
         }
     }
 
@@ -603,64 +492,32 @@ mod midi_consumer {
         chart_ready && clock_ready && practice_ready && *pause == game_shell::PauseState::Running
     }
 
-    struct ConsumedMidi {
-        hits: Vec<InputHit>,
-        /// Lanes for `PadNavHit`; emitted even when gameplay is not ready so
-        /// pads can steer menus outside a run.
-        nav_lanes: Vec<u8>,
-        /// System verbs fired by this batch. Emitted on the same unconditional
-        /// path as `nav_lanes` — the verb must work mid-song.
-        verbs: Vec<dtx_input::SystemVerb>,
-    }
-
-    fn consume_midi_events(
-        events: impl IntoIterator<Item = dtx_input::midi::MidiEvent>,
-        resolver: &crate::bindings::BindResolver,
-        gameplay_ready: bool,
-        clock_ms: i64,
-        last: &mut LastMidiHit,
-    ) -> ConsumedMidi {
-        let mut hits = Vec::new();
-        let mut nav_lanes = Vec::new();
-        let mut verbs = Vec::new();
-        for ev in events {
-            let dtx_input::midi::MidiEvent::NoteOn {
-                note,
-                velocity,
-                audio_ms,
-                captured_at,
-            } = ev
-            else {
-                continue;
-            };
-            *last = LastMidiHit {
-                note,
-                velocity,
-                below_threshold: velocity <= resolver.velocity_threshold,
-                at: Some(std::time::Instant::now()),
-            };
-            if velocity == 0 || velocity <= resolver.velocity_threshold {
-                continue;
-            }
-            // Before the gameplay_ready gate, exactly like nav_lanes: the verb
-            // must fire mid-song, and a system note was never gameplay input.
-            verbs.extend(resolver.system_for_note(note));
-            let lanes: Vec<_> = resolver.lanes_for_note(note).collect();
-            if let Some(&lane) = lanes.first() {
-                nav_lanes.push(lane);
-                if gameplay_ready {
-                    hits.push(InputHit {
-                        lanes,
-                        audio_ms: stamp_audio_ms(Some(clock_ms), audio_ms),
-                        captured_at,
-                    });
-                }
-            }
+    fn convert_resolved_hits(
+        chart: Res<crate::resources::ActiveChart>,
+        clock: Res<GameplayClock>,
+        flow: Option<Res<crate::practice::PracticeFlow>>,
+        pause: Res<State<game_shell::PauseState>>,
+        mut resolved: MessageReader<ResolvedInputHit>,
+        mut hits: MessageWriter<InputHit>,
+    ) {
+        let ready = gameplay_ready(
+            !chart.chart.chips.is_empty(),
+            clock.is_ready(),
+            crate::practice::gameplay_input_active(flow),
+            pause.get(),
+        );
+        if !ready {
+            // Drop, don't defer: an unread message replays next frame, and a
+            // hit buffered while paused/not-ready must never judge later.
+            resolved.clear();
+            return;
         }
-        ConsumedMidi {
-            hits,
-            nav_lanes,
-            verbs,
+        for hit in resolved.read() {
+            hits.write(InputHit {
+                lanes: hit.lanes.clone(),
+                audio_ms: stamp_audio_ms(Some(clock.current_ms), hit.audio_ms),
+                captured_at: hit.captured_at,
+            });
         }
     }
 
@@ -669,196 +526,63 @@ mod midi_consumer {
         use super::*;
 
         #[test]
-        fn midi_updates_last_hit_without_gameplay_readiness() {
-            let resolver = crate::bindings::BindResolver::default();
-            let mut last = LastMidiHit::default();
-
-            let hits = consume_midi_events(
-                [dtx_input::midi::MidiEvent::NoteOn {
-                    note: 38,
-                    velocity: 90,
-                    audio_ms: 0,
-                    captured_at: std::time::Instant::now(),
-                }],
-                &resolver,
-                false,
-                0,
-                &mut last,
-            );
-
-            assert_eq!((last.note, last.velocity), (38, 90));
-            assert!(last.at.is_some());
-            assert!(hits.hits.is_empty());
-            assert_eq!(hits.nav_lanes.len(), 1);
-        }
-
-        #[test]
-        fn shared_note_emits_one_atomic_hit() {
-            use dtx_input::{BindSource, InputBindings};
-            let mut b = InputBindings::default();
-            b.bind_shared(
-                dtx_core::EChannel::LeftBassDrum,
-                BindSource::Midi { note: 36 },
-            );
-            let resolver = crate::bindings::BindResolver::from_bindings(&b);
-            let mut last = LastMidiHit::default();
-            let captured_at = std::time::Instant::now();
-            let out = consume_midi_events(
-                [dtx_input::midi::MidiEvent::NoteOn {
-                    note: 36,
-                    velocity: 100,
-                    audio_ms: 10,
-                    captured_at,
-                }],
-                &resolver,
+        fn paused_gameplay_is_never_ready() {
+            assert!(!gameplay_ready(
                 true,
-                0,
-                &mut last,
-            );
-            assert_eq!(out.hits.len(), 1, "one physical MIDI note is atomic");
-            assert_eq!(out.hits[0].lanes, vec![2, 11]);
-            assert_eq!(out.hits[0].captured_at, captured_at);
-            assert_eq!(out.nav_lanes, vec![2]);
-        }
-
-        #[test]
-        fn gated_midi_event_is_not_replayed_when_gameplay_becomes_ready() {
-            let resolver = crate::bindings::BindResolver::default();
-            let mut last = LastMidiHit::default();
-
-            let gated = consume_midi_events(
-                [dtx_input::midi::MidiEvent::NoteOn {
-                    note: 38,
-                    velocity: 90,
-                    audio_ms: 0,
-                    captured_at: std::time::Instant::now(),
-                }],
-                &resolver,
-                false,
-                0,
-                &mut last,
-            );
-            let next = consume_midi_events([], &resolver, true, 1234, &mut last);
-
-            assert!(gated.hits.is_empty());
-            assert!(next.hits.is_empty());
-        }
-
-        #[test]
-        fn paused_midi_keeps_navigation_and_verbs_but_never_gameplay() {
-            use dtx_input::{BindSource, InputBindings, SystemVerb};
-            let mut bindings = InputBindings::default();
-            bindings.bind_system(SystemVerb::Pause, BindSource::Midi { note: 100 });
-            let resolver = crate::bindings::BindResolver::from_bindings(&bindings);
-            let mut last = LastMidiHit::default();
-
-            let out = consume_midi_events(
-                [
-                    dtx_input::midi::MidiEvent::NoteOn {
-                        note: 38,
-                        velocity: 100,
-                        audio_ms: 2_000,
-                        captured_at: std::time::Instant::now(),
-                    },
-                    dtx_input::midi::MidiEvent::NoteOn {
-                        note: 100,
-                        velocity: 100,
-                        audio_ms: 2_000,
-                        captured_at: std::time::Instant::now(),
-                    },
-                ],
-                &resolver,
-                gameplay_ready(true, true, true, &game_shell::PauseState::Paused),
-                2_000,
-                &mut last,
-            );
-
-            assert!(out.hits.is_empty());
-            assert_eq!(out.nav_lanes, vec![1]);
-            assert_eq!(out.verbs, vec![SystemVerb::Pause]);
-        }
-
-        #[test]
-        fn system_verb_fires_while_gameplay_is_not_ready() {
-            use dtx_input::{BindSource, InputBindings, SystemVerb};
-            let mut b = InputBindings::default();
-            b.bind_system(SystemVerb::Pause, BindSource::Midi { note: 37 });
-            let resolver = crate::bindings::BindResolver::from_bindings(&b);
-            let mut last = LastMidiHit::default();
-
-            // gameplay_ready = false — the live-play/menu case, and the whole feature.
-            let out = consume_midi_events(
-                [dtx_input::midi::MidiEvent::NoteOn {
-                    note: 37,
-                    velocity: 90,
-                    audio_ms: 0,
-                    captured_at: std::time::Instant::now(),
-                }],
-                &resolver,
-                false,
-                0,
-                &mut last,
-            );
-
-            assert_eq!(out.verbs, vec![SystemVerb::Pause]);
-            assert!(out.hits.is_empty());
-            assert!(out.nav_lanes.is_empty(), "a system note is not a lane");
-        }
-
-        #[test]
-        fn sub_threshold_system_note_emits_nothing() {
-            use dtx_input::{BindSource, InputBindings, SystemVerb};
-            let mut b = InputBindings::default();
-            b.midi.velocity_threshold = 20;
-            b.bind_system(SystemVerb::Pause, BindSource::Midi { note: 37 });
-            let resolver = crate::bindings::BindResolver::from_bindings(&b);
-            let mut last = LastMidiHit::default();
-
-            let out = consume_midi_events(
-                [dtx_input::midi::MidiEvent::NoteOn {
-                    note: 37,
-                    velocity: 15,
-                    audio_ms: 0,
-                    captured_at: std::time::Instant::now(),
-                }],
-                &resolver,
                 true,
-                0,
-                &mut last,
-            );
-
-            assert!(out.verbs.is_empty(), "noise must not pause the song");
+                true,
+                &game_shell::PauseState::Paused
+            ));
+            assert!(gameplay_ready(
+                true,
+                true,
+                true,
+                &game_shell::PauseState::Running
+            ));
         }
 
         #[test]
-        fn a_lane_note_never_emits_a_system_verb() {
-            use dtx_input::{BindSource, InputBindings, SystemVerb};
-            let mut b = InputBindings::default();
-            // The footgun: 38 is the Snare's note, also hand-bound to Pause.
-            b.bind_system(SystemVerb::Pause, BindSource::Midi { note: 38 });
-            let resolver = crate::bindings::BindResolver::from_bindings(&b);
-            let mut last = LastMidiHit::default();
+        fn stamp_prefers_event_time_then_clock() {
+            assert_eq!(stamp_audio_ms(Some(500), 2_000), 2_000);
+            assert_eq!(stamp_audio_ms(Some(500), 0), 500);
+            assert_eq!(stamp_audio_ms(None, 0), 0);
+        }
 
-            let out = consume_midi_events(
-                [dtx_input::midi::MidiEvent::NoteOn {
-                    note: 38,
-                    velocity: 90,
-                    audio_ms: 0,
-                    captured_at: std::time::Instant::now(),
-                }],
-                &resolver,
-                true,
-                0,
-                &mut last,
-            );
+        /// The old pump dropped not-ready hits instead of buffering them. The gate
+        /// must do the same: a hit that arrives while not ready is cleared, not
+        /// replayed once gameplay becomes ready.
+        #[test]
+        fn gated_hit_is_not_replayed_when_gameplay_becomes_ready() {
+            use dtx_input::ResolvedInputHit;
 
-            assert!(out.verbs.is_empty(), "a lane hit must never pause");
-            assert_eq!(out.hits.len(), 1, "it still judges");
+            let mut app = App::new();
+            app.add_plugins(bevy::state::app::StatesPlugin)
+                .init_state::<game_shell::PauseState>()
+                .init_resource::<crate::resources::ActiveChart>()
+                .init_resource::<GameplayClock>()
+                .add_message::<ResolvedInputHit>()
+                .add_message::<InputHit>()
+                .add_systems(Update, convert_resolved_hits);
+
+            // Not ready: empty chart. The hit must be dropped.
+            app.world_mut().write_message(ResolvedInputHit {
+                lanes: vec![1],
+                audio_ms: 0,
+                captured_at: std::time::Instant::now(),
+            });
+            app.update();
+            app.update(); // second frame: a buffered message would surface here
+            let count = app
+                .world()
+                .resource::<Messages<InputHit>>()
+                .iter_current_update_messages()
+                .count();
+            assert_eq!(count, 0, "not-ready hit must be dropped, not deferred");
         }
     }
 }
 
-pub use midi_consumer::{LastMidiHit, PadNavHit};
+pub use midi_gate::{LastMidiHit, PadNavHit};
 
 /// Re-export as struct form for callers that prefer `add_plugins(...)` syntax.
 pub use plugin as DrumsPlugin;
@@ -872,7 +596,7 @@ mod tests {
 
     #[test]
     fn menu_hits_are_stamped_even_without_clock() {
-        use super::midi_consumer::stamp_audio_ms;
+        use super::midi_gate::stamp_audio_ms;
         assert_eq!(stamp_audio_ms(None, 123), 123);
         assert_eq!(stamp_audio_ms(None, 0), 0);
         assert_eq!(stamp_audio_ms(Some(5000), 0), 5000);

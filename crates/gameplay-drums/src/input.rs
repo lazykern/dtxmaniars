@@ -2,7 +2,7 @@
 //!
 //! Keys resolve to lanes via [`crate::bindings::BindResolver`], built from the
 //! persisted `dtx-config` `InputBindings`. MIDI is handled in the lib.rs
-//! `midi_consumer` module.
+//! `midi_gate` module (pump lives in `dtx_input::pump`).
 //!
 //! ## Phase 0 p0-6
 //!
