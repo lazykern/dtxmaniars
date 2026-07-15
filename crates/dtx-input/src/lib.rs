@@ -26,6 +26,7 @@ use bevy::prelude::*;
 pub mod bindings;
 pub mod events;
 pub mod keyboard;
+pub mod lane_map;
 pub mod midi;
 pub mod pad;
 #[allow(missing_docs)]
