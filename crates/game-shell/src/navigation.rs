@@ -144,8 +144,6 @@ pub struct ActiveNavContext(pub Option<NavContext>);
 #[derive(SystemSet, Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct NavMapSet;
 
-// registered in the menu_nav swap commit; see plugin doc
-#[allow(dead_code)]
 fn pad_nav_mapper(
     ctx: Res<ActiveNavContext>,
     mut hits: MessageReader<dtx_input::PadNavHit>,
@@ -174,15 +172,13 @@ fn pad_nav_mapper(
     }
 }
 
-/// Registers messages/resources. The mapper system itself is registered in a
-/// follow-up commit — while gameplay-drums' old `menu_nav` mapper is still
-/// alive, registering a second reader of `PadNavHit` would emit every
-/// `NavAction` twice.
+/// Registers the NavAction message, nav resources, and the pad mapper.
 pub fn plugin(app: &mut App) {
     app.add_message::<NavAction>()
         .init_resource::<MidiConnected>()
         .init_resource::<NavGuard>()
-        .init_resource::<ActiveNavContext>();
+        .init_resource::<ActiveNavContext>()
+        .add_systems(Update, pad_nav_mapper.in_set(NavMapSet));
 }
 
 #[cfg(test)]
