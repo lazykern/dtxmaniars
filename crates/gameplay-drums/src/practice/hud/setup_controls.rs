@@ -215,6 +215,7 @@ pub fn apply_ui_actions(
     mut previews: MessageWriter<PreviewAction>,
     mut starts: MessageWriter<StartOrContinueRequested>,
     mut cancels: MessageWriter<crate::practice::CancelPracticeSettings>,
+    mut initial_cancels: MessageWriter<crate::practice::InitialSetupCancelRequested>,
     mut toasts: ResMut<crate::practice::toast::ToastQueue>,
 ) {
     for action in actions.read().copied() {
@@ -381,8 +382,14 @@ pub fn apply_ui_actions(
             ),
             PracticeUiAction::Back => {
                 flow.preview = PreviewState::Stopped;
-                if flow.phase == PracticePhase::Editing {
-                    cancels.write(crate::practice::CancelPracticeSettings);
+                match flow.phase {
+                    PracticePhase::Setup => {
+                        initial_cancels.write(crate::practice::InitialSetupCancelRequested);
+                    }
+                    PracticePhase::Editing => {
+                        cancels.write(crate::practice::CancelPracticeSettings);
+                    }
+                    PracticePhase::Running => {}
                 }
             }
         }
@@ -501,13 +508,9 @@ fn adjust_selected(
                 (draft.user_tempo + RATE_STEP * direction as f32).clamp(RATE_MIN, RATE_MAX)
         }
         SetupItem::Snap => {
-            draft.snap = if direction == 0 {
-                draft.snap
-            } else {
-                draft.snap.next()
-            }
+            draft.snap = adjust_snap(draft.snap, direction);
         }
-        SetupItem::Preroll => draft.preroll = draft.preroll.next(),
+        SetupItem::Preroll => draft.preroll = adjust_preroll(draft.preroll, direction),
         SetupItem::CountIn => draft.count_in = !draft.count_in,
         SetupItem::TrainerMode => {
             let next = match (draft.trainer_mode(), direction > 0) {
@@ -538,6 +541,30 @@ fn adjust_selected(
                     as u8
         }
         _ => {}
+    }
+}
+
+fn adjust_snap(value: SnapDivisor, direction: i8) -> SnapDivisor {
+    match (value, direction.cmp(&0)) {
+        (value, std::cmp::Ordering::Equal) => value,
+        (SnapDivisor::Bar, std::cmp::Ordering::Greater)
+        | (SnapDivisor::Quarter, std::cmp::Ordering::Less) => SnapDivisor::Beat,
+        (SnapDivisor::Beat, std::cmp::Ordering::Greater)
+        | (SnapDivisor::Bar, std::cmp::Ordering::Less) => SnapDivisor::Quarter,
+        (SnapDivisor::Quarter, std::cmp::Ordering::Greater)
+        | (SnapDivisor::Beat, std::cmp::Ordering::Less) => SnapDivisor::Bar,
+    }
+}
+
+fn adjust_preroll(value: PrerollSetting, direction: i8) -> PrerollSetting {
+    match (normalize_preroll(value), direction.cmp(&0)) {
+        (value, std::cmp::Ordering::Equal) => value,
+        (PrerollSetting::OneBar, std::cmp::Ordering::Greater)
+        | (PrerollSetting::Off, std::cmp::Ordering::Less) => PrerollSetting::Seconds(2.0),
+        (PrerollSetting::Seconds(_), std::cmp::Ordering::Greater)
+        | (PrerollSetting::OneBar, std::cmp::Ordering::Less) => PrerollSetting::Off,
+        (PrerollSetting::Off, std::cmp::Ordering::Greater)
+        | (PrerollSetting::Seconds(_), std::cmp::Ordering::Less) => PrerollSetting::OneBar,
     }
 }
 
@@ -625,6 +652,7 @@ pub(super) fn plugin(app: &mut App) {
         .init_resource::<PracticePresetPrompt>()
         .add_message::<PracticeUiAction>()
         .add_message::<StartOrContinueRequested>()
+        .add_message::<crate::practice::InitialSetupCancelRequested>()
         .add_systems(OnEnter(game_shell::AppState::Performance), reset_selection)
         .add_systems(
             Update,
@@ -632,12 +660,19 @@ pub(super) fn plugin(app: &mut App) {
         )
         .add_systems(
             Update,
-            (apply_ui_actions, apply_preset_results)
-                .chain()
+            apply_ui_actions
                 .after(super::setup::setup_button_actions)
                 .after(super::timeline_ui::timeline_mouse)
                 .after(super::timeline_ui::preview_transport_buttons)
                 .before(super::setup::ensure_setup_shell)
                 .run_if(crate::practice::practice_surface_open),
+        )
+        .add_systems(
+            Update,
+            apply_preset_results
+                .after(crate::practice::presets::preset_system)
+                .before(super::setup::ensure_setup_shell)
+                .run_if(resource_exists::<PracticeDraft>)
+                .run_if(resource_exists::<crate::practice::PracticeSession>),
         );
 }

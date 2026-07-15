@@ -39,6 +39,7 @@ pub(super) const TRANSPORT_BUTTON_MIN_WIDTH: f32 = 72.0;
 pub(super) const TRANSPORT_TIME_MIN_WIDTH: f32 = 72.0;
 pub(super) const TRANSPORT_CONTROL_GAP: f32 = 16.0;
 pub(super) const TIMELINE_STRIP_MIN_WIDTH: f32 = 220.0;
+const TRANSPORT_BUTTON_COUNT: f32 = 4.0;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PracticeTransportRowMode {
@@ -47,14 +48,17 @@ pub enum PracticeTransportRowMode {
 }
 
 pub fn practice_transport_row_mode(width: f32) -> PracticeTransportRowMode {
-    let controls = 3.0 * TRANSPORT_BUTTON_MIN_WIDTH + TRANSPORT_TIME_MIN_WIDTH;
-    let gaps = 4.0 * TRANSPORT_CONTROL_GAP;
-    let minimum = 2.0 * TIMELINE_HORIZONTAL_PADDING + controls + gaps + TIMELINE_STRIP_MIN_WIDTH;
-    if width >= minimum {
+    if width >= transport_single_row_min_width() {
         PracticeTransportRowMode::Single
     } else {
         PracticeTransportRowMode::Stacked
     }
+}
+
+pub fn transport_single_row_min_width() -> f32 {
+    let controls = TRANSPORT_BUTTON_COUNT * TRANSPORT_BUTTON_MIN_WIDTH + TRANSPORT_TIME_MIN_WIDTH;
+    let gaps = (TRANSPORT_BUTTON_COUNT + 1.0) * TRANSPORT_CONTROL_GAP;
+    2.0 * TIMELINE_HORIZONTAL_PADDING + controls + gaps + TIMELINE_STRIP_MIN_WIDTH
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -518,6 +522,7 @@ fn spawn_settings(
         });
 
         pane.spawn((
+            SetupRow(super::setup_controls::SetupItem::StartOrContinue),
             PrimaryActionButton,
             Button,
             Node {
@@ -530,14 +535,21 @@ fn spawn_settings(
                 ..default()
             },
             BackgroundColor(theme.accent),
-            children![(
-                PracticePrimaryAction,
-                Text::new(primary_action_label(phase)),
-                dtx_ui::Theme::font(16.0),
-                dtx_ui::SemanticText(dtx_ui::TypographyRole::Label),
-                TextColor(theme.stage_bg),
-            )],
-        ));
+        ))
+        .with_children(|button| {
+            let label = button
+                .spawn((
+                    PracticePrimaryAction,
+                    Text::new(primary_action_label(phase)),
+                    dtx_ui::Theme::font(16.0),
+                    dtx_ui::SemanticText(dtx_ui::TypographyRole::Label),
+                    TextColor(theme.stage_bg),
+                ))
+                .id();
+            button.commands().entity(label).insert(SetupRowLabel(
+                super::setup_controls::SetupItem::StartOrContinue,
+            ));
+        });
     });
 }
 
@@ -936,7 +948,12 @@ pub(super) fn refresh_setup_copy(
         };
     }
     for mut text in &mut primary {
-        text.0 = primary_action_label(flow.phase).to_owned();
+        let label = primary_action_label(flow.phase);
+        text.0 = if selection.0 == super::setup_controls::SetupItem::StartOrContinue {
+            format!("› {label}")
+        } else {
+            label.to_owned()
+        };
     }
     for (row, mut text) in &mut labels {
         let raw = text.0.trim_start_matches("› ").to_owned();

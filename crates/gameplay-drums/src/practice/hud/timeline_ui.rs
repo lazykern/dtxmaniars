@@ -156,6 +156,7 @@ pub(super) struct PreviewTransportText;
 
 #[derive(Component, Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PreviewTransportButton {
+    Back,
     PrevBar,
     PlayPause,
     NextBar,
@@ -205,6 +206,7 @@ pub(super) fn spawn_timeline(
             })
             .with_children(|transport_row| {
                 for button in [
+                    PreviewTransportButton::Back,
                     PreviewTransportButton::PrevBar,
                     PreviewTransportButton::PlayPause,
                     PreviewTransportButton::NextBar,
@@ -225,6 +227,7 @@ pub(super) fn spawn_timeline(
                         ))
                         .with_children(|button_root| {
                             let label = match button {
+                                PreviewTransportButton::Back => "Back",
                                 PreviewTransportButton::PrevBar => "Previous bar",
                                 PreviewTransportButton::PlayPause
                                     if flow.preview == crate::practice::PreviewState::Playing =>
@@ -388,17 +391,26 @@ pub(super) fn preview_transport_buttons(
         if *interaction != Interaction::Pressed {
             continue;
         }
-        let preview = match button {
-            PreviewTransportButton::PrevBar => crate::practice::PreviewAction::PrevBar,
+        let action = match button {
+            PreviewTransportButton::Back => super::setup_controls::PracticeUiAction::Back,
+            PreviewTransportButton::PrevBar => super::setup_controls::PracticeUiAction::Preview(
+                crate::practice::PreviewAction::PrevBar,
+            ),
             PreviewTransportButton::PlayPause
                 if flow.preview == crate::practice::PreviewState::Playing =>
             {
-                crate::practice::PreviewAction::Pause
+                super::setup_controls::PracticeUiAction::Preview(
+                    crate::practice::PreviewAction::Pause,
+                )
             }
-            PreviewTransportButton::PlayPause => crate::practice::PreviewAction::Play,
-            PreviewTransportButton::NextBar => crate::practice::PreviewAction::NextBar,
+            PreviewTransportButton::PlayPause => super::setup_controls::PracticeUiAction::Preview(
+                crate::practice::PreviewAction::Play,
+            ),
+            PreviewTransportButton::NextBar => super::setup_controls::PracticeUiAction::Preview(
+                crate::practice::PreviewAction::NextBar,
+            ),
         };
-        actions.write(super::setup_controls::PracticeUiAction::Preview(preview));
+        actions.write(action);
     }
 }
 

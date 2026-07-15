@@ -1,4 +1,5 @@
 use bevy::camera::{Camera, Camera2d, ComputedCameraValues, RenderTargetInfo, Viewport};
+use bevy::ecs::system::RunSystemOnce;
 use bevy::prelude::*;
 use bevy::window::{PrimaryWindow, WindowResolution};
 use game_shell::{AppState, PauseState};
@@ -159,6 +160,29 @@ fn setup_hud_app(width: f32, height: f32, text_scale: dtx_config::TextScale) -> 
 
 fn send_ui_action(app: &mut App, action: PracticeUiAction) {
     app.world_mut().write_message(action);
+}
+
+fn press_key(app: &mut App, key: KeyCode) {
+    app.world_mut()
+        .resource_mut::<ButtonInput<KeyCode>>()
+        .press(key);
+    app.world_mut()
+        .run_system_once(gameplay_drums::practice::hud::setup_controls::keyboard_actions)
+        .expect("keyboard actions run");
+    app.update();
+    app.world_mut()
+        .resource_mut::<ButtonInput<KeyCode>>()
+        .release(key);
+    app.update();
+}
+
+fn send_nav(app: &mut App, verb: game_shell::NavVerb) {
+    app.world_mut().write_message(game_shell::NavAction {
+        verb,
+        source: game_shell::NavSource::Keyboard,
+        coarse: false,
+    });
+    app.update();
 }
 
 fn texts(app: &mut App) -> Vec<String> {
@@ -461,6 +485,89 @@ fn mouse_adjust_buttons_use_the_same_typed_reducer() {
     assert_eq!(
         app.world().resource::<PracticeDraft>().source,
         PracticeDraftSource::Custom
+    );
+}
+
+#[test]
+fn snap_and_preroll_keyboard_adjustments_are_directional_and_wrap() {
+    let mut app = setup_hud_app(1280.0, 720.0, dtx_config::TextScale::Standard);
+
+    app.world_mut().resource_mut::<SetupSelection>().0 = SetupItem::Snap;
+    press_key(&mut app, KeyCode::ArrowLeft);
+    assert_eq!(
+        app.world().resource::<PracticeDraft>().snap,
+        SnapDivisor::Quarter
+    );
+    press_key(&mut app, KeyCode::ArrowRight);
+    assert_eq!(
+        app.world().resource::<PracticeDraft>().snap,
+        SnapDivisor::Bar
+    );
+
+    app.world_mut().resource_mut::<SetupSelection>().0 = SetupItem::Preroll;
+    press_key(&mut app, KeyCode::ArrowLeft);
+    assert_eq!(
+        app.world().resource::<PracticeDraft>().preroll,
+        gameplay_drums::practice::session::PrerollSetting::Off
+    );
+    press_key(&mut app, KeyCode::ArrowRight);
+    assert_eq!(
+        app.world().resource::<PracticeDraft>().preroll,
+        gameplay_drums::practice::session::PrerollSetting::OneBar
+    );
+}
+
+#[test]
+fn snap_and_preroll_nav_adjustments_are_directional_and_wrap() {
+    let mut app = setup_hud_app(1280.0, 720.0, dtx_config::TextScale::Standard);
+
+    app.world_mut().resource_mut::<SetupSelection>().0 = SetupItem::Snap;
+    send_nav(&mut app, game_shell::NavVerb::Dec);
+    assert_eq!(
+        app.world().resource::<PracticeDraft>().snap,
+        SnapDivisor::Quarter
+    );
+    send_nav(&mut app, game_shell::NavVerb::Inc);
+    assert_eq!(
+        app.world().resource::<PracticeDraft>().snap,
+        SnapDivisor::Bar
+    );
+
+    app.world_mut().resource_mut::<SetupSelection>().0 = SetupItem::Preroll;
+    send_nav(&mut app, game_shell::NavVerb::Dec);
+    assert_eq!(
+        app.world().resource::<PracticeDraft>().preroll,
+        gameplay_drums::practice::session::PrerollSetting::Off
+    );
+    send_nav(&mut app, game_shell::NavVerb::Inc);
+    assert_eq!(
+        app.world().resource::<PracticeDraft>().preroll,
+        gameplay_drums::practice::session::PrerollSetting::OneBar
+    );
+}
+
+#[test]
+fn snap_and_preroll_mouse_adjustments_are_directional_and_wrap() {
+    let mut app = setup_hud_app(1280.0, 720.0, dtx_config::TextScale::Standard);
+
+    for (item, direction) in [
+        (SetupItem::Snap, -1),
+        (SetupItem::Snap, 1),
+        (SetupItem::Preroll, -1),
+        (SetupItem::Preroll, 1),
+    ] {
+        app.world_mut()
+            .spawn((Interaction::Pressed, SetupAdjustButton { item, direction }));
+        app.update();
+    }
+
+    assert_eq!(
+        app.world().resource::<PracticeDraft>().snap,
+        SnapDivisor::Bar
+    );
+    assert_eq!(
+        app.world().resource::<PracticeDraft>().preroll,
+        gameplay_drums::practice::session::PrerollSetting::OneBar
     );
 }
 
@@ -920,17 +1027,26 @@ fn live_resize_and_text_scale_update_preview_geometry_in_the_same_frame() {
 
 #[test]
 fn transport_row_structure_and_reserved_geometry_share_exact_breakpoints() {
+    let breakpoint = gameplay_drums::practice::hud::setup::transport_single_row_min_width();
     assert_eq!(
-        practice_transport_row_mode(603.0),
+        practice_transport_row_mode(breakpoint - 1.0),
         PracticeTransportRowMode::Stacked
     );
     assert_eq!(
-        practice_transport_row_mode(604.0),
+        practice_transport_row_mode(breakpoint),
         PracticeTransportRowMode::Single
     );
     for (scale, below, above) in [
-        (dtx_config::TextScale::Standard, 603.0, 605.0),
-        (dtx_config::TextScale::XLarge, 603.0, 605.0),
+        (
+            dtx_config::TextScale::Standard,
+            breakpoint - 1.0,
+            breakpoint + 1.0,
+        ),
+        (
+            dtx_config::TextScale::XLarge,
+            breakpoint - 1.0,
+            breakpoint + 1.0,
+        ),
     ] {
         let mut app = setup_hud_app(above, 720.0, scale);
         click_tab(&mut app, "Preview");
@@ -1300,6 +1416,32 @@ fn editing_shell_uses_continue_as_the_pinned_primary_action() {
 }
 
 #[test]
+fn keyboard_traversal_selects_and_activates_the_pinned_primary_action() {
+    let mut app = setup_hud_app(1280.0, 720.0, dtx_config::TextScale::Standard);
+
+    press_key(&mut app, KeyCode::ArrowUp);
+
+    assert_eq!(
+        app.world().resource::<SetupSelection>().0,
+        SetupItem::StartOrContinue
+    );
+    let action_text = app
+        .world_mut()
+        .query_filtered::<&Text, With<PracticePrimaryAction>>()
+        .single(app.world())
+        .expect("one primary action");
+    assert_eq!(action_text.0, "› Start Practice");
+
+    press_key(&mut app, KeyCode::Enter);
+    assert!(app
+        .world()
+        .resource::<Messages<gameplay_drums::practice::hud::setup_controls::StartOrContinueRequested>>()
+        .iter_current_update_messages()
+        .next()
+        .is_some());
+}
+
+#[test]
 fn setup_copy_refreshes_from_draft_in_the_same_update() {
     let mut app = setup_hud_app(1280.0, 720.0, dtx_config::TextScale::Standard);
     {
@@ -1575,6 +1717,49 @@ fn preview_transport_buttons_keep_task_five_preview_actions() {
         actions,
         vec![gameplay_drums::practice::PreviewAction::NextBar]
     );
+}
+
+#[test]
+fn visible_transport_back_button_routes_through_the_shared_back_action() {
+    let mut app = setup_hud_app(1280.0, 720.0, dtx_config::TextScale::Standard);
+    let buttons = app
+        .world_mut()
+        .query::<&PreviewTransportButton>()
+        .iter(app.world())
+        .copied()
+        .collect::<Vec<_>>();
+    assert_eq!(buttons.len(), 4);
+    for expected in [
+        PreviewTransportButton::Back,
+        PreviewTransportButton::PrevBar,
+        PreviewTransportButton::PlayPause,
+        PreviewTransportButton::NextBar,
+    ] {
+        assert!(buttons.contains(&expected));
+    }
+
+    app.world_mut()
+        .spawn((Interaction::Pressed, PreviewTransportButton::Back));
+    app.update();
+
+    assert!(app
+        .world()
+        .resource::<Messages<gameplay_drums::practice::InitialSetupCancelRequested>>()
+        .iter_current_update_messages()
+        .next()
+        .is_some());
+
+    app.world_mut().resource_mut::<PracticeFlow>().phase =
+        gameplay_drums::practice::PracticePhase::Editing;
+    app.world_mut()
+        .spawn((Interaction::Pressed, PreviewTransportButton::Back));
+    app.update();
+    assert!(app
+        .world()
+        .resource::<Messages<gameplay_drums::practice::CancelPracticeSettings>>()
+        .iter_current_update_messages()
+        .next()
+        .is_some());
 }
 
 #[test]

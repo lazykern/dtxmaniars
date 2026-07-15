@@ -1,5 +1,6 @@
 //! Integration tests for practice mode: seek, gates, loop.
 
+use bevy::ecs::system::RunSystemOnce;
 use bevy::prelude::*;
 use dtx_audio::BgmHandle;
 use dtx_core::assets::DtxAssets;
@@ -13,11 +14,12 @@ use gameplay_drums::orchestrator::{
     detect_end_of_stage, enter_derive_from_chart, enter_reset_run_state, enter_seed_bgm_state,
     DrumsStageCompletion,
 };
+use gameplay_drums::practice::hud::setup_controls::PracticeUiAction;
 use gameplay_drums::practice::session::{LoopRegion, PracticeSession, PracticeTransport};
 use gameplay_drums::practice::{
     cancel_initial_setup, start_or_continue_practice, CancelPracticeSettings, OpenPracticeSettings,
-    PracticeDraft, PracticeEditSnapshot, PracticeFlow, PracticePhase, PresetCommand, PreviewAction,
-    PreviewState,
+    PracticeDraft, PracticeEditSnapshot, PracticeFlow, PracticePhase, PracticePresetPrompt,
+    PracticePresetStore, PresetCommand, PreviewAction, PreviewState,
 };
 use gameplay_drums::resources::{
     AccuracyHistory, ActiveChart, BgmAdjustState, Combo, EffectivePlaybackRate, GameStartMs,
@@ -1833,8 +1835,6 @@ fn setup_start_commits_draft_records_last_used_and_seeks_to_preroll() {
 
 #[test]
 fn setup_cancel_routes_origins_and_defends_results_snapshot() {
-    use bevy::ecs::system::RunSystemOnce;
-
     for (origin, available, expected, skips, warns) in [
         (
             PracticeOrigin::SongSelect,
@@ -1891,6 +1891,123 @@ fn setup_cancel_routes_origins_and_defends_results_snapshot() {
             "{origin:?} available={available}"
         );
     }
+}
+
+#[test]
+fn escape_and_nav_back_route_every_initial_setup_origin() {
+    for use_nav in [false, true] {
+        for (origin, expected) in [
+            (PracticeOrigin::SongSelect, AppState::SongSelect),
+            (PracticeOrigin::NormalPause, AppState::SongSelect),
+            (PracticeOrigin::Results, AppState::Result),
+        ] {
+            let mut app = build_lifecycle_app(PracticeIntent::manual(origin));
+            enter_performance(&mut app, chart_with_measures(4));
+            app.world_mut()
+                .resource_mut::<game_shell::ResultReturnState>()
+                .available = true;
+
+            if use_nav {
+                app.world_mut().write_message(game_shell::NavAction {
+                    verb: game_shell::NavVerb::Back,
+                    source: game_shell::NavSource::Pad,
+                    coarse: false,
+                });
+            } else {
+                app.world_mut()
+                    .resource_mut::<ButtonInput<KeyCode>>()
+                    .press(KeyCode::Escape);
+                app.world_mut()
+                    .run_system_once(
+                        gameplay_drums::practice::hud::setup_controls::keyboard_actions,
+                    )
+                    .expect("keyboard actions run");
+            }
+            app.update();
+
+            let requests = app
+                .world()
+                .resource::<Messages<game_shell::TransitionRequest>>()
+                .iter_current_update_messages()
+                .collect::<Vec<_>>();
+            assert_eq!(
+                requests.last().map(|request| request.0),
+                Some(expected),
+                "use_nav={use_nav} origin={origin:?}"
+            );
+        }
+    }
+}
+
+#[test]
+fn last_used_failure_survives_running_until_settings_retry() {
+    let mut app = build_lifecycle_app(PracticeIntent::manual(PracticeOrigin::SongSelect));
+    enter_performance(&mut app, chart_with_measures(4));
+    let draft = app.world().resource::<PracticeDraft>().clone();
+    let expected = PresetCommand::RecordLastUsed {
+        draft: draft.clone(),
+    };
+    let (chart, source_path_hint, registry) = {
+        let current_store = app.world().resource::<PracticePresetStore>();
+        (
+            current_store.chart.clone(),
+            current_store.source_path_hint.clone(),
+            current_store.registry.clone(),
+        )
+    };
+    app.world_mut()
+        .insert_resource(PracticePresetStore::read_only(
+            std::env::temp_dir().join("practice-last-used-read-only.toml"),
+            chart,
+            source_path_hint,
+            registry,
+            "unsupported version",
+        ));
+
+    app.world_mut()
+        .write_message(PracticeUiAction::StartOrContinue);
+    app.update();
+    app.update();
+
+    assert_eq!(
+        app.world().resource::<PracticeFlow>().phase,
+        PracticePhase::Running
+    );
+    assert!(matches!(
+        app.world().resource::<PracticePresetPrompt>(),
+        PracticePresetPrompt::Retry { command, .. } if **command == expected
+    ));
+    assert!(app
+        .world()
+        .resource::<gameplay_drums::practice::toast::ToastQueue>()
+        .iter()
+        .any(|toast| toast.message.contains("read-only")));
+
+    app.world_mut().write_message(OpenPracticeSettings);
+    app.update();
+    assert_eq!(
+        app.world().resource::<PracticeFlow>().phase,
+        PracticePhase::Editing
+    );
+    assert!(matches!(
+        app.world().resource::<PracticePresetPrompt>(),
+        PracticePresetPrompt::Retry { command, .. } if **command == expected
+    ));
+
+    app.world_mut().write_message(PracticeUiAction::RetryPreset);
+    app.update();
+    assert!(matches!(
+        app.world().resource::<PracticePresetPrompt>(),
+        PracticePresetPrompt::Retry { command, .. } if **command == expected
+    ));
+
+    app.world_mut()
+        .write_message(gameplay_drums::practice::PresetResult::LastUsedRecorded);
+    app.update();
+    assert_eq!(
+        *app.world().resource::<PracticePresetPrompt>(),
+        PracticePresetPrompt::None
+    );
 }
 
 #[test]

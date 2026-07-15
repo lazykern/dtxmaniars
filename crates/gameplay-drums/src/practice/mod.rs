@@ -39,6 +39,9 @@ pub use presets::{
 pub use preview::{CancelPracticeSettings, OpenPracticeSettings, PreviewAction, PreviewController};
 pub use session::PracticeSession;
 
+#[derive(Message, Debug, Clone, Copy, PartialEq, Eq)]
+pub struct InitialSetupCancelRequested;
+
 use crate::gauge::StageGauge;
 use crate::seek::SeekToChartTime;
 use crate::timeline::ChipTimeline;
@@ -67,7 +70,8 @@ fn add_action_systems(app: &mut App) {
 
 pub(super) fn plugin(app: &mut App) {
     add_action_systems(app);
-    app.init_resource::<toast::ToastQueue>();
+    app.init_resource::<toast::ToastQueue>()
+        .add_message::<InitialSetupCancelRequested>();
     presets::plugin(app);
     app.add_systems(
         OnEnter(AppState::Performance),
@@ -75,7 +79,12 @@ pub(super) fn plugin(app: &mut App) {
     )
     .add_systems(OnExit(AppState::Performance), remove_practice_surface)
     .add_systems(OnEnter(AppState::SongSelect), remove_practice_session)
-    .add_systems(Update, run_start_requests.run_if(practice_surface_open))
+    .add_systems(
+        Update,
+        (run_start_requests, run_initial_setup_cancel_requests)
+            .after(hud::setup_controls::apply_ui_actions)
+            .run_if(practice_surface_open),
+    )
     .add_systems(
         FixedUpdate,
         freeze_gauge_in_practice
@@ -101,6 +110,15 @@ fn run_start_requests(
 ) {
     if requests.read().next().is_some() {
         commands.run_system_cached(start_or_continue_practice);
+    }
+}
+
+fn run_initial_setup_cancel_requests(
+    mut requests: MessageReader<InitialSetupCancelRequested>,
+    mut commands: Commands,
+) {
+    if requests.read().next().is_some() {
+        commands.run_system_cached(cancel_initial_setup);
     }
 }
 
