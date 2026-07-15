@@ -116,8 +116,8 @@ and difficulty when possible.
 |---|---|
 | `Up` / `Down` | Select previous or next song |
 | `Left` / `Right` | Select another difficulty |
-| `Enter` | Start normal play |
-| `Shift+Enter` | Start practice mode |
+| `Enter` | Open Song Ready with Normal selected |
+| `Shift+Enter` | Open Song Ready with Practice selected |
 | `Esc` | Return to the title screen |
 | `Tab` | Cycle the sort mode |
 | `F1` | Open Customize using the selected chart |
@@ -155,8 +155,8 @@ The difficulty level then uses:
 |---|---|
 | Closed/open hi-hat | Previous difficulty |
 | Cymbal/ride | Next difficulty |
-| Bass drum | Start normal play |
-| Floor tom | Start practice mode |
+| Bass drum | Open Song Ready with Normal selected |
+| Floor tom | Open Song Ready with Practice selected |
 | Snare | Return to the song wheel |
 
 Pad menu actions have a short debounce, and newly entered screens ignore pad
@@ -165,6 +165,23 @@ triggering another action.
 
 **Limited:** the kit does not provide song search, sort cycling, library rescan,
 archive import, or settings access from this screen.
+
+### Song Ready
+
+Song Ready is a separate checkpoint between song selection and loading. The
+action used on Song Select preselects Normal or Practice. The player can review
+the chart and difficulty, switch mode, and adjust fail mode, lane speed, BGM
+volume, or drum volume before confirming Start Song or Open Practice Setup.
+
+Keyboard players use `Left`/`Right` to move between cards and `Up`/`Down` to
+adjust the focused value. With the Song card focused, `Enter` confirms the
+primary action and starts loading. `Esc` returns to Song Select. Mouse players
+can select cards, use their controls, and click the primary action.
+
+Kit navigation uses HH/CY to move between cards, BD to enter or confirm, and SD
+to go back. On the Song card, one BD opens its detail and another BD confirms
+the primary action. The initial BD or FT on Song Select only opens Song Ready;
+it does not start loading.
 
 ### Selected-song information
 
@@ -229,8 +246,10 @@ up without another message; clearing the search reveals the imported song.
 
 ## 7. Song loading
 
-After normal play or practice is requested, the loading screen parses the chart
-and prepares required audio. It displays loading status and progress.
+After the player confirms a Song Ready action, the loading screen parses the
+chart and prepares required audio. Retry and Practice actions from Results can
+also load a chart without returning through Song Ready. The screen displays
+loading status and progress.
 
 If the chart defines a loading sound and BGM audio is enabled, that sound is
 played when its file is available.
@@ -438,9 +457,10 @@ action or recovery workflow.
 
 ## 12. Practice mode
 
-Start practice by selecting a song and pressing `Shift+Enter`, or by striking
-the floor tom on song selection. The Practice action on Results can also seed a
-recommended section. Every route opens Practice Setup before the first attempt.
+On Song Select, press `Shift+Enter` or strike the floor tom at the difficulty
+level to open Song Ready with Practice selected. Confirm Open Practice Setup to
+load the chart. The Practice action on Results can also seed a recommended
+section. Every route opens Practice Setup before the first attempt.
 
 Setup starts with preview stopped. The preview uses the real playfield, notes,
 BGA, audio, and timeline, but input is not judged and cannot create misses,
@@ -1041,9 +1061,10 @@ events, and movie events.
 1. Press `Enter` on the title screen.
 2. Use `Up`/`Down` to select a song.
 3. Use `Left`/`Right` to select a difficulty.
-4. Press `Enter`.
-5. Play with the configured drum keys.
-6. Press `Enter` or `Esc` on results to return.
+4. Press `Enter` to open Song Ready in Normal mode.
+5. Confirm Start Song with the Song card focused.
+6. Play with the configured drum keys.
+7. Press `Enter` or `Esc` on results to return.
 
 ### Play a song with a MIDI kit
 
@@ -1051,20 +1072,23 @@ events, and movie events.
 2. Use hi-hat and cymbal/ride hits to browse.
 3. Strike the bass drum to enter difficulty selection.
 4. Use hi-hat and cymbal/ride hits to choose a difficulty.
-5. Strike the bass drum to start.
-6. Play the chart with the mapped pads.
-7. Strike bass drum or snare on results to return.
+5. Strike the bass drum to open Song Ready in Normal mode.
+6. With the Song card focused, strike the bass drum to open its detail, then
+   strike it again to confirm Start Song.
+7. Play the chart with the mapped pads.
+8. Strike bass drum or snare on results to return.
 
 ### Start practice with keyboard
 
 1. Select a song and difficulty.
-2. Press `Shift+Enter`.
-3. In the stopped Setup surface, configure the loop, tempo, trainer, pre-roll,
+2. Press `Shift+Enter` to open Song Ready in Practice mode.
+3. Confirm Open Practice Setup to load the chart.
+4. In the stopped Setup surface, configure the loop, tempo, trainer, pre-roll,
    and count-in. Use Preview if needed; preview input is not judged.
-4. Choose Start Practice to begin from pre-roll/count-in.
-5. During the run, press `Tab` to open Settings and choose Continue Practice to
+5. Choose Start Practice to begin from pre-roll/count-in.
+6. During the run, press `Tab` to open Settings and choose Continue Practice to
    restart from pre-roll, or press `Esc` to open Pause.
-6. Choose Resume in Pause to continue from the frozen position, or Exit to Song
+7. Choose Resume in Pause to continue from the frozen position, or Exit to Song
    Select to leave Practice.
 
 ### Start practice with a MIDI kit
@@ -1072,11 +1096,13 @@ events, and movie events.
 1. Select a song using pad navigation.
 2. Strike the bass drum to enter difficulty selection.
 3. Choose the difficulty with hi-hat and cymbal/ride hits.
-4. Strike the floor tom.
-5. Use the shared pad-navigation verbs to configure stopped Setup, inspect
+4. Strike the floor tom to open Song Ready in Practice mode.
+5. With the Song card focused, strike the bass drum to open its detail, then
+   strike it again to confirm Open Practice Setup.
+6. Use the shared pad-navigation verbs to configure stopped Setup, inspect
    Progress, or operate preview transport.
-6. Activate Start Practice to begin from pre-roll/count-in.
-7. During the run, use a configured system Pause note to open Pause, then
+7. Activate Start Practice to begin from pre-roll/count-in.
+8. During the run, use a configured system Pause note to open Pause, then
    choose Practice Settings, Resume, Restart Loop, or Exit to Song Select. The
    Pause note is unbound by default and must be configured before kit-only use.
 

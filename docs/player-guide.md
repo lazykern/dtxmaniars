@@ -35,13 +35,21 @@ Song Select supports:
   near-level filters; these filters compose;
 - `Ctrl+0` to reset filters and `Ctrl+R` to choose randomly from the current
   searched and filtered set;
-- arrows to move song/difficulty, `Enter` for normal play,
-  `Shift+Enter` for Practice, and `Esc` to clear search before returning.
+- arrows to move song/difficulty, `Enter` to open Song Ready in Normal mode,
+  `Shift+Enter` to open it in Practice mode, and `Esc` to clear search before
+  returning.
 
 With a connected kit, the on-screen legend is authoritative. At the song
 wheel, HH/CY moves, BD enters difficulty, and SD returns to Title. At the
-difficulty level, HH/CY changes difficulty, BD starts normal play, FT starts
-Practice, and SD returns to the wheel.
+difficulty level, HH/CY changes difficulty, BD opens Song Ready with Normal
+selected, FT opens it with Practice selected, and SD returns to the wheel.
+Confirm the primary action in Song Ready to start loading.
+
+Song Ready is the checkpoint before loading. It shows the selected song and
+difficulty alongside mode, fail-mode, lane-speed, and audio controls. Keyboard
+and mouse players can confirm Start Song or Open Practice Setup. From a kit,
+use HH/CY to move between cards, BD to enter or confirm, and SD to go back. On
+the Song card, one BD opens its detail and another confirms the primary action.
 
 ## Customize controls and presentation
 
@@ -148,11 +156,13 @@ saved.
 
 ## Practice transport
 
-Start Practice with `Shift+Enter`, FT at the kit difficulty level, or the
-Practice action on Results. Every route opens Practice Setup before any attempt
-begins. Setup uses the loaded playfield, notes, BGA, audio, and timeline as a
-preview, but preview starts stopped and drum input is not judged. Preview does
-not change score, combo, gauge, attempt history, lane diagnosis, Wait, or Ramp.
+From Song Select, press `Shift+Enter` or hit FT at the kit difficulty level to
+open Song Ready with Practice selected. Confirm Open Practice Setup to load the
+chart. The Practice action on Results can also enter Practice. Every route
+opens Practice Setup before any attempt begins. Setup uses the loaded
+playfield, notes, BGA, audio, and timeline as a preview, but preview starts
+stopped and drum input is not judged. Preview does not change score, combo,
+gauge, attempt history, lane diagnosis, Wait, or Ramp.
 
 Setup contains loop, tempo, snap, pre-roll, count-in, trainer, and saved-loop
 controls. Trainer is exactly one of Off, Wait, or Ramp. The Progress tab shows

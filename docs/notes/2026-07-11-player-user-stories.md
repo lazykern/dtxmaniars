@@ -111,10 +111,25 @@ Import is not one happy path. Current player-visible outcomes include:
 > filtered-result states to be distinguishable so I know whether to retry,
 > extract manually, clear search, or use the existing song.
 
+### Shared Song Ready stories
+
+Song Select opens Song Ready before loading. `Enter` or BD at the difficulty
+level preselects Normal; `Shift+Enter` or FT preselects Practice. The player
+then reviews the chart and quick settings and confirms Start Song or Open
+Practice Setup. From a kit, HH/CY moves between cards, BD enters or confirms,
+and SD goes back. On the Song card, one BD opens its detail and another confirms
+the primary action.
+
+- **READY-1:** As a player, I want to confirm the chart, difficulty, mode, and
+  routine settings before loading.
+- **READY-2:** As a kit player, I want the checkpoint and its confirmation to
+  remain reachable from the throne.
+
 ### Shared loading stories
 
-After play or practice is requested, a loading screen prepares the chart and
-audio and shows progress/status.
+After the player confirms Song Ready, a loading screen prepares the chart and
+audio and shows progress/status. Results can also request Retry or Practice
+without returning through Song Ready.
 
 | Player type | Cancel loading | Loading failure |
 |---|---|---|
@@ -269,9 +284,10 @@ section for Practice. Write failure is visible but has no retry-save action.
 
 Practice behavior is richer than starting a loop:
 
-- Every Practice request first opens Setup with preview stopped. Preview uses
-  the real chart presentation, but input is not judged and creates no gameplay
-  or Progress data.
+- After Practice is confirmed in Song Ready or selected from Results, the
+  loaded chart first opens Setup with preview stopped. Preview uses the real
+  chart presentation, but input is not judged and creates no gameplay or
+  Progress data.
 - Without A/B points, the entire song loops and does not end automatically.
 - `[` and `]` set bar-snapped A/B points; `Backspace` clears the loop.
 - Snap cycles Bar, Beat, and half-beat.
@@ -338,12 +354,12 @@ These motivations and concerns are hypotheses until validated with players.
 | Launch | See whether the game started correctly | Launch and wait through the short loading splash | Title appears automatically | Does the splash communicate healthy startup? |
 | Find songs | Understand why the library is empty | Press `Enter`; follow the empty-library hints | Player sees rescan, import, and archive-drop options | Which option does a new player understand first? |
 | Import | Add playable content | Press `F6` and mouse-select files, or mouse-drag files onto the window | Valid ZIP/7z imports rescan; invalid, unsafe, duplicate, unsupported, and filtered outcomes differ | Does the player choose the correct recovery for each notification? |
-| Learn navigation | Move through songs and difficulties | Press `Up`/`Down` for songs, `Left`/`Right` for difficulty, type to search, `Tab` to sort, `Enter` to play, `Shift+Enter` for practice, and `Esc` to go back | Entire song-selection workflow is reachable | Do players try to click the wheel before reading keyboard hints? |
+| Learn navigation | Move through songs and difficulties | Press `Up`/`Down` for songs, `Left`/`Right` for difficulty, type to search, `Tab` to sort, `Enter` for Normal Song Ready, `Shift+Enter` for Practice Song Ready, and `Esc` to go back | Song selection and its pre-load checkpoint are reachable | Do players try to click the wheel before reading keyboard hints? |
 | Verify timing | Make keyboard hits feel synchronized | Press `F1`, click `Calibrate`, press configured drum keys 12 times, then press `Enter` to apply or `Esc` to cancel; alternatively click/drag the Input Offset slider | Input offset can be changed | Can the player understand input offset versus BGM offset? |
 | Learn and edit keys | Identify drum mappings | Press `F1`, click Controls and Keyboard, inspect rows; click `+`, press a key, review it, choose Add shared/Move here if needed, then confirm | Defaults and custom keyboard profiles are visible and editable | Do source chips and lane highlights create a usable mental map? |
 | Arrange lanes | Make the playfield match preference | Click Lanes, select a profile, then click rows/pads; drag preview pads/edges and use detail-card add/split/hide/restore actions; Save As if editing a built-in | Lane profiles and live draft preview are reachable with mouse | Do players discover preview dragging without instruction? |
 | Load chart | Wait, cancel a mistake, or recover from failure | Observe progress; use `Esc` to cancel | Cancel/failure returns to songs | Does the player understand why loading ended? |
-| First play | Complete a chart | Select difficulty and press `Enter` | Normal performance, clear/fail banner, and results are reachable | Is the HUD understandable without prior DTX knowledge? |
+| First play | Complete a chart | Select difficulty, press `Enter` to open Normal Song Ready, then confirm Start Song | Normal performance, clear/fail banner, and results are reachable | Is the HUD understandable without prior DTX knowledge? |
 | Save result | Preserve the first play | Reach Results after a qualifying run and inspect the status | Results attempts persistence on entry | Does the player understand qualification and a failed status? |
 
 ### First-time acceptance stories
@@ -372,7 +388,7 @@ These motivations and concerns are hypotheses until validated with players.
 | Search | Type a title or artist | Live search is available | Efficient for known-item retrieval |
 | Sort | Change browsing order | `Tab` cycles Default, Title, Artist | Hidden shortcut may be forgotten |
 | Choose difficulty | Compare levels and past performance | Difficulty slots, level, achievement, rank, density, BPM, skill, and history are visible | Information density may exceed what casual keyboard players need |
-| Start | Press `Enter` | Normal play starts | Direct and repeatable |
+| Start | Press `Enter`, review Normal Song Ready, then confirm Start Song | Normal play starts after the checkpoint | Does the extra confirmation prevent mistakes without slowing repeat play too much? |
 | Adjust | Correct speed or offsets during play | Press `Up`/`Down` for scroll speed, `Left`/`Right` for input offset, add `Ctrl` for fine input adjustment, or press `Shift+Up`/`Shift+Down` for song BGM offset | Accidental adjustment is possible because arrows are active during play |
 | Pause | Interrupt safely | Press `Esc`; select Resume, Restart Song, Practice This Section, Quick Settings, or Return to Song Select; `Esc` resumes | Fully reachable |
 | Finish | Inspect score and judgments | Results presents score, combo, rank, counts, save status, timing/lane/section analysis, and a recommendation when evidence qualifies | `Tab` exposes the detailed analysis |
@@ -382,7 +398,7 @@ These motivations and concerns are hypotheses until validated with players.
 
 | Stage | Player intent | Current action/path | Outcome |
 |---|---|---|---|
-| Enter practice | Configure practice instead of recording a score | `Shift+Enter` on song selection | Stopped, non-judged Setup opens before any attempt |
+| Enter practice | Configure practice instead of recording a score | Press `Shift+Enter` on Song Select, then confirm Open Practice Setup in Song Ready | Loading completes, then stopped non-judged Setup opens before any attempt |
 | Preview | Inspect the exercise before starting | Use preview transport/timeline | Audio, notes, BGA, and timeline move without judgments or Progress data |
 | Mark section | Repeat a difficult span | `[` sets A; `]` sets B | Bar-snapped A/B loop |
 | Clear section | Return to whole-song practice | Press `Backspace` while running, or clear A/B in Setup/Settings | A/B clears and active Ramp disarms |
@@ -458,9 +474,9 @@ Possible concerns:
 | Save the setup | Reuse it next session | Click Save As for a built-in, type a name, and submit; later click Save after edits | User MIDI profile becomes active if the registry write succeeds | Is the separation between MIDI and Keyboard profiles understood? |
 | Verify play input | Confirm prepared pads produce gameplay input | Strike mapped pads during a readiness check or chart | Hits above the prepared threshold produce gameplay input | Can the player recognize loss of readiness from routine game feedback? |
 | Calibrate | Align physical strike and judgment | Press keyboard `F1`, click `Calibrate`, hit configured pads 12 times, then press `Enter` to apply or `Esc` to cancel | Suggested input offset can be applied | Does a pad drummer produce stable enough samples? |
-| Learn menu grammar | Navigate without reaching for keyboard after setup | Hit HH/CY to move, BD to enter/confirm, SD to go back, FT to start practice at difficulty level, and the configured system note to open Pause | Title, song wheel, difficulty, play, practice, Results, and Pause are kit-navigable after the Pause binding is configured | Are lane-to-command associations memorable? |
+| Learn menu grammar | Navigate without reaching for keyboard after setup | Hit HH/CY to move, BD to enter/confirm, SD to go back, FT to open Practice Song Ready at difficulty level, and the configured system note to open Pause | Title, song wheel, difficulty, Song Ready, play, practice, Results, and Pause are kit-navigable after the Pause binding is configured | Are lane-to-command associations memorable? |
 | Load chart | Wait or correct a mistaken selection | Observe progress; reach keyboard `Esc` to cancel | Failure returns automatically; kit has no cancel action | Does the fallback occur before the player settles into play posture? |
-| First play | Play primarily from the kit | Hit HH/CY to choose song, BD to enter difficulty, HH/CY to choose difficulty, BD to start, then hit mapped pads at the judgment line | Normal drum gameplay is reachable | Are pad/audio/judgment responses perceived as simultaneous? |
+| First play | Play primarily from the kit | Hit HH/CY to choose song, BD to enter difficulty, HH/CY to choose difficulty, BD to open Normal Song Ready, then confirm Start Song with BD | Normal drum gameplay is reachable | Are pad/audio/judgment responses perceived as simultaneous? |
 | Recover | Handle first failure or interruption | Use keyboard `Esc` or the configured system Pause note, then choose with arrows/`Enter` or HH/CY/BD; SD resumes | Kit-only interruption handling depends on the unbound-by-default Pause action | Does setup make that dependency clear? |
 
 ### First-time acceptance stories
@@ -484,7 +500,7 @@ Possible concerns:
 | Browse songs | Use kit for repeated navigation | HH/CY move the song wheel | Efficient after convention is learned |
 | Enter difficulty | Commit to selected song | BD changes from wheel to difficulty level | Two-level structure prevents accidental start but adds a step |
 | Choose difficulty | Compare chart choices | HH/CY move difficulty; SD returns | Kit-accessible |
-| Start | Play or practice | BD starts play; FT starts practice | Kit-accessible |
+| Start | Choose play or practice | BD opens Normal Song Ready; FT opens Practice Song Ready; BD confirms the primary action | Kit-accessible with a deliberate pre-load checkpoint |
 | Perform | Stay focused on kit | Mapped pads drive lanes and sounds | Primary job is supported |
 | Pause | Interrupt play | Press keyboard `Esc`, or hit the configured system Pause note | Kit-only Pause works after setup; no MIDI note is bound by default |
 | Operate pause | Resume/restart/settings/return | Hit HH/CY to move, BD to activate, or SD to resume; keyboard arrows/`Enter`/`Esc` remain available | Kit works after Pause opens |
@@ -495,13 +511,14 @@ Possible concerns:
 
 ### Returning practice journey
 
-The player can start practice from the kit with floor tom. Setup, Settings,
-Progress, preview transport, and Pause consume the shared pad-navigation verbs;
+The player can request practice from the kit with floor tom, then confirm Open
+Practice Setup from Song Ready with bass drum. Setup, Settings, Progress,
+preview transport, and Pause consume the shared pad-navigation verbs;
 physical-kit behavior remains a manual research item.
 
 | Need | Current path | Device switch |
 |---|---|---|
-| Open Setup | FT on difficulty selection | None |
+| Open Setup | FT on difficulty selection, then confirm Open Practice Setup in Song Ready | None |
 | Set A/B loop | Navigate Setup controls, or use `[` / `]` or mouse while running | None in wired pad navigation; keyboard/mouse fallback remains |
 | Change tempo | Navigate Setup/Settings controls, or press `-`/`=` while running | None in wired pad navigation; keyboard fallback remains |
 | Restart current practice section | `R` or Restart Loop in Pause | `R` remains the keyboard fallback; the Pause action is throne-reachable |
@@ -599,7 +616,8 @@ alone. The player must temporarily access the computer or receive help.
 | Enter difficulties | BD | Changes navigation level | Reachable |
 | Choose difficulty | HH/CY | Previous/next difficulty | Reachable |
 | Correct wrong song | SD | Returns to song wheel | Reachable |
-| Start normal play | BD | Performance begins | Reachable |
+| Open Normal Song Ready | BD | Normal mode is selected; loading has not started | Reachable |
+| Confirm normal play | BD on the Song card to open its detail, then BD again | Loading begins | Reachable |
 | Cancel loading | No pad action | Loading continues unless it fails or computer input intervenes | **Blocker** |
 | Play | Mapped pads | Notes are judged | Reachable |
 | Pause during play | Configured system Pause note | Performance freezes and Pause opens | Reachable after setup-time binding |
@@ -642,7 +660,8 @@ Current behavior:
 
 | Practice need | Kit-only support | Reachability |
 |---|---|---|
-| Start practice | FT on difficulty level | Reachable |
+| Open Practice Song Ready | FT on difficulty level | Reachable |
+| Confirm Practice Setup | BD on the Song card to open its detail, then BD again | Reachable |
 | Configure Setup and start | Shared pad navigation | Wired; physical kit unverified |
 | Play whole-song or A/B loop | Normal mapped pads | Reachable after Setup |
 | Change loop, tempo, or Off/Wait/Ramp | Practice Setup/Settings navigation | Wired; physical kit unverified |
@@ -653,10 +672,11 @@ Current behavior:
 | Pause and resume exactly | Bound system Pause, then Resume | Reachable after binding |
 | Exit practice | Bound system Pause, then Exit to Song Select | Reachable after binding |
 
-Starting practice from floor tom enters mandatory stopped Setup. A complete
-distant-kit Practice workflow depends on configured system Pause/Restart
-bindings. Source and tests confirm reachability, but physical-kit and
-room-distance validation remain pending.
+Floor tom opens Song Ready with Practice selected. Confirming Open Practice
+Setup loads the chart and enters mandatory stopped Setup. A complete distant-kit
+Practice workflow depends on configured system Pause/Restart bindings. Source
+and tests confirm reachability, but physical-kit and room-distance validation
+remain pending.
 
 ### Distant-MIDI blockers and workarounds
 
@@ -785,8 +805,9 @@ The title itself is not mouse-clickable for Continue or Quit.
 | Previous/next song | Press `Up`/`Down` | At wheel level, hit hi-hat/cymbal or ride |
 | Enter difficulty level | Not required; keyboard is flat | Hit bass drum on wheel level |
 | Previous/next difficulty | Press `Left`/`Right` | At difficulty level, hit hi-hat/cymbal or ride |
-| Start normal play | Press `Enter` | Hit bass drum at difficulty level |
-| Start practice | Press `Shift+Enter` | Hit floor tom at difficulty level |
+| Open Normal Song Ready | Press `Enter` | Hit bass drum at difficulty level |
+| Open Practice Song Ready | Press `Shift+Enter` | Hit floor tom at difficulty level |
+| Confirm loading from Song Ready | With the Song card focused, press `Enter`, or click the primary action | On the Song card, hit bass drum to open its detail, then hit it again |
 | Back from difficulty | Not applicable | Hit snare |
 | Back to title | Press `Esc` | Hit snare at wheel level |
 | Search | Type title/artist characters; press `Backspace` to delete | No pad action |
@@ -805,6 +826,9 @@ The visible song wheel is not mouse-clickable for routine browse/start actions.
 | Wait for loading | No input | No input |
 | Cancel loading | Press `Esc` | No pad action |
 | Recover from loading failure | No input; game returns automatically | No input |
+
+Loading starts only after the player confirms Song Ready, except for direct
+Retry and Practice actions from Results.
 
 #### Normal performance and banner
 
@@ -961,18 +985,20 @@ Ask the participant to:
    duplicate archive and respond to its notification.
 3. Press `Up`/`Down` or type to find a named song, then press `Left`/`Right` for
    the requested difficulty.
-4. Start loading the wrong chart and cancel with `Esc`.
+4. Open Song Ready for the wrong chart, confirm Start Song, and cancel loading
+   with `Esc`.
 5. Press `F1`, click `Calibrate`, press configured drum keys 12 times, then
    press `Enter` to apply.
 6. Click the Audio and System tabs, click/drag one control in each, then press
    `Esc` to close Customize.
-7. Press `Enter` to start and press configured drum keys to complete or fail one
-   play.
+7. Press `Enter` to open Normal Song Ready, confirm Start Song, and press
+   configured drum keys to complete or fail one play.
 8. Inspect the Results save status and analysis, choose Retry once, then use
    Continue and inspect whether the result appears in history.
-9. Press `Shift+Enter`, verify Setup preview is stopped, configure a section and
-   Off/Wait/Ramp, start from pre-roll, open Settings with `Tab`, continue from
-   pre-roll, then press `Esc` and choose Exit to Song Select.
+9. Press `Shift+Enter`, confirm Open Practice Setup in Song Ready, verify Setup
+   preview is stopped, configure a section and Off/Wait/Ramp, start from
+   pre-roll, open Settings with `Tab`, continue from pre-roll, then press `Esc`
+   and choose Exit to Song Select.
 10. Return to title with `Esc`, press `Esc` again, and wait for application exit.
 
 Observe attempted mouse clicks, shortcut discovery, mapping comprehension,
@@ -991,13 +1017,17 @@ Ask the participant to:
    enter rows, HH/CY to select a volume, BD to adjust, HH/CY to change it, BD
    to keep it, SD to return to the tab bar, and SD again to close.
 5. From title, hit BD, use HH/CY to choose the wrong song, hit BD to enter its
-   difficulties, hit BD to start loading, then press keyboard `Esc` to cancel.
-6. Use HH/CY to choose a song, hit BD to enter difficulty and BD again to start,
-   press keyboard `Esc`, use HH/CY to select Restart Song, hit BD to activate it, then
-   hit BD or SD to leave Results.
-7. Use HH/CY to choose a song, hit BD to enter difficulty, hit FT to open
-   Practice Setup, configure a two-bar section and 0.75x tempo with pad
-   navigation, choose Off, Wait, or Ramp, then start from pre-roll.
+   difficulties, and hit BD to open Normal Song Ready. On the Song card, hit BD
+   to open its detail and again to start loading, then press keyboard `Esc` to
+   cancel.
+6. Use HH/CY to choose a song, hit BD to enter difficulty, and hit BD to open
+   Normal Song Ready. Confirm Start Song with BD, press keyboard `Esc`, use
+   HH/CY to select Restart Song, hit BD to activate it, then hit BD or SD to
+   leave Results.
+7. Use HH/CY to choose a song, hit BD to enter difficulty, and hit FT to open
+   Practice Song Ready. Confirm Open Practice Setup with BD, configure a
+   two-bar section and 0.75x tempo with pad navigation, choose Off, Wait, or
+   Ramp, then start from pre-roll.
 
 Observe readiness assumptions, pad-command learning, computer handoffs,
 calibration confidence, and whether practice remains kit-centered. Do not
@@ -1010,15 +1040,17 @@ participant to:
 
 1. Hit BD on title.
 2. Hit HH/CY to choose the named chart, BD to enter difficulties, HH/CY to
-   choose difficulty, and BD to start.
+   choose difficulty, and BD to open Normal Song Ready. On the Song card, hit
+   BD to open its detail and again to confirm Start Song.
 3. Start loading the wrong chart and attempt to cancel it; explicitly record
    that no pad action is available.
 4. Respond to a simulated interruption with the configured system Pause note;
    verify Pause opens and Resume returns to the exact position.
 5. After failure, use HH/CY to select Retry on Results and hit BD to reload the
    chart directly.
-6. Hit FT to enter stopped Practice Setup, set the requested section and slower
-   tempo using pads, start, then open Settings and inspect completed Progress.
+6. Hit FT to open Practice Song Ready, confirm Open Practice Setup with BD,
+   then set the requested section and slower tempo using pads, start, open
+   Settings, and inspect completed Progress.
 7. Open Pause with the configured system binding and exit Practice using pads.
 8. Return to title with SD from the song wheel, then attempt to quit using pads;
    record that no pad action exists.
@@ -1054,14 +1086,15 @@ MIDI player. Ask each participant to:
 1. Press the required title action (`Enter` or bass drum).
 2. Use remembered selection, then type a different song title and press
    `Backspace` if correction is needed.
-3. Press `Enter` or hit BD to start, press `Up`/`Down` once for scroll speed,
-   press keyboard `Esc`, select Restart Song with arrows or HH/CY, and activate with
-   `Enter`/BD.
+3. Press `Enter` or hit BD to open Normal Song Ready, confirm Start Song, press
+   `Up`/`Down` once for scroll speed, press keyboard `Esc`, select Restart Song
+   with arrows or HH/CY, and activate with `Enter`/BD.
 4. Use the direct Retry action once, then Continue from Results and inspect
    history.
-5. Press `Shift+Enter` or hit FT, configure and start an A/B span, press `R`,
-   press `Tab` to open Settings, continue from pre-roll, then press `Esc` and
-   choose Exit to Song Select.
+5. Press `Shift+Enter` or hit FT to open Practice Song Ready, confirm Open
+   Practice Setup, configure and start an A/B span, press `R`, press `Tab` to
+   open Settings, continue from pre-roll, then press `Esc` and choose Exit to
+   Song Select.
 6. Press `F1`, click Audio, click/drag a BGM or drum volume, close with `Esc` or
    SD from the tab bar, and press `F11` during the next play.
 7. Press `Esc` or hit SD to return to title, then press keyboard `Esc` to quit.
