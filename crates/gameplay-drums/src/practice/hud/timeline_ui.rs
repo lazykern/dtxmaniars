@@ -513,7 +513,10 @@ pub(super) fn update_timeline_markers(
     )>,
 ) {
     if let Ok(mut text) = time_text.single_mut() {
-        text.0 = super::format_chart_time(clock.current_ms);
+        let want = super::format_chart_time(clock.current_ms);
+        if text.0 != want {
+            text.0 = want;
+        }
     }
     if let Ok(mut playhead) = markers.p0().single_mut() {
         playhead.left = Val::Percent(dtx_ui::widget::density_strip::time_to_pct(
@@ -573,7 +576,11 @@ pub(super) fn update_transport_label(
         "Play Preview"
     };
     for mut text in &mut labels {
-        text.0 = label.to_owned();
+        // Guard: an unconditional write marks Text `Changed` every frame, which
+        // Bevy 0.19 re-shapes → re-registers the font (new atlas) → VRAM OOM.
+        if text.0 != label {
+            text.0 = label.to_owned();
+        }
     }
 }
 

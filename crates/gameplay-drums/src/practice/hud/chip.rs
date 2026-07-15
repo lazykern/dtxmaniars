@@ -91,7 +91,12 @@ pub fn update_chip(
     mut chips: Query<&mut Text, With<StatusChip>>,
 ) {
     if let Ok(mut t) = chips.single_mut() {
-        t.0 = chip_text(&session, &timeline.bar_ms);
+        // Guard: unconditional writes mark Text `Changed` every frame → Bevy 0.19
+        // re-shapes → new font atlas per frame → VRAM OOM.
+        let want = chip_text(&session, &timeline.bar_ms);
+        if t.0 != want {
+            t.0 = want;
+        }
     }
 }
 

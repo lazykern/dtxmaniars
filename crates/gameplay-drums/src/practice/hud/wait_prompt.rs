@@ -86,7 +86,12 @@ fn update_prompt(
         *visibility = Visibility::Hidden;
         return;
     };
-    text.0 = wait_prompt_text(set, &chart.chart, &judged.0);
+    // Guard: unconditional writes mark Text `Changed` every frame → Bevy 0.19
+    // re-shapes → new font atlas per frame → VRAM OOM.
+    let want = wait_prompt_text(set, &chart.chart, &judged.0);
+    if text.0 != want {
+        text.0 = want;
+    }
     *visibility = Visibility::Visible;
 }
 

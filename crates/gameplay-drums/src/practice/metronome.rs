@@ -263,7 +263,10 @@ pub fn update_countdown(
                 *vis = Visibility::Hidden;
                 return;
             }
-            text.0 = n.to_string();
+            let want = n.to_string();
+            if text.0 != want {
+                text.0 = want;
+            }
             let theme = Theme::default();
             let base = if accent {
                 theme.accent

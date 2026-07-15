@@ -80,9 +80,15 @@ pub(super) fn refresh_progress_copy(
     mut diagnosis: Query<&mut Text, (With<ProgressDiagnosisText>, Without<ProgressSummaryText>)>,
 ) {
     for mut text in &mut summary {
-        text.0 = progress_summary(&session, timeline.end_ms);
+        let want = progress_summary(&session, timeline.end_ms);
+        if text.0 != want {
+            text.0 = want;
+        }
     }
     for mut text in &mut diagnosis {
-        text.0 = crate::practice::diagnosis::diagnosis_text(&session.lane_diag);
+        let want = crate::practice::diagnosis::diagnosis_text(&session.lane_diag);
+        if text.0 != want {
+            text.0 = want;
+        }
     }
 }

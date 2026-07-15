@@ -1132,8 +1132,11 @@ pub(super) fn refresh_setup_copy(
         (Without<SetupValueText>, Without<PracticePrimaryAction>),
     >,
 ) {
+    // Guard every write: an unconditional assignment marks Text `Changed` each
+    // frame, which Bevy 0.19 re-shapes → re-registers the font (fresh 512x512
+    // glyph atlas) → VRAM leak to OOM. Only write when the value differs.
     for (field, mut text) in &mut values {
-        text.0 = if field.0 == SetupValue::Source {
+        let want = if field.0 == SetupValue::Source {
             format!(
                 "{} {}",
                 dtx_ui::StateMarker::Selected.label(),
@@ -1148,16 +1151,22 @@ pub(super) fn refresh_setup_copy(
         } else {
             setup_value(field.0, &draft)
         };
+        if text.0 != want {
+            text.0 = want;
+        }
     }
     for mut text in &mut primary {
         let label = primary_action_label(flow.phase);
-        text.0 = if *focus == PracticeSurfaceFocus::Settings
+        let want = if *focus == PracticeSurfaceFocus::Settings
             && selection.0 == super::setup_controls::SetupItem::StartOrContinue
         {
             format!("{} {label}", dtx_ui::StateMarker::Focus.label())
         } else {
             label.to_owned()
         };
+        if text.0 != want {
+            text.0 = want;
+        }
     }
     for (row, mut text) in &mut labels {
         let focus_prefix = format!("{} ", dtx_ui::StateMarker::Focus.label());
@@ -1166,11 +1175,14 @@ pub(super) fn refresh_setup_copy(
             .strip_prefix(&focus_prefix)
             .unwrap_or(&text.0)
             .to_owned();
-        text.0 = if *focus == PracticeSurfaceFocus::Settings && row.0 == selection.0 {
+        let want = if *focus == PracticeSurfaceFocus::Settings && row.0 == selection.0 {
             format!("{focus_prefix}{raw}")
         } else {
             raw
         };
+        if text.0 != want {
+            text.0 = want;
+        }
     }
 }
 
