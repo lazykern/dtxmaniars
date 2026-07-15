@@ -26,6 +26,7 @@ pub struct CancelPracticeSettings;
 #[derive(Resource, Debug, Clone, Copy, Default)]
 pub struct PreviewController {
     pub restore_ms: Option<i64>,
+    pub start_pending: bool,
 }
 
 #[doc(hidden)]
@@ -40,8 +41,11 @@ pub(super) fn plugin(app: &mut App) {
         .add_message::<CancelPracticeSettings>()
         .add_systems(
             OnEnter(AppState::Performance),
-            pause_initial_setup_audio.after(crate::orchestrator::DrumsEnterSet),
+            (reset_preview_transients, pause_initial_setup_audio)
+                .chain()
+                .after(crate::orchestrator::DrumsEnterSet),
         )
+        .add_systems(OnExit(AppState::Performance), reset_preview_transients)
         .add_systems(
             Update,
             (
@@ -59,11 +63,20 @@ pub(super) fn plugin(app: &mut App) {
                 wrap_preview_loop
                     .before(crate::seek::apply_seek_system)
                     .run_if(in_state(PauseState::Running)),
+                finish_preview_start.after(crate::seek::start_pending_bgm),
                 finish_cancel_after_restore.after(super::stats::track_attempt_stats),
             )
                 .run_if(in_state(AppState::Performance))
                 .run_if(resource_exists::<PracticeFlow>),
         );
+}
+
+fn reset_preview_transients(
+    mut controller: ResMut<PreviewController>,
+    mut pending_cancel: ResMut<PendingCancel>,
+) {
+    *controller = PreviewController::default();
+    *pending_cancel = PendingCancel::default();
 }
 
 pub fn preview_tempo(draft: &PracticeDraft) -> f32 {
@@ -78,6 +91,21 @@ fn draft_region(draft: &PracticeDraft, timeline: &ChipTimeline) -> super::sessio
     let mut preview_session = PracticeSession::default();
     preview_session.transport.loop_region = draft.loop_region;
     active_region(&preview_session, timeline)
+}
+
+fn normalize_preview_draft(
+    draft: &mut PracticeDraft,
+    timeline: &ChipTimeline,
+    toasts: &mut super::toast::ToastQueue,
+) {
+    let validated = match draft.validate(timeline) {
+        Ok(validated) => validated,
+        Err(never) => match never {},
+    };
+    if let Some(warning) = validated.warning {
+        toasts.push(warning);
+    }
+    *draft = validated.draft;
 }
 
 fn pause_initial_setup_audio(
@@ -164,11 +192,15 @@ fn finish_cancel_after_restore(
     }
 }
 
+fn finish_preview_start(mut controller: ResMut<PreviewController>) {
+    controller.start_pending = false;
+}
+
 #[allow(clippy::too_many_arguments)]
 fn apply_preview_actions(
     mut actions: MessageReader<PreviewAction>,
     mut flow: ResMut<PracticeFlow>,
-    draft: Res<PracticeDraft>,
+    mut draft: ResMut<PracticeDraft>,
     timeline: Res<ChipTimeline>,
     clock: Res<GameplayClock>,
     mut seeks: MessageWriter<SeekToChartTime>,
@@ -178,6 +210,8 @@ fn apply_preview_actions(
     active: Res<ActiveDrumSounds>,
     mut instances: ResMut<Assets<AudioInstance>>,
     mut rate: ResMut<EffectivePlaybackRate>,
+    mut toasts: ResMut<super::toast::ToastQueue>,
+    mut controller: ResMut<PreviewController>,
 ) {
     if !matches!(flow.phase, PracticePhase::Setup | PracticePhase::Editing) {
         actions.clear();
@@ -186,6 +220,7 @@ fn apply_preview_actions(
     for action in actions.read() {
         match action {
             PreviewAction::Play => {
+                normalize_preview_draft(&mut draft, &timeline, &mut toasts);
                 let region = draft_region(&draft, &timeline);
                 let target_ms = if (region.start_ms..region.end_ms).contains(&clock.current_ms) {
                     clock.current_ms
@@ -204,7 +239,7 @@ fn apply_preview_actions(
                     &bgm,
                     &mut instances,
                 );
-                crate::pause::resume_all_chart_audio(&bgm, &polyphony, &active, &mut instances);
+                controller.start_pending = true;
                 flow.preview = PreviewState::Playing;
             }
             PreviewAction::Pause => {
@@ -240,10 +275,11 @@ fn apply_preview_actions(
 
 fn wrap_preview_loop(
     flow: Res<PracticeFlow>,
-    draft: Res<PracticeDraft>,
+    mut draft: ResMut<PracticeDraft>,
     timeline: Res<ChipTimeline>,
     clock: Res<GameplayClock>,
     mut seeks: MessageWriter<SeekToChartTime>,
+    mut toasts: ResMut<super::toast::ToastQueue>,
 ) {
     if flow.preview != PreviewState::Playing
         || !matches!(flow.phase, PracticePhase::Setup | PracticePhase::Editing)
@@ -252,6 +288,7 @@ fn wrap_preview_loop(
     {
         return;
     }
+    normalize_preview_draft(&mut draft, &timeline, &mut toasts);
     let region = draft_region(&draft, &timeline);
     if clock.current_ms >= region.end_ms {
         seeks.write(SeekToChartTime {

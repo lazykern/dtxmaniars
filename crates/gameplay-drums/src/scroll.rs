@@ -82,7 +82,7 @@ fn should_emit_miss_for_note(
     !judged.contains(&chip_id) && now_ms - target_ms > crate::drum_groups::MAX_JUDGE_WINDOW_MS
 }
 
-fn spawn_notes_system(
+pub(crate) fn spawn_notes_system(
     mut commands: Commands,
     clock: Res<GameplayClock>,
     mode: Res<EGameMode>,

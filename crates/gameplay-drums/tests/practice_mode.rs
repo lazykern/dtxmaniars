@@ -80,8 +80,11 @@ fn build_app() -> App {
     .init_resource::<gameplay_drums::resources::TimingLineCrossed>()
     .init_resource::<gameplay_drums::timeline::ChipTimeline>()
     .init_resource::<gameplay_drums::seek::PendingBgmStart>()
+    .init_resource::<gameplay_drums::seek::PendingAudioStarts>()
     .init_resource::<gameplay_drums::seek::LastSeekFrom>()
     .init_resource::<gameplay_drums::seek::PreviewSkippedChips>()
+    .init_resource::<gameplay_drums::seek::StoppedSeekRebuild>()
+    .init_resource::<dtx_bga::BgaClock>()
     .init_resource::<gameplay_drums::pause::PracticePauseSurface>()
     .init_resource::<game_shell::EditorSession>()
     .add_message::<game_shell::TransitionRequest>()
@@ -178,6 +181,33 @@ fn chart_with_mixer_limited_bgm() -> Chart {
             Chip::with_wav(0, EChannel::MixerAdd, 0.0, 1),
             Chip::with_wav(0, EChannel::BGM, 0.0, 1),
             Chip::with_wav(1, EChannel::MixerRemove, 0.0, 1),
+            Chip::new(2, EChannel::BassDrum, 0.0),
+        ],
+        assets,
+        ..Default::default()
+    }
+}
+
+fn chart_with_overlapping_audio_slices() -> Chart {
+    let mut assets = DtxAssets::default();
+    for (slot, path) in [
+        (1, "primary.wav"),
+        (2, "layer.wav"),
+        (3, "old-se.wav"),
+        (4, "new-se.wav"),
+    ] {
+        assets.wav.insert(slot, path.into());
+    }
+    Chart {
+        metadata: Metadata {
+            bpm: Some(120.0),
+            ..Default::default()
+        },
+        chips: vec![
+            Chip::with_wav(0, EChannel::BGM, 0.0, 1),
+            Chip::with_wav(0, EChannel::BGM, 0.5, 2),
+            Chip::with_wav(0, EChannel::SE01, 0.25, 3),
+            Chip::with_wav(0, EChannel::SE01, 0.5, 4),
             Chip::new(2, EChannel::BassDrum, 0.0),
         ],
         assets,
@@ -842,6 +872,58 @@ fn editing_preview_seek_preserves_gameplay_reconstruction() {
     assert_preview_seek_preserves_gameplay_reconstruction(PracticePhase::Editing);
 }
 
+#[test]
+fn stopped_setup_and_editing_seek_reconstruct_notes_and_bga_once() {
+    for phase in [PracticePhase::Setup, PracticePhase::Editing] {
+        let mut app = build_lifecycle_app(PracticeIntent::manual(PracticeOrigin::SongSelect));
+        app.init_asset::<Image>();
+        app.add_plugins(dtx_bga::plugin);
+        enter_performance(&mut app, chart_for_preview_seek());
+        app.world_mut().resource_mut::<PracticeFlow>().phase = phase;
+        ready_clock(&mut app, 250);
+        app.world_mut().insert_resource(dtx_bga::ActiveChartRes {
+            source_dir: None,
+            events: vec![dtx_bga::TimedVisualEvent::replace(
+                1_000,
+                dtx_core::bga::BgaLayer::Layer1,
+                1,
+            )],
+            bmp_paths: std::collections::HashMap::new(),
+            avi_paths: std::collections::HashMap::new(),
+        });
+
+        send_seek(&mut app, 1_500);
+        app.world_mut().run_schedule(FixedUpdate);
+
+        assert_eq!(app.world().resource::<GameplayClock>().current_ms, 1_500);
+        assert_eq!(
+            app.world().resource::<dtx_bga::BgaClock>().current_ms,
+            1_500
+        );
+        let visible_ids = {
+            let world = app.world_mut();
+            let mut notes = world.query_filtered::<&Note, With<NoteVisual>>();
+            notes
+                .iter(world)
+                .map(|note| note.chip_id)
+                .collect::<Vec<_>>()
+        };
+        assert!(
+            visible_ids.contains(&3),
+            "{phase:?} stopped seek rebuilds notes"
+        );
+
+        app.update();
+        assert_eq!(
+            app.world().resource::<dtx_bga::BgaPlayer>().next_event_idx,
+            1
+        );
+        let held = app.world().resource::<GameplayClock>().current_ms;
+        app.world_mut().run_schedule(FixedUpdate);
+        assert_eq!(app.world().resource::<GameplayClock>().current_ms, held);
+    }
+}
+
 fn assert_seek_past_mixer_remove_stops_bgm(intent: PracticeIntent, phase: Option<PracticePhase>) {
     let mut app = build_lifecycle_app(intent);
     enter_performance(&mut app, chart_with_mixer_limited_bgm());
@@ -932,6 +1014,167 @@ fn eligible_seek_restarts_bgm_at_resolved_position() {
         .resource::<gameplay_drums::mixer_events::MixerEligibility>()
         .is_slot_eligible(1));
     assert!(app.world().resource::<GameplayClock>().current_ms >= 1_000);
+}
+
+#[test]
+fn stopped_cancel_seek_queues_all_spanning_audio_with_choke() {
+    let mut app = build_lifecycle_app(PracticeIntent::manual(PracticeOrigin::SongSelect));
+    enter_performance(&mut app, chart_with_overlapping_audio_slices());
+    app.world_mut().resource_mut::<PracticeFlow>().phase = PracticePhase::Running;
+    ready_clock(&mut app, 1_500);
+
+    app.world_mut().write_message(OpenPracticeSettings);
+    app.update();
+    app.world_mut().write_message(PreviewAction::Seek(250));
+    app.update();
+    app.world_mut().run_schedule(FixedUpdate);
+    app.world_mut().write_message(CancelPracticeSettings);
+    app.update();
+
+    app.world_mut().run_schedule(FixedUpdate);
+
+    let bgm = app
+        .world()
+        .resource::<gameplay_drums::seek::PendingBgmStart>()
+        .0
+        .as_ref()
+        .expect("the active primary BGM is queued as clock authority");
+    assert_eq!(bgm.wav_slot, 1);
+    assert!((bgm.start_seconds - 1.5).abs() < f64::EPSILON);
+    assert_eq!(app.world().resource::<GameStartMs>().0, 0);
+    let slices = &app
+        .world()
+        .resource::<gameplay_drums::seek::PendingAudioStarts>()
+        .0;
+    assert_eq!(
+        slices
+            .iter()
+            .map(|slice| slice.wav_slot)
+            .collect::<Vec<_>>(),
+        vec![2, 4],
+        "the later BGM stays a layer while SE01 choke keeps only its newest slice"
+    );
+}
+
+#[test]
+fn seek_does_not_reconstruct_a_decoded_slice_past_its_duration() {
+    use bevy_kira_audio::prelude::{Frame, StaticSoundData, StaticSoundSettings};
+    use bevy_kira_audio::AudioSource as KiraAudioSource;
+
+    let mut app = build_lifecycle_app(PracticeIntent::manual(PracticeOrigin::SongSelect));
+    enter_performance(&mut app, chart_with_overlapping_audio_slices());
+    app.world_mut().resource_mut::<PracticeFlow>().phase = PracticePhase::Editing;
+    let source = app
+        .world_mut()
+        .resource_mut::<Assets<KiraAudioSource>>()
+        .add(KiraAudioSource {
+            sound: StaticSoundData {
+                sample_rate: 1_000,
+                frames: vec![Frame::from_mono(0.0); 500].into(),
+                settings: StaticSoundSettings::default(),
+                slice: None,
+            },
+        });
+    app.world_mut()
+        .resource_mut::<dtx_audio::ChartSoundBank>()
+        .insert(
+            1,
+            dtx_audio::LoadedChartSound {
+                handle: source,
+                path: "primary.wav".into(),
+                volume: 100,
+                pan: 0,
+            },
+        );
+    ready_clock(&mut app, 250);
+
+    send_seek(&mut app, 1_500);
+    app.world_mut().run_schedule(FixedUpdate);
+
+    assert!(!app
+        .world()
+        .resource::<gameplay_drums::seek::PendingAudioStarts>()
+        .0
+        .iter()
+        .any(|slice| slice.wav_slot == 1));
+}
+
+#[test]
+fn seek_reconstruction_respects_configured_polyphony() {
+    let mut assets = DtxAssets::default();
+    assets.wav.insert(3, "system.wav".into());
+    let chart = Chart {
+        metadata: Metadata {
+            bpm: Some(120.0),
+            ..Default::default()
+        },
+        chips: vec![
+            Chip::with_wav(0, EChannel::Click, 0.25, 3),
+            Chip::with_wav(0, EChannel::FirstSoundChip, 0.5, 3),
+            Chip::new(2, EChannel::BassDrum, 0.0),
+        ],
+        assets,
+        ..Default::default()
+    };
+    let mut app = build_lifecycle_app(PracticeIntent::manual(PracticeOrigin::SongSelect));
+    enter_performance(&mut app, chart);
+    app.world_mut().resource_mut::<PracticeFlow>().phase = PracticePhase::Editing;
+    app.world_mut()
+        .resource_mut::<dtx_audio::DrumPolyphony>()
+        .set_voices(1);
+    ready_clock(&mut app, 250);
+
+    send_seek(&mut app, 1_500);
+    app.world_mut().run_schedule(FixedUpdate);
+
+    let slices = &app
+        .world()
+        .resource::<gameplay_drums::seek::PendingAudioStarts>()
+        .0;
+    assert_eq!(slices.len(), 1);
+    assert_eq!(slices[0].chip_idx, 1);
+}
+
+fn assert_running_seek_starts_all_spanning_audio(intent: PracticeIntent) {
+    let mut app = build_lifecycle_app(intent);
+    enter_performance(&mut app, chart_with_overlapping_audio_slices());
+    if let Some(mut flow) = app.world_mut().get_resource_mut::<PracticeFlow>() {
+        flow.phase = PracticePhase::Setup;
+        flow.preview = PreviewState::Playing;
+    }
+    ready_clock(&mut app, 250);
+
+    send_seek(&mut app, 1_500);
+    app.world_mut().run_schedule(FixedUpdate);
+
+    assert_eq!(
+        app.world().resource::<BgmHandle>().path.as_deref(),
+        Some("primary.wav")
+    );
+    assert_eq!(
+        app.world()
+            .resource::<gameplay_drums::resources::ActiveDrumSounds>()
+            .layer_bgm_instances
+            .len(),
+        1
+    );
+    assert!(app
+        .world()
+        .resource::<gameplay_drums::resources::ActiveDrumSounds>()
+        .stick_se_instances
+        .contains_key(&EChannel::SE01));
+}
+
+#[test]
+fn preview_seek_starts_all_spanning_audio_slices() {
+    assert_running_seek_starts_all_spanning_audio(PracticeIntent::manual(
+        PracticeOrigin::SongSelect,
+    ));
+}
+
+#[test]
+fn normal_seek_starts_all_spanning_audio_slices() {
+    assert_running_seek_starts_all_spanning_audio(PracticeIntent::None);
 }
 
 fn assert_gameplay_seek_rebuilds_judged(intent: PracticeIntent) {
@@ -1401,6 +1644,66 @@ fn preview_wraps_draft_loop_without_attempt_completion() {
 }
 
 #[test]
+fn preview_play_normalizes_invalid_draft_once_before_wrapping() {
+    for region in [
+        LoopRegion {
+            start_ms: 6_000,
+            end_ms: 2_000,
+        },
+        LoopRegion {
+            start_ms: 4_000,
+            end_ms: 4_000,
+        },
+        LoopRegion {
+            start_ms: 90_000,
+            end_ms: 100_000,
+        },
+    ] {
+        let mut app = build_lifecycle_app(PracticeIntent::manual(PracticeOrigin::SongSelect));
+        enter_performance(&mut app, chart_with_measures(8));
+        {
+            let mut draft = app.world_mut().resource_mut::<PracticeDraft>();
+            draft.loop_region = Some(region);
+            draft.user_tempo = f32::NAN;
+        }
+
+        app.world_mut().write_message(PreviewAction::Play);
+        app.update();
+        app.world_mut().run_schedule(FixedUpdate);
+
+        let (normalized_tempo, normalized_region) = {
+            let draft = app.world().resource::<PracticeDraft>();
+            (draft.user_tempo, draft.loop_region)
+        };
+        assert!(normalized_tempo.is_finite());
+        assert_ne!(normalized_region, Some(region));
+        let first_ms = app.world().resource::<GameplayClock>().current_ms;
+        app.world_mut()
+            .resource_mut::<gameplay_drums::seek::LastSeekFrom>()
+            .0 = None;
+        for _ in 0..3 {
+            app.world_mut().run_schedule(FixedUpdate);
+            assert!(
+                app.world().resource::<GameplayClock>().current_ms >= first_ms,
+                "a normalized preview must not fixed-tick seek-loop"
+            );
+        }
+        assert!(app
+            .world()
+            .resource::<gameplay_drums::seek::LastSeekFrom>()
+            .0
+            .is_none());
+        let warning_count = app
+            .world()
+            .resource::<gameplay_drums::practice::toast::ToastQueue>()
+            .iter()
+            .filter(|toast| toast.message.contains("using whole song"))
+            .count();
+        assert_eq!(warning_count, usize::from(normalized_region.is_none()));
+    }
+}
+
+#[test]
 fn preview_transport_plays_pauses_seeks_and_steps_bars() {
     let mut app = build_lifecycle_app(PracticeIntent::manual(PracticeOrigin::SongSelect));
     enter_performance(&mut app, chart_with_measures(16));
@@ -1439,6 +1742,50 @@ fn preview_transport_plays_pauses_seeks_and_steps_bars() {
         .resource::<PracticeSession>()
         .attempt_history
         .is_empty());
+}
+
+#[test]
+fn preview_play_keeps_old_audio_paused_until_seek_reconstruction() {
+    use bevy_kira_audio::prelude::{Audio, Frame, StaticSoundData, StaticSoundSettings};
+    use bevy_kira_audio::{AudioControl, AudioSource as KiraAudioSource};
+
+    let mut app = build_lifecycle_app(PracticeIntent::manual(PracticeOrigin::SongSelect));
+    enter_performance(&mut app, chart_for_preview_seek());
+    ready_clock(&mut app, 250);
+    let source = app
+        .world_mut()
+        .resource_mut::<Assets<KiraAudioSource>>()
+        .add(KiraAudioSource {
+            sound: StaticSoundData {
+                sample_rate: 1_000,
+                frames: vec![Frame::from_mono(0.0); 10_000].into(),
+                settings: StaticSoundSettings::default(),
+                slice: None,
+            },
+        });
+    let old = app.world().resource::<Audio>().play(source).handle();
+    app.update();
+    app.world_mut().resource_mut::<BgmHandle>().instance = Some(old.clone());
+    dtx_audio::pause_audio_instance(
+        &mut app
+            .world_mut()
+            .resource_mut::<Assets<bevy_kira_audio::AudioInstance>>(),
+        &old,
+    );
+    app.update();
+    app.world_mut().write_message(PreviewAction::Play);
+    app.update();
+
+    assert_eq!(
+        app.world().resource::<BgmHandle>().instance.as_ref(),
+        Some(&old),
+        "Update must not replace or resume the old audio before the seek applies"
+    );
+    assert!(
+        app.world()
+            .resource::<gameplay_drums::practice::PreviewController>()
+            .start_pending
+    );
 }
 
 #[test]
@@ -1483,6 +1830,93 @@ fn preview_cancel_editing_restores_frozen_session_and_cursor() {
         app.world().resource::<NextState<game_shell::PauseState>>(),
         NextState::Pending(game_shell::PauseState::Paused)
     ));
+}
+
+#[test]
+fn preview_transients_do_not_leak_across_performance_reentry() {
+    let mut app = build_lifecycle_app(PracticeIntent::manual(PracticeOrigin::SongSelect));
+    enter_performance(&mut app, chart_with_measures(16));
+    app.world_mut().resource_mut::<PracticeFlow>().phase = PracticePhase::Running;
+    ready_clock(&mut app, 5_000);
+
+    app.world_mut().write_message(OpenPracticeSettings);
+    app.update();
+    app.world_mut().write_message(CancelPracticeSettings);
+    app.update();
+    assert!(app
+        .world()
+        .resource::<gameplay_drums::practice::PreviewController>()
+        .restore_ms
+        .is_none());
+    app.world_mut()
+        .resource_mut::<gameplay_drums::seek::PendingBgmStart>()
+        .0 = Some(gameplay_drums::seek::PendingBgm {
+        wav_slot: 99,
+        path: "stale.wav".into(),
+        start_seconds: 4.0,
+    });
+    app.world_mut()
+        .resource_mut::<gameplay_drums::seek::PendingAudioStarts>()
+        .0
+        .push(gameplay_drums::seek::PendingAudioSlice {
+            chip_idx: 99,
+            wav_slot: 99,
+            path: "stale-layer.wav".into(),
+            start_seconds: 4.0,
+            kind: gameplay_drums::seek::PendingAudioKind::LayerBgm,
+        });
+    app.world_mut()
+        .resource_mut::<gameplay_drums::seek::StoppedSeekRebuild>()
+        .0 = true;
+    app.world_mut()
+        .resource_mut::<gameplay_drums::seek::LastSeekFrom>()
+        .0 = Some(4_000);
+
+    app.world_mut()
+        .resource_mut::<NextState<AppState>>()
+        .set(AppState::SongSelect);
+    app.update();
+    *app.world_mut().resource_mut::<PracticeIntent>() =
+        PracticeIntent::manual(PracticeOrigin::SongSelect);
+    app.world_mut()
+        .resource_mut::<NextState<AppState>>()
+        .set(AppState::Performance);
+    app.update();
+
+    assert_eq!(
+        app.world().resource::<PracticeFlow>().phase,
+        PracticePhase::Setup
+    );
+    let controller = app
+        .world()
+        .resource::<gameplay_drums::practice::PreviewController>();
+    assert!(controller.restore_ms.is_none());
+    assert!(!controller.start_pending);
+    assert!(app
+        .world()
+        .resource::<gameplay_drums::seek::PendingBgmStart>()
+        .0
+        .is_none());
+    assert!(app
+        .world()
+        .resource::<gameplay_drums::seek::PendingAudioStarts>()
+        .0
+        .is_empty());
+    assert!(
+        !app.world()
+            .resource::<gameplay_drums::seek::StoppedSeekRebuild>()
+            .0
+    );
+    assert!(app
+        .world()
+        .resource::<gameplay_drums::seek::LastSeekFrom>()
+        .0
+        .is_none());
+    app.world_mut().run_schedule(FixedUpdate);
+    assert_eq!(
+        app.world().resource::<PracticeFlow>().phase,
+        PracticePhase::Setup
+    );
 }
 
 #[test]

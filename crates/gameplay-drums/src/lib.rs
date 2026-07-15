@@ -123,8 +123,10 @@ pub fn plugin(app: &mut App) {
     .init_resource::<dtx_input::midi::VirtualSource>()
     .init_resource::<timeline::ChipTimeline>()
     .init_resource::<seek::PendingBgmStart>()
+    .init_resource::<seek::PendingAudioStarts>()
     .init_resource::<seek::LastSeekFrom>()
     .init_resource::<seek::PreviewSkippedChips>()
+    .init_resource::<seek::StoppedSeekRebuild>()
     .init_resource::<dtx_bga::BgaClock>()
     .init_resource::<dtx_bga::BgaSettings>()
     .add_systems(
@@ -141,7 +143,14 @@ pub fn plugin(app: &mut App) {
     )
     .add_systems(
         OnEnter(game_shell::AppState::Performance),
-        seek::reset_preview_skipped_chips,
+        (
+            seek::reset_preview_skipped_chips,
+            seek::reset_seek_transients,
+        ),
+    )
+    .add_systems(
+        OnExit(game_shell::AppState::Performance),
+        seek::reset_seek_transients,
     )
     .add_systems(
         OnEnter(game_shell::AppState::Performance),
@@ -200,6 +209,14 @@ pub fn plugin(app: &mut App) {
             .run_if(in_state(game_shell::AppState::Performance))
             .run_if(in_state(game_shell::PauseState::Running))
             .run_if(practice::chart_clock_active),
+    )
+    .add_systems(
+        FixedUpdate,
+        (scroll::spawn_notes_system, seek::clear_stopped_seek_rebuild)
+            .chain()
+            .after(seek::apply_seek_system)
+            .run_if(in_state(game_shell::AppState::Performance))
+            .run_if(seek::stopped_seek_rebuild_pending),
     )
     .add_plugins(playback_rate::plugin)
     .add_plugins((

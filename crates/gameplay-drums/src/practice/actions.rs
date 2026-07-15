@@ -24,7 +24,7 @@ pub enum PracticeAction {
     TempoUp,
     RestartLoop,
     ToggleRamp,
-    OpenFullHud,
+    OpenSettings,
 }
 
 /// Key→action table. A resource so a future bindings UI / MIDI layer can
@@ -42,7 +42,7 @@ impl Default for PracticeBindings {
             (KeyCode::Equal, PracticeAction::TempoUp),
             (KeyCode::KeyR, PracticeAction::RestartLoop),
             (KeyCode::KeyT, PracticeAction::ToggleRamp),
-            (KeyCode::Tab, PracticeAction::OpenFullHud),
+            (KeyCode::Tab, PracticeAction::OpenSettings),
         ])
     }
 }
@@ -141,8 +141,8 @@ pub fn apply_practice_actions(
                 });
                 toasts.push("restart");
             }
-            PracticeAction::OpenFullHud => {
-                *surface = crate::pause::PracticePauseSurface::Rail;
+            PracticeAction::OpenSettings => {
+                *surface = crate::pause::PracticePauseSurface::Overlay;
                 if let Some(open_settings) = &mut open_settings {
                     open_settings.write(super::OpenPracticeSettings);
                 }
@@ -191,7 +191,7 @@ mod tests {
         );
         assert_eq!(
             action_for(&b, KeyCode::Tab),
-            Some(PracticeAction::OpenFullHud)
+            Some(PracticeAction::OpenSettings)
         );
         assert_eq!(action_for(&b, KeyCode::KeyQ), None);
     }
@@ -213,7 +213,7 @@ mod tests {
         world.init_resource::<crate::practice::toast::ToastQueue>();
         world.init_resource::<NextState<PauseState>>();
         world.init_resource::<PracticePauseSurface>();
-        world.write_message(PracticeAction::OpenFullHud);
+        world.write_message(PracticeAction::OpenSettings);
 
         world
             .run_system_once(apply_practice_actions)
@@ -221,7 +221,7 @@ mod tests {
 
         assert_eq!(
             *world.resource::<PracticePauseSurface>(),
-            PracticePauseSurface::Rail
+            PracticePauseSurface::Overlay
         );
         assert_eq!(
             world

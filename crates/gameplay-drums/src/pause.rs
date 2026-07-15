@@ -20,8 +20,8 @@ use game_shell::{request_transition, AppState, PauseState, TransitionRequest};
 
 use crate::resources::ActiveDrumSounds;
 
-/// Root marker for the pause overlay. In practice this spawns for the Esc
-/// surface; Tab opens the full rail instead (see PracticePauseSurface).
+/// Root marker for the pause overlay. Practice Settings leaves this overlay
+/// and enters the dedicated Editing phase.
 #[derive(Component)]
 pub struct PauseOverlay;
 
@@ -63,7 +63,7 @@ const PRACTICE_ITEMS: &[PauseItemKind] = &[
 ];
 
 /// Rows for the pause overlay: practice gets Resume / Restart loop /
-/// Exit Practice; normal play keeps Resume / Retry / Quit exactly as-is.
+/// Practice Settings / Exit Practice; normal play keeps Resume / Retry / Quit.
 pub fn pause_items(practice: bool) -> &'static [PauseItemKind] {
     if practice {
         PRACTICE_ITEMS
@@ -306,7 +306,7 @@ pub fn spawn_overlay(
     midi: Option<Res<game_shell::MidiConnected>>,
 ) {
     if practice.is_some() && *surface == PracticePauseSurface::Rail {
-        return; // Tab-opened pause: the practice rail owns this surface
+        return; // The legacy rail surface owns this paused frame.
     }
     selection.0 = 0;
     let theme = Theme::default();
@@ -411,7 +411,7 @@ fn pause_menu_input(
 ) {
     use game_shell::NavVerb;
     if practice.is_some() && *surface == PracticePauseSurface::Rail {
-        actions.clear(); // rail owns this pause; don't double-handle keys/pads
+        actions.clear(); // Don't double-handle input while the legacy rail is active.
         return;
     }
     let items = pause_items(practice.is_some());

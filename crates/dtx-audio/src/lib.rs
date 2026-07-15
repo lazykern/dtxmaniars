@@ -596,9 +596,22 @@ pub fn play_sfx_handle(
     master: f32,
     channel: f32,
 ) -> Handle<AudioInstance> {
+    play_sfx_handle_from_seconds(audio, source, dtx_volume, dtx_pan, master, channel, 0.0)
+}
+
+pub fn play_sfx_handle_from_seconds(
+    audio: &Audio,
+    source: Handle<KiraAudioSource>,
+    dtx_volume: i32,
+    dtx_pan: i32,
+    master: f32,
+    channel: f32,
+    start_seconds: f64,
+) -> Handle<AudioInstance> {
     let gain = dtx_linear(dtx_volume) * master.clamp(0.0, 1.0) * channel.clamp(0.0, 1.0);
     audio
         .play(source)
+        .start_from(start_seconds.max(0.0))
         .with_volume(linear_gain_to_db(gain))
         .with_panning((dtx_pan as f32 / 100.0).clamp(-1.0, 1.0))
         .handle()
@@ -650,12 +663,40 @@ pub fn play_drum_hit_handle(
     master: f32,
     drum_channel: f32,
 ) -> Handle<AudioInstance> {
+    play_drum_hit_handle_from_seconds(
+        audio,
+        instances,
+        polyphony,
+        source,
+        wav_slot,
+        dtx_volume,
+        dtx_pan,
+        master,
+        drum_channel,
+        0.0,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+pub fn play_drum_hit_handle_from_seconds(
+    audio: &Audio,
+    instances: &mut Assets<AudioInstance>,
+    polyphony: &mut DrumPolyphony,
+    source: Handle<KiraAudioSource>,
+    wav_slot: u32,
+    dtx_volume: i32,
+    dtx_pan: i32,
+    master: f32,
+    drum_channel: f32,
+    start_seconds: f64,
+) -> Handle<AudioInstance> {
     let voice = polyphony.advance(wav_slot);
     let gain = dtx_linear(dtx_volume) * master.clamp(0.0, 1.0) * drum_channel.clamp(0.0, 1.0);
     let db = linear_gain_to_db(gain);
     let pan = (dtx_pan as f32 / 100.0).clamp(-1.0, 1.0);
     let handle = audio
         .play(source)
+        .start_from(start_seconds.max(0.0))
         .with_volume(db)
         .with_panning(pan)
         .handle();

@@ -307,7 +307,7 @@ mod tests {
             app.world()
                 .resource::<Messages<actions::PracticeAction>>()
                 .is_empty(),
-            "editor open must gate practice actions (Tab = OpenFullHud)"
+            "editor open must gate practice actions (Tab = OpenSettings)"
         );
 
         // Editor closed: the same press emits again. `reset_all` (not `clear`)
