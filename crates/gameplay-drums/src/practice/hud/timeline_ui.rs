@@ -172,7 +172,7 @@ pub(super) fn spawn_timeline(
         PracticeTimelineRoot,
         Node {
             width: Val::Percent(100.0),
-            min_height: Val::Px(88.0),
+            min_height: Val::Px(super::setup::TIMELINE_HEIGHT),
             flex_direction: FlexDirection::Row,
             flex_wrap: FlexWrap::Wrap,
             align_items: AlignItems::Center,
@@ -443,6 +443,10 @@ pub(super) fn reset_timeline_gesture(
     }) {
         *gesture = TimelineGesture::Idle;
     }
+}
+
+pub(super) fn clear_timeline_gesture(mut gesture: ResMut<TimelineGesture>) {
+    *gesture = TimelineGesture::Idle;
 }
 
 pub(super) fn update_timeline_markers(

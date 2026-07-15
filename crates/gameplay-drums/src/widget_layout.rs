@@ -146,6 +146,7 @@ pub(super) fn plugin(app: &mut App) {
                 ),
             )
                 .chain()
+                .in_set(crate::layout::PlayfieldLayoutConsumers)
                 .run_if(in_state(AppState::Performance)),
         )
         .add_systems(

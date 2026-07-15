@@ -22,11 +22,10 @@ pub(super) fn plugin(app: &mut App) {
         Update,
         (
             flash_key_caps_on_hit.run_if(crate::practice::gameplay_input_active),
-            respawn_key_caps_on_lanes_change
-                .after(crate::layout::PlayfieldLayoutSync)
-                .run_if(resource_changed::<crate::lanes::Lanes>),
+            respawn_key_caps_on_lanes_change.run_if(resource_changed::<crate::lanes::Lanes>),
             apply_key_cap_layout.run_if(resource_changed::<PlayfieldLayout>),
         )
+            .in_set(crate::layout::PlayfieldLayoutConsumers)
             .run_if(in_state(AppState::Performance)),
     );
 }

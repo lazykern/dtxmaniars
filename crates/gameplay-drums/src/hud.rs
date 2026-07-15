@@ -136,6 +136,7 @@ pub fn plugin(app: &mut App) {
             sample_accuracy_history.run_if(crate::practice::gameplay_input_active),
             sync_live_graph,
         )
+            .in_set(crate::layout::PlayfieldLayoutConsumers)
             .run_if(in_state(AppState::Performance)),
     );
 }

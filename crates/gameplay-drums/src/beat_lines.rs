@@ -60,6 +60,7 @@ pub(super) fn plugin(app: &mut App) {
                 despawn_timing_lines,
             )
                 .chain()
+                .in_set(crate::layout::PlayfieldLayoutConsumers)
                 .run_if(in_state(AppState::Performance))
                 .run_if(in_state(PauseState::Running)),
         )

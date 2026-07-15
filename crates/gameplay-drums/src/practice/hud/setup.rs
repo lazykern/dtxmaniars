@@ -31,6 +31,11 @@ pub enum PracticeLayoutMode {
 
 const SETTINGS_REF_MIN: f32 = 400.0;
 const PREVIEW_REF_MIN: f32 = 520.0;
+const TAB_CHROME_HEIGHT: f32 = 48.0;
+pub(super) const TIMELINE_HEIGHT: f32 = 88.0;
+
+#[derive(Resource, Debug, Clone, Copy, Default, PartialEq)]
+pub struct PracticePreviewGeometry(pub Option<crate::stage_rect::StageRect>);
 
 fn required_pane_widths(width: f32, height: f32, text_multiplier: f32) -> (f32, f32) {
     let scale = (width / dtx_ui::REF_WIDTH)
@@ -105,6 +110,7 @@ pub(super) fn ensure_setup_shell(
     windows: Query<&Window, With<PrimaryWindow>>,
     accessibility: Option<Res<dtx_ui::AccessibilityPolicy>>,
     mut tab: ResMut<PracticeTab>,
+    mut preview_geometry: ResMut<PracticePreviewGeometry>,
     roots: Query<(Entity, &PracticeSetupLayout), With<PracticeSetupRoot>>,
     mut panes: ParamSet<(
         Query<&mut Node, With<PracticeSettingsPane>>,
@@ -113,6 +119,7 @@ pub(super) fn ensure_setup_shell(
 ) {
     let surface_open = matches!(flow.phase, PracticePhase::Setup | PracticePhase::Editing);
     if !surface_open {
+        preview_geometry.0 = None;
         for (root, _) in &roots {
             commands.entity(root).despawn();
         }
@@ -132,11 +139,10 @@ pub(super) fn ensure_setup_shell(
     if mode == PracticeLayoutMode::Split && *tab == PracticeTab::Preview {
         *tab = PracticeTab::Setup;
     }
+    preview_geometry.0 = preview_stage_rect(width, height, mode, settings_width, *tab);
 
-    if let Ok((root, current)) = roots.single() {
-        if current.0 != mode {
-            commands.entity(root).despawn();
-        } else {
+    if let Ok((_, current)) = roots.single() {
+        if current.0 == mode {
             if mode == PracticeLayoutMode::Split {
                 if let Ok(mut settings) = panes.p0().single_mut() {
                     settings.width = Val::Px(settings_width);
@@ -150,8 +156,8 @@ pub(super) fn ensure_setup_shell(
             return;
         }
     }
-    if !roots.is_empty() {
-        return;
+    for (root, _) in &roots {
+        commands.entity(root).despawn();
     }
 
     spawn_setup_shell(
@@ -165,6 +171,30 @@ pub(super) fn ensure_setup_shell(
         &session,
         &timeline,
     );
+}
+
+fn preview_stage_rect(
+    width: f32,
+    height: f32,
+    mode: PracticeLayoutMode,
+    settings_width: f32,
+    tab: PracticeTab,
+) -> Option<crate::stage_rect::StageRect> {
+    if mode == PracticeLayoutMode::Tabbed && tab != PracticeTab::Preview {
+        return None;
+    }
+    let origin_x = if mode == PracticeLayoutMode::Split {
+        settings_width
+    } else {
+        0.0
+    };
+    Some(crate::stage_rect::StageRect {
+        origin: Vec2::new(origin_x, TAB_CHROME_HEIGHT),
+        size: Vec2::new(
+            (width - origin_x).max(0.0),
+            (height - TAB_CHROME_HEIGHT - TIMELINE_HEIGHT).max(0.0),
+        ),
+    })
 }
 
 fn spawn_setup_shell(
@@ -230,7 +260,7 @@ fn spawn_tab_chrome(
     root.spawn((
         Node {
             width: Val::Percent(100.0),
-            min_height: Val::Px(48.0),
+            min_height: Val::Px(TAB_CHROME_HEIGHT),
             flex_direction: FlexDirection::Row,
             flex_wrap: FlexWrap::Wrap,
             align_items: AlignItems::Center,

@@ -12,6 +12,10 @@ use crate::lanes::Lanes;
 #[derive(SystemSet, Debug, Clone, PartialEq, Eq, Hash)]
 pub struct PlayfieldLayoutSync;
 
+/// Systems that apply a rebuilt [`PlayfieldLayout`] to renderable entities.
+#[derive(SystemSet, Debug, Clone, PartialEq, Eq, Hash)]
+pub struct PlayfieldLayoutConsumers;
+
 pub const REF_JUDGE_Y: f32 = 620.0;
 pub const REF_BACKBOARD_PAD: f32 = 12.0;
 /// Flush to the backboard's top pad so the playfield fills the screen top
@@ -190,6 +194,10 @@ impl PlayfieldLayout {
 
 pub(super) fn plugin(app: &mut App) {
     app.init_resource::<PlayfieldLayout>()
+        .configure_sets(
+            Update,
+            (PlayfieldLayoutSync, PlayfieldLayoutConsumers).chain(),
+        )
         .add_systems(Startup, init_playfield_layout)
         .add_systems(
             Update,
@@ -214,10 +222,7 @@ pub fn sync_playfield_layout(
     windows: Query<&Window, With<PrimaryWindow>>,
     lanes: Res<Lanes>,
     flow: Option<Res<crate::practice::PracticeFlow>>,
-    preview: Query<
-        (&ComputedNode, &bevy::ui::UiGlobalTransform),
-        With<crate::practice::hud::setup::PracticePreviewRegion>,
-    >,
+    preview: Option<Res<crate::practice::hud::setup::PracticePreviewGeometry>>,
     mut layout: ResMut<PlayfieldLayout>,
 ) {
     let Ok(window) = windows.single() else {
@@ -232,19 +237,8 @@ pub fn sync_playfield_layout(
                 crate::practice::PracticePhase::Setup | crate::practice::PracticePhase::Editing
             )
         })
-        .and_then(|_| preview.single().ok())
-        .and_then(|(node, transform)| {
-            let inverse_scale = node.inverse_scale_factor();
-            let size = node.size() * inverse_scale;
-            (size.x >= 1.0 && size.y >= 1.0).then(|| {
-                let center = transform.translation * inverse_scale;
-                let rect = Rect::from_center_size(center, size);
-                crate::stage_rect::StageRect {
-                    origin: rect.min,
-                    size: rect.size(),
-                }
-            })
-        });
+        .and(preview.as_deref())
+        .and_then(|preview| preview.0);
     let want = PlayfieldLayout::from_rect(preview_rect.unwrap_or(full), &lanes);
     if *layout != want {
         *layout = want;

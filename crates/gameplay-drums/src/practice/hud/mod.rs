@@ -9,6 +9,10 @@ pub mod wait_prompt;
 
 use bevy::prelude::*;
 
+#[doc(hidden)]
+#[derive(SystemSet, Debug, Clone, PartialEq, Eq, Hash)]
+pub struct PracticeShellUpdate;
+
 /// Format chart ms as `m:ss.d`.
 pub fn format_chart_time(ms: i64) -> String {
     let ms = ms.max(0);
@@ -26,14 +30,19 @@ pub fn plugin(app: &mut App) {
     chip::plugin(app);
     wait_prompt::plugin(app);
     app.init_resource::<setup::PracticeTab>()
+        .init_resource::<setup::PracticePreviewGeometry>()
         .init_resource::<timeline_ui::TimelineGesture>()
         .init_resource::<crate::practice::toast::ToastQueue>()
+        .configure_sets(
+            Update,
+            PracticeShellUpdate.before(crate::layout::PlayfieldLayoutSync),
+        )
         .add_systems(OnEnter(AppState::Performance), setup::reset_tab)
         .add_systems(
             Update,
             (
-                setup::ensure_setup_shell,
                 setup::update_tab_selection,
+                setup::ensure_setup_shell,
                 timeline_ui::timeline_mouse.run_if(crate::practice::practice_surface_open),
                 timeline_ui::preview_transport_buttons
                     .run_if(crate::practice::practice_surface_open),
@@ -43,13 +52,14 @@ pub fn plugin(app: &mut App) {
                 progress::refresh_progress_copy.run_if(crate::practice::practice_surface_open),
             )
                 .chain()
+                .in_set(PracticeShellUpdate)
                 .run_if(in_state(AppState::Performance))
                 .run_if(resource_exists::<crate::practice::PracticeFlow>),
         )
         .add_systems(OnExit(AppState::Performance), setup::despawn_setup_shell)
         .add_systems(
             OnExit(AppState::Performance),
-            timeline_ui::reset_timeline_gesture,
+            timeline_ui::clear_timeline_gesture,
         )
         .add_systems(
             Update,

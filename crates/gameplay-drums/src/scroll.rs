@@ -40,6 +40,7 @@ pub(super) fn plugin(app: &mut App) {
         Update,
         (spawn_notes_system, scroll_notes_system)
             .chain()
+            .in_set(crate::layout::PlayfieldLayoutConsumers)
             .run_if(in_state(AppState::Performance))
             .run_if(in_state(PauseState::Running))
             .run_if(crate::practice::chart_clock_active),
@@ -47,6 +48,7 @@ pub(super) fn plugin(app: &mut App) {
     .add_systems(
         Update,
         reposition_notes_on_layout_change
+            .in_set(crate::layout::PlayfieldLayoutConsumers)
             .run_if(in_state(AppState::Performance))
             .run_if(resource_changed::<PlayfieldLayout>),
     )

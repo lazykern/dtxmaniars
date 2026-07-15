@@ -1,5 +1,4 @@
 use bevy::camera::{Camera, Camera2d, ComputedCameraValues, RenderTargetInfo, Viewport};
-use bevy::ecs::system::RunSystemOnce;
 use bevy::prelude::*;
 use bevy::window::{PrimaryWindow, WindowResolution};
 use game_shell::{AppState, PauseState};
@@ -19,7 +18,37 @@ use gameplay_drums::practice::{
 use gameplay_drums::resources::GameplayClock;
 use gameplay_drums::timeline::{ChipTimeline, SnapDivisor};
 
-fn setup_hud_app(width: f32, height: f32, text_scale: dtx_config::TextScale) -> App {
+#[derive(Resource, Default)]
+struct PendingTabClick(Option<PracticeTab>);
+
+#[derive(Resource, Default)]
+struct ConsumerLayout(Option<gameplay_drums::stage_rect::StageRect>);
+
+fn record_consumer_layout(
+    layout: Res<gameplay_drums::layout::PlayfieldLayout>,
+    mut seen: ResMut<ConsumerLayout>,
+) {
+    seen.0 = Some(gameplay_drums::stage_rect::StageRect {
+        origin: layout.origin,
+        size: Vec2::new(layout.width, layout.height),
+    });
+}
+
+fn inject_tab_click(
+    mut pending: ResMut<PendingTabClick>,
+    mut buttons: Query<(&PracticeTabButton, &mut Interaction)>,
+) {
+    let Some(target) = pending.0.take() else {
+        return;
+    };
+    for (button, mut interaction) in &mut buttons {
+        if button.0 == target {
+            *interaction = Interaction::Pressed;
+        }
+    }
+}
+
+fn build_hud_app(width: f32, height: f32, text_scale: dtx_config::TextScale) -> App {
     let mut app = App::new();
     app.add_plugins((
         MinimalPlugins,
@@ -88,6 +117,21 @@ fn setup_hud_app(width: f32, height: f32, text_scale: dtx_config::TextScale) -> 
     ));
 
     gameplay_drums::practice::hud::plugin(&mut app);
+    app.init_resource::<PendingTabClick>()
+        .init_resource::<ConsumerLayout>()
+        .configure_sets(
+            Update,
+            (
+                gameplay_drums::layout::PlayfieldLayoutSync,
+                gameplay_drums::layout::PlayfieldLayoutConsumers,
+            )
+                .chain(),
+        )
+        .add_systems(Update, inject_tab_click.before(update_tab_selection))
+        .add_systems(
+            Update,
+            record_consumer_layout.in_set(gameplay_drums::layout::PlayfieldLayoutConsumers),
+        );
     app.add_systems(
         Update,
         gameplay_drums::layout::sync_playfield_layout
@@ -96,6 +140,11 @@ fn setup_hud_app(width: f32, height: f32, text_scale: dtx_config::TextScale) -> 
     app.world_mut()
         .resource_mut::<NextState<AppState>>()
         .set(AppState::Performance);
+    app
+}
+
+fn setup_hud_app(width: f32, height: f32, text_scale: dtx_config::TextScale) -> App {
+    let mut app = build_hud_app(width, height, text_scale);
     app.update();
     app.update();
     app.update();
@@ -121,18 +170,7 @@ fn click_tab(app: &mut App, label: &str) {
         "Preview" => PracticeTab::Preview,
         _ => panic!("unknown practice tab {label}"),
     };
-    let button = app
-        .world_mut()
-        .query::<(Entity, &PracticeTabButton)>()
-        .iter(app.world())
-        .find_map(|(entity, button)| (button.0 == tab).then_some(entity))
-        .unwrap_or_else(|| panic!("missing {label} tab button"));
-    *app.world_mut()
-        .get_mut::<Interaction>(button)
-        .expect("practice tab is interactive") = Interaction::Pressed;
-    app.world_mut()
-        .run_system_once(update_tab_selection)
-        .expect("tab click system runs");
+    app.world_mut().resource_mut::<PendingTabClick>().0 = Some(tab);
     app.update();
 }
 
@@ -322,6 +360,68 @@ fn tabbed_preview_keeps_navigation_visible_and_clickable_back_to_setup() {
 }
 
 #[test]
+fn tab_click_reconciles_shell_and_chrome_in_one_update() {
+    let mut app = setup_hud_app(900.0, 720.0, dtx_config::TextScale::XLarge);
+
+    click_tab(&mut app, "Preview");
+
+    assert_eq!(*app.world().resource::<PracticeTab>(), PracticeTab::Preview);
+    assert_eq!(count::<PracticeSetupRoot>(&mut app), 1);
+    assert_eq!(count::<PracticeTabButton>(&mut app), 3);
+    assert_eq!(computed_width::<PracticeSettingsPane>(&mut app), 0.0);
+    assert!((computed_width::<PracticePreviewRegion>(&mut app) - 900.0).abs() <= 1.0);
+    let preview = computed_rect::<PracticePreviewRegion>(&mut app);
+    let layout = app
+        .world()
+        .resource::<gameplay_drums::layout::PlayfieldLayout>();
+    assert_eq!(layout.origin, preview.min);
+    assert_eq!(Vec2::new(layout.width, layout.height), preview.size());
+}
+
+#[test]
+fn initial_shell_frame_owns_fitted_playfield_geometry() {
+    let mut app = build_hud_app(1280.0, 720.0, dtx_config::TextScale::Standard);
+
+    app.update();
+
+    let preview = computed_rect::<PracticePreviewRegion>(&mut app);
+    let layout = app
+        .world()
+        .resource::<gameplay_drums::layout::PlayfieldLayout>();
+    assert_eq!(layout.origin, preview.min);
+    assert_eq!(Vec2::new(layout.width, layout.height), preview.size());
+    assert_eq!(
+        app.world().resource::<ConsumerLayout>().0,
+        Some(gameplay_drums::stage_rect::StageRect {
+            origin: preview.min,
+            size: preview.size(),
+        })
+    );
+}
+
+#[test]
+fn first_resize_frame_owns_fitted_playfield_geometry() {
+    let mut app = setup_hud_app(1280.0, 720.0, dtx_config::TextScale::Standard);
+
+    resize_surface(&mut app, 1920.0, 1080.0);
+    app.update();
+
+    let preview = computed_rect::<PracticePreviewRegion>(&mut app);
+    let layout = app
+        .world()
+        .resource::<gameplay_drums::layout::PlayfieldLayout>();
+    assert_eq!(layout.origin, preview.min);
+    assert_eq!(Vec2::new(layout.width, layout.height), preview.size());
+    assert_eq!(
+        app.world().resource::<ConsumerLayout>().0,
+        Some(gameplay_drums::stage_rect::StageRect {
+            origin: preview.min,
+            size: preview.size(),
+        })
+    );
+}
+
+#[test]
 fn computed_playfield_and_drum_strip_fit_the_live_preview_region() {
     for (width, height, scale) in [
         (1280.0, 720.0, dtx_config::TextScale::Standard),
@@ -415,17 +515,19 @@ fn resize_from_tabbed_preview_to_split_selects_setup_coherently() {
 
     resize_surface(&mut app, 1280.0, 720.0);
     app.update();
-    app.update();
 
     assert_eq!(*app.world().resource::<PracticeTab>(), PracticeTab::Setup);
+    assert_eq!(count::<PracticeSetupRoot>(&mut app), 1);
+    assert_eq!(count::<PracticeTabButton>(&mut app), 2);
     assert!(texts(&mut app).iter().any(|text| text == "✓ Setup"));
     assert!(!texts(&mut app).iter().any(|text| text == "✓ Preview"));
     assert_eq!(computed_width::<PracticeSettingsPane>(&mut app), 400.0);
 
     resize_surface(&mut app, 900.0, 720.0);
     app.update();
-    app.update();
     assert_eq!(*app.world().resource::<PracticeTab>(), PracticeTab::Setup);
+    assert_eq!(count::<PracticeSetupRoot>(&mut app), 1);
+    assert_eq!(count::<PracticeTabButton>(&mut app), 3);
     assert!(texts(&mut app).iter().any(|text| text == "✓ Setup"));
 }
 
@@ -807,6 +909,58 @@ fn fresh_performance_setup_resets_tab_while_editing_retains_it() {
     app.update();
 
     assert_eq!(*app.world().resource::<PracticeTab>(), PracticeTab::Setup);
+}
+
+#[test]
+fn performance_exit_clears_pending_timeline_gesture_before_reentry() {
+    let mut app = setup_hud_app(1280.0, 720.0, dtx_config::TextScale::Standard);
+    *app.world_mut().resource_mut::<TimelineGesture>() = TimelineGesture::Pending {
+        press_x: 420.0,
+        press_ms: 4_000,
+    };
+
+    app.world_mut()
+        .resource_mut::<NextState<AppState>>()
+        .set(AppState::SongSelect);
+    app.update();
+    assert_eq!(
+        *app.world().resource::<TimelineGesture>(),
+        TimelineGesture::Idle
+    );
+
+    app.world_mut()
+        .resource_mut::<NextState<AppState>>()
+        .set(AppState::Performance);
+    app.update();
+    assert_eq!(
+        *app.world().resource::<TimelineGesture>(),
+        TimelineGesture::Idle
+    );
+}
+
+#[test]
+fn performance_exit_clears_drag_timeline_gesture_before_reentry() {
+    let mut app = setup_hud_app(1280.0, 720.0, dtx_config::TextScale::Standard);
+    *app.world_mut().resource_mut::<TimelineGesture>() =
+        TimelineGesture::DragLoop { anchor_ms: 4_000 };
+
+    app.world_mut()
+        .resource_mut::<NextState<AppState>>()
+        .set(AppState::SongSelect);
+    app.update();
+    assert_eq!(
+        *app.world().resource::<TimelineGesture>(),
+        TimelineGesture::Idle
+    );
+
+    app.world_mut()
+        .resource_mut::<NextState<AppState>>()
+        .set(AppState::Performance);
+    app.update();
+    assert_eq!(
+        *app.world().resource::<TimelineGesture>(),
+        TimelineGesture::Idle
+    );
 }
 
 #[test]
