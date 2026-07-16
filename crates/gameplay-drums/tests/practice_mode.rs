@@ -580,7 +580,7 @@ fn setup_real_midi_pad_reduces_to_ui_action_without_gameplay_output() {
             .resource_mut::<gameplay_drums::menu_nav::NavGuard>();
         guard.clear_context();
         guard.enter_context(
-            gameplay_drums::menu_nav::NavContext::PracticeSetup,
+            gameplay_drums::menu_nav::NavContext::PracticeSetupSettings,
             std::time::Instant::now() - std::time::Duration::from_millis(600),
         );
     }

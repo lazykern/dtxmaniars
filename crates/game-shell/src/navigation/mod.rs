@@ -14,6 +14,12 @@ pub use dtx_input::MidiConnected;
 /// `NavAction` is an envelope around it, not a second vocabulary.
 pub use dtx_input::SystemVerb;
 
+pub mod context;
+pub mod source;
+
+pub use context::{NavContext, NavContextStack};
+pub use source::{InputSource, LastIntentionalInputSource, MouseIntent, PromptSourcePreference};
+
 /// Which device produced the action. Consumers may branch on this: keyboard
 /// keeps its flat navigation model, pads use the two-level model.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -33,25 +39,6 @@ pub struct NavAction {
     pub source: NavSource,
     /// Shift held (keyboard only) — consumers multiply steps by 10.
     pub coarse: bool,
-}
-
-/// Which menu surface pads are currently navigating.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum NavContext {
-    /// Title screen.
-    Title,
-    /// Song select wheel.
-    SongSelect,
-    /// Post-play results screen.
-    Result,
-    /// Pause overlay during a performance.
-    Paused,
-    /// Customize (settings) overlay during a performance.
-    Editor,
-    /// Chart/audio load in progress. Pads may cancel it (SD = Back).
-    Loading,
-    /// Practice Setup or Settings, including non-judged preview playback.
-    PracticeSetup,
 }
 
 /// Minimum gap between accepted pad nav actions (double-trigger/flam guard).
@@ -162,9 +149,13 @@ fn pad_nav_mapper(
 /// Registers the NavAction message, nav resources, and the pad mapper.
 pub fn plugin(app: &mut App) {
     app.add_message::<NavAction>()
+        .add_message::<MouseIntent>()
         .init_resource::<MidiConnected>()
         .init_resource::<NavGuard>()
         .init_resource::<ActiveNavContext>()
+        .init_resource::<NavContextStack>()
+        .init_resource::<LastIntentionalInputSource>()
+        .init_resource::<PromptSourcePreference>()
         .add_systems(Update, pad_nav_mapper.in_set(NavMapSet));
 }
 
@@ -207,7 +198,7 @@ mod tests {
     fn guard_enforces_grace_then_debounce() {
         let mut g = NavGuard::default();
         let t0 = std::time::Instant::now();
-        g.enter_context(NavContext::SongSelect, t0);
+        g.enter_context(NavContext::SongSelectSongs, t0);
         assert!(!g.accept(t0 + std::time::Duration::from_millis(100)));
         let t1 = t0 + std::time::Duration::from_millis(600);
         assert!(g.accept(t1));
@@ -219,13 +210,13 @@ mod tests {
     fn guard_resets_grace_on_context_change() {
         let mut g = NavGuard::default();
         let t0 = std::time::Instant::now();
-        g.enter_context(NavContext::SongSelect, t0);
+        g.enter_context(NavContext::SongSelectSongs, t0);
         let t1 = t0 + std::time::Duration::from_millis(600);
         assert!(g.accept(t1));
-        g.enter_context(NavContext::SongSelect, t1);
+        g.enter_context(NavContext::SongSelectSongs, t1);
         assert!(g.accept(t1 + std::time::Duration::from_millis(100)));
         g.enter_context(
-            NavContext::Result,
+            NavContext::Results,
             t1 + std::time::Duration::from_millis(200),
         );
         assert!(!g.accept(t1 + std::time::Duration::from_millis(300)));
@@ -238,12 +229,12 @@ mod tests {
     fn confirm_hit_cannot_cancel_the_load_it_started() {
         let mut g = NavGuard::default();
         let t0 = std::time::Instant::now();
-        g.enter_context(NavContext::SongSelect, t0);
+        g.enter_context(NavContext::SongSelectSongs, t0);
         let confirm = t0 + std::time::Duration::from_millis(600);
         assert!(g.accept(confirm), "BD confirms the song");
 
         // Next frame: SongLoading is active.
-        g.enter_context(NavContext::Loading, confirm);
+        g.enter_context(NavContext::SongLoading, confirm);
         assert!(!g.accept(confirm), "same-instant hit is inside the grace");
         assert!(!g.accept(confirm + std::time::Duration::from_millis(499)));
         assert!(g.accept(confirm + std::time::Duration::from_millis(500)));
@@ -254,7 +245,7 @@ mod tests {
     /// chart's autoplay notes would otherwise navigate and close the overlay.
     #[test]
     fn mapper_consumes_pad_nav_hits_not_lane_hits() {
-        let src = include_str!("navigation.rs");
+        let src = include_str!("mod.rs");
         let body = src
             .split("fn pad_nav_mapper(")
             .nth(1)

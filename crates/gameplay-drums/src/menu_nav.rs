@@ -40,22 +40,22 @@ fn active_context(
         return None;
     }
     match app_state {
-        AppState::Title => Some(NavContext::Title),
-        AppState::SongSelect => Some(NavContext::SongSelect),
-        AppState::Result => Some(NavContext::Result),
-        AppState::SongLoading => Some(NavContext::Loading),
+        AppState::Title => Some(NavContext::Home),
+        AppState::SongSelect => Some(NavContext::SongSelectSongs),
+        AppState::Result => Some(NavContext::Results),
+        AppState::SongLoading => Some(NavContext::SongLoading),
         AppState::Performance => {
             if editor_open {
-                Some(NavContext::Editor)
+                Some(NavContext::LayoutEditor)
             } else if *pause == PauseState::Paused {
-                Some(NavContext::Paused)
+                Some(NavContext::PauseMenu)
             } else if matches!(
                 practice_phase,
                 Some(
                     crate::practice::PracticePhase::Setup | crate::practice::PracticePhase::Editing
                 )
             ) {
-                Some(NavContext::PracticeSetup)
+                Some(NavContext::PracticeSetupSettings)
             } else {
                 None
             }
@@ -134,7 +134,7 @@ mod tests {
                 false,
                 None,
             ),
-            Some(NavContext::Paused)
+            Some(NavContext::PauseMenu)
         );
         assert_eq!(
             active_context(
@@ -145,7 +145,7 @@ mod tests {
                 false,
                 None,
             ),
-            Some(NavContext::Editor)
+            Some(NavContext::LayoutEditor)
         );
         assert_eq!(
             active_context(
@@ -156,7 +156,7 @@ mod tests {
                 false,
                 None,
             ),
-            Some(NavContext::Loading)
+            Some(NavContext::SongLoading)
         );
     }
 
@@ -175,7 +175,7 @@ mod tests {
                     false,
                     Some(phase),
                 ),
-                Some(NavContext::PracticeSetup),
+                Some(NavContext::PracticeSetupSettings),
                 "{phase:?}",
             );
         }
