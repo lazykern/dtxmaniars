@@ -1939,6 +1939,7 @@ fn bound_pause_cancels_simultaneous_paused_restart() {
     app.world_mut()
         .write_message(gameplay_drums::events::SystemVerbHit {
             verb: dtx_input::SystemVerb::Pause,
+            source: dtx_input::VerbSource::Keyboard,
         });
 
     app.update();
@@ -2911,6 +2912,7 @@ fn bound_pause_opens_overlay_only_during_practice_running() {
         .world_mut()
         .write_message(gameplay_drums::events::SystemVerbHit {
             verb: dtx_input::SystemVerb::Pause,
+            source: dtx_input::VerbSource::Keyboard,
         });
     setup.update();
     setup.update();
@@ -2929,6 +2931,7 @@ fn bound_pause_opens_overlay_only_during_practice_running() {
         .world_mut()
         .write_message(gameplay_drums::events::SystemVerbHit {
             verb: dtx_input::SystemVerb::Pause,
+            source: dtx_input::VerbSource::Keyboard,
         });
     running.update();
     running.update();
@@ -2951,7 +2954,10 @@ fn setup_system_verbs_are_drained_before_continue() {
     enter_performance(&mut app, chart_with_measures(4));
     for verb in [dtx_input::SystemVerb::Pause, dtx_input::SystemVerb::Restart] {
         app.world_mut()
-            .write_message(gameplay_drums::events::SystemVerbHit { verb });
+            .write_message(gameplay_drums::events::SystemVerbHit {
+                verb,
+                source: dtx_input::VerbSource::Keyboard,
+            });
     }
     app.update();
     app.world_mut()
@@ -2986,7 +2992,10 @@ fn customize_system_verbs_are_drained_before_close() {
         .0 = true;
     for verb in [dtx_input::SystemVerb::Pause, dtx_input::SystemVerb::Restart] {
         app.world_mut()
-            .write_message(gameplay_drums::events::SystemVerbHit { verb });
+            .write_message(gameplay_drums::events::SystemVerbHit {
+                verb,
+                source: dtx_input::VerbSource::Keyboard,
+            });
     }
     app.update();
     app.world_mut()

@@ -1497,7 +1497,10 @@ mod tests {
         world.insert_resource(State::new(state));
         world.init_resource::<NextState<PauseState>>();
         world.init_resource::<VerbGuard>();
-        world.write_message(crate::events::SystemVerbHit { verb });
+        world.write_message(crate::events::SystemVerbHit {
+            verb,
+            source: dtx_input::VerbSource::Keyboard,
+        });
         world
     }
 
@@ -1615,6 +1618,7 @@ mod tests {
         for _ in 0..2 {
             app.world_mut().write_message(crate::events::SystemVerbHit {
                 verb: dtx_input::SystemVerb::Pause,
+                source: dtx_input::VerbSource::Midi,
             });
         }
         // Frame 1 reads the hits and sets NextState; frame 2's StateTransition

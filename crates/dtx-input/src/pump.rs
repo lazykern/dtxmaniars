@@ -52,6 +52,17 @@ pub struct ResolvedInputHit {
 pub struct SystemVerbHit {
     /// The verb that fired.
     pub verb: SystemVerb,
+    /// The device that fired it.
+    pub source: VerbSource,
+}
+
+/// Which device fired a bound system verb.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum VerbSource {
+    /// Physical keyboard key.
+    Keyboard,
+    /// MIDI note (pad/zone).
+    Midi,
 }
 
 /// Last MIDI NoteOn observed by the pump, written before the threshold gate.
@@ -198,8 +209,8 @@ fn poll_midi(
     for lane in consumed.nav_lanes {
         nav_hits.write(PadNavHit { lane });
     }
-    for verb in consumed.verbs {
-        verb_hits.write(SystemVerbHit { verb });
+    for (verb, source) in consumed.verbs {
+        verb_hits.write(SystemVerbHit { verb, source });
     }
 }
 
@@ -210,7 +221,7 @@ struct ConsumedMidi {
     nav_lanes: Vec<LaneId>,
     /// System verbs fired by this batch. Emitted on the same unconditional
     /// path as `nav_lanes` — the verb must work mid-song.
-    verbs: Vec<SystemVerb>,
+    verbs: Vec<(SystemVerb, VerbSource)>,
 }
 
 fn consume_midi_events(
@@ -242,7 +253,11 @@ fn consume_midi_events(
         }
         // Verbs fire before any gameplay gate: they must work mid-song, and a
         // system note was never gameplay input.
-        verbs.extend(resolver.system_for_note(note));
+        verbs.extend(
+            resolver
+                .system_for_note(note)
+                .map(|v| (v, VerbSource::Midi)),
+        );
         let lanes: Vec<_> = resolver.lanes_for_note(note).collect();
         if let Some(&lane) = lanes.first() {
             nav_lanes.push(lane);
@@ -333,9 +348,31 @@ mod tests {
             &mut last,
         );
 
-        assert_eq!(out.verbs, vec![SystemVerb::Pause]);
+        assert_eq!(out.verbs, vec![(SystemVerb::Pause, VerbSource::Midi)]);
         assert!(out.hits.is_empty());
         assert!(out.nav_lanes.is_empty(), "a system note is not a lane");
+    }
+
+    #[test]
+    fn verb_hits_carry_their_device_source() {
+        use crate::{BindSource, InputBindings, SystemVerb};
+        let mut b = InputBindings::default();
+        b.bind_system(SystemVerb::Pause, BindSource::Midi { note: 37 });
+        let resolver = BindResolver::from_bindings(&b);
+        let mut last = LastMidiHit::default();
+
+        let out = consume_midi_events(
+            [crate::midi::MidiEvent::NoteOn {
+                note: 37,
+                velocity: 90,
+                audio_ms: 0,
+                captured_at: Instant::now(),
+            }],
+            &resolver,
+            &mut last,
+        );
+
+        assert_eq!(out.verbs, vec![(SystemVerb::Pause, VerbSource::Midi)]);
     }
 
     #[test]
@@ -381,13 +418,14 @@ mod tests {
             &mut last,
         );
 
+        let verbs: Vec<SystemVerb> = out.verbs.iter().map(|(v, _)| *v).collect();
         assert!(
-            !out.verbs.contains(&SystemVerb::Pause),
+            !verbs.contains(&SystemVerb::Pause),
             "a lane hit must never pause: {:?}",
             out.verbs
         );
         assert!(
-            out.verbs.contains(&SystemVerb::Back),
+            verbs.contains(&SystemVerb::Back),
             "the default menu convention (SD = Back) is lane-shared on purpose"
         );
         assert_eq!(out.hits.len(), 1, "it still judges");

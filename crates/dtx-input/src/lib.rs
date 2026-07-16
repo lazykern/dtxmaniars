@@ -41,7 +41,7 @@ pub mod resolver;
 pub use events::{LaneHit, LaneHitKind, LaneId};
 pub use pump::{
     InputPumpSet, LastMidiHit, MidiConnected, PadNavHit, RawInputOwned, ResolvedInputHit,
-    SystemVerbHit,
+    SystemVerbHit, VerbSource,
 };
 pub use resolver::{ActiveInputProfiles, BindResolver, LiveBindings};
 
