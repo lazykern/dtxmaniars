@@ -298,8 +298,11 @@ pub(super) fn plugin(app: &mut App) {
             Update,
             // Both write NextState<PauseState>, but they compute the same
             // transition from the same current state, so a same-frame Escape +
-            // pad hit is idempotent — no ordering constraint needed.
+            // pad hit is idempotent — no ordering constraint needed. The verb
+            // consumers read the router's `LiveVerb`, so they run after the
+            // router to keep same-frame delivery.
             (toggle_pause, system_verb_pause, system_verb_restart)
+                .after(game_shell::NavRouterSet)
                 .run_if(in_state(AppState::Performance)),
         )
         .add_systems(
@@ -465,15 +468,18 @@ fn toggle_pause(
 /// short-circuits and leaves the rest of the batch unread to replay (and
 /// re-toggle) on the next frame. A pad retrigger really does put two hits in
 /// one frame, so the reader must be drained to the end.
-fn drain_verb(hits: &mut MessageReader<crate::events::SystemVerbHit>, verb: SystemVerb) -> bool {
-    hits.read().filter(|hit| hit.verb == verb).count() > 0
+fn drain_verb(hits: &mut MessageReader<game_shell::LiveVerb>, verb: SystemVerb) -> bool {
+    hits.read().filter(|hit| hit.0 == verb).count() > 0
 }
 
-/// `SystemVerb::Pause` from a pad or a bound key — the distant-kit equivalent of
-/// Escape. Toggles both ways, so firing it while paused resumes. Always drains
-/// during Performance, but only acts while the gameplay surface owns the verb.
+/// `SystemVerb::Pause` (router-delivered `LiveVerb`) — the distant-kit
+/// equivalent of Escape. Toggles both ways, so firing it while paused resumes.
+/// `SystemVerb::OpenSystemMenu` rides the same reader: it OPENS the pause
+/// overlay while running and is ignored while already paused (it opens the
+/// system menu; it never toggles). Always drains during Performance, but only
+/// acts while the gameplay surface owns the verb.
 fn system_verb_pause(
-    mut hits: MessageReader<crate::events::SystemVerbHit>,
+    mut hits: MessageReader<game_shell::LiveVerb>,
     state: Res<State<PauseState>>,
     mut next: ResMut<NextState<PauseState>>,
     mut guard: ResMut<VerbGuard>,
@@ -481,23 +487,41 @@ fn system_verb_pause(
     editor_open: Option<Res<crate::editor::EditorOpen>>,
 ) {
     // Drain first: the guard decides whether to ACT, never whether to READ.
-    if !drain_verb(&mut hits, SystemVerb::Pause) {
+    let mut pause_hit = false;
+    let mut open_hit = false;
+    for hit in hits.read() {
+        match hit.0 {
+            SystemVerb::Pause => pause_hit = true,
+            SystemVerb::OpenSystemMenu => open_hit = true,
+            _ => {}
+        }
+    }
+    if !pause_hit && !open_hit {
         return;
     }
     if editor_open.is_some_and(|editor| editor.0) || !system_verbs_active(flow.as_deref()) {
         return;
     }
-    if !guard.accept(SystemVerb::Pause, Instant::now()) {
-        return; // pad retrigger a few frames later — not a second press
+    let now = Instant::now();
+    if pause_hit {
+        if !guard.accept(SystemVerb::Pause, now) {
+            return; // pad retrigger a few frames later — not a second press
+        }
+        toggle(state.get(), &mut next);
+        return;
     }
-    toggle(state.get(), &mut next);
+    // OpenSystemMenu alone: open-only, never un-pause.
+    if *state.get() == PauseState::Running && guard.accept(SystemVerb::OpenSystemMenu, now) {
+        next.set(PauseState::Paused);
+    }
 }
 
-/// `SystemVerb::Restart` — re-request `SongLoading`, exactly as the pause menu's
-/// Retry row does, preserving `SelectedSong` and `PracticeIntent`. Fires during
-/// Performance whether running or paused.
+/// `SystemVerb::Restart` (router-delivered `LiveVerb`) — re-request
+/// `SongLoading`, exactly as the pause menu's Retry row does, preserving
+/// `SelectedSong` and `PracticeIntent`. Fires during Performance whether
+/// running or paused.
 fn system_verb_restart(
-    mut hits: MessageReader<crate::events::SystemVerbHit>,
+    mut hits: MessageReader<game_shell::LiveVerb>,
     mut next_pause: ResMut<NextState<PauseState>>,
     mut requests: MessageWriter<TransitionRequest>,
     mut guard: ResMut<VerbGuard>,
@@ -1497,15 +1521,12 @@ mod tests {
     fn verb_world(state: PauseState, verb: dtx_input::SystemVerb) -> World {
         use bevy::ecs::message::Messages;
         let mut world = World::new();
-        world.init_resource::<Messages<crate::events::SystemVerbHit>>();
+        world.init_resource::<Messages<game_shell::LiveVerb>>();
         world.init_resource::<Messages<TransitionRequest>>();
         world.insert_resource(State::new(state));
         world.init_resource::<NextState<PauseState>>();
         world.init_resource::<VerbGuard>();
-        world.write_message(crate::events::SystemVerbHit {
-            verb,
-            source: dtx_input::VerbSource::Keyboard,
-        });
+        world.write_message(game_shell::LiveVerb(verb));
         world
     }
 
@@ -1539,6 +1560,60 @@ mod tests {
             world.resource::<NextState<PauseState>>(),
             NextState::Pending(PauseState::Running)
         ));
+    }
+
+    #[test]
+    fn open_system_menu_verb_opens_pause_while_running() {
+        let mut world = verb_world(PauseState::Running, dtx_input::SystemVerb::OpenSystemMenu);
+        world
+            .run_system_once(system_verb_pause)
+            .expect("system_verb_pause runs");
+        assert!(matches!(
+            world.resource::<NextState<PauseState>>(),
+            NextState::Pending(PauseState::Paused)
+        ));
+    }
+
+    #[test]
+    fn open_system_menu_verb_while_paused_never_unpauses() {
+        let mut world = verb_world(PauseState::Paused, dtx_input::SystemVerb::OpenSystemMenu);
+        world
+            .run_system_once(system_verb_pause)
+            .expect("system_verb_pause runs");
+        assert!(matches!(
+            world.resource::<NextState<PauseState>>(),
+            NextState::Unchanged
+        ));
+    }
+
+    /// End-to-end: a raw keyboard `SystemVerbHit` goes through the REAL
+    /// game-shell router (`navigation::plugin`), comes out as `LiveVerb`, and
+    /// the pause consumer toggles. Router and consumer both run in Update with
+    /// the consumer ordered after `NavRouterSet`, so one hit pauses within a
+    /// frame and the state applies on the next.
+    #[test]
+    fn keyboard_pause_hit_through_router_toggles_pause() {
+        use bevy::state::app::StatesPlugin;
+        let mut app = App::new();
+        app.add_plugins((MinimalPlugins, StatesPlugin))
+            .add_plugins(game_shell::navigation::plugin)
+            .init_state::<PauseState>()
+            .insert_resource(open_guard())
+            .add_message::<crate::events::SystemVerbHit>()
+            .add_message::<dtx_input::PadNavHit>()
+            .init_resource::<ButtonInput<KeyCode>>()
+            .add_systems(Update, system_verb_pause.after(game_shell::NavRouterSet));
+        app.world_mut().write_message(crate::events::SystemVerbHit {
+            verb: dtx_input::SystemVerb::Pause,
+            source: dtx_input::VerbSource::Keyboard,
+        });
+        app.update();
+        app.update();
+        assert_eq!(
+            *app.world().resource::<State<PauseState>>().get(),
+            PauseState::Paused,
+            "a keyboard Pause hit routed as LiveVerb must pause"
+        );
     }
 
     #[test]
@@ -1603,7 +1678,7 @@ mod tests {
         );
     }
 
-    /// An e-kit pad retrigger puts TWO `SystemVerbHit`s in one frame.
+    /// An e-kit pad retrigger puts TWO `LiveVerb`s in one frame.
     /// `Iterator::any` short-circuits, so the second message stayed unread and
     /// replayed the next frame — pause on, pause off, overlay flashes for one
     /// frame. This app runs a real message lifecycle (`TimePlugin` +
@@ -1617,14 +1692,12 @@ mod tests {
             // Debounce OFF: this test must fail on `any()` alone, so the drain
             // is what it proves — the min-interval guard is tested separately.
             .insert_resource(open_guard())
-            .add_message::<crate::events::SystemVerbHit>()
+            .add_message::<game_shell::LiveVerb>()
             .add_systems(Update, system_verb_pause);
 
         for _ in 0..2 {
-            app.world_mut().write_message(crate::events::SystemVerbHit {
-                verb: dtx_input::SystemVerb::Pause,
-                source: dtx_input::VerbSource::Midi,
-            });
+            app.world_mut()
+                .write_message(game_shell::LiveVerb(dtx_input::SystemVerb::Pause));
         }
         // Frame 1 reads the hits and sets NextState; frame 2's StateTransition
         // applies it (transitions run before Update).

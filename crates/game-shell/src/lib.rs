@@ -12,8 +12,8 @@ mod performance;
 mod transition;
 
 pub use navigation::{
-    InputSource, LastIntentionalInputSource, MidiConnected, MouseIntent, NavAction, NavContext,
-    NavContextStack, PromptSourcePreference, SystemVerb,
+    InputSource, LastIntentionalInputSource, LiveVerb, MidiConnected, MouseIntent, NavAction,
+    NavContext, NavContextStack, NavRouterSet, PromptSourcePreference, SystemVerb,
 };
 pub use score_store::ScoreStoreResource;
 pub use states::{
