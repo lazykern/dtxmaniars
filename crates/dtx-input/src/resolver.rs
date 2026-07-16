@@ -480,7 +480,8 @@ mod tests {
         );
         assert_eq!(r.lane_for_note(38), Some(1));
         assert!(
-            !r.system_for_key(KeyCode::KeyX).any(|v| v == SystemVerb::Pause),
+            !r.system_for_key(KeyCode::KeyX)
+                .any(|v| v == SystemVerb::Pause),
             "lane wins"
         );
         assert_eq!(r.lane_for_key(KeyCode::KeyX), Some(0));
@@ -505,7 +506,9 @@ mod tests {
         b.bind_system(SystemVerb::NavigateUp, BindSource::Key(KeyCode::KeyX));
         let r = BindResolver::from_bindings(&b);
         assert_eq!(r.lane_for_key(KeyCode::KeyX), Some(0));
-        assert!(r.system_for_key(KeyCode::KeyX).any(|v| v == SystemVerb::NavigateUp));
+        assert!(r
+            .system_for_key(KeyCode::KeyX)
+            .any(|v| v == SystemVerb::NavigateUp));
     }
 
     #[test]
@@ -514,7 +517,8 @@ mod tests {
         b.bind_system(SystemVerb::OpenSystemMenu, BindSource::Midi { note: 38 });
         let r = BindResolver::from_bindings(&b);
         assert!(
-            !r.system_for_note(38).any(|v| v == SystemVerb::OpenSystemMenu),
+            !r.system_for_note(38)
+                .any(|v| v == SystemVerb::OpenSystemMenu),
             "OpenSystemMenu must stay lane-exclusive"
         );
     }
@@ -525,9 +529,15 @@ mod tests {
         let mut b = InputBindings::default();
         b.system.clear();
         let r = BindResolver::from_bindings(&b);
-        assert!(r.system_for_key(KeyCode::ArrowUp).any(|v| v == SystemVerb::NavigateUp));
-        assert!(r.system_for_key(KeyCode::Enter).any(|v| v == SystemVerb::Confirm));
-        assert!(r.system_for_key(KeyCode::Escape).any(|v| v == SystemVerb::Back));
+        assert!(r
+            .system_for_key(KeyCode::ArrowUp)
+            .any(|v| v == SystemVerb::NavigateUp));
+        assert!(r
+            .system_for_key(KeyCode::Enter)
+            .any(|v| v == SystemVerb::Confirm));
+        assert!(r
+            .system_for_key(KeyCode::Escape)
+            .any(|v| v == SystemVerb::Back));
         // Live-system verbs are never injected.
         assert_eq!(
             r.key_to_system
@@ -542,8 +552,12 @@ mod tests {
         b.system.clear();
         b.bind_system(SystemVerb::Confirm, BindSource::Key(KeyCode::Space)); // shares BD lane: fine
         let r = BindResolver::from_bindings(&b);
-        assert!(!r.system_for_key(KeyCode::Enter).any(|v| v == SystemVerb::Confirm));
-        assert!(r.system_for_key(KeyCode::Space).any(|v| v == SystemVerb::Confirm));
+        assert!(!r
+            .system_for_key(KeyCode::Enter)
+            .any(|v| v == SystemVerb::Confirm));
+        assert!(r
+            .system_for_key(KeyCode::Space)
+            .any(|v| v == SystemVerb::Confirm));
     }
 
     #[test]

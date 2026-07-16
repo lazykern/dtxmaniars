@@ -3,7 +3,7 @@
 use bevy::prelude::*;
 use dtx_ui::motion::EnterChoreo;
 use game_shell::{
-    request_transition, AppState, NavAction, NavVerb, PracticeIntent, PracticeOrigin,
+    request_transition, AppState, NavAction, PracticeIntent, PracticeOrigin, SystemVerb,
     TransitionRequest,
 };
 use gameplay_drums::resources::ActiveChart;
@@ -42,16 +42,15 @@ pub(crate) enum ResultAction {
     Moved(ResultVerb),
     Activate(ResultVerb),
     ContinueNow,
-    PracticeNow,
     None,
 }
 
 /// HH/CY (Up/Down) and keyboard ←/→ (mapped to Up/Down by the driver) move
 /// the cursor, clamped at the ends. BD/Enter activates, SD/Esc continues,
 /// FT jumps to practice.
-pub(crate) fn reduce_result_nav(cursor: ResultVerb, verb: NavVerb) -> ResultAction {
+pub(crate) fn reduce_result_nav(cursor: ResultVerb, verb: SystemVerb) -> ResultAction {
     match verb {
-        NavVerb::Up | NavVerb::Dec => {
+        SystemVerb::NavigateUp | SystemVerb::Decrease => {
             let moved = cursor.prev();
             if moved == cursor {
                 ResultAction::None
@@ -59,7 +58,7 @@ pub(crate) fn reduce_result_nav(cursor: ResultVerb, verb: NavVerb) -> ResultActi
                 ResultAction::Moved(moved)
             }
         }
-        NavVerb::Down | NavVerb::Inc => {
+        SystemVerb::NavigateDown | SystemVerb::Increase => {
             let moved = cursor.next();
             if moved == cursor {
                 ResultAction::None
@@ -67,9 +66,9 @@ pub(crate) fn reduce_result_nav(cursor: ResultVerb, verb: NavVerb) -> ResultActi
                 ResultAction::Moved(moved)
             }
         }
-        NavVerb::Confirm => ResultAction::Activate(cursor),
-        NavVerb::Back => ResultAction::ContinueNow,
-        NavVerb::Practice => ResultAction::PracticeNow,
+        SystemVerb::Confirm => ResultAction::Activate(cursor),
+        SystemVerb::Back => ResultAction::ContinueNow,
+        _ => ResultAction::None,
     }
 }
 
@@ -100,18 +99,18 @@ pub(crate) fn result_nav(
     // Pads (mapper's screen-enter grace already filters the song's last
     // notes) + keyboard, folded onto the same verbs. ←/→ are the natural
     // axis for a horizontal row; pads reuse Up/Down.
-    let mut verbs: Vec<NavVerb> = actions.read().map(|a| a.verb).collect();
+    let mut verbs: Vec<SystemVerb> = actions.read().map(|a| a.verb).collect();
     if keys.just_pressed(KeyCode::ArrowLeft) {
-        verbs.push(NavVerb::Up);
+        verbs.push(SystemVerb::NavigateUp);
     }
     if keys.just_pressed(KeyCode::ArrowRight) {
-        verbs.push(NavVerb::Down);
+        verbs.push(SystemVerb::NavigateDown);
     }
     if keys.just_pressed(KeyCode::Enter) || keys.just_pressed(KeyCode::Space) {
-        verbs.push(NavVerb::Confirm);
+        verbs.push(SystemVerb::Confirm);
     }
     if keys.just_pressed(KeyCode::Escape) {
-        verbs.push(NavVerb::Back);
+        verbs.push(SystemVerb::Back);
     }
     let retry_key = keys.just_pressed(KeyCode::KeyR);
     let toggle_details = keys.just_pressed(KeyCode::Tab);
@@ -193,7 +192,7 @@ fn apply(
                 request_transition(requests, AppState::SongSelect);
             }
         }
-        ResultAction::PracticeNow | ResultAction::Activate(ResultVerb::Practice) => {
+        ResultAction::Activate(ResultVerb::Practice) => {
             if chart.source_path.is_some() {
                 *practice_intent = practice_intent_for_result(recommendation);
                 request_transition(requests, AppState::SongLoading);
@@ -250,35 +249,38 @@ mod tests {
     fn reduce_result_nav_moves_and_clamps() {
         use ResultVerb::{Continue, Practice, Retry};
         // Clamped at both ends, no wrap.
-        assert_eq!(reduce_result_nav(Continue, NavVerb::Up), ResultAction::None);
         assert_eq!(
-            reduce_result_nav(Practice, NavVerb::Down),
+            reduce_result_nav(Continue, SystemVerb::NavigateUp),
+            ResultAction::None
+        );
+        assert_eq!(
+            reduce_result_nav(Practice, SystemVerb::NavigateDown),
             ResultAction::None
         );
         // Moves along Continue ↔ Retry ↔ Practice.
         assert_eq!(
-            reduce_result_nav(Continue, NavVerb::Down),
+            reduce_result_nav(Continue, SystemVerb::NavigateDown),
             ResultAction::Moved(Retry)
         );
         assert_eq!(
-            reduce_result_nav(Retry, NavVerb::Down),
+            reduce_result_nav(Retry, SystemVerb::NavigateDown),
             ResultAction::Moved(Practice)
         );
         assert_eq!(
-            reduce_result_nav(Practice, NavVerb::Up),
+            reduce_result_nav(Practice, SystemVerb::NavigateUp),
             ResultAction::Moved(Retry)
         );
         assert_eq!(
-            reduce_result_nav(Retry, NavVerb::Up),
+            reduce_result_nav(Retry, SystemVerb::NavigateUp),
             ResultAction::Moved(Continue)
         );
         // Dec/Inc alias the same axis (keyboard adjust verbs).
         assert_eq!(
-            reduce_result_nav(Retry, NavVerb::Dec),
+            reduce_result_nav(Retry, SystemVerb::Decrease),
             ResultAction::Moved(Continue)
         );
         assert_eq!(
-            reduce_result_nav(Retry, NavVerb::Inc),
+            reduce_result_nav(Retry, SystemVerb::Increase),
             ResultAction::Moved(Practice)
         );
     }
@@ -286,20 +288,22 @@ mod tests {
     #[test]
     fn reduce_result_nav_confirm_activates_cursor() {
         assert_eq!(
-            reduce_result_nav(ResultVerb::Retry, NavVerb::Confirm),
+            reduce_result_nav(ResultVerb::Retry, SystemVerb::Confirm),
             ResultAction::Activate(ResultVerb::Retry)
         );
     }
 
     #[test]
-    fn reduce_result_nav_back_and_practice_shortcuts() {
+    fn reduce_result_nav_back_continues() {
         assert_eq!(
-            reduce_result_nav(ResultVerb::Retry, NavVerb::Back),
+            reduce_result_nav(ResultVerb::Retry, SystemVerb::Back),
             ResultAction::ContinueNow
         );
+        // Practice is a visible verb-row choice, not a shared semantic verb:
+        // no shortcut verb jumps there anymore.
         assert_eq!(
-            reduce_result_nav(ResultVerb::Continue, NavVerb::Practice),
-            ResultAction::PracticeNow
+            reduce_result_nav(ResultVerb::Continue, SystemVerb::Preview),
+            ResultAction::None
         );
     }
 
@@ -332,7 +336,7 @@ mod tests {
         world
     }
 
-    fn pad(verb: NavVerb) -> NavAction {
+    fn pad(verb: SystemVerb) -> NavAction {
         NavAction {
             verb,
             source: NavSource::Pad,
@@ -351,7 +355,7 @@ mod tests {
     #[test]
     fn result_nav_back_continues_to_song_select() {
         let mut world = driver_world();
-        world.write_message(pad(NavVerb::Back));
+        world.write_message(pad(SystemVerb::Back));
         world.run_system_once(result_nav).expect("driver runs");
         assert_eq!(drain_requests(&mut world), vec![AppState::SongSelect]);
     }
@@ -359,13 +363,13 @@ mod tests {
     #[test]
     fn result_nav_moves_cursor_then_confirm_retries() {
         let mut world = driver_world();
-        world.write_message(pad(NavVerb::Down));
+        world.write_message(pad(SystemVerb::NavigateDown));
         world.run_system_once(result_nav).expect("driver runs");
         assert_eq!(*world.resource::<ResultVerb>(), ResultVerb::Retry);
         assert!(drain_requests(&mut world).is_empty());
 
         world.resource_mut::<Messages<NavAction>>().clear();
-        world.write_message(pad(NavVerb::Confirm));
+        world.write_message(pad(SystemVerb::Confirm));
         world.run_system_once(result_nav).expect("driver runs");
         assert_eq!(drain_requests(&mut world), vec![AppState::SongLoading]);
         assert!(
@@ -408,7 +412,7 @@ mod tests {
         assert!(world.resource::<ResultDisplaySnapshot>().0.is_some());
 
         world.insert_resource(ResultVerb::Retry);
-        world.write_message(pad(NavVerb::Confirm));
+        world.write_message(pad(SystemVerb::Confirm));
         world.run_system_once(result_nav).expect("driver runs");
 
         assert_eq!(drain_requests(&mut world), vec![AppState::SongLoading]);
@@ -416,9 +420,10 @@ mod tests {
     }
 
     #[test]
-    fn result_nav_ft_jumps_to_practice() {
+    fn result_nav_practice_activates_from_the_verb_row() {
         let mut world = driver_world();
-        world.write_message(pad(NavVerb::Practice));
+        world.insert_resource(ResultVerb::Practice);
+        world.write_message(pad(SystemVerb::Confirm));
         world.run_system_once(result_nav).expect("driver runs");
         assert_eq!(drain_requests(&mut world), vec![AppState::SongLoading]);
         assert_eq!(
@@ -445,7 +450,7 @@ mod tests {
             source_path: None,
         });
         world.insert_resource(ResultVerb::Retry);
-        world.write_message(pad(NavVerb::Confirm));
+        world.write_message(pad(SystemVerb::Confirm));
         world.run_system_once(result_nav).expect("driver runs");
         assert_eq!(drain_requests(&mut world), vec![AppState::SongSelect]);
         assert_eq!(*world.resource::<PracticeIntent>(), PracticeIntent::None);
@@ -473,7 +478,7 @@ mod tests {
             .id();
 
         // First input: consumed, finishes the reveal, no verb action.
-        world.write_message(pad(NavVerb::Confirm));
+        world.write_message(pad(SystemVerb::Confirm));
         world.run_system_once(result_nav).expect("driver runs");
         assert!(world.resource::<RevealState>().done);
         assert!(drain_requests(&mut world).is_empty(), "skip consumes input");
@@ -484,7 +489,7 @@ mod tests {
 
         // Second input acts normally.
         world.resource_mut::<Messages<NavAction>>().clear();
-        world.write_message(pad(NavVerb::Confirm));
+        world.write_message(pad(SystemVerb::Confirm));
         world.run_system_once(result_nav).expect("driver runs");
         assert_eq!(drain_requests(&mut world), vec![AppState::SongSelect]);
     }

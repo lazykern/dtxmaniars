@@ -6,7 +6,7 @@
 //! mutation.
 
 use bevy::prelude::*;
-use game_shell::{CustomizeTab, NavAction, NavSource, NavVerb};
+use game_shell::{CustomizeTab, NavAction, NavSource, SystemVerb};
 
 /// Which settings row is focused for nav. Reset to 0 on tab change.
 #[derive(Resource, Default)]
@@ -62,10 +62,10 @@ fn keyboard_can_enter(tab: CustomizeTab) -> bool {
 
 /// Delta a verb applies to the focused row, if any. Pads reuse Up/Down as −/+
 /// once in adjust mode; the keyboard uses Dec/Inc directly.
-fn adjust_delta(verb: NavVerb, source: NavSource) -> Option<i32> {
+fn adjust_delta(verb: SystemVerb, source: NavSource) -> Option<i32> {
     match (verb, source) {
-        (NavVerb::Up, NavSource::Pad) | (NavVerb::Dec, _) => Some(-1),
-        (NavVerb::Down, NavSource::Pad) | (NavVerb::Inc, _) => Some(1),
+        (SystemVerb::NavigateUp, NavSource::Pad) | (SystemVerb::Decrease, _) => Some(-1),
+        (SystemVerb::NavigateDown, NavSource::Pad) | (SystemVerb::Increase, _) => Some(1),
         _ => None,
     }
 }
@@ -182,15 +182,15 @@ fn keyboard_emit_nav(
     }
     let coarse = keys.pressed(KeyCode::ShiftLeft) || keys.pressed(KeyCode::ShiftRight);
     let verb = if keys.just_pressed(KeyCode::ArrowDown) {
-        NavVerb::Down
+        SystemVerb::NavigateDown
     } else if keys.just_pressed(KeyCode::ArrowUp) {
-        NavVerb::Up
+        SystemVerb::NavigateUp
     } else if keys.just_pressed(KeyCode::ArrowRight) {
-        NavVerb::Inc
+        SystemVerb::Increase
     } else if keys.just_pressed(KeyCode::ArrowLeft) {
-        NavVerb::Dec
+        SystemVerb::Decrease
     } else if keys.just_pressed(KeyCode::Enter) {
-        NavVerb::Confirm
+        SystemVerb::Confirm
     } else {
         return;
     };
@@ -228,7 +228,7 @@ fn settings_nav_consumer(
         // A kit tab whose own focus machine is below the tab bar owns
         // Dec/Inc (segment toggle / width adjust) — don't also switch tabs.
         if action.source == NavSource::Keyboard
-            && matches!(action.verb, NavVerb::Dec | NavVerb::Inc)
+            && matches!(action.verb, SystemVerb::Decrease | SystemVerb::Increase)
             && matches!(*level, NavLevel::Rail)
             && subtab_focus_captured(active.0, *controls_focus, *lanes_focus)
         {
@@ -238,9 +238,9 @@ fn settings_nav_consumer(
         match action.source {
             NavSource::Keyboard => match &mut *level {
                 NavLevel::Rail => match action.verb {
-                    NavVerb::Dec => active.0 = active.0.prev(),
-                    NavVerb::Inc => active.0 = active.0.next(),
-                    NavVerb::Down | NavVerb::Confirm
+                    SystemVerb::Decrease => active.0 = active.0.prev(),
+                    SystemVerb::Increase => active.0 = active.0.next(),
+                    SystemVerb::NavigateDown | SystemVerb::Confirm
                         if keyboard_can_enter(active.0) && !items.is_empty() =>
                     {
                         focused.0 = 0;
@@ -254,8 +254,10 @@ fn settings_nav_consumer(
                     }
                     let reps = if action.coarse { 10 } else { 1 };
                     match action.verb {
-                        NavVerb::Down => focused.0 = (focused.0 + 1).min(items.len() - 1),
-                        NavVerb::Up => {
+                        SystemVerb::NavigateDown => {
+                            focused.0 = (focused.0 + 1).min(items.len() - 1)
+                        }
+                        SystemVerb::NavigateUp => {
                             if focused.0 == 0 {
                                 *level = NavLevel::Rail;
                             } else {
@@ -277,37 +279,37 @@ fn settings_nav_consumer(
             },
             NavSource::Pad => match &mut *level {
                 NavLevel::Rail => match action.verb {
-                    NavVerb::Up => active.0 = active.0.prev(),
-                    NavVerb::Down => active.0 = active.0.next(),
-                    NavVerb::Confirm => {
+                    SystemVerb::NavigateUp => active.0 = active.0.prev(),
+                    SystemVerb::NavigateDown => active.0 = active.0.next(),
+                    SystemVerb::Confirm => {
                         if pad_can_enter(active.0) && !items.is_empty() {
                             focused.0 = 0;
                             *level = NavLevel::Rows;
                         }
                     }
-                    NavVerb::Back => {
+                    SystemVerb::Back => {
                         close.write(super::EditorCloseRequest);
                     }
                     _ => {}
                 },
                 NavLevel::Rows => match action.verb {
-                    NavVerb::Up => focused.0 = focused.0.saturating_sub(1),
-                    NavVerb::Down => {
+                    SystemVerb::NavigateUp => focused.0 = focused.0.saturating_sub(1),
+                    SystemVerb::NavigateDown => {
                         focused.0 = (focused.0 + 1).min(items.len().saturating_sub(1));
                     }
-                    NavVerb::Confirm => {
+                    SystemVerb::Confirm => {
                         if items.get(focused.0).is_some() {
                             *level = NavLevel::Adjust {
                                 saved: Box::new(draft.0.clone()),
                             };
                         }
                     }
-                    NavVerb::Back => *level = NavLevel::Rail,
+                    SystemVerb::Back => *level = NavLevel::Rail,
                     _ => {}
                 },
                 NavLevel::Adjust { saved } => match action.verb {
-                    NavVerb::Confirm => *level = NavLevel::Rows,
-                    NavVerb::Back => {
+                    SystemVerb::Confirm => *level = NavLevel::Rows,
+                    SystemVerb::Back => {
                         draft.0 = (**saved).clone();
                         *level = NavLevel::Rows;
                     }
@@ -337,15 +339,15 @@ mod tests {
         focused: &mut usize,
         at_rail: &mut bool,
         draft: &mut dtx_config::Config,
-        verb: NavVerb,
+        verb: SystemVerb,
         coarse: bool,
     ) {
         let items = crate::editor::settings_data::settings_items(*active);
         if *at_rail {
             match verb {
-                NavVerb::Dec => *active = active.prev(),
-                NavVerb::Inc => *active = active.next(),
-                NavVerb::Down | NavVerb::Confirm
+                SystemVerb::Decrease => *active = active.prev(),
+                SystemVerb::Increase => *active = active.next(),
+                SystemVerb::NavigateDown | SystemVerb::Confirm
                     if keyboard_can_enter(*active) && !items.is_empty() =>
                 {
                     *focused = 0;
@@ -360,8 +362,8 @@ mod tests {
         }
         let reps = if coarse { 10 } else { 1 };
         match verb {
-            NavVerb::Down => *focused = (*focused + 1).min(items.len() - 1),
-            NavVerb::Up => {
+            SystemVerb::NavigateDown => *focused = (*focused + 1).min(items.len() - 1),
+            SystemVerb::NavigateUp => {
                 if *focused == 0 {
                     *at_rail = true;
                 } else {
@@ -393,14 +395,32 @@ mod tests {
 
     #[test]
     fn pad_verbs_in_adjust_mode_map_to_steps() {
-        assert_eq!(adjust_delta(NavVerb::Up, NavSource::Pad), Some(-1));
-        assert_eq!(adjust_delta(NavVerb::Down, NavSource::Pad), Some(1));
-        assert_eq!(adjust_delta(NavVerb::Dec, NavSource::Keyboard), Some(-1));
-        assert_eq!(adjust_delta(NavVerb::Inc, NavSource::Keyboard), Some(1));
-        assert_eq!(adjust_delta(NavVerb::Confirm, NavSource::Pad), None);
-        assert_eq!(adjust_delta(NavVerb::Back, NavSource::Pad), None);
-        assert_eq!(adjust_delta(NavVerb::Up, NavSource::Keyboard), None);
-        assert_eq!(adjust_delta(NavVerb::Down, NavSource::Keyboard), None);
+        assert_eq!(
+            adjust_delta(SystemVerb::NavigateUp, NavSource::Pad),
+            Some(-1)
+        );
+        assert_eq!(
+            adjust_delta(SystemVerb::NavigateDown, NavSource::Pad),
+            Some(1)
+        );
+        assert_eq!(
+            adjust_delta(SystemVerb::Decrease, NavSource::Keyboard),
+            Some(-1)
+        );
+        assert_eq!(
+            adjust_delta(SystemVerb::Increase, NavSource::Keyboard),
+            Some(1)
+        );
+        assert_eq!(adjust_delta(SystemVerb::Confirm, NavSource::Pad), None);
+        assert_eq!(adjust_delta(SystemVerb::Back, NavSource::Pad), None);
+        assert_eq!(
+            adjust_delta(SystemVerb::NavigateUp, NavSource::Keyboard),
+            None
+        );
+        assert_eq!(
+            adjust_delta(SystemVerb::NavigateDown, NavSource::Keyboard),
+            None
+        );
     }
 
     #[test]
@@ -416,7 +436,7 @@ mod tests {
             &mut focused,
             &mut at_rail,
             &mut draft,
-            NavVerb::Down,
+            SystemVerb::NavigateDown,
             false,
         );
         assert!(!at_rail, "Down from the bar enters the rows");
@@ -426,7 +446,7 @@ mod tests {
             &mut focused,
             &mut at_rail,
             &mut draft,
-            NavVerb::Down,
+            SystemVerb::NavigateDown,
             false,
         );
         assert_eq!(focused, 1);
@@ -435,7 +455,7 @@ mod tests {
             &mut focused,
             &mut at_rail,
             &mut draft,
-            NavVerb::Up,
+            SystemVerb::NavigateUp,
             false,
         );
         assert_eq!(focused, 0);
@@ -444,7 +464,7 @@ mod tests {
             &mut focused,
             &mut at_rail,
             &mut draft,
-            NavVerb::Up,
+            SystemVerb::NavigateUp,
             false,
         );
         assert!(at_rail, "Up on the first row returns focus to the bar");
@@ -453,7 +473,7 @@ mod tests {
             &mut focused,
             &mut at_rail,
             &mut draft,
-            NavVerb::Confirm,
+            SystemVerb::Confirm,
             false,
         );
         assert!(!at_rail, "Enter on the bar re-enters the rows");
@@ -463,7 +483,7 @@ mod tests {
                 &mut focused,
                 &mut at_rail,
                 &mut draft,
-                NavVerb::Down,
+                SystemVerb::NavigateDown,
                 false,
             );
         }
@@ -481,7 +501,7 @@ mod tests {
             &mut focused,
             &mut at_rail,
             &mut draft,
-            NavVerb::Inc,
+            SystemVerb::Increase,
             false,
         );
         assert_eq!(active, CustomizeTab::Audio);
@@ -491,7 +511,7 @@ mod tests {
             &mut focused,
             &mut at_rail,
             &mut draft,
-            NavVerb::Dec,
+            SystemVerb::Decrease,
             false,
         );
         assert_eq!(active, CustomizeTab::Gameplay);
@@ -509,7 +529,7 @@ mod tests {
                 &mut focused,
                 &mut at_rail,
                 &mut draft,
-                NavVerb::Down,
+                SystemVerb::NavigateDown,
                 false,
             );
             assert!(at_rail, "{tab:?} has no settings rows to enter");
@@ -535,7 +555,7 @@ mod tests {
             &mut f,
             &mut at_rail,
             &mut fine,
-            NavVerb::Inc,
+            SystemVerb::Increase,
             false,
         );
         apply_keyboard(
@@ -543,7 +563,7 @@ mod tests {
             &mut c,
             &mut at_rail,
             &mut coarse,
-            NavVerb::Inc,
+            SystemVerb::Increase,
             true,
         );
 
@@ -567,7 +587,7 @@ mod tests {
         let mut draft = base.clone();
 
         let saved = draft.clone();
-        let delta = adjust_delta(NavVerb::Down, NavSource::Pad).unwrap();
+        let delta = adjust_delta(SystemVerb::NavigateDown, NavSource::Pad).unwrap();
         (items[scroll].adjust)(&mut draft, delta);
         assert_ne!(
             (items[scroll].raw)(&draft),

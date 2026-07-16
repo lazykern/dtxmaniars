@@ -333,112 +333,123 @@ pub fn nav_actions(
         .single()
         .is_ok_and(|layout| layout.0 == super::setup::PracticeLayoutMode::Split);
     for action in nav.read() {
-        let action = if split && action.verb == game_shell::NavVerb::Practice {
+        let action = if split && action.verb == game_shell::SystemVerb::NextTab {
             PracticeUiAction::ToggleSurfaceFocus
         } else if split && matches!(*focus, super::setup::PracticeSurfaceFocus::Preview(_)) {
             match action.verb {
-                game_shell::NavVerb::Back => PracticeUiAction::Back,
-                game_shell::NavVerb::Practice => PracticeUiAction::ToggleSurfaceFocus,
-                game_shell::NavVerb::Dec => PracticeUiAction::MoveTransportFocus(-1),
-                game_shell::NavVerb::Inc => PracticeUiAction::MoveTransportFocus(1),
-                game_shell::NavVerb::Confirm => PracticeUiAction::ActivateTransport,
-                game_shell::NavVerb::Up | game_shell::NavVerb::Down => {
+                game_shell::SystemVerb::Back => PracticeUiAction::Back,
+                game_shell::SystemVerb::Decrease => PracticeUiAction::MoveTransportFocus(-1),
+                game_shell::SystemVerb::Increase => PracticeUiAction::MoveTransportFocus(1),
+                game_shell::SystemVerb::Confirm => PracticeUiAction::ActivateTransport,
+                game_shell::SystemVerb::NavigateUp | game_shell::SystemVerb::NavigateDown => {
                     PracticeUiAction::ToggleSurfaceFocus
                 }
+                _ => continue,
             }
         } else if *tab == super::setup::PracticeTab::Progress {
             match action.verb {
-                game_shell::NavVerb::Back => PracticeUiAction::Back,
-                game_shell::NavVerb::Up | game_shell::NavVerb::Dec => PracticeUiAction::MoveTab(-1),
-                game_shell::NavVerb::Down
-                | game_shell::NavVerb::Inc
-                | game_shell::NavVerb::Practice => PracticeUiAction::MoveTab(1),
-                game_shell::NavVerb::Confirm => {
+                game_shell::SystemVerb::Back => PracticeUiAction::Back,
+                game_shell::SystemVerb::NavigateUp | game_shell::SystemVerb::Decrease => {
+                    PracticeUiAction::MoveTab(-1)
+                }
+                game_shell::SystemVerb::NavigateDown
+                | game_shell::SystemVerb::Increase
+                | game_shell::SystemVerb::NextTab => PracticeUiAction::MoveTab(1),
+                game_shell::SystemVerb::Confirm => {
                     PracticeUiAction::SelectTab(super::setup::PracticeTab::Setup)
                 }
+                _ => continue,
             }
         } else if split {
             match (*focus, action.verb) {
-                (_, game_shell::NavVerb::Back) => PracticeUiAction::Back,
-                (_, game_shell::NavVerb::Practice) => PracticeUiAction::ToggleSurfaceFocus,
-                (super::setup::PracticeSurfaceFocus::Preview(_), game_shell::NavVerb::Dec) => {
-                    PracticeUiAction::MoveTransportFocus(-1)
-                }
-                (super::setup::PracticeSurfaceFocus::Preview(_), game_shell::NavVerb::Inc) => {
-                    PracticeUiAction::MoveTransportFocus(1)
-                }
-                (super::setup::PracticeSurfaceFocus::Preview(_), game_shell::NavVerb::Confirm) => {
-                    PracticeUiAction::ActivateTransport
-                }
+                (_, game_shell::SystemVerb::Back) => PracticeUiAction::Back,
                 (
                     super::setup::PracticeSurfaceFocus::Preview(_),
-                    game_shell::NavVerb::Up | game_shell::NavVerb::Down,
+                    game_shell::SystemVerb::Decrease,
+                ) => PracticeUiAction::MoveTransportFocus(-1),
+                (
+                    super::setup::PracticeSurfaceFocus::Preview(_),
+                    game_shell::SystemVerb::Increase,
+                ) => PracticeUiAction::MoveTransportFocus(1),
+                (
+                    super::setup::PracticeSurfaceFocus::Preview(_),
+                    game_shell::SystemVerb::Confirm,
+                ) => PracticeUiAction::ActivateTransport,
+                (
+                    super::setup::PracticeSurfaceFocus::Preview(_),
+                    game_shell::SystemVerb::NavigateUp | game_shell::SystemVerb::NavigateDown,
                 ) => PracticeUiAction::ToggleSurfaceFocus,
-                (super::setup::PracticeSurfaceFocus::Settings, game_shell::NavVerb::Up) => {
-                    PracticeUiAction::MoveSelection(-1)
-                }
-                (super::setup::PracticeSurfaceFocus::Settings, game_shell::NavVerb::Down) => {
-                    PracticeUiAction::MoveSelection(1)
-                }
-                (super::setup::PracticeSurfaceFocus::Settings, game_shell::NavVerb::Dec) => {
-                    PracticeUiAction::Adjust(-1)
-                }
-                (super::setup::PracticeSurfaceFocus::Settings, game_shell::NavVerb::Inc) => {
-                    PracticeUiAction::Adjust(1)
-                }
-                (super::setup::PracticeSurfaceFocus::Settings, game_shell::NavVerb::Confirm) => {
+                (
+                    super::setup::PracticeSurfaceFocus::Settings,
+                    game_shell::SystemVerb::NavigateUp,
+                ) => PracticeUiAction::MoveSelection(-1),
+                (
+                    super::setup::PracticeSurfaceFocus::Settings,
+                    game_shell::SystemVerb::NavigateDown,
+                ) => PracticeUiAction::MoveSelection(1),
+                (
+                    super::setup::PracticeSurfaceFocus::Settings,
+                    game_shell::SystemVerb::Decrease,
+                ) => PracticeUiAction::Adjust(-1),
+                (
+                    super::setup::PracticeSurfaceFocus::Settings,
+                    game_shell::SystemVerb::Increase,
+                ) => PracticeUiAction::Adjust(1),
+                (super::setup::PracticeSurfaceFocus::Settings, game_shell::SystemVerb::Confirm) => {
                     PracticeUiAction::Confirm
                 }
+                _ => continue,
             }
         } else {
             match (*tab, action.verb) {
-                (_, game_shell::NavVerb::Back) => PracticeUiAction::Back,
-                (_, game_shell::NavVerb::Practice) => PracticeUiAction::MoveTab(1),
-                (super::setup::PracticeTab::Setup, game_shell::NavVerb::Up) => {
+                (_, game_shell::SystemVerb::Back) => PracticeUiAction::Back,
+                (_, game_shell::SystemVerb::NextTab) => PracticeUiAction::MoveTab(1),
+                (super::setup::PracticeTab::Setup, game_shell::SystemVerb::NavigateUp) => {
                     PracticeUiAction::MoveSelection(-1)
                 }
-                (super::setup::PracticeTab::Setup, game_shell::NavVerb::Down) => {
+                (super::setup::PracticeTab::Setup, game_shell::SystemVerb::NavigateDown) => {
                     PracticeUiAction::MoveSelection(1)
                 }
-                (super::setup::PracticeTab::Setup, game_shell::NavVerb::Dec) => {
+                (super::setup::PracticeTab::Setup, game_shell::SystemVerb::Decrease) => {
                     PracticeUiAction::Adjust(-1)
                 }
-                (super::setup::PracticeTab::Setup, game_shell::NavVerb::Inc) => {
+                (super::setup::PracticeTab::Setup, game_shell::SystemVerb::Increase) => {
                     PracticeUiAction::Adjust(1)
                 }
-                (super::setup::PracticeTab::Setup, game_shell::NavVerb::Confirm) => {
+                (super::setup::PracticeTab::Setup, game_shell::SystemVerb::Confirm) => {
                     PracticeUiAction::Confirm
                 }
                 (
                     super::setup::PracticeTab::Progress,
-                    game_shell::NavVerb::Up | game_shell::NavVerb::Dec,
+                    game_shell::SystemVerb::NavigateUp | game_shell::SystemVerb::Decrease,
                 )
-                | (super::setup::PracticeTab::Preview, game_shell::NavVerb::Up) => {
+                | (super::setup::PracticeTab::Preview, game_shell::SystemVerb::NavigateUp) => {
                     PracticeUiAction::MoveTab(-1)
                 }
                 (
                     super::setup::PracticeTab::Progress,
-                    game_shell::NavVerb::Down | game_shell::NavVerb::Inc,
+                    game_shell::SystemVerb::NavigateDown | game_shell::SystemVerb::Increase,
                 )
-                | (super::setup::PracticeTab::Preview, game_shell::NavVerb::Down) => {
+                | (super::setup::PracticeTab::Preview, game_shell::SystemVerb::NavigateDown) => {
                     PracticeUiAction::MoveTab(1)
                 }
-                (super::setup::PracticeTab::Progress, game_shell::NavVerb::Confirm) => {
+                (super::setup::PracticeTab::Progress, game_shell::SystemVerb::Confirm) => {
                     PracticeUiAction::SelectTab(super::setup::PracticeTab::Setup)
                 }
-                (super::setup::PracticeTab::Preview, game_shell::NavVerb::Dec) => {
+                (super::setup::PracticeTab::Preview, game_shell::SystemVerb::Decrease) => {
                     PracticeUiAction::Preview(PreviewAction::PrevBar)
                 }
-                (super::setup::PracticeTab::Preview, game_shell::NavVerb::Inc) => {
+                (super::setup::PracticeTab::Preview, game_shell::SystemVerb::Increase) => {
                     PracticeUiAction::Preview(PreviewAction::NextBar)
                 }
-                (super::setup::PracticeTab::Preview, game_shell::NavVerb::Confirm) => {
+                (super::setup::PracticeTab::Preview, game_shell::SystemVerb::Confirm) => {
                     PracticeUiAction::Preview(if flow.preview == PreviewState::Playing {
                         PreviewAction::Pause
                     } else {
                         PreviewAction::Play
                     })
                 }
+                _ => continue,
             }
         };
         actions.write(action);

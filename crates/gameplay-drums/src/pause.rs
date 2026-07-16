@@ -809,17 +809,17 @@ fn despawn_overlay(mut commands: Commands, overlays: Query<Entity, With<PauseOve
 
 /// Keyboard → `NavAction` for the pause overlay. Esc keeps its own toggle path.
 fn pause_kb_emit(keys: Res<ButtonInput<KeyCode>>, mut out: MessageWriter<game_shell::NavAction>) {
-    use game_shell::{NavAction, NavSource, NavVerb};
+    use game_shell::{NavAction, NavSource, SystemVerb};
     let verb = if keys.just_pressed(KeyCode::ArrowDown) {
-        NavVerb::Down
+        SystemVerb::NavigateDown
     } else if keys.just_pressed(KeyCode::ArrowUp) {
-        NavVerb::Up
+        SystemVerb::NavigateUp
     } else if keys.just_pressed(KeyCode::ArrowLeft) {
-        NavVerb::Dec
+        SystemVerb::Decrease
     } else if keys.just_pressed(KeyCode::ArrowRight) {
-        NavVerb::Inc
+        SystemVerb::Increase
     } else if keys.just_pressed(KeyCode::Enter) || keys.just_pressed(KeyCode::Space) {
-        NavVerb::Confirm
+        SystemVerb::Confirm
     } else {
         return;
     };
@@ -853,7 +853,7 @@ fn pause_pointer_emit(
     >,
     mut out: MessageWriter<game_shell::NavAction>,
 ) {
-    use game_shell::{NavAction, NavSource, NavVerb};
+    use game_shell::{NavAction, NavSource, SystemVerb};
     let context = if practice.is_some() {
         PauseContext::Practice
     } else {
@@ -867,7 +867,7 @@ fn pause_pointer_emit(
             selection.0 = index;
             *view = PauseView::Menu;
             out.write(NavAction {
-                verb: NavVerb::Confirm,
+                verb: SystemVerb::Confirm,
                 source: NavSource::Keyboard,
                 coarse: false,
             });
@@ -882,9 +882,9 @@ fn pause_pointer_emit(
             *view = PauseView::QuickSettings;
             out.write(NavAction {
                 verb: if *setting == QuickSettingKind::Back {
-                    NavVerb::Confirm
+                    SystemVerb::Confirm
                 } else {
-                    NavVerb::Inc
+                    SystemVerb::Increase
                 },
                 source: NavSource::Keyboard,
                 coarse: false,
@@ -903,9 +903,9 @@ fn pause_pointer_emit(
             *view = PauseView::QuickSettings;
             out.write(NavAction {
                 verb: if button.direction < 0 {
-                    NavVerb::Dec
+                    SystemVerb::Decrease
                 } else {
-                    NavVerb::Inc
+                    SystemVerb::Increase
                 },
                 source: NavSource::Keyboard,
                 coarse: false,
@@ -926,7 +926,7 @@ pub(crate) fn pause_menu_input(
     mut ui: PauseMenuUi,
     mut quick_runtime: crate::perf_hotkeys::PauseQuickSettings,
 ) {
-    use game_shell::NavVerb;
+    use game_shell::SystemVerb;
     let context = if state.practice.is_some() {
         PauseContext::Practice
     } else {
@@ -939,26 +939,28 @@ pub(crate) fn pause_menu_input(
     for action in actions.read() {
         match *state.view {
             PauseView::Menu => match action.verb {
-                NavVerb::Down => state.selection.0 = (state.selection.0 + 1) % items.len(),
-                NavVerb::Up => {
+                SystemVerb::NavigateDown => {
+                    state.selection.0 = (state.selection.0 + 1) % items.len()
+                }
+                SystemVerb::NavigateUp => {
                     state.selection.0 = (state.selection.0 + items.len() - 1) % items.len();
                 }
-                NavVerb::Confirm => confirm = true,
-                NavVerb::Back => resume = true,
+                SystemVerb::Confirm => confirm = true,
+                SystemVerb::Back => resume = true,
                 _ => {}
             },
             PauseView::QuickSettings => match action.verb {
-                NavVerb::Down => {
+                SystemVerb::NavigateDown => {
                     state.quick_selection.0 = (state.quick_selection.0 + 1) % QUICK_SETTINGS.len();
                 }
-                NavVerb::Up => {
+                SystemVerb::NavigateUp => {
                     state.quick_selection.0 =
                         (state.quick_selection.0 + QUICK_SETTINGS.len() - 1) % QUICK_SETTINGS.len();
                 }
-                NavVerb::Dec => adjustment = -1,
-                NavVerb::Inc => adjustment = 1,
-                NavVerb::Confirm => confirm = true,
-                NavVerb::Back => *state.view = PauseView::Menu,
+                SystemVerb::Decrease => adjustment = -1,
+                SystemVerb::Increase => adjustment = 1,
+                SystemVerb::Confirm => confirm = true,
+                SystemVerb::Back => *state.view = PauseView::Menu,
                 _ => {}
             },
         }
@@ -1413,7 +1415,7 @@ mod tests {
         world.init_resource::<dtx_audio::BgmHandle>();
         world.init_resource::<Assets<AudioInstance>>();
         world.write_message(game_shell::NavAction {
-            verb: game_shell::NavVerb::Confirm,
+            verb: game_shell::SystemVerb::Confirm,
             source: game_shell::NavSource::Keyboard,
             coarse: false,
         });

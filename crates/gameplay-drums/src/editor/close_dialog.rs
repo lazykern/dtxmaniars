@@ -238,13 +238,13 @@ fn close_dialog_keys(
     let mut nav_confirm = false;
     let mut nav_back = false;
     for action in nav.read() {
-        use game_shell::NavVerb;
+        use game_shell::SystemVerb;
         match action.verb {
-            NavVerb::Dec | NavVerb::Up => nav_left = true,
-            NavVerb::Inc | NavVerb::Down => nav_right = true,
-            NavVerb::Confirm => nav_confirm = true,
-            NavVerb::Back => nav_back = true,
-            NavVerb::Practice => {}
+            SystemVerb::Decrease | SystemVerb::NavigateUp => nav_left = true,
+            SystemVerb::Increase | SystemVerb::NavigateDown => nav_right = true,
+            SystemVerb::Confirm => nav_confirm = true,
+            SystemVerb::Back => nav_back = true,
+            _ => {}
         }
     }
     let next = step_focus(

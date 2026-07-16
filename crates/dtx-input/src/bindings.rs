@@ -223,6 +223,8 @@ fn default_menu_midi_sources(verb: SystemVerb) -> &'static [BindSource] {
         SystemVerb::Confirm => &[Midi { note: 36 }, Midi { note: 35 }],
         // SD
         SystemVerb::Back => &[Midi { note: 38 }, Midi { note: 40 }],
+        // FT
+        SystemVerb::NextTab => &[Midi { note: 43 }, Midi { note: 41 }],
         _ => &[],
     }
 }

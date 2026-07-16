@@ -11,7 +11,7 @@ pub mod states;
 mod performance;
 mod transition;
 
-pub use navigation::{MidiConnected, NavAction, NavSource, NavVerb};
+pub use navigation::{MidiConnected, NavAction, NavSource, SystemVerb};
 pub use score_store::ScoreStoreResource;
 pub use states::{
     AppState, CompletedRunContext, CustomizeTab, EGameMode, EditorSession, PauseState,

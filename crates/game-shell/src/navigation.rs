@@ -10,25 +10,9 @@ use std::time::{Duration, Instant};
 use bevy::prelude::*;
 
 pub use dtx_input::MidiConnected;
-
-/// What the input means, not what produced it.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum NavVerb {
-    /// Move focus up / previous. Pads: HH.
-    Up,
-    /// Move focus down / next. Pads: CY/RD.
-    Down,
-    /// Enter / select / apply. Pads: BD.
-    Confirm,
-    /// Back out / cancel. Pads: SD.
-    Back,
-    /// Decrement focused value (keyboard Left; pads reuse Up in adjust mode).
-    Dec,
-    /// Increment focused value (keyboard Right; pads reuse Down in adjust mode).
-    Inc,
-    /// Start practice mode (keyboard Shift+Enter; pads FT at difficulty level).
-    Practice,
-}
+/// The canonical semantic action vocabulary (see ADR: unified SystemVerb).
+/// `NavAction` is an envelope around it, not a second vocabulary.
+pub use dtx_input::SystemVerb;
 
 /// Which device produced the action. Consumers may branch on this: keyboard
 /// keeps its flat navigation model, pads use the two-level model.
@@ -44,7 +28,7 @@ pub enum NavSource {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Message)]
 pub struct NavAction {
     /// Semantic meaning of the action.
-    pub verb: NavVerb,
+    pub verb: SystemVerb,
     /// Device that produced it.
     pub source: NavSource,
     /// Shift held (keyboard only) — consumers multiply steps by 10.
@@ -119,15 +103,18 @@ impl NavGuard {
 }
 
 /// GITADORA-ish convention. Lane ids per `dtx_input::lane_map::LANE_ORDER`.
-pub(crate) fn verb_for_lane(lane: u8) -> Option<NavVerb> {
+/// Transitional: replaced by configured profile bindings (`SystemVerbHit`)
+/// once every menu consumer is on the shared router. Practice is no longer a
+/// shared semantic action — it is a visible UI choice on Song Ready.
+pub(crate) fn verb_for_lane(lane: u8) -> Option<SystemVerb> {
     match lane {
-        0 | 7 => Some(NavVerb::Up),
-        6 | 8 => Some(NavVerb::Down),
-        2 => Some(NavVerb::Confirm),
-        1 => Some(NavVerb::Back),
-        3 => Some(NavVerb::Dec),
-        4 => Some(NavVerb::Inc),
-        5 => Some(NavVerb::Practice),
+        0 | 7 => Some(SystemVerb::NavigateUp),
+        6 | 8 => Some(SystemVerb::NavigateDown),
+        2 => Some(SystemVerb::Confirm),
+        1 => Some(SystemVerb::Back),
+        3 => Some(SystemVerb::Decrease),
+        4 => Some(SystemVerb::Increase),
+        5 => Some(SystemVerb::NextTab),
         _ => None,
     }
 }
@@ -188,7 +175,7 @@ mod tests {
     #[test]
     fn nav_action_is_copy_and_comparable() {
         let a = NavAction {
-            verb: NavVerb::Up,
+            verb: SystemVerb::NavigateUp,
             source: NavSource::Pad,
             coarse: false,
         };
@@ -198,22 +185,22 @@ mod tests {
 
     #[test]
     fn lane_verbs_follow_gitadora_convention() {
-        assert_eq!(verb_for_lane(0), Some(NavVerb::Up)); // HH close
-        assert_eq!(verb_for_lane(7), Some(NavVerb::Up)); // HH open
-        assert_eq!(verb_for_lane(6), Some(NavVerb::Down)); // CY
-        assert_eq!(verb_for_lane(8), Some(NavVerb::Down)); // RD
-        assert_eq!(verb_for_lane(2), Some(NavVerb::Confirm)); // BD
-        assert_eq!(verb_for_lane(1), Some(NavVerb::Back)); // SD
-        assert_eq!(verb_for_lane(5), Some(NavVerb::Practice)); // FT
-        assert_eq!(verb_for_lane(3), Some(NavVerb::Dec)); // HT
-        assert_eq!(verb_for_lane(4), Some(NavVerb::Inc)); // LT
+        assert_eq!(verb_for_lane(0), Some(SystemVerb::NavigateUp)); // HH close
+        assert_eq!(verb_for_lane(7), Some(SystemVerb::NavigateUp)); // HH open
+        assert_eq!(verb_for_lane(6), Some(SystemVerb::NavigateDown)); // CY
+        assert_eq!(verb_for_lane(8), Some(SystemVerb::NavigateDown)); // RD
+        assert_eq!(verb_for_lane(2), Some(SystemVerb::Confirm)); // BD
+        assert_eq!(verb_for_lane(1), Some(SystemVerb::Back)); // SD
+        assert_eq!(verb_for_lane(5), Some(SystemVerb::NextTab)); // FT
+        assert_eq!(verb_for_lane(3), Some(SystemVerb::Decrease)); // HT
+        assert_eq!(verb_for_lane(4), Some(SystemVerb::Increase)); // LT
         assert_eq!(verb_for_lane(10), None); // LP unmapped
     }
 
     #[test]
     fn toms_supply_explicit_quick_setting_adjustment_verbs() {
-        assert_eq!(verb_for_lane(3), Some(NavVerb::Dec));
-        assert_eq!(verb_for_lane(4), Some(NavVerb::Inc));
+        assert_eq!(verb_for_lane(3), Some(SystemVerb::Decrease));
+        assert_eq!(verb_for_lane(4), Some(SystemVerb::Increase));
     }
 
     #[test]

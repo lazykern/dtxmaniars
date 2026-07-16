@@ -192,7 +192,7 @@ fn press_key(app: &mut App, key: KeyCode) {
         .release(key);
 }
 
-fn send_nav(app: &mut App, verb: game_shell::NavVerb) {
+fn send_nav(app: &mut App, verb: game_shell::SystemVerb) {
     app.world_mut().write_message(game_shell::NavAction {
         verb,
         source: game_shell::NavSource::Keyboard,
@@ -623,24 +623,24 @@ fn snap_and_preroll_nav_adjustments_are_directional_and_wrap() {
     let mut app = setup_hud_app(1280.0, 720.0, dtx_config::TextScale::Standard);
 
     app.world_mut().resource_mut::<SetupSelection>().0 = SetupItem::Snap;
-    send_nav(&mut app, game_shell::NavVerb::Dec);
+    send_nav(&mut app, game_shell::SystemVerb::Decrease);
     assert_eq!(
         app.world().resource::<PracticeDraft>().snap,
         SnapDivisor::Quarter
     );
-    send_nav(&mut app, game_shell::NavVerb::Inc);
+    send_nav(&mut app, game_shell::SystemVerb::Increase);
     assert_eq!(
         app.world().resource::<PracticeDraft>().snap,
         SnapDivisor::Bar
     );
 
     app.world_mut().resource_mut::<SetupSelection>().0 = SetupItem::Preroll;
-    send_nav(&mut app, game_shell::NavVerb::Dec);
+    send_nav(&mut app, game_shell::SystemVerb::Decrease);
     assert_eq!(
         app.world().resource::<PracticeDraft>().preroll,
         gameplay_drums::practice::session::PrerollSetting::Off
     );
-    send_nav(&mut app, game_shell::NavVerb::Inc);
+    send_nav(&mut app, game_shell::SystemVerb::Increase);
     assert_eq!(
         app.world().resource::<PracticeDraft>().preroll,
         gameplay_drums::practice::session::PrerollSetting::OneBar
@@ -1562,7 +1562,7 @@ fn keyboard_and_pad_tab_actions_share_the_tab_reducer() {
         PracticeTab::Progress
     );
 
-    send_nav(&mut app, game_shell::NavVerb::Practice);
+    send_nav(&mut app, game_shell::SystemVerb::NextTab);
     assert_eq!(*app.world().resource::<PracticeTab>(), PracticeTab::Preview);
 
     press_key(&mut app, KeyCode::Space);
@@ -1573,7 +1573,7 @@ fn keyboard_and_pad_tab_actions_share_the_tab_reducer() {
         .any(|action| *action == gameplay_drums::practice::PreviewAction::Play));
 
     let setup_selection = *app.world().resource::<SetupSelection>();
-    send_nav(&mut app, game_shell::NavVerb::Dec);
+    send_nav(&mut app, game_shell::SystemVerb::Decrease);
     assert_eq!(*app.world().resource::<SetupSelection>(), setup_selection);
     assert!(app
         .world()
@@ -1581,7 +1581,7 @@ fn keyboard_and_pad_tab_actions_share_the_tab_reducer() {
         .iter_current_update_messages()
         .any(|action| *action == gameplay_drums::practice::PreviewAction::PrevBar));
 
-    send_nav(&mut app, game_shell::NavVerb::Up);
+    send_nav(&mut app, game_shell::SystemVerb::NavigateUp);
     assert_eq!(
         *app.world().resource::<PracticeTab>(),
         PracticeTab::Progress
@@ -1827,7 +1827,7 @@ fn split_keyboard_and_pad_reach_every_transport_without_mutating_settings() {
             let original = app.world().resource::<PracticeDraft>().clone();
 
             if pad {
-                send_nav(&mut app, game_shell::NavVerb::Practice);
+                send_nav(&mut app, game_shell::SystemVerb::NextTab);
             } else {
                 press_key(&mut app, KeyCode::Tab);
             }
@@ -1847,7 +1847,7 @@ fn split_keyboard_and_pad_reach_every_transport_without_mutating_settings() {
                 "only the active Split surface may carry the focus marker"
             );
             if pad {
-                send_nav(&mut app, game_shell::NavVerb::Confirm);
+                send_nav(&mut app, game_shell::SystemVerb::Confirm);
             } else {
                 press_key(&mut app, KeyCode::Enter);
             }
@@ -1873,8 +1873,8 @@ fn split_keyboard_and_pad_reach_every_transport_without_mutating_settings() {
                 ),
             ] {
                 if pad {
-                    send_nav(&mut app, game_shell::NavVerb::Inc);
-                    send_nav(&mut app, game_shell::NavVerb::Confirm);
+                    send_nav(&mut app, game_shell::SystemVerb::Increase);
+                    send_nav(&mut app, game_shell::SystemVerb::Confirm);
                 } else {
                     press_key(&mut app, KeyCode::ArrowRight);
                     press_key(&mut app, KeyCode::Enter);
@@ -1893,8 +1893,8 @@ fn split_keyboard_and_pad_reach_every_transport_without_mutating_settings() {
             app.world_mut().resource_mut::<PracticeFlow>().preview =
                 gameplay_drums::practice::PreviewState::Playing;
             if pad {
-                send_nav(&mut app, game_shell::NavVerb::Dec);
-                send_nav(&mut app, game_shell::NavVerb::Confirm);
+                send_nav(&mut app, game_shell::SystemVerb::Decrease);
+                send_nav(&mut app, game_shell::SystemVerb::Confirm);
             } else {
                 press_key(&mut app, KeyCode::ArrowLeft);
                 press_key(&mut app, KeyCode::Enter);
@@ -1906,7 +1906,7 @@ fn split_keyboard_and_pad_reach_every_transport_without_mutating_settings() {
                 .any(|seen| *seen == gameplay_drums::practice::PreviewAction::Pause));
 
             if pad {
-                send_nav(&mut app, game_shell::NavVerb::Practice);
+                send_nav(&mut app, game_shell::SystemVerb::NextTab);
             } else {
                 press_key(&mut app, KeyCode::Tab);
             }
@@ -1926,7 +1926,7 @@ fn split_keyboard_and_pad_reach_every_transport_without_mutating_settings() {
             assert_eq!(count::<PracticeSettingsPane>(&mut app), 1);
 
             if pad {
-                send_nav(&mut app, game_shell::NavVerb::Back);
+                send_nav(&mut app, game_shell::SystemVerb::Back);
             } else {
                 press_key(&mut app, KeyCode::Escape);
             }
@@ -1961,7 +1961,7 @@ fn assert_split_progress_transport(mut app: App, pad: bool) {
     );
 
     if pad {
-        send_nav(&mut app, game_shell::NavVerb::Practice);
+        send_nav(&mut app, game_shell::SystemVerb::NextTab);
     } else {
         press_key(&mut app, KeyCode::Tab);
     }
@@ -1975,9 +1975,9 @@ fn assert_split_progress_transport(mut app: App, pad: bool) {
     );
 
     if pad {
-        send_nav(&mut app, game_shell::NavVerb::Inc);
-        send_nav(&mut app, game_shell::NavVerb::Inc);
-        send_nav(&mut app, game_shell::NavVerb::Confirm);
+        send_nav(&mut app, game_shell::SystemVerb::Increase);
+        send_nav(&mut app, game_shell::SystemVerb::Increase);
+        send_nav(&mut app, game_shell::SystemVerb::Confirm);
     } else {
         press_key(&mut app, KeyCode::ArrowRight);
         press_key(&mut app, KeyCode::ArrowRight);
@@ -1995,8 +1995,8 @@ fn assert_split_progress_transport(mut app: App, pad: bool) {
     assert_eq!(*app.world().resource::<PracticeDraft>(), original);
 
     if pad {
-        send_nav(&mut app, game_shell::NavVerb::Practice);
-        send_nav(&mut app, game_shell::NavVerb::Confirm);
+        send_nav(&mut app, game_shell::SystemVerb::NextTab);
+        send_nav(&mut app, game_shell::SystemVerb::Confirm);
     } else {
         press_key(&mut app, KeyCode::Tab);
         press_key(&mut app, KeyCode::Enter);
@@ -2055,7 +2055,7 @@ fn progress_hides_primary_action_and_cannot_focus_or_activate_it() {
             .is_none());
 
         click_tab(&mut app, "Progress");
-        send_nav(&mut app, game_shell::NavVerb::Confirm);
+        send_nav(&mut app, game_shell::SystemVerb::Confirm);
         assert_eq!(*app.world().resource::<PracticeTab>(), PracticeTab::Setup);
         assert!(app
             .world()
