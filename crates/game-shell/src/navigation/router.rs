@@ -79,6 +79,8 @@ pub fn route(
 #[derive(SystemSet, Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct NavRouterSet;
 
+// A Bevy system's parameters are its dependency list, not an API surface.
+#[allow(clippy::too_many_arguments)]
 pub(super) fn route_verbs(
     stack: Res<NavContextStack>,
     keys: Res<ButtonInput<KeyCode>>,

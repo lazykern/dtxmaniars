@@ -1,5 +1,4 @@
 use bevy::camera::{Camera, Camera2d, ComputedCameraValues, RenderTargetInfo, Viewport};
-use bevy::ecs::system::RunSystemOnce;
 use bevy::prelude::*;
 use bevy::window::{PrimaryWindow, WindowResolution};
 use game_shell::{AppState, PauseState};
