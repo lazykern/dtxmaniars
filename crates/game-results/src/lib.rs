@@ -107,6 +107,7 @@ pub fn plugin(app: &mut App) {
                 ui::animate_staggered_reveal,
             )
                 .chain()
+                .after(game_shell::NavRouterSet)
                 .run_if(in_state(AppState::Result))
                 .run_if(result_display_available),
         );

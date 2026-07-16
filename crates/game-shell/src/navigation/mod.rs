@@ -129,6 +129,12 @@ pub struct NavMapSet;
 #[derive(SystemSet, Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct NavStackWriteSet;
 
+/// Update-schedule set for systems that refine the published stack top with
+/// screen-local state (e.g. Song Ready layers, practice preview focus). Runs
+/// after [`NavStackWriteSet`] and before the mirror and the router.
+#[derive(SystemSet, Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct NavStackRefineSet;
+
 /// Derives the transitional [`ActiveNavContext`] from the stack top.
 /// Exclusive contexts and [`NavContext::LiveGameplay`] mirror to `None`: the
 /// pad mapper must stay suppressed there exactly as before the stack existed.
@@ -181,10 +187,11 @@ pub fn plugin(app: &mut App) {
         .init_resource::<NavContextStack>()
         .init_resource::<LastIntentionalInputSource>()
         .init_resource::<PromptSourcePreference>()
+        .configure_sets(Update, NavStackRefineSet.after(NavStackWriteSet))
         .add_systems(
             Update,
             mirror_stack_to_active
-                .after(NavStackWriteSet)
+                .after(NavStackRefineSet)
                 .before(NavMapSet),
         )
         .add_systems(Update, pad_nav_mapper.in_set(NavMapSet))
@@ -192,7 +199,7 @@ pub fn plugin(app: &mut App) {
             Update,
             router::route_verbs
                 .in_set(NavRouterSet)
-                .after(NavStackWriteSet),
+                .after(NavStackRefineSet),
         );
 }
 

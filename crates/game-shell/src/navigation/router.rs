@@ -28,12 +28,15 @@ pub enum Routed {
     Dropped,
 }
 
-/// Gate on router-produced menu `NavAction`s. Stays `false` until the screens
-/// migrate off their local keyboard emitters and `pad_nav_mapper` dies —
-/// running both would double-drive every menu (keyboard) and double-consume
-/// the guard (MIDI). Live verbs and `LastIntentionalInputSource` updates are
-/// unaffected. Flips on in the screen-migration task.
-const ROUTE_MENU: bool = false;
+/// Gate on router-delivered keyboard menu `NavAction`s. The screens' local
+/// keyboard emitters are gone; keyboard menu input flows dtx-input
+/// `keyboard_system_verbs` → router → `NavAction`.
+const ROUTE_KEYBOARD_MENU: bool = true;
+
+/// Gate on router-delivered MIDI menu `NavAction`s. Stays `false` while the
+/// transitional `pad_nav_mapper` still owns menu MIDI (and the shared
+/// `NavGuard`); flips on when the pad mapper is deleted.
+const ROUTE_MIDI_MENU: bool = false;
 
 /// Route one hit. Pure: all Bevy state is passed in. `guard.accept(now)` both
 /// checks and records, so only MIDI-sourced menu verbs consult it — keyboard
@@ -100,14 +103,26 @@ pub(super) fn route_verbs(
     let now = Instant::now();
     // While pad_nav_mapper still owns menu MIDI, the router must not sync or
     // consume the shared NavGuard — `accept()` records, and a second consumer
-    // would break the mapper's grace/debounce.
-    if ROUTE_MENU {
+    // would break the mapper's grace/debounce. The guard belongs to the pad
+    // mapper until the MIDI cutover.
+    if ROUTE_MIDI_MENU {
         guard.sync(stack.top(), now);
     }
     let coarse = keys.pressed(KeyCode::ShiftLeft) || keys.pressed(KeyCode::ShiftRight);
     for hit in hits.read() {
-        if !ROUTE_MENU && hit.verb.activation_scope() != VerbScope::LiveSystem {
-            continue;
+        if hit.verb.activation_scope() != VerbScope::LiveSystem {
+            let deliver = match hit.source {
+                dtx_input::VerbSource::Keyboard => {
+                    // Transitional: the layout editor still runs its own
+                    // keyboard→NavAction emitters; skip router delivery there
+                    // to avoid double-driving it until the editor migrates.
+                    ROUTE_KEYBOARD_MENU && !matches!(stack.top(), Some(NavContext::LayoutEditor))
+                }
+                dtx_input::VerbSource::Midi => ROUTE_MIDI_MENU,
+            };
+            if !deliver {
+                continue;
+            }
         }
         match route(stack.top(), hit.verb, hit.source, coarse, &mut guard, now) {
             Routed::Menu(action) => {
@@ -330,6 +345,88 @@ mod tests {
                 repeated: false,
             })
         );
+    }
+
+    fn router_app() -> App {
+        let mut app = App::new();
+        app.add_message::<dtx_input::SystemVerbHit>()
+            .add_message::<NavAction>()
+            .add_message::<LiveVerb>()
+            .add_message::<MouseIntent>()
+            .init_resource::<ButtonInput<KeyCode>>()
+            .init_resource::<NavGuard>()
+            .init_resource::<NavContextStack>()
+            .insert_resource(LastIntentionalInputSource(InputSource::MidiKit))
+            .add_systems(Update, route_verbs);
+        app
+    }
+
+    fn menu_actions(app: &App) -> Vec<NavAction> {
+        app.world()
+            .resource::<Messages<NavAction>>()
+            .iter_current_update_messages()
+            .copied()
+            .collect()
+    }
+
+    /// End-to-end: keyboard menu verbs are now routed. Confirm on Home
+    /// produces a NavAction without touching the guard.
+    #[test]
+    fn route_verbs_system_delivers_keyboard_menu_actions() {
+        let mut app = router_app();
+        app.world_mut()
+            .resource_mut::<NavContextStack>()
+            .push(NavContext::Home);
+        app.world_mut().write_message(dtx_input::SystemVerbHit {
+            verb: SystemVerb::Confirm,
+            source: VerbSource::Keyboard,
+        });
+        app.update();
+        assert_eq!(
+            menu_actions(&app),
+            vec![NavAction {
+                verb: SystemVerb::Confirm,
+                source: InputSource::Keyboard,
+                coarse: false,
+                repeated: false,
+            }]
+        );
+        assert_eq!(
+            app.world().resource::<LastIntentionalInputSource>().0,
+            InputSource::Keyboard
+        );
+    }
+
+    /// MIDI menu verbs stay with the transitional pad mapper: the router
+    /// drops them and must not consume the shared guard.
+    #[test]
+    fn route_verbs_system_drops_midi_menu_verbs_while_pad_mapper_owns_them() {
+        let mut app = router_app();
+        app.world_mut()
+            .resource_mut::<NavContextStack>()
+            .push(NavContext::Home);
+        app.world_mut().write_message(dtx_input::SystemVerbHit {
+            verb: SystemVerb::Confirm,
+            source: VerbSource::Midi,
+        });
+        app.update();
+        assert_eq!(menu_actions(&app), vec![]);
+    }
+
+    /// Transitional: the layout editor still emits its own keyboard
+    /// NavActions, so the router skips keyboard menu delivery there.
+    #[test]
+    fn route_verbs_system_skips_keyboard_menu_delivery_in_layout_editor() {
+        let mut app = router_app();
+        app.world_mut()
+            .resource_mut::<NavContextStack>()
+            .push(NavContext::LayoutEditor);
+        app.world_mut().write_message(dtx_input::SystemVerbHit {
+            verb: SystemVerb::NavigateDown,
+            source: VerbSource::Keyboard,
+        });
+        app.update();
+        assert_eq!(menu_actions(&app), vec![]);
     }
 
     /// End-to-end wiring: a keyboard Pause hit through the system produces a

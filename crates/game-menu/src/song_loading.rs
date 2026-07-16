@@ -18,8 +18,6 @@
 //!
 //! BGM playback + real asset progress → M5.
 
-use bevy::input::ButtonInput;
-use bevy::input::keyboard::KeyCode;
 use bevy::prelude::*;
 use bevy::tasks::{AsyncComputeTaskPool, Task, block_on, futures_lite::future};
 use bevy_kira_audio::prelude::{Audio, AudioInstance};
@@ -255,7 +253,7 @@ pub fn plugin(app: &mut App) {
         .add_systems(
             Update,
             (
-                watch_cancel_key,
+                watch_cancel_key.after(game_shell::NavRouterSet),
                 poll_chart_parse,
                 wait_for_audio.after(poll_chart_parse),
                 update_status_text.after(wait_for_audio),
@@ -746,12 +744,12 @@ fn spawn_loading(
         });
 }
 
-/// Watch for a cancel during load: Esc on the keyboard, or `SystemVerb::Back` — SD
-/// — from the kit (`game_shell::navigation` emits it while `NavContext::SongLoading` is active).
-/// On cancel, mark the load; the next `poll_chart_parse` tick sees the flag and
-/// fails fast, and `advance_when_loaded` routes back to SongSelect.
+/// Watch for a cancel during load: `SystemVerb::Back` as a `NavAction` — the
+/// router delivers keyboard Esc, the pad mapper delivers kit SD while
+/// `NavContext::SongLoading` is active. On cancel, mark the load; the next
+/// `poll_chart_parse` tick sees the flag and fails fast, and
+/// `advance_when_loaded` routes back to SongSelect.
 fn watch_cancel_key(
-    keys: Res<ButtonInput<KeyCode>>,
     mut actions: MessageReader<NavAction>,
     mut cancel: ResMut<CancelRequested>,
     phase: Res<LoadPhase>,
@@ -767,8 +765,7 @@ fn watch_cancel_key(
         actions.clear();
         return;
     }
-    let pad_back = actions.read().any(|action| action.verb == SystemVerb::Back);
-    if keys.just_pressed(KeyCode::Escape) || pad_back {
+    if actions.read().any(|action| action.verb == SystemVerb::Back) {
         info!("SongLoading: cancel requested — cancelling load");
         cancel.0 = true;
     }
@@ -1092,7 +1089,6 @@ mod tests {
         use game_shell::InputSource;
 
         let mut world = World::new();
-        world.init_resource::<ButtonInput<KeyCode>>();
         world.init_resource::<Messages<NavAction>>();
         world.init_resource::<CancelRequested>();
         world.insert_resource(phase);

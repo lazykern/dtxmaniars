@@ -45,12 +45,12 @@ pub(crate) enum ResultAction {
     None,
 }
 
-/// HH/CY (Up/Down) and keyboard ←/→ (mapped to Up/Down by the driver) move
-/// the cursor, clamped at the ends. BD/Enter activates, SD/Esc continues,
-/// FT jumps to practice.
+/// HH/CY (Up/Down) and keyboard ←/→ (router-delivered NavigateLeft/Right)
+/// move the cursor, clamped at the ends. BD/Enter activates, SD/Esc
+/// continues, FT jumps to practice.
 pub(crate) fn reduce_result_nav(cursor: ResultVerb, verb: SystemVerb) -> ResultAction {
     match verb {
-        SystemVerb::NavigateUp | SystemVerb::Decrease => {
+        SystemVerb::NavigateUp | SystemVerb::NavigateLeft | SystemVerb::Decrease => {
             let moved = cursor.prev();
             if moved == cursor {
                 ResultAction::None
@@ -58,7 +58,7 @@ pub(crate) fn reduce_result_nav(cursor: ResultVerb, verb: SystemVerb) -> ResultA
                 ResultAction::Moved(moved)
             }
         }
-        SystemVerb::NavigateDown | SystemVerb::Increase => {
+        SystemVerb::NavigateDown | SystemVerb::NavigateRight | SystemVerb::Increase => {
             let moved = cursor.next();
             if moved == cursor {
                 ResultAction::None
@@ -97,20 +97,14 @@ pub(crate) fn result_nav(
     };
 
     // Pads (mapper's screen-enter grace already filters the song's last
-    // notes) + keyboard, folded onto the same verbs. ←/→ are the natural
-    // axis for a horizontal row; pads reuse Up/Down.
+    // notes) and keyboard arrive on the same router-delivered NavActions —
+    // no raw arrow/Enter/Esc reads here, or every press would act twice.
+    // ←/→ are the natural axis for a horizontal row; pads reuse Up/Down.
+    // Screen-local raw accelerators (not bound menu keys, no NavAction):
+    // Space activates like Confirm, R retries, Tab toggles details.
     let mut verbs: Vec<SystemVerb> = actions.read().map(|a| a.verb).collect();
-    if keys.just_pressed(KeyCode::ArrowLeft) {
-        verbs.push(SystemVerb::NavigateUp);
-    }
-    if keys.just_pressed(KeyCode::ArrowRight) {
-        verbs.push(SystemVerb::NavigateDown);
-    }
-    if keys.just_pressed(KeyCode::Enter) || keys.just_pressed(KeyCode::Space) {
+    if keys.just_pressed(KeyCode::Space) {
         verbs.push(SystemVerb::Confirm);
-    }
-    if keys.just_pressed(KeyCode::Escape) {
-        verbs.push(SystemVerb::Back);
     }
     let retry_key = keys.just_pressed(KeyCode::KeyR);
     let toggle_details = keys.just_pressed(KeyCode::Tab);
@@ -455,6 +449,75 @@ mod tests {
         world.run_system_once(result_nav).expect("driver runs");
         assert_eq!(drain_requests(&mut world), vec![AppState::SongSelect]);
         assert_eq!(*world.resource::<PracticeIntent>(), PracticeIntent::None);
+    }
+
+    /// End to end (double-delivery regression): one physical ArrowRight press
+    /// flows dtx-input `keyboard_system_verbs` → game-shell router → NavAction
+    /// → `result_nav`, moving the cursor by EXACTLY one. Raw arrow/Enter/Esc
+    /// reads were removed from the driver — with the router also delivering,
+    /// they would have double-acted on every press.
+    #[test]
+    fn keyboard_right_arrow_moves_cursor_exactly_one_through_the_router() {
+        let mut app = App::new();
+        app.add_plugins(bevy::input::InputPlugin)
+            .add_plugins(game_shell::navigation::plugin)
+            .add_message::<dtx_input::SystemVerbHit>()
+            .add_message::<dtx_input::PadNavHit>()
+            .add_message::<game_shell::TransitionRequest>()
+            .init_resource::<dtx_input::BindResolver>()
+            .init_resource::<dtx_input::RawInputOwned>()
+            .insert_resource(ResultVerb::default())
+            .insert_resource(PracticeIntent::default())
+            .insert_resource(ResultDisplaySnapshot(Some(crate::ResultDisplay::default())))
+            .insert_resource(ResultDetailsOpen::default())
+            .insert_resource(RevealState {
+                elapsed_ms: 2_000.0,
+                total_ms: 1_130.0,
+                done: true,
+            })
+            .insert_resource(ActiveChart {
+                chart: dtx_core::Chart::default(),
+                source_path: Some(std::path::PathBuf::from("song.dtx")),
+            })
+            .add_systems(
+                PreUpdate,
+                dtx_input::keyboard::keyboard_system_verbs.after(bevy::input::InputSystems),
+            )
+            .add_systems(Update, result_nav.after(game_shell::NavRouterSet));
+        app.world_mut()
+            .resource_mut::<game_shell::navigation::NavContextStack>()
+            .push(game_shell::navigation::NavContext::Results);
+        let event = |state| bevy::input::keyboard::KeyboardInput {
+            key_code: KeyCode::ArrowRight,
+            logical_key: bevy::input::keyboard::Key::Unidentified(
+                bevy::input::keyboard::NativeKey::Unidentified,
+            ),
+            state,
+            text: None,
+            repeat: false,
+            window: Entity::PLACEHOLDER,
+        };
+        app.world_mut()
+            .write_message(event(bevy::input::ButtonState::Pressed));
+        app.update();
+        let delivered = app
+            .world()
+            .resource::<Messages<NavAction>>()
+            .iter_current_update_messages()
+            .count();
+        assert_eq!(
+            delivered, 1,
+            "one ArrowRight press must produce exactly one NavAction"
+        );
+        app.world_mut()
+            .write_message(event(bevy::input::ButtonState::Released));
+        app.update();
+        app.update();
+        assert_eq!(
+            *app.world().resource::<ResultVerb>(),
+            ResultVerb::Retry,
+            "one press moves the cursor by exactly one"
+        );
     }
 
     #[test]

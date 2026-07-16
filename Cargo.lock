@@ -3171,6 +3171,7 @@ dependencies = [
  "dtx-bga",
  "dtx-config",
  "dtx-core",
+ "dtx-input",
  "dtx-library",
  "dtx-scoring",
  "dtx-ui",
@@ -3185,6 +3186,7 @@ version = "0.0.0"
 dependencies = [
  "bevy",
  "dtx-core",
+ "dtx-input",
  "dtx-scoring",
  "dtx-ui",
  "game-shell",

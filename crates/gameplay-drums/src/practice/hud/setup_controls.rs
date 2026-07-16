@@ -207,7 +207,11 @@ pub enum PracticeUiAction {
 #[derive(Message, Debug, Clone, Copy, PartialEq, Eq)]
 pub struct StartOrContinueRequested;
 
-pub fn keyboard_actions(
+/// Screen-local Space accelerator (Space is not a bound menu key). Mirrors
+/// the retired raw-key mapping exactly: transport activation in split
+/// preview, play/pause on the Preview tab, back-to-Setup on Progress,
+/// swallowed while editing the preset name, Confirm otherwise.
+pub fn space_accelerator(
     keys: Res<ButtonInput<KeyCode>>,
     tab: Res<super::setup::PracticeTab>,
     focus: Res<super::setup::PracticeSurfaceFocus>,
@@ -216,87 +220,66 @@ pub fn keyboard_actions(
     selection: Res<SetupSelection>,
     mut actions: MessageWriter<PracticeUiAction>,
 ) {
+    if !keys.just_pressed(KeyCode::Space) {
+        return;
+    }
     let split = layouts
         .single()
         .is_ok_and(|layout| layout.0 == super::setup::PracticeLayoutMode::Split);
     let editing_name = *tab == super::setup::PracticeTab::Setup
         && matches!(*focus, super::setup::PracticeSurfaceFocus::Settings)
         && selection.0 == SetupItem::PresetName;
-    let action = if keys.just_pressed(KeyCode::Escape) {
-        Some(PracticeUiAction::Back)
-    } else if split && keys.just_pressed(KeyCode::Tab) {
-        Some(PracticeUiAction::ToggleSurfaceFocus)
-    } else if split
-        && matches!(*focus, super::setup::PracticeSurfaceFocus::Preview(_))
-        && keys.just_pressed(KeyCode::ArrowLeft)
-    {
-        Some(PracticeUiAction::MoveTransportFocus(-1))
-    } else if split
-        && matches!(*focus, super::setup::PracticeSurfaceFocus::Preview(_))
-        && keys.just_pressed(KeyCode::ArrowRight)
-    {
-        Some(PracticeUiAction::MoveTransportFocus(1))
-    } else if split
-        && matches!(*focus, super::setup::PracticeSurfaceFocus::Preview(_))
-        && (keys.just_pressed(KeyCode::ArrowUp) || keys.just_pressed(KeyCode::ArrowDown))
-    {
-        Some(PracticeUiAction::ToggleSurfaceFocus)
-    } else if split
-        && matches!(*focus, super::setup::PracticeSurfaceFocus::Preview(_))
-        && (keys.just_pressed(KeyCode::Enter) || keys.just_pressed(KeyCode::Space))
-    {
-        Some(PracticeUiAction::ActivateTransport)
-    } else if keys.just_pressed(KeyCode::Tab) {
-        Some(PracticeUiAction::MoveTab(1))
-    } else if *tab == super::setup::PracticeTab::Preview && keys.just_pressed(KeyCode::ArrowLeft) {
-        Some(PracticeUiAction::Preview(PreviewAction::PrevBar))
-    } else if *tab == super::setup::PracticeTab::Preview && keys.just_pressed(KeyCode::ArrowRight) {
-        Some(PracticeUiAction::Preview(PreviewAction::NextBar))
-    } else if *tab == super::setup::PracticeTab::Preview
-        && (keys.just_pressed(KeyCode::Enter) || keys.just_pressed(KeyCode::Space))
-    {
-        Some(PracticeUiAction::Preview(
-            if flow.preview == PreviewState::Playing {
-                PreviewAction::Pause
-            } else {
-                PreviewAction::Play
-            },
-        ))
-    } else if *tab == super::setup::PracticeTab::Progress
-        && (keys.just_pressed(KeyCode::ArrowUp) || keys.just_pressed(KeyCode::ArrowLeft))
-    {
-        Some(PracticeUiAction::MoveTab(-1))
-    } else if *tab == super::setup::PracticeTab::Progress
-        && (keys.just_pressed(KeyCode::ArrowDown) || keys.just_pressed(KeyCode::ArrowRight))
-    {
-        Some(PracticeUiAction::MoveTab(1))
-    } else if *tab == super::setup::PracticeTab::Progress
-        && (keys.just_pressed(KeyCode::Enter) || keys.just_pressed(KeyCode::Space))
-    {
-        Some(PracticeUiAction::SelectTab(
-            super::setup::PracticeTab::Setup,
-        ))
-    } else if *tab == super::setup::PracticeTab::Preview && keys.just_pressed(KeyCode::ArrowUp) {
-        Some(PracticeUiAction::MoveTab(-1))
-    } else if *tab == super::setup::PracticeTab::Preview && keys.just_pressed(KeyCode::ArrowDown) {
-        Some(PracticeUiAction::MoveTab(1))
-    } else if keys.just_pressed(KeyCode::ArrowUp) {
-        Some(PracticeUiAction::MoveSelection(-1))
-    } else if keys.just_pressed(KeyCode::ArrowDown) {
-        Some(PracticeUiAction::MoveSelection(1))
-    } else if keys.just_pressed(KeyCode::ArrowLeft) {
-        Some(PracticeUiAction::Adjust(-1))
-    } else if keys.just_pressed(KeyCode::ArrowRight) {
-        Some(PracticeUiAction::Adjust(1))
-    } else if editing_name && keys.just_pressed(KeyCode::Space) {
-        None
-    } else if keys.just_pressed(KeyCode::Enter) || keys.just_pressed(KeyCode::Space) {
-        Some(PracticeUiAction::Confirm)
+    let action = if split && matches!(*focus, super::setup::PracticeSurfaceFocus::Preview(_)) {
+        PracticeUiAction::ActivateTransport
+    } else if *tab == super::setup::PracticeTab::Preview {
+        PracticeUiAction::Preview(if flow.preview == PreviewState::Playing {
+            PreviewAction::Pause
+        } else {
+            PreviewAction::Play
+        })
+    } else if *tab == super::setup::PracticeTab::Progress {
+        PracticeUiAction::SelectTab(super::setup::PracticeTab::Setup)
+    } else if editing_name {
+        // Space is text input while renaming a preset.
+        return;
     } else {
-        None
+        PracticeUiAction::Confirm
     };
-    if let Some(action) = action {
-        actions.write(action);
+    actions.write(action);
+}
+
+/// The base publisher writes `PracticeSetupSettings` for the whole setup
+/// surface; refine to `PracticeSetupPreview` (not an edit context: Left/Right
+/// stay NavigateLeft/Right for the transport) when the preview owns focus —
+/// split layout focus, or the Preview tab in single-column layout.
+fn refine_nav_stack_for_practice(
+    tab: Res<super::setup::PracticeTab>,
+    focus: Res<super::setup::PracticeSurfaceFocus>,
+    layouts: Query<&super::setup::PracticeSetupLayout>,
+    mut stack: ResMut<game_shell::NavContextStack>,
+) {
+    use game_shell::NavContext;
+    let split = layouts
+        .single()
+        .is_ok_and(|layout| layout.0 == super::setup::PracticeLayoutMode::Split);
+    let preview = if split {
+        matches!(*focus, super::setup::PracticeSurfaceFocus::Preview(_))
+    } else {
+        *tab == super::setup::PracticeTab::Preview
+    };
+    let desired = if preview {
+        NavContext::PracticeSetupPreview
+    } else {
+        NavContext::PracticeSetupSettings
+    };
+    if matches!(
+        stack.top(),
+        Some(NavContext::PracticeSetupSettings | NavContext::PracticeSetupPreview)
+    ) && stack.top() != Some(desired)
+    {
+        stack.pop(NavContext::PracticeSetupSettings);
+        stack.pop(NavContext::PracticeSetupPreview);
+        stack.push(desired);
     }
 }
 
@@ -338,8 +321,15 @@ pub fn nav_actions(
         } else if split && matches!(*focus, super::setup::PracticeSurfaceFocus::Preview(_)) {
             match action.verb {
                 game_shell::SystemVerb::Back => PracticeUiAction::Back,
-                game_shell::SystemVerb::Decrease => PracticeUiAction::MoveTransportFocus(-1),
-                game_shell::SystemVerb::Increase => PracticeUiAction::MoveTransportFocus(1),
+                // PracticeSetupPreview is not an edit context: router keyboard
+                // arrows arrive as NavigateLeft/Right. Decrease/Increase kept
+                // for pads.
+                game_shell::SystemVerb::Decrease | game_shell::SystemVerb::NavigateLeft => {
+                    PracticeUiAction::MoveTransportFocus(-1)
+                }
+                game_shell::SystemVerb::Increase | game_shell::SystemVerb::NavigateRight => {
+                    PracticeUiAction::MoveTransportFocus(1)
+                }
                 game_shell::SystemVerb::Confirm => PracticeUiAction::ActivateTransport,
                 game_shell::SystemVerb::NavigateUp | game_shell::SystemVerb::NavigateDown => {
                     PracticeUiAction::ToggleSurfaceFocus
@@ -436,12 +426,14 @@ pub fn nav_actions(
                 (super::setup::PracticeTab::Progress, game_shell::SystemVerb::Confirm) => {
                     PracticeUiAction::SelectTab(super::setup::PracticeTab::Setup)
                 }
-                (super::setup::PracticeTab::Preview, game_shell::SystemVerb::Decrease) => {
-                    PracticeUiAction::Preview(PreviewAction::PrevBar)
-                }
-                (super::setup::PracticeTab::Preview, game_shell::SystemVerb::Increase) => {
-                    PracticeUiAction::Preview(PreviewAction::NextBar)
-                }
+                (
+                    super::setup::PracticeTab::Preview,
+                    game_shell::SystemVerb::Decrease | game_shell::SystemVerb::NavigateLeft,
+                ) => PracticeUiAction::Preview(PreviewAction::PrevBar),
+                (
+                    super::setup::PracticeTab::Preview,
+                    game_shell::SystemVerb::Increase | game_shell::SystemVerb::NavigateRight,
+                ) => PracticeUiAction::Preview(PreviewAction::NextBar),
                 (super::setup::PracticeTab::Preview, game_shell::SystemVerb::Confirm) => {
                     PracticeUiAction::Preview(if flow.preview == PreviewState::Playing {
                         PreviewAction::Pause
@@ -1031,10 +1023,17 @@ pub(super) fn plugin(app: &mut App) {
         .add_systems(OnEnter(game_shell::AppState::Performance), reset_selection)
         .add_systems(
             Update,
-            (preset_name_keyboard_input, keyboard_actions, nav_actions)
+            (preset_name_keyboard_input, space_accelerator, nav_actions)
                 .chain()
+                .after(game_shell::NavRouterSet)
                 .run_if(crate::practice::practice_surface_open)
                 .before(apply_ui_actions),
+        )
+        .add_systems(
+            Update,
+            refine_nav_stack_for_practice
+                .in_set(game_shell::NavStackRefineSet)
+                .run_if(crate::practice::practice_surface_open),
         )
         .add_systems(
             Update,

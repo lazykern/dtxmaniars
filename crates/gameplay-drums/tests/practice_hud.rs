@@ -99,6 +99,21 @@ fn build_hud_app(width: f32, height: f32, text_scale: dtx_config::TextScale) -> 
     .insert_resource(PracticeDraft::default())
     .insert_resource(PracticeFlow::default());
 
+    // Real keyboard path: dtx-input keyboard_system_verbs → game-shell router
+    // → NavAction → nav_actions (the per-screen keyboard emitter is gone).
+    app.add_plugins(game_shell::navigation::plugin)
+        .add_message::<dtx_input::SystemVerbHit>()
+        .add_message::<dtx_input::PadNavHit>()
+        .init_resource::<dtx_input::BindResolver>()
+        .init_resource::<dtx_input::RawInputOwned>()
+        .add_systems(
+            PreUpdate,
+            dtx_input::keyboard::keyboard_system_verbs.after(bevy::input::InputSystems),
+        );
+    app.world_mut()
+        .resource_mut::<game_shell::NavContextStack>()
+        .push(game_shell::NavContext::PracticeSetupSettings);
+
     let physical_size = UVec2::new(width as u32, height as u32);
     app.world_mut().spawn((
         Camera2d,
@@ -179,17 +194,30 @@ fn send_ui_action(app: &mut App, action: PracticeUiAction) {
     app.world_mut().write_message(action);
 }
 
+/// Injects a real KeyboardInput event so `bevy_input` stamps `just_pressed`
+/// for exactly one frame; the router pipeline picks it up in PreUpdate.
 fn press_key(app: &mut App, key: KeyCode) {
+    let window = app
+        .world_mut()
+        .query_filtered::<Entity, With<PrimaryWindow>>()
+        .single(app.world())
+        .expect("primary window");
+    let event = |state| bevy::input::keyboard::KeyboardInput {
+        key_code: key,
+        logical_key: bevy::input::keyboard::Key::Unidentified(
+            bevy::input::keyboard::NativeKey::Unidentified,
+        ),
+        state,
+        text: None,
+        repeat: false,
+        window,
+    };
     app.world_mut()
-        .resource_mut::<ButtonInput<KeyCode>>()
-        .press(key);
-    app.world_mut()
-        .run_system_once(gameplay_drums::practice::hud::setup_controls::keyboard_actions)
-        .expect("keyboard actions run");
+        .write_message(event(bevy::input::ButtonState::Pressed));
     app.update();
+    // Released is queued; the next update() processes it.
     app.world_mut()
-        .resource_mut::<ButtonInput<KeyCode>>()
-        .release(key);
+        .write_message(event(bevy::input::ButtonState::Released));
 }
 
 fn send_nav(app: &mut App, verb: game_shell::SystemVerb) {

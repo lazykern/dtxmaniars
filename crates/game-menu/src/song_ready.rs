@@ -153,11 +153,13 @@ fn reduce_ready_keyboard_browse(
     verb: SystemVerb,
 ) -> ReadyKeyboardEffect {
     match verb {
-        SystemVerb::Decrease => {
+        // Browse is not an edit context: router keyboard arrows arrive as
+        // NavigateLeft/Right. Decrease/Increase kept for legacy writers.
+        SystemVerb::Decrease | SystemVerb::NavigateLeft => {
             state.step_card(-1);
             ReadyKeyboardEffect::None
         }
-        SystemVerb::Increase => {
+        SystemVerb::Increase | SystemVerb::NavigateRight => {
             state.step_card(1);
             ReadyKeyboardEffect::None
         }
@@ -331,7 +333,7 @@ pub fn plugin(app: &mut App) {
             Update,
             (
                 manage_song_ready_ui,
-                song_ready_nav_input.after(crate::song_select::song_select_kb_emit),
+                song_ready_nav_input.after(game_shell::NavRouterSet),
                 song_ready_pointer_input,
                 execute_ready_launch,
                 render_song_ready,
@@ -340,7 +342,39 @@ pub fn plugin(app: &mut App) {
                 .chain()
                 .run_if(in_state(AppState::SongSelect)),
         )
+        .add_systems(
+            Update,
+            refine_nav_stack_for_ready
+                .in_set(game_shell::NavStackRefineSet)
+                .run_if(in_state(AppState::SongSelect)),
+        )
         .add_systems(Last, clear_ready_action_capture);
+}
+
+/// The base publisher only knows "we're in SongSelect" and writes
+/// `SongSelectSongs`; it cannot see the Ready layers. Refine the stack top so
+/// the router translates Left/Right correctly (SongReadyEdit is an edit
+/// context). PrimaryDetail navigates like Browse.
+fn refine_nav_stack_for_ready(
+    state: Res<SongReadyState>,
+    mut stack: ResMut<game_shell::NavContextStack>,
+) {
+    use game_shell::NavContext;
+    let desired = match state.layer {
+        SongReadyLayer::Closed => return,
+        SongReadyLayer::Edit => NavContext::SongReadyEdit,
+        SongReadyLayer::Browse | SongReadyLayer::PrimaryDetail => NavContext::SongReadyBrowse,
+    };
+    if matches!(
+        stack.top(),
+        Some(NavContext::SongSelectSongs | NavContext::SongReadyBrowse | NavContext::SongReadyEdit)
+    ) && stack.top() != Some(desired)
+    {
+        stack.pop(NavContext::SongSelectSongs);
+        stack.pop(NavContext::SongReadyBrowse);
+        stack.pop(NavContext::SongReadyEdit);
+        stack.push(desired);
+    }
 }
 
 fn clear_ready_action_capture(mut capture: ResMut<ReadyActionCapture>) {
@@ -1514,6 +1548,7 @@ mod tests {
             .insert_resource(SongReadyState::default())
             .insert_resource(ReadyConfigDraft::default())
             .insert_resource(ReadyActionCapture::default())
+            .init_resource::<crate::song_select::SearchEscConsumed>()
             .insert_resource(intent)
             .insert_resource(NotificationQueue::default())
             .add_systems(
@@ -1857,7 +1892,8 @@ mod tests {
             .init_resource::<PracticeIntent>()
             .init_resource::<NotificationQueue>()
             .init_resource::<ThemeResource>()
-            .init_resource::<dtx_ui::AccessibilityPolicy>();
+            .init_resource::<dtx_ui::AccessibilityPolicy>()
+            .init_resource::<game_shell::NavContextStack>();
         plugin(&mut app);
         app.world_mut()
             .resource_mut::<NextState<AppState>>()

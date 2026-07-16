@@ -326,13 +326,9 @@ pub(super) fn plugin(app: &mut App) {
         )
         .add_systems(
             Update,
-            (
-                pause_kb_emit,
-                pause_pointer_emit,
-                pause_menu_input,
-                refresh_pause_legend,
-            )
+            (pause_pointer_emit, pause_menu_input, refresh_pause_legend)
                 .chain()
+                .after(game_shell::NavRouterSet)
                 .run_if(in_state(PauseState::Paused)),
         )
         .add_systems(
@@ -831,30 +827,6 @@ fn despawn_overlay(mut commands: Commands, overlays: Query<Entity, With<PauseOve
     }
 }
 
-/// Keyboard → `NavAction` for the pause overlay. Esc keeps its own toggle path.
-fn pause_kb_emit(keys: Res<ButtonInput<KeyCode>>, mut out: MessageWriter<game_shell::NavAction>) {
-    use game_shell::{InputSource, NavAction, SystemVerb};
-    let verb = if keys.just_pressed(KeyCode::ArrowDown) {
-        SystemVerb::NavigateDown
-    } else if keys.just_pressed(KeyCode::ArrowUp) {
-        SystemVerb::NavigateUp
-    } else if keys.just_pressed(KeyCode::ArrowLeft) {
-        SystemVerb::Decrease
-    } else if keys.just_pressed(KeyCode::ArrowRight) {
-        SystemVerb::Increase
-    } else if keys.just_pressed(KeyCode::Enter) || keys.just_pressed(KeyCode::Space) {
-        SystemVerb::Confirm
-    } else {
-        return;
-    };
-    out.write(NavAction {
-        verb,
-        source: InputSource::Keyboard,
-        coarse: false,
-        repeated: false,
-    });
-}
-
 fn pause_pointer_emit(
     practice: Option<Res<crate::practice::PracticeSession>>,
     mut selection: ResMut<PauseSelection>,
@@ -944,6 +916,7 @@ fn pause_pointer_emit(
 
 pub(crate) fn pause_menu_input(
     mut commands: Commands,
+    keys: Res<ButtonInput<KeyCode>>,
     mut actions: MessageReader<game_shell::NavAction>,
     mut state: PauseMenuState,
     mut requests: MessageWriter<TransitionRequest>,
@@ -961,7 +934,9 @@ pub(crate) fn pause_menu_input(
         PauseContext::Normal
     };
     let items = pause_items(context);
-    let mut confirm = false;
+    // Screen-local accelerator: Space activates like Confirm (no NavAction —
+    // it feeds the same code path directly).
+    let mut confirm = keys.just_pressed(KeyCode::Space);
     let mut resume = false;
     let mut adjustment = 0;
     for action in actions.read() {
@@ -985,8 +960,11 @@ pub(crate) fn pause_menu_input(
                     state.quick_selection.0 =
                         (state.quick_selection.0 + QUICK_SETTINGS.len() - 1) % QUICK_SETTINGS.len();
                 }
-                SystemVerb::Decrease => adjustment = -1,
-                SystemVerb::Increase => adjustment = 1,
+                // Router keyboard arrows arrive as NavigateLeft/Right
+                // (PauseMenu is not an edit context); Decrease/Increase kept
+                // for pads and pointer emitters.
+                SystemVerb::Decrease | SystemVerb::NavigateLeft => adjustment = -1,
+                SystemVerb::Increase | SystemVerb::NavigateRight => adjustment = 1,
                 SystemVerb::Confirm => confirm = true,
                 SystemVerb::Back => *state.view = PauseView::Menu,
                 _ => {}
@@ -1413,6 +1391,7 @@ mod tests {
     fn dispatch_world(selection: usize) -> World {
         use bevy::ecs::message::Messages;
         let mut world = World::new();
+        world.init_resource::<ButtonInput<KeyCode>>();
         world.init_resource::<Messages<game_shell::NavAction>>();
         world.init_resource::<Messages<TransitionRequest>>();
         world.init_resource::<Messages<crate::practice::actions::PracticeAction>>();

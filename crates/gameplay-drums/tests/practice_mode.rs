@@ -2591,14 +2591,13 @@ fn escape_and_nav_back_route_every_initial_setup_origin() {
                     repeated: false,
                 });
             } else {
-                app.world_mut()
-                    .resource_mut::<ButtonInput<KeyCode>>()
-                    .press(KeyCode::Escape);
-                app.world_mut()
-                    .run_system_once(
-                        gameplay_drums::practice::hud::setup_controls::keyboard_actions,
-                    )
-                    .expect("keyboard actions run");
+                // Keyboard Esc arrives as a router-delivered Back NavAction.
+                app.world_mut().write_message(game_shell::NavAction {
+                    verb: game_shell::SystemVerb::Back,
+                    source: game_shell::InputSource::Keyboard,
+                    coarse: false,
+                    repeated: false,
+                });
             }
             app.update();
 

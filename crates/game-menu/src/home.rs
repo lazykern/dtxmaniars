@@ -83,6 +83,7 @@ pub fn plugin(app: &mut App) {
                 render_home_state,
             )
                 .chain()
+                .after(game_shell::NavRouterSet)
                 .run_if(in_state(AppState::Title)),
         );
 }
@@ -251,33 +252,18 @@ fn spawn_exit_dialog(root: &mut ChildSpawnerCommands, t: &Theme) {
 }
 
 fn home_input(
-    keys: Res<ButtonInput<KeyCode>>,
     mut actions: MessageReader<NavAction>,
     mut state: ResMut<HomeState>,
     mut commands: MessageWriter<HomeCommand>,
 ) {
-    let keyboard = if keys.just_pressed(KeyCode::ArrowUp)
-        || (state.exit_dialog != ExitChoice::Closed && keys.just_pressed(KeyCode::ArrowLeft))
-    {
-        Some(HomeInput::Previous)
-    } else if keys.just_pressed(KeyCode::ArrowDown)
-        || (state.exit_dialog != ExitChoice::Closed && keys.just_pressed(KeyCode::ArrowRight))
-    {
-        Some(HomeInput::Next)
-    } else if keys.just_pressed(KeyCode::Enter) {
-        Some(HomeInput::Confirm)
-    } else if keys.just_pressed(KeyCode::Escape) {
-        Some(HomeInput::Back)
-    } else {
-        None
-    };
-    if let Some(input) = keyboard {
-        emit_home_command(state.apply(input), &mut commands);
-    }
     for action in actions.read() {
+        let dialog_open = state.exit_dialog != ExitChoice::Closed;
         let input = match action.verb {
             SystemVerb::NavigateUp => Some(HomeInput::Previous),
             SystemVerb::NavigateDown => Some(HomeInput::Next),
+            // The exit dialog is horizontal: Left/Right move between choices.
+            SystemVerb::NavigateLeft if dialog_open => Some(HomeInput::Previous),
+            SystemVerb::NavigateRight if dialog_open => Some(HomeInput::Next),
             SystemVerb::Confirm => Some(HomeInput::Confirm),
             SystemVerb::Back => Some(HomeInput::Back),
             _ => None,
