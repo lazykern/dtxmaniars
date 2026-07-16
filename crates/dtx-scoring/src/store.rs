@@ -272,14 +272,16 @@ impl ScoreStore {
     }
 
     /// Add an entry when an equivalent entry is not already present.
-    pub fn add_if_new(&mut self, entry: ScoreEntry) {
-        if !self
+    pub fn add_if_new(&mut self, entry: ScoreEntry) -> bool {
+        if self
             .entries
             .iter()
             .any(|existing| equivalent_entry(existing, &entry))
         {
-            self.entries.push(entry);
+            return false;
         }
+        self.entries.push(entry);
+        true
     }
 
     /// Best score for a canonical chart hash. No Fail plays never rank.

@@ -320,7 +320,14 @@ fn save_result(
         no_fail,
     );
 
-    store.add(entry);
+    if !store.add_if_new(entry) {
+        *status = if no_fail {
+            SaveStatus::NoFail
+        } else {
+            SaveStatus::Saved
+        };
+        return;
+    }
     *status = if let Err(e) = store.save() {
         warn!("game-results: save failed: {e}");
         SaveStatus::Failed
@@ -623,6 +630,22 @@ mod tests {
         world
             .run_system_once(save_result)
             .expect("save_result runs");
+
+        assert_eq!(world.resource::<ScoreStoreResource>().entries.len(), 1);
+        assert_eq!(*world.resource::<SaveStatus>(), SaveStatus::Saved);
+    }
+
+    #[test]
+    fn save_result_ignores_repeated_result_entry() {
+        use bevy::ecs::system::RunSystemOnce;
+
+        let mut world = result_world(None, 1.0);
+        world
+            .run_system_once(save_result)
+            .expect("first save_result runs");
+        world
+            .run_system_once(save_result)
+            .expect("repeated save_result runs");
 
         assert_eq!(world.resource::<ScoreStoreResource>().entries.len(), 1);
         assert_eq!(*world.resource::<SaveStatus>(), SaveStatus::Saved);

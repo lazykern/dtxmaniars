@@ -144,6 +144,7 @@ pub struct CalibrationSchedule {
 impl CalibrationSchedule {
     const LEAD_IN: Duration = Duration::from_secs(1);
     const BEAT_INTERVAL: Duration = Duration::from_millis(500);
+    const PREVIEW_HIT_HOLD: Duration = Duration::from_millis(80);
     pub const BEAT_COUNT: usize = 16;
 
     pub fn new(started_at: Instant) -> Self {
@@ -186,6 +187,29 @@ impl CalibrationSchedule {
         let nearest_ms = (elapsed_ms + interval_ms / 2).div_euclid(interval_ms) * interval_ms;
         (elapsed_ms - nearest_ms) as i32
     }
+
+    /// Note travel from lane top (0) to strike line (1), held briefly on each beat.
+    fn preview_progress(&self, now: Instant) -> Option<f32> {
+        let interval_ms = Self::BEAT_INTERVAL.as_millis() as u64;
+        if now < self.first_beat_at {
+            let remaining_ms = self.first_beat_at.duration_since(now).as_millis() as u64;
+            return Some(1.0 - remaining_ms.min(interval_ms) as f32 / interval_ms as f32);
+        }
+
+        let elapsed = now.duration_since(self.first_beat_at);
+        let final_beat = Self::BEAT_INTERVAL.mul_f32((Self::BEAT_COUNT - 1) as f32);
+        if elapsed > final_beat + Self::PREVIEW_HIT_HOLD {
+            return None;
+        }
+
+        let phase_ms = elapsed.as_millis() as u64 % interval_ms;
+        let hold_ms = Self::PREVIEW_HIT_HOLD.as_millis() as u64;
+        Some(if phase_ms < hold_ms {
+            1.0
+        } else {
+            (phase_ms - hold_ms) as f32 / (interval_ms - hold_ms) as f32
+        })
+    }
 }
 
 /// Tap-test lifecycle. Idle by default.
@@ -216,6 +240,12 @@ pub enum CalibrationState {
 #[derive(Component)]
 struct CalibrationOverlay;
 
+#[derive(Component)]
+struct CalibrationPreviewNote;
+
+#[derive(Resource, Default)]
+struct CalibrationBgmDuck(bool);
+
 /// Reuses the chart-independent metronome sample for calibration clicks.
 #[derive(Resource, Default)]
 struct CalibrationClickSound(Option<Handle<bevy_kira_audio::prelude::AudioSource>>);
@@ -223,6 +253,7 @@ struct CalibrationClickSound(Option<Handle<bevy_kira_audio::prelude::AudioSource
 pub(super) fn plugin(app: &mut App) {
     app.init_resource::<CalibrationState>()
         .init_resource::<CalibrationClickSound>()
+        .init_resource::<CalibrationBgmDuck>()
         .add_systems(
             Update,
             (
@@ -231,6 +262,7 @@ pub(super) fn plugin(app: &mut App) {
                 collect_taps,
                 confirm_or_cancel,
                 render_overlay,
+                animate_preview_note,
             )
                 .chain()
                 .run_if(in_state(game_shell::AppState::Performance))
@@ -238,7 +270,9 @@ pub(super) fn plugin(app: &mut App) {
         )
         .add_systems(
             Update,
-            restore_when_editor_closes.run_if(in_state(game_shell::AppState::Performance)),
+            (restore_when_editor_closes, sync_calibration_bgm_volume)
+                .chain()
+                .run_if(in_state(game_shell::AppState::Performance)),
         )
         .add_systems(
             OnExit(game_shell::AppState::Performance),
@@ -428,6 +462,22 @@ fn restore_on_performance_exit(
     restore_runtime_state(&mut state, &mut metronome, &mut timing_lines, &mut autoplay);
 }
 
+fn sync_calibration_bgm_volume(
+    state: Res<CalibrationState>,
+    settings: Res<crate::resources::DrumAudioSettings>,
+    bgm: Res<dtx_audio::BgmHandle>,
+    mut instances: ResMut<Assets<bevy_kira_audio::prelude::AudioInstance>>,
+    mut ducked: ResMut<CalibrationBgmDuck>,
+) {
+    let active = !matches!(*state, CalibrationState::Idle);
+    if active == ducked.0 {
+        return;
+    }
+    let gain = settings.bgm_gain() * if active { 0.15 } else { 1.0 };
+    dtx_audio::set_bgm_volume(&bgm, &mut instances, gain);
+    ducked.0 = active;
+}
+
 pub(super) fn confirm_or_cancel(
     keys: Res<ButtonInput<KeyCode>>,
     mut state: ResMut<CalibrationState>,
@@ -485,7 +535,7 @@ fn render_overlay(
     for e in &existing {
         commands.entity(e).despawn();
     }
-    let (msg, pulse) = match &*state {
+    let (msg, pulse, show_preview) = match &*state {
         CalibrationState::Idle => return,
         CalibrationState::Collecting {
             samples,
@@ -493,13 +543,14 @@ fn render_overlay(
             ..
         } => (
             format!(
-                "● 120 BPM calibration · tap any mapped key or pad\n{}/{} taps · beat {}/{}",
+                "120 BPM · strike when note reaches line\n{}/{} taps · beat {}/{}\nAny mapped key or pad · Esc cancel",
                 samples.len(),
                 CalibrationSchedule::BEAT_COUNT,
                 fired_beats,
                 CalibrationSchedule::BEAT_COUNT,
             ),
             fired_beats % 2 == 1,
+            true,
         ),
         CalibrationState::Done {
             report,
@@ -527,31 +578,97 @@ fn render_overlay(
                     },
                 ),
                 false,
+                false,
             )
         }
     };
-    commands.spawn((
-        CalibrationOverlay,
-        super::picking::EditorChrome,
-        Node {
-            position_type: PositionType::Absolute,
-            top: Val::Percent(40.0),
-            left: Val::Percent(35.0),
-            padding: UiRect::axes(Val::Px(16.0), Val::Px(10.0)),
-            ..default()
-        },
-        BackgroundColor(if pulse {
-            Color::srgba(0.10, 0.14, 0.20, 0.97)
-        } else {
-            Color::srgba(0.05, 0.05, 0.07, 0.95)
-        }),
-        GlobalZIndex(crate::ui_z::EDITOR_CHROME + 1),
-        children![(
+    let overlay = commands
+        .spawn((
+            CalibrationOverlay,
+            super::picking::EditorChrome,
+            Node {
+                position_type: PositionType::Absolute,
+                top: Val::Percent(32.0),
+                left: Val::Percent(30.0),
+                padding: UiRect::all(Val::Px(16.0)),
+                column_gap: Val::Px(18.0),
+                align_items: AlignItems::Center,
+                ..default()
+            },
+            BackgroundColor(if pulse {
+                Color::srgba(0.10, 0.14, 0.20, 0.97)
+            } else {
+                Color::srgba(0.05, 0.05, 0.07, 0.95)
+            }),
+            GlobalZIndex(crate::ui_z::EDITOR_CHROME + 1),
+        ))
+        .id();
+    commands.entity(overlay).with_children(|parent| {
+        if show_preview {
+            parent
+                .spawn((
+                    Node {
+                        position_type: PositionType::Relative,
+                        width: Val::Px(72.0),
+                        height: Val::Px(180.0),
+                        border: UiRect::all(Val::Px(1.0)),
+                        ..default()
+                    },
+                    BackgroundColor(Color::srgba(0.0, 0.0, 0.0, 0.45)),
+                    BorderColor::all(theme.0.stage_panel_border),
+                ))
+                .with_children(|lane| {
+                    lane.spawn((
+                        CalibrationPreviewNote,
+                        Node {
+                            position_type: PositionType::Absolute,
+                            top: Val::Px(0.0),
+                            left: Val::Px(7.0),
+                            width: Val::Px(56.0),
+                            height: Val::Px(14.0),
+                            border_radius: BorderRadius::all(Val::Px(4.0)),
+                            ..default()
+                        },
+                        BackgroundColor(theme.0.accent),
+                    ));
+                    lane.spawn((
+                        Node {
+                            position_type: PositionType::Absolute,
+                            bottom: Val::Px(16.0),
+                            left: Val::Px(4.0),
+                            width: Val::Px(62.0),
+                            height: Val::Px(3.0),
+                            ..default()
+                        },
+                        BackgroundColor(theme.0.select_yellow),
+                    ));
+                });
+        }
+        parent.spawn((
             Text::new(msg),
             dtx_ui::theme::Theme::font(16.0),
             TextColor(theme.0.text_primary),
-        )],
-    ));
+        ));
+    });
+}
+
+fn animate_preview_note(
+    state: Res<CalibrationState>,
+    mut note: Query<(&mut Node, &mut Visibility), With<CalibrationPreviewNote>>,
+) {
+    let CalibrationState::Collecting { schedule, .. } = &*state else {
+        return;
+    };
+    let Some(progress) = schedule.preview_progress(Instant::now()) else {
+        for (_, mut visibility) in &mut note {
+            *visibility = Visibility::Hidden;
+        }
+        return;
+    };
+    for (mut node, mut visibility) in &mut note {
+        node.top = Val::Px(progress * 147.0);
+        *visibility = Visibility::Visible;
+    }
 }
 
 fn despawn_overlay(mut commands: Commands, existing: Query<Entity, With<CalibrationOverlay>>) {
@@ -621,6 +738,19 @@ mod tests {
         let schedule = CalibrationSchedule::new(std::time::Instant::now());
         let after_three_beats = schedule.first_beat_at() + std::time::Duration::from_millis(1_020);
         assert_eq!(schedule.due_beat_count(after_three_beats), 3);
+    }
+
+    #[test]
+    fn preview_note_reaches_and_briefly_holds_the_strike_line() {
+        let schedule = CalibrationSchedule::new(std::time::Instant::now());
+        assert_eq!(
+            schedule.preview_progress(schedule.first_beat_at() - Duration::from_millis(250)),
+            Some(0.5)
+        );
+        assert_eq!(
+            schedule.preview_progress(schedule.first_beat_at() + Duration::from_millis(40)),
+            Some(1.0)
+        );
     }
 
     #[test]
