@@ -103,7 +103,6 @@ fn build_hud_app(width: f32, height: f32, text_scale: dtx_config::TextScale) -> 
     // → NavAction → nav_actions (the per-screen keyboard emitter is gone).
     app.add_plugins(game_shell::navigation::plugin)
         .add_message::<dtx_input::SystemVerbHit>()
-        .add_message::<dtx_input::PadNavHit>()
         .init_resource::<dtx_input::BindResolver>()
         .init_resource::<dtx_input::RawInputOwned>()
         .add_systems(

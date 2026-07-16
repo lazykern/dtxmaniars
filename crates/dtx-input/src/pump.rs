@@ -1,5 +1,5 @@
 //! MIDI device pump: connection, drain, velocity filter, and resolution into
-//! device-level messages (`PadNavHit`, `ResolvedInputHit`, `SystemVerbHit`).
+//! device-level messages (`ResolvedInputHit`, `SystemVerbHit`).
 //!
 //! Moved from gameplay-drums `midi_consumer` (menu-nav extraction,
 //! 2026-07-15 spec). The consuming game crate adds [`plugin`] and orders
@@ -19,22 +19,11 @@ use crate::resolver::BindResolver;
 use crate::resolver::LiveBindings;
 use crate::SystemVerb;
 
-/// A resolved hit from a real pad, for menu navigation only.
-///
-/// Separate from `LaneHit` on purpose: `LaneHit` is also written by autoplay
-/// (which the Customize surface forces on) and by keyboard lane keys, and
-/// neither should ever steer a menu.
-#[derive(Debug, Clone, Copy, Message)]
-pub struct PadNavHit {
-    /// Lane id per `crate::lane_map::LANE_ORDER`.
-    pub lane: LaneId,
-}
-
 /// A velocity-accepted MIDI hit resolved to lanes, before any gameplay gating.
 ///
 /// The gameplay crate decides whether gameplay is ready and converts this to
 /// its own judged input event with a clock restamp. Menus never read this —
-/// they consume [`PadNavHit`].
+/// they consume router-delivered `NavAction`s built from [`SystemVerbHit`].
 #[derive(Debug, Clone, PartialEq, Eq, Message)]
 pub struct ResolvedInputHit {
     /// Primary lane followed by accepted alternates (atomic multi-target hit).
@@ -119,7 +108,6 @@ pub fn plugin(app: &mut App) {
         .init_resource::<MidiConnected>()
         .init_resource::<RawInputOwned>()
         .init_resource::<VirtualSource>()
-        .add_message::<PadNavHit>()
         .add_message::<ResolvedInputHit>()
         .add_message::<SystemVerbHit>()
         .add_systems(FixedUpdate, poll_midi.in_set(InputPumpSet));
@@ -193,7 +181,6 @@ fn poll_midi(
     mut source: ResMut<VirtualSource>,
     resolver: Res<BindResolver>,
     mut hits: MessageWriter<ResolvedInputHit>,
-    mut nav_hits: MessageWriter<PadNavHit>,
     mut verb_hits: MessageWriter<SystemVerbHit>,
     mut last: ResMut<LastMidiHit>,
 ) {
@@ -206,9 +193,6 @@ fn poll_midi(
     for hit in consumed.hits {
         hits.write(hit);
     }
-    for lane in consumed.nav_lanes {
-        nav_hits.write(PadNavHit { lane });
-    }
     for (verb, source) in consumed.verbs {
         verb_hits.write(SystemVerbHit { verb, source });
     }
@@ -216,11 +200,8 @@ fn poll_midi(
 
 struct ConsumedMidi {
     hits: Vec<ResolvedInputHit>,
-    /// Lanes for `PadNavHit`; emitted even when gameplay is not ready so
-    /// pads can steer menus outside a run.
-    nav_lanes: Vec<LaneId>,
-    /// System verbs fired by this batch. Emitted on the same unconditional
-    /// path as `nav_lanes` — the verb must work mid-song.
+    /// System verbs fired by this batch. Emitted before any gameplay-ready
+    /// gate — the verb must work mid-song, and menus ride these outside a run.
     verbs: Vec<(SystemVerb, VerbSource)>,
 }
 
@@ -230,7 +211,6 @@ fn consume_midi_events(
     last: &mut LastMidiHit,
 ) -> ConsumedMidi {
     let mut hits = Vec::new();
-    let mut nav_lanes = Vec::new();
     let mut verbs = Vec::new();
     for ev in events {
         let crate::midi::MidiEvent::NoteOn {
@@ -259,8 +239,7 @@ fn consume_midi_events(
                 .map(|v| (v, VerbSource::Midi)),
         );
         let lanes: Vec<_> = resolver.lanes_for_note(note).collect();
-        if let Some(&lane) = lanes.first() {
-            nav_lanes.push(lane);
+        if !lanes.is_empty() {
             hits.push(ResolvedInputHit {
                 lanes,
                 audio_ms,
@@ -268,11 +247,7 @@ fn consume_midi_events(
             });
         }
     }
-    ConsumedMidi {
-        hits,
-        nav_lanes,
-        verbs,
-    }
+    ConsumedMidi { hits, verbs }
 }
 
 #[cfg(test)]
@@ -298,7 +273,6 @@ mod tests {
         assert_eq!((last.note, last.velocity), (38, 90));
         assert!(last.at.is_some());
         assert_eq!(hits.hits.len(), 1);
-        assert_eq!(hits.nav_lanes.len(), 1);
     }
 
     #[test]
@@ -326,7 +300,6 @@ mod tests {
         assert_eq!(out.hits[0].lanes, vec![2, 11]);
         assert_eq!(out.hits[0].captured_at, captured_at);
         assert_eq!(out.hits[0].audio_ms, 10);
-        assert_eq!(out.nav_lanes, vec![2]);
     }
 
     #[test]
@@ -349,8 +322,7 @@ mod tests {
         );
 
         assert_eq!(out.verbs, vec![(SystemVerb::Pause, VerbSource::Midi)]);
-        assert!(out.hits.is_empty());
-        assert!(out.nav_lanes.is_empty(), "a system note is not a lane");
+        assert!(out.hits.is_empty(), "a system note is not a lane");
     }
 
     #[test]

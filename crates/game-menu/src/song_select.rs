@@ -2693,7 +2693,6 @@ mod tests {
         app.add_plugins(bevy::input::InputPlugin)
             .add_plugins(game_shell::navigation::plugin)
             .add_message::<dtx_input::SystemVerbHit>()
-            .add_message::<dtx_input::PadNavHit>()
             .add_message::<TransitionRequest>()
             .init_resource::<dtx_input::BindResolver>()
             .init_resource::<dtx_input::RawInputOwned>()

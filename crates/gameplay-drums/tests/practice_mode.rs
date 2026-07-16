@@ -514,13 +514,22 @@ fn paused_hh_cy_bd_sd_midi_remains_menu_input_only() {
     app.world_mut().run_schedule(FixedUpdate);
 
     assert!(app.world().resource::<Messages<InputHit>>().is_empty());
-    let lanes = app
+    let verbs = app
         .world()
-        .resource::<Messages<gameplay_drums::PadNavHit>>()
+        .resource::<Messages<dtx_input::SystemVerbHit>>()
         .iter_current_update_messages()
-        .map(|hit| hit.lane)
+        .map(|hit| (hit.verb, hit.source))
         .collect::<Vec<_>>();
-    assert_eq!(lanes, vec![0, 6, 2, 1]);
+    use dtx_input::{SystemVerb, VerbSource};
+    assert_eq!(
+        verbs,
+        vec![
+            (SystemVerb::NavigateUp, VerbSource::Midi),
+            (SystemVerb::NavigateDown, VerbSource::Midi),
+            (SystemVerb::Confirm, VerbSource::Midi),
+            (SystemVerb::Back, VerbSource::Midi),
+        ]
+    );
     assert!(app.world().resource::<JudgedChips>().0.is_empty());
     assert_eq!(app.world().resource::<Score>().0, 0);
 }
@@ -561,13 +570,14 @@ fn setup_ready_midi_keeps_raw_hit_and_pad_navigation() {
 
     let last = app.world().resource::<gameplay_drums::LastMidiHit>();
     assert_eq!((last.note, last.velocity), (36, 100));
-    let nav_hits = app
+    let verbs = app
         .world()
-        .resource::<Messages<gameplay_drums::PadNavHit>>()
+        .resource::<Messages<dtx_input::SystemVerbHit>>()
         .iter_current_update_messages()
         .collect::<Vec<_>>();
-    assert_eq!(nav_hits.len(), 1);
-    assert_eq!(nav_hits[0].lane, 2);
+    assert_eq!(verbs.len(), 1);
+    assert_eq!(verbs[0].verb, dtx_input::SystemVerb::Confirm);
+    assert_eq!(verbs[0].source, dtx_input::VerbSource::Midi);
 }
 
 #[test]

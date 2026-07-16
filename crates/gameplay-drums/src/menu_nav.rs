@@ -5,16 +5,14 @@
 //! module keeps the one job game-shell cannot do: computing the owning
 //! context from gameplay-drums' own surface states (editor, capture,
 //! calibration, practice phase) and writing it to `NavContextStack` each
-//! frame, ordered before the mapper and the router.
+//! frame, ordered before the router.
 //!
-//! Transitional: the whole stack is recomputed per frame here so its contents
-//! mirror today's `ActiveNavContext` semantics exactly. Screens will take
-//! over their own push/pop in later PRs. The transitional `ActiveNavContext`
-//! consumed by the pad mapper is derived from the stack top by game-shell's
-//! `mirror_stack_to_active`.
+//! Transitional: the whole stack is recomputed per frame here so its top
+//! always names the owning surface. Screens will take over their own
+//! push/pop in later PRs.
 
 use bevy::prelude::*;
-use game_shell::navigation::{ActiveNavContext, NavContextStack, NavMapSet, NavStackWriteSet};
+use game_shell::navigation::{NavContextStack, NavRouterSet, NavStackWriteSet};
 use game_shell::{AppState, PauseState};
 
 use crate::editor::bindings_capture::CaptureState;
@@ -25,26 +23,24 @@ use crate::editor::calibration::CalibrationState;
 pub use game_shell::navigation::{InputSource, NavAction, NavContext, NavGuard, SystemVerb};
 
 pub(super) fn plugin(app: &mut App) {
-    // NavGuard/ActiveNavContext/NavContextStack are normally registered by
-    // game-shell's navigation plugin; init here too (idempotent) so
-    // drums-only test apps that poke `menu_nav::NavGuard` keep working
-    // without GameShellPlugin.
+    // NavGuard/NavContextStack are normally registered by game-shell's
+    // navigation plugin; init here too (idempotent) so drums-only test apps
+    // that poke `menu_nav::NavGuard` keep working without GameShellPlugin.
     app.init_resource::<NavGuard>()
-        .init_resource::<ActiveNavContext>()
         .init_resource::<NavContextStack>()
         .add_systems(
             Update,
             publish_nav_context
                 .in_set(NavStackWriteSet)
-                .before(NavMapSet),
+                .before(NavRouterSet),
         );
 }
 
 /// The context that owns semantic input for the current global state.
 /// `NavContext::BindingCapture` while a capture/calibration overlay owns raw
-/// hits; `NavContext::LiveGameplay` during live judged play (both mirror to
-/// `ActiveNavContext(None)`, keeping pads as gameplay/raw input). `None` only
-/// for states with no input surface at all (startup).
+/// hits; `NavContext::LiveGameplay` during live judged play (the router
+/// drops menu verbs in both, keeping pads as gameplay/raw input). `None`
+/// only for states with no input surface at all (startup).
 fn owning_context(
     app_state: &AppState,
     pause: &PauseState,
@@ -114,25 +110,33 @@ fn publish_nav_context(
 
 #[cfg(test)]
 mod tests {
-    use game_shell::navigation::mirror_stack_to_active;
+    use game_shell::navigation::{route, Routed};
 
     use super::*;
 
-    /// What the pad mapper will see for a given owning context, via
-    /// game-shell's mirror.
-    fn mirrored(ctx: Option<NavContext>) -> Option<NavContext> {
-        let mut app = App::new();
-        let mut stack = NavContextStack::default();
-        set_stack(&mut stack, ctx);
-        app.insert_resource(stack)
-            .init_resource::<ActiveNavContext>()
-            .add_systems(Update, mirror_stack_to_active);
-        app.update();
-        app.world().resource::<ActiveNavContext>().0
+    /// Whether a MIDI menu verb routes to the given owning context (guard
+    /// grace already elapsed) — what the pad mapper's suppression used to be.
+    fn pads_navigate(ctx: Option<NavContext>) -> bool {
+        let now = std::time::Instant::now();
+        let mut guard = NavGuard::default();
+        if let Some(c) = ctx {
+            guard.force_ready(c, now);
+        }
+        matches!(
+            route(
+                ctx,
+                SystemVerb::NavigateUp,
+                dtx_input::VerbSource::Midi,
+                false,
+                &mut guard,
+                now,
+            ),
+            Routed::Menu(_)
+        )
     }
 
     #[test]
-    fn live_play_and_capture_own_the_stack_but_mirror_to_none() {
+    fn live_play_and_capture_own_the_stack_but_drop_menu_verbs() {
         let live = owning_context(
             &AppState::Performance,
             &PauseState::Running,
@@ -142,7 +146,7 @@ mod tests {
             None,
         );
         assert_eq!(live, Some(NavContext::LiveGameplay));
-        assert_eq!(mirrored(live), None, "pads stay gameplay input");
+        assert!(!pads_navigate(live), "pads stay gameplay input");
 
         let capture = owning_context(
             &AppState::Performance,
@@ -153,7 +157,7 @@ mod tests {
             None,
         );
         assert_eq!(capture, Some(NavContext::BindingCapture));
-        assert_eq!(mirrored(capture), None, "capture suppresses pad nav");
+        assert!(!pads_navigate(capture), "capture suppresses pad nav");
 
         let calibrating = owning_context(
             &AppState::SongSelect,
@@ -164,11 +168,11 @@ mod tests {
             None,
         );
         assert_eq!(calibrating, Some(NavContext::BindingCapture));
-        assert_eq!(mirrored(calibrating), None, "calibration suppresses pads");
+        assert!(!pads_navigate(calibrating), "calibration suppresses pads");
     }
 
     #[test]
-    fn menu_surfaces_own_the_stack_and_mirror_through() {
+    fn menu_surfaces_own_the_stack_and_route_pads_through() {
         for (state, expected) in [
             (AppState::Title, NavContext::Home),
             (AppState::SongSelect, NavContext::SongSelectSongs),
@@ -177,7 +181,7 @@ mod tests {
         ] {
             let ctx = owning_context(&state, &PauseState::Running, false, false, false, None);
             assert_eq!(ctx, Some(expected), "{state:?}");
-            assert_eq!(mirrored(ctx), Some(expected), "{state:?}");
+            assert!(pads_navigate(ctx), "{state:?}");
         }
         let paused = owning_context(
             &AppState::Performance,
@@ -188,7 +192,7 @@ mod tests {
             None,
         );
         assert_eq!(paused, Some(NavContext::PauseMenu));
-        assert_eq!(mirrored(paused), Some(NavContext::PauseMenu));
+        assert!(pads_navigate(paused));
         let editor = owning_context(
             &AppState::Performance,
             &PauseState::Running,
@@ -198,7 +202,7 @@ mod tests {
             None,
         );
         assert_eq!(editor, Some(NavContext::LayoutEditor));
-        assert_eq!(mirrored(editor), Some(NavContext::LayoutEditor));
+        assert!(pads_navigate(editor));
         let startup = owning_context(
             &AppState::Startup,
             &PauseState::Running,
@@ -208,7 +212,7 @@ mod tests {
             None,
         );
         assert_eq!(startup, None, "no surface: stack stays empty");
-        assert_eq!(mirrored(startup), None);
+        assert!(!pads_navigate(startup));
     }
 
     #[test]
@@ -226,11 +230,7 @@ mod tests {
                 Some(phase),
             );
             assert_eq!(ctx, Some(NavContext::PracticeSetupSettings), "{phase:?}");
-            assert_eq!(
-                mirrored(ctx),
-                Some(NavContext::PracticeSetupSettings),
-                "{phase:?}"
-            );
+            assert!(pads_navigate(ctx), "{phase:?}");
         }
         let running = owning_context(
             &AppState::Performance,
@@ -241,7 +241,7 @@ mod tests {
             Some(crate::practice::PracticePhase::Running),
         );
         assert_eq!(running, Some(NavContext::LiveGameplay));
-        assert_eq!(mirrored(running), None, "pads are gameplay input");
+        assert!(!pads_navigate(running), "pads are gameplay input");
     }
 
     #[test]

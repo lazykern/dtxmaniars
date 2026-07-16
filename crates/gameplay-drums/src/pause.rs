@@ -1579,7 +1579,6 @@ mod tests {
             .init_state::<PauseState>()
             .insert_resource(open_guard())
             .add_message::<crate::events::SystemVerbHit>()
-            .add_message::<dtx_input::PadNavHit>()
             .init_resource::<ButtonInput<KeyCode>>()
             .add_systems(Update, system_verb_pause.after(game_shell::NavRouterSet));
         app.world_mut().write_message(crate::events::SystemVerbHit {

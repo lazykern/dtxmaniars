@@ -28,16 +28,6 @@ pub enum Routed {
     Dropped,
 }
 
-/// Gate on router-delivered keyboard menu `NavAction`s. The screens' local
-/// keyboard emitters are gone; keyboard menu input flows dtx-input
-/// `keyboard_system_verbs` → router → `NavAction`.
-const ROUTE_KEYBOARD_MENU: bool = true;
-
-/// Gate on router-delivered MIDI menu `NavAction`s. Stays `false` while the
-/// transitional `pad_nav_mapper` still owns menu MIDI (and the shared
-/// `NavGuard`); flips on when the pad mapper is deleted.
-const ROUTE_MIDI_MENU: bool = false;
-
 /// Route one hit. Pure: all Bevy state is passed in. `guard.accept(now)` both
 /// checks and records, so only MIDI-sourced menu verbs consult it — keyboard
 /// hits bypass grace/debounce entirely (matching the pad mapper's policy).
@@ -101,28 +91,18 @@ pub(super) fn route_verbs(
 ) {
     use dtx_input::bindings::VerbScope;
     let now = Instant::now();
-    // While pad_nav_mapper still owns menu MIDI, the router must not sync or
-    // consume the shared NavGuard — `accept()` records, and a second consumer
-    // would break the mapper's grace/debounce. The guard belongs to the pad
-    // mapper until the MIDI cutover.
-    if ROUTE_MIDI_MENU {
-        guard.sync(stack.top(), now);
-    }
+    guard.sync(stack.top(), now);
     let coarse = keys.pressed(KeyCode::ShiftLeft) || keys.pressed(KeyCode::ShiftRight);
     for hit in hits.read() {
-        if hit.verb.activation_scope() != VerbScope::LiveSystem {
-            let deliver = match hit.source {
-                dtx_input::VerbSource::Keyboard => {
-                    // Transitional: the layout editor still runs its own
-                    // keyboard→NavAction emitters; skip router delivery there
-                    // to avoid double-driving it until the editor migrates.
-                    ROUTE_KEYBOARD_MENU && !matches!(stack.top(), Some(NavContext::LayoutEditor))
-                }
-                dtx_input::VerbSource::Midi => ROUTE_MIDI_MENU,
-            };
-            if !deliver {
-                continue;
-            }
+        // Transitional: the layout editor still runs its own
+        // keyboard→NavAction emitters; skip keyboard menu delivery there
+        // to avoid double-driving it until the editor migrates. MIDI menu
+        // verbs DO route to the editor (they replaced the pad mapper).
+        if hit.verb.activation_scope() != VerbScope::LiveSystem
+            && hit.source == dtx_input::VerbSource::Keyboard
+            && matches!(stack.top(), Some(NavContext::LayoutEditor))
+        {
+            continue;
         }
         match route(stack.top(), hit.verb, hit.source, coarse, &mut guard, now) {
             Routed::Menu(action) => {
@@ -397,20 +377,97 @@ mod tests {
         );
     }
 
-    /// MIDI menu verbs stay with the transitional pad mapper: the router
-    /// drops them and must not consume the shared guard.
+    /// End-to-end MIDI menu path: a hit inside the 500 ms entry grace is
+    /// dropped; after the grace it is accepted exactly once; a second hit
+    /// inside the 80 ms debounce is dropped.
     #[test]
-    fn route_verbs_system_drops_midi_menu_verbs_while_pad_mapper_owns_them() {
+    fn route_verbs_system_applies_grace_then_debounce_to_midi_menu_verbs() {
         let mut app = router_app();
         app.world_mut()
             .resource_mut::<NavContextStack>()
             .push(NavContext::Home);
+        let hit = dtx_input::SystemVerbHit {
+            verb: SystemVerb::NavigateUp,
+            source: VerbSource::Midi,
+        };
+        app.world_mut().write_message(hit);
+        app.update();
+        assert_eq!(menu_actions(&app), vec![], "inside the entry grace");
+
+        app.world_mut()
+            .resource_mut::<NavGuard>()
+            .force_ready(NavContext::Home, Instant::now());
+        app.world_mut().write_message(hit);
+        app.update();
+        assert_eq!(
+            menu_actions(&app),
+            vec![NavAction {
+                verb: SystemVerb::NavigateUp,
+                source: InputSource::MidiKit,
+                coarse: false,
+                repeated: false,
+            }],
+            "accepted once after the grace"
+        );
+
+        app.world_mut().write_message(hit);
+        app.update();
+        assert_eq!(menu_actions(&app), vec![], "inside the debounce");
+    }
+
+    /// MIDI menu verbs never reach live gameplay: pads are gameplay input.
+    #[test]
+    fn route_verbs_system_never_delivers_midi_menu_verbs_in_live_gameplay() {
+        let mut app = router_app();
+        app.world_mut()
+            .resource_mut::<NavContextStack>()
+            .push(NavContext::LiveGameplay);
+        app.world_mut()
+            .resource_mut::<NavGuard>()
+            .force_ready(NavContext::LiveGameplay, Instant::now());
         app.world_mut().write_message(dtx_input::SystemVerbHit {
-            verb: SystemVerb::Confirm,
+            verb: SystemVerb::NavigateUp,
             source: VerbSource::Midi,
         });
         app.update();
         assert_eq!(menu_actions(&app), vec![]);
+    }
+
+    /// Chain coverage by construction: the default profile binds the HH
+    /// close note (42) to NavigateUp, so the pump's `SystemVerbHit` for it
+    /// carries the verb the router just proved it delivers.
+    #[test]
+    fn default_profile_binds_hh_note_to_navigate_up() {
+        let verbs: Vec<SystemVerb> = dtx_input::BindResolver::default()
+            .system_for_note(42)
+            .collect();
+        assert!(verbs.contains(&SystemVerb::NavigateUp));
+    }
+
+    /// MIDI HT/LT arrive as NavigateLeft/Right; the layout editor's panels
+    /// consume Decrease/Increase, so LayoutEditor is an edit context and the
+    /// router translates (pad parity with the retired pad mapper).
+    #[test]
+    fn layout_editor_translates_midi_horizontal_navigation_to_adjustment() {
+        let now = Instant::now();
+        let mut guard = fresh_guard();
+        guard.force_ready(NavContext::LayoutEditor, now);
+        assert_eq!(
+            route(
+                Some(NavContext::LayoutEditor),
+                SystemVerb::NavigateLeft,
+                VerbSource::Midi,
+                false,
+                &mut guard,
+                now,
+            ),
+            Routed::Menu(NavAction {
+                verb: SystemVerb::Decrease,
+                source: InputSource::MidiKit,
+                coarse: false,
+                repeated: false,
+            })
+        );
     }
 
     /// Transitional: the layout editor still emits its own keyboard

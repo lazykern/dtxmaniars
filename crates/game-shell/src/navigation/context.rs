@@ -43,12 +43,18 @@ pub enum NavContext {
 
 impl NavContext {
     /// Edit-type contexts translate NavigateLeft/Right into Decrease/Increase.
+    ///
+    /// LayoutEditor is edit-type for pad parity: the retired pad mapper sent
+    /// HT/LT as Decrease/Increase, and the editor's panels (lanes, controls)
+    /// consume those verbs. Only MIDI is affected — the router still skips
+    /// keyboard menu delivery in the editor (it runs its own emitters).
     pub fn is_edit(self) -> bool {
         matches!(
             self,
             NavContext::SongReadyEdit
                 | NavContext::SettingsEdit
                 | NavContext::PracticeSetupSettings
+                | NavContext::LayoutEditor
         )
     }
 

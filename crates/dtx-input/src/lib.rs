@@ -10,14 +10,14 @@
 //! - [`midi`] — `MidiSource` trait + `VirtualSource` + (optional) real-device impl
 //! - [`lane_map`] — fixed BocuD lane order
 //! - [`resolver`] — bind resolution (`BindResolver`)
-//! - [`pump`] — the MIDI pump; emits `PadNavHit`, `ResolvedInputHit`, `SystemVerbHit`
+//! - [`pump`] — the MIDI pump; emits `ResolvedInputHit`, `SystemVerbHit`
 //!
 //! ## Lane resolution lives here
 //!
 //! Since the menu-nav extraction (2026-07-15 spec), this crate owns the fixed
 //! BocuD lane order (`lane_map`), bind resolution (`resolver`), and the MIDI
-//! pump (`pump`). It emits device-level messages (`PadNavHit`,
-//! `ResolvedInputHit`, `SystemVerbHit`); it knows nothing about application
+//! pump (`pump`). It emits device-level messages (`ResolvedInputHit`,
+//! `SystemVerbHit`); it knows nothing about application
 //! contexts (SongSelect, Settings, Practice) — those belong to game-shell.
 
 #![warn(missing_docs)]
@@ -40,8 +40,8 @@ pub mod resolver;
 
 pub use events::{LaneHit, LaneHitKind, LaneId};
 pub use pump::{
-    InputPumpSet, LastMidiHit, MidiConnected, PadNavHit, RawInputOwned, ResolvedInputHit,
-    SystemVerbHit, VerbSource,
+    InputPumpSet, LastMidiHit, MidiConnected, RawInputOwned, ResolvedInputHit, SystemVerbHit,
+    VerbSource,
 };
 pub use resolver::{ActiveInputProfiles, BindResolver, LiveBindings};
 

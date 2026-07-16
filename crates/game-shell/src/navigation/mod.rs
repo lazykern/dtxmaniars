@@ -1,9 +1,10 @@
-//! Semantic menu-navigation: actions, contexts, guard, and the pad mapper.
+//! Semantic menu-navigation: actions, contexts, guard, and the router.
 //!
-//! Producers: per-screen keyboard systems and dtx-input's MIDI pump
-//! (`PadNavHit`). Consumers: song select, title, pause menu, results,
-//! settings overlay. Moved/merged from game-shell `nav.rs` and
-//! gameplay-drums `menu_nav.rs` (menu-nav extraction, 2026-07-15 spec).
+//! Producer: dtx-input's pump (`SystemVerbHit`, keyboard and MIDI, from
+//! configured profile bindings) → [`router::route_verbs`] → [`NavAction`].
+//! Consumers: song select, title, pause menu, results, settings overlay,
+//! layout editor. Moved/merged from game-shell `nav.rs` and gameplay-drums
+//! `menu_nav.rs` (menu-nav extraction, 2026-07-15 spec).
 
 use std::time::{Duration, Instant};
 
@@ -75,6 +76,15 @@ impl NavGuard {
         }
     }
 
+    /// Test-only: pretend the context was entered long ago so MIDI hits
+    /// clear the entry grace without waiting out wall-clock time.
+    #[doc(hidden)]
+    pub fn force_ready(&mut self, ctx: NavContext, now: Instant) {
+        self.context = Some(ctx);
+        self.entered_at = Some(now - Duration::from_secs(1));
+        self.last_accept = None;
+    }
+
     /// True if a pad hit at `now` may become a [`NavAction`].
     pub fn accept(&mut self, now: Instant) -> bool {
         let Some(entered) = self.entered_at else {
@@ -93,108 +103,28 @@ impl NavGuard {
     }
 }
 
-/// GITADORA-ish convention. Lane ids per `dtx_input::lane_map::LANE_ORDER`.
-/// Transitional: replaced by configured profile bindings (`SystemVerbHit`)
-/// once every menu consumer is on the shared router. Practice is no longer a
-/// shared semantic action — it is a visible UI choice on Song Ready.
-pub(crate) fn verb_for_lane(lane: u8) -> Option<SystemVerb> {
-    match lane {
-        0 | 7 => Some(SystemVerb::NavigateUp),
-        6 | 8 => Some(SystemVerb::NavigateDown),
-        2 => Some(SystemVerb::Confirm),
-        1 => Some(SystemVerb::Back),
-        3 => Some(SystemVerb::Decrease),
-        4 => Some(SystemVerb::Increase),
-        5 => Some(SystemVerb::NextTab),
-        _ => None,
-    }
-}
-
-/// Which menu surface currently owns pad navigation. `None` = pads are
-/// gameplay input, or a capture/calibration overlay owns raw hits.
-/// Transitional: derived from [`NavContextStack`] by
-/// [`mirror_stack_to_active`]; consumed by [`pad_nav_mapper`] until the
-/// screens migrate to the router.
-#[derive(Resource, Debug, Default, Clone, Copy, PartialEq, Eq)]
-pub struct ActiveNavContext(pub Option<NavContext>);
-
-/// Update-schedule set the pad mapper runs in. Context writers order
-/// themselves `.before(NavMapSet)`.
-#[derive(SystemSet, Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub struct NavMapSet;
-
 /// Update-schedule set for systems that write [`NavContextStack`]. Stack
-/// consumers ([`mirror_stack_to_active`], the router) order themselves
-/// `.after(NavStackWriteSet)`.
+/// consumers (the router) order themselves `.after(NavStackWriteSet)`.
 #[derive(SystemSet, Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct NavStackWriteSet;
 
 /// Update-schedule set for systems that refine the published stack top with
 /// screen-local state (e.g. Song Ready layers, practice preview focus). Runs
-/// after [`NavStackWriteSet`] and before the mirror and the router.
+/// after [`NavStackWriteSet`] and before the router.
 #[derive(SystemSet, Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct NavStackRefineSet;
 
-/// Derives the transitional [`ActiveNavContext`] from the stack top.
-/// Exclusive contexts and [`NavContext::LiveGameplay`] mirror to `None`: the
-/// pad mapper must stay suppressed there exactly as before the stack existed.
-pub fn mirror_stack_to_active(stack: Res<NavContextStack>, mut active: ResMut<ActiveNavContext>) {
-    let next = stack
-        .top()
-        .filter(|c| !c.exclusive() && *c != NavContext::LiveGameplay);
-    if active.0 != next {
-        active.0 = next;
-    }
-}
-
-fn pad_nav_mapper(
-    ctx: Res<ActiveNavContext>,
-    mut hits: MessageReader<dtx_input::PadNavHit>,
-    mut guard: ResMut<NavGuard>,
-    mut out: MessageWriter<NavAction>,
-) {
-    let now = Instant::now();
-    let Some(ctx) = ctx.0 else {
-        guard.clear_context();
-        hits.clear();
-        return;
-    };
-    guard.enter_context(ctx, now);
-    for hit in hits.read() {
-        let Some(verb) = verb_for_lane(hit.lane) else {
-            continue;
-        };
-        if !guard.accept(now) {
-            continue;
-        }
-        out.write(NavAction {
-            verb,
-            source: InputSource::MidiKit,
-            coarse: false,
-            repeated: false,
-        });
-    }
-}
-
-/// Registers the NavAction message, nav resources, and the pad mapper.
+/// Registers the NavAction message, nav resources, and the router.
 pub fn plugin(app: &mut App) {
     app.add_message::<NavAction>()
         .add_message::<LiveVerb>()
         .add_message::<MouseIntent>()
         .init_resource::<MidiConnected>()
         .init_resource::<NavGuard>()
-        .init_resource::<ActiveNavContext>()
         .init_resource::<NavContextStack>()
         .init_resource::<LastIntentionalInputSource>()
         .init_resource::<PromptSourcePreference>()
         .configure_sets(Update, NavStackRefineSet.after(NavStackWriteSet))
-        .add_systems(
-            Update,
-            mirror_stack_to_active
-                .after(NavStackRefineSet)
-                .before(NavMapSet),
-        )
-        .add_systems(Update, pad_nav_mapper.in_set(NavMapSet))
         .add_systems(
             Update,
             router::route_verbs
@@ -217,26 +147,6 @@ mod tests {
         };
         let b = a;
         assert_eq!(a, b);
-    }
-
-    #[test]
-    fn lane_verbs_follow_gitadora_convention() {
-        assert_eq!(verb_for_lane(0), Some(SystemVerb::NavigateUp)); // HH close
-        assert_eq!(verb_for_lane(7), Some(SystemVerb::NavigateUp)); // HH open
-        assert_eq!(verb_for_lane(6), Some(SystemVerb::NavigateDown)); // CY
-        assert_eq!(verb_for_lane(8), Some(SystemVerb::NavigateDown)); // RD
-        assert_eq!(verb_for_lane(2), Some(SystemVerb::Confirm)); // BD
-        assert_eq!(verb_for_lane(1), Some(SystemVerb::Back)); // SD
-        assert_eq!(verb_for_lane(5), Some(SystemVerb::NextTab)); // FT
-        assert_eq!(verb_for_lane(3), Some(SystemVerb::Decrease)); // HT
-        assert_eq!(verb_for_lane(4), Some(SystemVerb::Increase)); // LT
-        assert_eq!(verb_for_lane(10), None); // LP unmapped
-    }
-
-    #[test]
-    fn toms_supply_explicit_quick_setting_adjustment_verbs() {
-        assert_eq!(verb_for_lane(3), Some(SystemVerb::Decrease));
-        assert_eq!(verb_for_lane(4), Some(SystemVerb::Increase));
     }
 
     #[test]
@@ -268,70 +178,55 @@ mod tests {
     }
 
     /// The BD that confirmed a song must not also cancel the load it started:
-    /// entering `Loading` resets the grace window, so the next pad hit is only
-    /// accepted 500 ms later.
+    /// entering `Loading` resets the grace window, so the next MIDI hit is
+    /// only accepted 500 ms later. Exercised through `route()` — the router
+    /// owns the guard now.
     #[test]
     fn confirm_hit_cannot_cancel_the_load_it_started() {
+        use dtx_input::VerbSource;
         let mut g = NavGuard::default();
         let t0 = std::time::Instant::now();
-        g.enter_context(NavContext::SongSelectSongs, t0);
+        g.sync(Some(NavContext::SongSelectSongs), t0);
         let confirm = t0 + std::time::Duration::from_millis(600);
-        assert!(g.accept(confirm), "BD confirms the song");
-
-        // Next frame: SongLoading is active.
-        g.enter_context(NavContext::SongLoading, confirm);
-        assert!(!g.accept(confirm), "same-instant hit is inside the grace");
-        assert!(!g.accept(confirm + std::time::Duration::from_millis(499)));
-        assert!(g.accept(confirm + std::time::Duration::from_millis(500)));
-    }
-
-    fn mirror(stack: &NavContextStack) -> Option<NavContext> {
-        let mut app = App::new();
-        app.insert_resource(stack.clone())
-            .init_resource::<ActiveNavContext>()
-            .add_systems(Update, mirror_stack_to_active);
-        app.update();
-        app.world().resource::<ActiveNavContext>().0
-    }
-
-    #[test]
-    fn mirror_passes_plain_menu_contexts_through() {
-        let mut stack = NavContextStack::default();
-        stack.push(NavContext::SongSelectSongs);
-        assert_eq!(mirror(&stack), Some(NavContext::SongSelectSongs));
-        stack.push(NavContext::PauseMenu);
-        assert_eq!(mirror(&stack), Some(NavContext::PauseMenu));
-    }
-
-    #[test]
-    fn mirror_maps_exclusive_and_live_gameplay_to_none() {
-        let mut stack = NavContextStack::default();
-        assert_eq!(mirror(&stack), None, "empty stack");
-        stack.push(NavContext::BindingCapture);
-        assert_eq!(mirror(&stack), None, "exclusive capture suppresses pads");
-        stack.clear();
-        stack.push(NavContext::LiveGameplay);
-        assert_eq!(mirror(&stack), None, "live play: pads are gameplay input");
-    }
-
-    /// The mapper must read `PadNavHit`, never `LaneHit` — autoplay (forced on
-    /// by the Customize surface) and keyboard lane keys write `LaneHit`, and a
-    /// chart's autoplay notes would otherwise navigate and close the overlay.
-    #[test]
-    fn mapper_consumes_pad_nav_hits_not_lane_hits() {
-        let src = include_str!("mod.rs");
-        let body = src
-            .split("fn pad_nav_mapper(")
-            .nth(1)
-            .expect("pad_nav_mapper exists");
-        let signature = body.split(") {").next().unwrap();
         assert!(
-            signature.contains("PadNavHit"),
-            "mapper must read PadNavHit"
+            matches!(
+                route(
+                    Some(NavContext::SongSelectSongs),
+                    SystemVerb::Confirm,
+                    VerbSource::Midi,
+                    false,
+                    &mut g,
+                    confirm,
+                ),
+                Routed::Menu(_)
+            ),
+            "BD confirms the song"
         );
-        assert!(
-            !signature.contains("LaneHit"),
-            "mapper must not read LaneHit (autoplay + keyboard write those)"
+
+        // Next frame: SongLoading is active; the router syncs the guard.
+        g.sync(Some(NavContext::SongLoading), confirm);
+        let back = |g: &mut NavGuard, at| {
+            route(
+                Some(NavContext::SongLoading),
+                SystemVerb::Back,
+                VerbSource::Midi,
+                false,
+                g,
+                at,
+            )
+        };
+        assert_eq!(
+            back(&mut g, confirm),
+            Routed::Dropped,
+            "same-instant hit is inside the grace"
         );
+        assert_eq!(
+            back(&mut g, confirm + std::time::Duration::from_millis(499)),
+            Routed::Dropped
+        );
+        assert!(matches!(
+            back(&mut g, confirm + std::time::Duration::from_millis(500)),
+            Routed::Menu(_)
+        ));
     }
 }
