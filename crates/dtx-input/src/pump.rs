@@ -381,7 +381,15 @@ mod tests {
             &mut last,
         );
 
-        assert!(out.verbs.is_empty(), "a lane hit must never pause");
+        assert!(
+            !out.verbs.contains(&SystemVerb::Pause),
+            "a lane hit must never pause: {:?}",
+            out.verbs
+        );
+        assert!(
+            out.verbs.contains(&SystemVerb::Back),
+            "the default menu convention (SD = Back) is lane-shared on purpose"
+        );
         assert_eq!(out.hits.len(), 1, "it still judges");
     }
 
