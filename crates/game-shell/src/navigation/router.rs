@@ -62,6 +62,8 @@ pub fn route(
     if source == dtx_input::VerbSource::Midi && !guard.accept(now) {
         return Routed::Dropped;
     }
+    // Shift is a keyboard gesture: it never modifies MIDI-sourced verbs.
+    let coarse = coarse && source == dtx_input::VerbSource::Keyboard;
     let verb = match (ctx.is_edit(), verb, coarse) {
         (true, SystemVerb::NavigateLeft, _) => SystemVerb::Decrease,
         (true, SystemVerb::NavigateRight, _) => SystemVerb::Increase,
@@ -300,6 +302,31 @@ mod tests {
                 verb: SystemVerb::PreviousTab,
                 source: InputSource::Keyboard,
                 coarse: true,
+                repeated: false,
+            })
+        );
+    }
+
+    /// Shift is keyboard-only: it must not flip a MIDI NextTab into
+    /// PreviousTab nor stamp `coarse` on a MIDI-sourced action.
+    #[test]
+    fn shift_does_not_modify_midi_sourced_verbs() {
+        let t0 = Instant::now();
+        let mut guard = fresh_guard();
+        guard.sync(Some(NavContext::SettingsTabs), t0);
+        assert_eq!(
+            route(
+                Some(NavContext::SettingsTabs),
+                SystemVerb::NextTab,
+                VerbSource::Midi,
+                true,
+                &mut guard,
+                t0 + Duration::from_millis(600),
+            ),
+            Routed::Menu(NavAction {
+                verb: SystemVerb::NextTab,
+                source: InputSource::MidiKit,
+                coarse: false,
                 repeated: false,
             })
         );
