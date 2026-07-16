@@ -82,7 +82,10 @@ pub fn keyboard_system_verbs(
     }
     for key in keys.get_just_pressed() {
         for verb in resolver.system_for_key(*key) {
-            out.write(crate::SystemVerbHit { verb });
+            out.write(crate::SystemVerbHit {
+                verb,
+                source: crate::VerbSource::Keyboard,
+            });
         }
     }
 }
@@ -157,7 +160,8 @@ mod tests {
         assert_eq!(
             hits,
             vec![SystemVerbHit {
-                verb: SystemVerb::Pause
+                verb: SystemVerb::Pause,
+                source: crate::VerbSource::Keyboard,
             }]
         );
     }

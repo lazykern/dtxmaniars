@@ -53,7 +53,7 @@ use dtx_ui::widget::song_wheel::{SongWheel, VISIBLE_HALF, WheelRow, WheelSpring,
 use dtx_ui::widget::stage_background::spawn_stage_background;
 use dtx_ui::widget::stage_panel::{BadgeValueText, panel, set_panel_selected, spawn_badge_row};
 use game_shell::{
-    AppState, NavAction, NavSource, NavVerb, ResultReturnState, ScoreStoreResource,
+    AppState, InputSource, NavAction, ResultReturnState, ScoreStoreResource, SystemVerb,
     TransitionRequest, despawn_stage, request_transition,
 };
 
@@ -598,6 +598,7 @@ pub fn plugin(app: &mut App) {
         .init_resource::<SongSelectFocus>()
         .init_resource::<DiscoveryFilters>()
         .init_resource::<DiscoveryRandom>()
+        .init_resource::<SearchEscConsumed>()
         .add_systems(
             OnEnter(AppState::SongSelect),
             (
@@ -627,11 +628,12 @@ pub fn plugin(app: &mut App) {
                 maybe_recompute_visible,
                 song_select_hotkeys,
                 (
-                    song_select_kb_emit,
+                    search_esc_intercept,
                     song_select_nav_consumer,
                     persist_hovered_selection,
                 )
-                    .chain(),
+                    .chain()
+                    .after(game_shell::NavRouterSet),
                 update_song_select_legend,
                 (respawn_wheel_on_change, install_song_select_pointer_targets).chain(),
                 song_select_pointer_input,
@@ -1732,21 +1734,24 @@ pub enum SongSelectFocus {
 }
 
 impl SongSelectFocus {
-    fn on_keyboard_verb(self, verb: game_shell::NavVerb) -> Self {
-        use game_shell::NavVerb;
+    fn on_keyboard_verb(self, verb: game_shell::SystemVerb) -> Self {
+        use game_shell::SystemVerb;
         match (self, verb) {
-            (Self::Songs, NavVerb::Dec) => Self::Difficulty,
-            (Self::Difficulty, NavVerb::Inc) => Self::Songs,
-            (Self::Difficulty, NavVerb::Back) => Self::Songs,
+            // Router-delivered keyboard arrows arrive as NavigateLeft/Right
+            // (song select is not an edit context); Decrease/Increase kept
+            // for legacy writers.
+            (Self::Songs, SystemVerb::Decrease | SystemVerb::NavigateLeft) => Self::Difficulty,
+            (Self::Difficulty, SystemVerb::Increase | SystemVerb::NavigateRight) => Self::Songs,
+            (Self::Difficulty, SystemVerb::Back) => Self::Songs,
             _ => self,
         }
     }
 
-    fn on_pad_verb(self, verb: game_shell::NavVerb) -> Self {
-        use game_shell::NavVerb;
+    fn on_pad_verb(self, verb: game_shell::SystemVerb) -> Self {
+        use game_shell::SystemVerb;
         match (self, verb) {
-            (Self::Songs, NavVerb::Confirm) => Self::Difficulty,
-            (Self::Difficulty, NavVerb::Back) => Self::Songs,
+            (Self::Songs, SystemVerb::Confirm) => Self::Difficulty,
+            (Self::Difficulty, SystemVerb::Back) => Self::Songs,
             _ => self,
         }
     }
@@ -2105,10 +2110,7 @@ fn song_select_hotkeys(
     if selection_state.visible.is_empty() {
         return;
     }
-    if keys.just_pressed(KeyCode::Tab) {
-        selection_state.sort_mode = selection_state.sort_mode.next();
-        selection_state.dirty = true;
-    } else if keys.just_pressed(KeyCode::F1)
+    if keys.just_pressed(KeyCode::F1)
         && !crate::title::request_gameplay_settings(
             &mut db,
             &mut pending,
@@ -2121,65 +2123,47 @@ fn song_select_hotkeys(
     }
 }
 
-/// Keyboard → `NavAction`. Shift+Enter is Practice, plain Enter is Confirm.
-/// Esc clears a non-empty search instead of backing out (pads unaffected:
-/// pad Back still emits regardless of the query).
-pub(crate) fn song_select_kb_emit(
+/// Frame-scoped marker: Esc cleared the search this frame, so the NavAction
+/// consumer must swallow exactly one keyboard `Back` (Esc clears a non-empty
+/// search instead of backing out; pads unaffected).
+#[derive(Resource, Debug, Default)]
+pub(crate) struct SearchEscConsumed(pub bool);
+
+/// Runs before the NavAction consumer: when Esc lands on a non-empty search
+/// (and Song Ready is closed), clear the query and mark the router-delivered
+/// `Back` as consumed for this frame.
+pub(crate) fn search_esc_intercept(
     keys: Res<ButtonInput<KeyCode>>,
-    mut out: MessageWriter<NavAction>,
     mut selection_state: ResMut<SongSelectSelection>,
     ready: Res<crate::song_ready::SongReadyState>,
+    mut consumed: ResMut<SearchEscConsumed>,
 ) {
-    use game_shell::{NavSource, NavVerb};
-    let shift = keys.pressed(KeyCode::ShiftLeft) || keys.pressed(KeyCode::ShiftRight);
-    let verb = if keys.just_pressed(KeyCode::ArrowDown) {
-        NavVerb::Down
-    } else if keys.just_pressed(KeyCode::ArrowUp) {
-        NavVerb::Up
-    } else if keys.just_pressed(KeyCode::ArrowRight) {
-        NavVerb::Inc
-    } else if keys.just_pressed(KeyCode::ArrowLeft) {
-        NavVerb::Dec
-    } else if keys.just_pressed(KeyCode::Enter) {
-        if shift {
-            NavVerb::Practice
-        } else {
-            NavVerb::Confirm
-        }
-    } else if keys.just_pressed(KeyCode::Escape) {
-        // Immutable reborrow for the read: `ResMut` change detection is
-        // write-triggered, so this doesn't dirty the resource each frame.
-        if ready.layer == crate::song_ready::SongReadyLayer::Closed
-            && esc_clears_search_first(&selection_state.search_query)
-        {
-            selection_state.search_query.clear();
-            selection_state.dirty = true;
-            return;
-        }
-        NavVerb::Back
-    } else {
-        return;
-    };
-    out.write(NavAction {
-        verb,
-        source: NavSource::Keyboard,
-        coarse: false,
-    });
+    consumed.0 = false;
+    if keys.just_pressed(KeyCode::Escape)
+        && ready.layer == crate::song_ready::SongReadyLayer::Closed
+        && esc_clears_search_first(&selection_state.search_query)
+    {
+        selection_state.search_query.clear();
+        selection_state.dirty = true;
+        consumed.0 = true;
+    }
 }
 
 fn ready_mode_for_action(
-    source: NavSource,
+    source: InputSource,
     focus: SongSelectFocus,
-    verb: NavVerb,
+    verb: SystemVerb,
+    coarse: bool,
 ) -> Option<crate::song_ready::ReadyMode> {
     match (source, focus, verb) {
-        (NavSource::Keyboard, _, NavVerb::Confirm) => Some(crate::song_ready::ReadyMode::Normal),
-        (NavSource::Keyboard, _, NavVerb::Practice) => Some(crate::song_ready::ReadyMode::Practice),
-        (NavSource::Pad, SongSelectFocus::Difficulty, NavVerb::Confirm) => {
+        (InputSource::Keyboard, _, SystemVerb::Confirm) if coarse => {
+            Some(crate::song_ready::ReadyMode::Practice)
+        }
+        (InputSource::Keyboard, _, SystemVerb::Confirm) => {
             Some(crate::song_ready::ReadyMode::Normal)
         }
-        (NavSource::Pad, SongSelectFocus::Difficulty, NavVerb::Practice) => {
-            Some(crate::song_ready::ReadyMode::Practice)
+        (InputSource::MidiKit, SongSelectFocus::Difficulty, SystemVerb::Confirm) => {
+            Some(crate::song_ready::ReadyMode::Normal)
         }
         _ => None,
     }
@@ -2190,12 +2174,13 @@ pub(crate) fn song_select_nav_consumer(
     mut focus: ResMut<SongSelectFocus>,
     db: Res<SongDb>,
     mut selection: ResMut<Selection>,
-    selection_state: Res<SongSelectSelection>,
+    mut selection_state: ResMut<SongSelectSelection>,
     mut requests: MessageWriter<TransitionRequest>,
     mut ready: ResMut<crate::song_ready::SongReadyState>,
     mut draft: ResMut<crate::song_ready::ReadyConfigDraft>,
+    mut esc_consumed: ResMut<SearchEscConsumed>,
 ) {
-    use game_shell::{NavSource, NavVerb};
+    use game_shell::{InputSource, SystemVerb};
     if ready.layer != crate::song_ready::SongReadyLayer::Closed {
         actions.clear();
         return;
@@ -2205,11 +2190,24 @@ pub(crate) fn song_select_nav_consumer(
         return;
     }
     for action in actions.read() {
+        if action.verb == SystemVerb::Back
+            && action.source == InputSource::Keyboard
+            && esc_consumed.0
+        {
+            // Esc already cleared the search this frame.
+            esc_consumed.0 = false;
+            continue;
+        }
+        if action.verb == SystemVerb::NextTab {
+            selection_state.sort_mode = selection_state.sort_mode.next();
+            selection_state.dirty = true;
+            continue;
+        }
         let (folder_step, diff_step) = match (*focus, action.verb) {
-            (SongSelectFocus::Songs, NavVerb::Up) => (-1, 0),
-            (SongSelectFocus::Songs, NavVerb::Down) => (1, 0),
-            (SongSelectFocus::Difficulty, NavVerb::Up) => (0, 1),
-            (SongSelectFocus::Difficulty, NavVerb::Down) => (0, -1),
+            (SongSelectFocus::Songs, SystemVerb::NavigateUp) => (-1, 0),
+            (SongSelectFocus::Songs, SystemVerb::NavigateDown) => (1, 0),
+            (SongSelectFocus::Difficulty, SystemVerb::NavigateUp) => (0, 1),
+            (SongSelectFocus::Difficulty, SystemVerb::NavigateDown) => (0, -1),
             _ => (0, 0),
         };
         if folder_step > 0 {
@@ -2231,7 +2229,7 @@ pub(crate) fn song_select_nav_consumer(
             selection.difficulty = selection.difficulty.saturating_sub(1);
         }
 
-        let open_mode = ready_mode_for_action(action.source, *focus, action.verb);
+        let open_mode = ready_mode_for_action(action.source, *focus, action.verb, action.coarse);
         if let Some(mode) = open_mode
             && open_song_ready(
                 mode,
@@ -2255,16 +2253,24 @@ pub(crate) fn song_select_nav_consumer(
 
         let leaves = matches!(
             (action.source, *focus, action.verb),
-            (NavSource::Keyboard, SongSelectFocus::Songs, NavVerb::Back)
-                | (NavSource::Pad, SongSelectFocus::Songs, NavVerb::Back)
+            (
+                InputSource::Keyboard,
+                SongSelectFocus::Songs,
+                SystemVerb::Back
+            ) | (
+                InputSource::MidiKit,
+                SongSelectFocus::Songs,
+                SystemVerb::Back
+            )
         );
         if leaves {
             request_transition(&mut requests, AppState::Title);
         }
 
         *focus = match action.source {
-            NavSource::Keyboard => focus.on_keyboard_verb(action.verb),
-            NavSource::Pad => focus.on_pad_verb(action.verb),
+            InputSource::Keyboard => focus.on_keyboard_verb(action.verb),
+            InputSource::MidiKit => focus.on_pad_verb(action.verb),
+            _ => *focus,
         };
     }
 }
@@ -2632,33 +2638,162 @@ mod tests {
 
     #[test]
     fn song_select_focus_regions_follow_keyboard_geometry() {
-        use game_shell::NavVerb;
+        use game_shell::SystemVerb;
         let mut focus = SongSelectFocus::Songs;
-        focus = focus.on_keyboard_verb(NavVerb::Dec);
+        focus = focus.on_keyboard_verb(SystemVerb::Decrease);
         assert_eq!(focus, SongSelectFocus::Difficulty);
-        focus = focus.on_keyboard_verb(NavVerb::Dec);
+        focus = focus.on_keyboard_verb(SystemVerb::Decrease);
         assert_eq!(focus, SongSelectFocus::Difficulty);
-        focus = focus.on_keyboard_verb(NavVerb::Inc);
+        focus = focus.on_keyboard_verb(SystemVerb::Increase);
         assert_eq!(focus, SongSelectFocus::Songs);
-        focus = SongSelectFocus::Difficulty.on_keyboard_verb(NavVerb::Back);
+        focus = SongSelectFocus::Difficulty.on_keyboard_verb(SystemVerb::Back);
         assert_eq!(focus, SongSelectFocus::Songs);
         assert_eq!(
-            SongSelectFocus::Songs.on_keyboard_verb(NavVerb::Inc),
+            SongSelectFocus::Songs.on_keyboard_verb(SystemVerb::Increase),
             SongSelectFocus::Songs
         );
     }
 
     #[test]
     fn song_select_focus_preserves_two_level_pad_model() {
-        use game_shell::NavVerb;
+        use game_shell::SystemVerb;
         let mut focus = SongSelectFocus::Songs;
-        focus = focus.on_pad_verb(NavVerb::Confirm);
+        focus = focus.on_pad_verb(SystemVerb::Confirm);
         assert_eq!(focus, SongSelectFocus::Difficulty);
-        focus = focus.on_pad_verb(NavVerb::Back);
+        focus = focus.on_pad_verb(SystemVerb::Back);
         assert_eq!(focus, SongSelectFocus::Songs);
         assert_eq!(
-            SongSelectFocus::Songs.on_pad_verb(NavVerb::Back),
+            SongSelectFocus::Songs.on_pad_verb(SystemVerb::Back),
             SongSelectFocus::Songs
+        );
+    }
+
+    fn song(path: &str) -> SongInfo {
+        SongInfo {
+            path: std::path::PathBuf::from(path),
+            title: path.into(),
+            artist: "X".into(),
+            bpm: Some(120.0),
+            dlevel: Some(20),
+            bgm_path: None,
+            preview_path: None,
+            preview_is_loopable: false,
+            preimage_path: None,
+        }
+    }
+
+    /// Full app wiring for the keyboard cutover regression tests: bevy's
+    /// InputPlugin (so `just_pressed` clears each frame exactly like the real
+    /// app), dtx-input `keyboard_system_verbs` in PreUpdate, the game-shell
+    /// navigation plugin (router), and the song select NavAction consumer.
+    fn router_e2e_app(songs: Vec<SongInfo>) -> App {
+        let mut selection_state = SongSelectSelection::default();
+        selection_state.recompute(&songs);
+        let mut app = App::new();
+        app.add_plugins(bevy::input::InputPlugin)
+            .add_plugins(game_shell::navigation::plugin)
+            .add_message::<dtx_input::SystemVerbHit>()
+            .add_message::<TransitionRequest>()
+            .init_resource::<dtx_input::BindResolver>()
+            .init_resource::<dtx_input::RawInputOwned>()
+            .insert_resource(SongDb {
+                songs,
+                ..Default::default()
+            })
+            .insert_resource(Selection::default())
+            .insert_resource(selection_state)
+            .insert_resource(SongSelectFocus::Songs)
+            .insert_resource(crate::song_ready::SongReadyState::default())
+            .insert_resource(crate::song_ready::ReadyConfigDraft::default())
+            .init_resource::<SearchEscConsumed>()
+            .add_systems(
+                PreUpdate,
+                dtx_input::keyboard::keyboard_system_verbs.after(bevy::input::InputSystems),
+            )
+            .add_systems(
+                Update,
+                song_select_nav_consumer.after(game_shell::NavRouterSet),
+            );
+        app.world_mut()
+            .resource_mut::<game_shell::NavContextStack>()
+            .push(game_shell::NavContext::SongSelectSongs);
+        app
+    }
+
+    /// One physical press+release: a `KeyboardInput` Pressed event, one frame,
+    /// then the Released event (the next `app.update()` processes it).
+    fn press_key_event(app: &mut App, key: KeyCode) -> usize {
+        let event = |state| bevy::input::keyboard::KeyboardInput {
+            key_code: key,
+            logical_key: bevy::input::keyboard::Key::Unidentified(
+                bevy::input::keyboard::NativeKey::Unidentified,
+            ),
+            state,
+            text: None,
+            repeat: false,
+            window: Entity::PLACEHOLDER,
+        };
+        app.world_mut()
+            .write_message(event(bevy::input::ButtonState::Pressed));
+        app.update();
+        let delivered = app
+            .world()
+            .resource::<Messages<NavAction>>()
+            .iter_current_update_messages()
+            .count();
+        app.world_mut()
+            .write_message(event(bevy::input::ButtonState::Released));
+        app.update();
+        app.update();
+        delivered
+    }
+
+    /// End to end (the double-step regression): one physical ArrowDown press
+    /// flows dtx-input `keyboard_system_verbs` → game-shell router →
+    /// NavAction → the song select consumer, moving the wheel selection by
+    /// EXACTLY one — and the router delivered exactly ONE NavAction for the
+    /// press. A 3-song list so a double step cannot hide behind clamping.
+    #[test]
+    fn keyboard_down_arrow_moves_selection_exactly_one_through_the_router() {
+        let songs = vec![
+            song("/songs/A/a.dtx"),
+            song("/songs/B/b.dtx"),
+            song("/songs/C/c.dtx"),
+        ];
+        let mut app = router_e2e_app(songs);
+        let delivered = press_key_event(&mut app, KeyCode::ArrowDown);
+        assert_eq!(
+            delivered, 1,
+            "one ArrowDown press must produce exactly one NavAction"
+        );
+        assert_eq!(
+            app.world().resource::<Selection>().folder,
+            1,
+            "one press moves the wheel by exactly one"
+        );
+    }
+
+    /// Same end-to-end path with the Difficulty column focused: one ArrowUp
+    /// press moves the difficulty focus by exactly one, via exactly one
+    /// router-delivered NavAction.
+    #[test]
+    fn keyboard_up_arrow_moves_difficulty_exactly_one_through_the_router() {
+        let songs = vec![
+            song("/songs/A/bas.dtx"),
+            song("/songs/A/adv.dtx"),
+            song("/songs/A/ext.dtx"),
+        ];
+        let mut app = router_e2e_app(songs);
+        app.insert_resource(SongSelectFocus::Difficulty);
+        let delivered = press_key_event(&mut app, KeyCode::ArrowUp);
+        assert_eq!(
+            delivered, 1,
+            "one ArrowUp press must produce exactly one NavAction"
+        );
+        assert_eq!(
+            app.world().resource::<Selection>().difficulty,
+            1,
+            "one press moves the difficulty focus by exactly one"
         );
     }
 
@@ -2716,21 +2851,27 @@ mod tests {
             .insert_resource(SongSelectFocus::Difficulty)
             .insert_resource(crate::song_ready::SongReadyState::default())
             .insert_resource(crate::song_ready::ReadyConfigDraft::default())
+            .init_resource::<SearchEscConsumed>()
             .add_systems(Update, song_select_nav_consumer);
 
-        for source in [game_shell::NavSource::Keyboard, game_shell::NavSource::Pad] {
+        for source in [
+            game_shell::InputSource::Keyboard,
+            game_shell::InputSource::MidiKit,
+        ] {
             app.world_mut().write_message(NavAction {
-                verb: game_shell::NavVerb::Up,
+                verb: game_shell::SystemVerb::NavigateUp,
                 source,
                 coarse: false,
+                repeated: false,
             });
             app.update();
             assert_eq!(app.world().resource::<Selection>().difficulty, 2);
 
             app.world_mut().write_message(NavAction {
-                verb: game_shell::NavVerb::Down,
+                verb: game_shell::SystemVerb::NavigateDown,
                 source,
                 coarse: false,
+                repeated: false,
             });
             app.update();
             assert_eq!(app.world().resource::<Selection>().difficulty, 1);
@@ -2742,17 +2883,20 @@ mod tests {
         for focus in [SongSelectFocus::Songs, SongSelectFocus::Difficulty] {
             assert_eq!(
                 ready_mode_for_action(
-                    game_shell::NavSource::Keyboard,
+                    game_shell::InputSource::Keyboard,
                     focus,
-                    game_shell::NavVerb::Confirm,
+                    game_shell::SystemVerb::Confirm,
+                    false,
                 ),
                 Some(crate::song_ready::ReadyMode::Normal)
             );
+            // Shift+Enter accelerator: coarse Confirm opens in Practice mode.
             assert_eq!(
                 ready_mode_for_action(
-                    game_shell::NavSource::Keyboard,
+                    game_shell::InputSource::Keyboard,
                     focus,
-                    game_shell::NavVerb::Practice,
+                    game_shell::SystemVerb::Confirm,
+                    true,
                 ),
                 Some(crate::song_ready::ReadyMode::Practice)
             );
@@ -2763,17 +2907,19 @@ mod tests {
     fn pad_ready_entry_still_requires_difficulty_focus() {
         assert_eq!(
             ready_mode_for_action(
-                game_shell::NavSource::Pad,
+                game_shell::InputSource::MidiKit,
                 SongSelectFocus::Songs,
-                game_shell::NavVerb::Confirm,
+                game_shell::SystemVerb::Confirm,
+                false,
             ),
             None
         );
         assert_eq!(
             ready_mode_for_action(
-                game_shell::NavSource::Pad,
+                game_shell::InputSource::MidiKit,
                 SongSelectFocus::Difficulty,
-                game_shell::NavVerb::Confirm,
+                game_shell::SystemVerb::Confirm,
+                false,
             ),
             Some(crate::song_ready::ReadyMode::Normal)
         );

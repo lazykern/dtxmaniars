@@ -18,3 +18,5 @@ dtx-ui = { workspace = true }
 gameplay-drums = { path = "../gameplay-drums" }
 game-shell = { path = "../game-shell" }
 serde = { version = "1", features = ["derive"] }
+[dev-dependencies]
+dtx-input = { workspace = true }

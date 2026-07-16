@@ -85,12 +85,27 @@ impl BindResolver {
         let mut key_to_system: HashMap<KeyCode, Vec<SystemVerb>> = HashMap::new();
         let mut note_to_system: HashMap<u8, Vec<SystemVerb>> = HashMap::new();
         for verb in SYSTEM_VERBS {
-            for src in b.system.get(&verb).into_iter().flatten() {
-                // Lanes win ties. A hand-edited bindings.toml cannot make one
-                // note both judge and pause: the colliding source is dropped here.
-                if let Some(owner) = lane_owner(b, src) {
-                    warn!("system bind {verb:?} ignored: {src:?} already drives lane {owner:?}");
-                    continue;
+            let bound = b.system.get(&verb).map(Vec::as_slice).unwrap_or(&[]);
+            // A menu verb left fully unbound (e.g. a migrated version-1
+            // profile) falls back to the built-in keyboard defaults —
+            // keyboard navigation must never brick. Live-system verbs have
+            // no defaults and are never injected.
+            let sources: &[BindSource] = if bound.is_empty() {
+                crate::bindings::default_menu_keyboard_sources(verb)
+            } else {
+                bound
+            };
+            for src in sources {
+                // Lanes win ties for live-system verbs only: one hit must not
+                // both judge and pause. Menu verbs may share a lane source —
+                // menus own input while judging is inactive.
+                if !verb.allows_lane_sharing() {
+                    if let Some(owner) = lane_owner(b, src) {
+                        warn!(
+                            "system bind {verb:?} ignored: {src:?} already drives lane {owner:?}"
+                        );
+                        continue;
+                    }
                 }
                 match src {
                     BindSource::Key(k) => key_to_system.entry(*k).or_default().push(verb),
@@ -402,10 +417,9 @@ mod tests {
         b.bind_system(SystemVerb::Pause, BindSource::Midi { note: 38 });
         let r = BindResolver::from_bindings(&b);
         assert_eq!(r.lane_for_note(38), Some(1), "the lane still judges");
-        assert_eq!(
-            r.system_for_note(38).count(),
-            0,
-            "the colliding system source is skipped"
+        assert!(
+            !r.system_for_note(38).any(|v| v == SystemVerb::Pause),
+            "the colliding live-system source is skipped"
         );
     }
 
@@ -460,14 +474,90 @@ mod tests {
             r.system_for_note(37).collect::<Vec<_>>(),
             vec![SystemVerb::Pause]
         );
-        assert_eq!(r.system_for_note(38).count(), 0, "lane wins the tie");
+        assert!(
+            !r.system_for_note(38).any(|v| v == SystemVerb::Pause),
+            "lane wins the tie"
+        );
         assert_eq!(r.lane_for_note(38), Some(1));
-        assert_eq!(r.system_for_key(KeyCode::KeyX).count(), 0, "lane wins");
+        assert!(
+            !r.system_for_key(KeyCode::KeyX)
+                .any(|v| v == SystemVerb::Pause),
+            "lane wins"
+        );
         assert_eq!(r.lane_for_key(KeyCode::KeyX), Some(0));
         assert_eq!(
             r.system_for_key(KeyCode::F9).collect::<Vec<_>>(),
             vec![SystemVerb::Restart]
         );
+    }
+
+    #[test]
+    fn menu_verb_may_share_a_lane_source() {
+        let b = InputBindings::default();
+        let r = BindResolver::from_bindings(&b);
+        // 38 = Snare default AND the default menu Back note.
+        assert_eq!(r.lane_for_note(38), Some(1), "the lane still judges");
+        assert!(
+            r.system_for_note(38).any(|v| v == SystemVerb::Back),
+            "menu verbs keep lane-shared sources"
+        );
+        // KeyX drives the HH lane; share NavigateUp onto it explicitly.
+        let mut b = InputBindings::default();
+        b.bind_system(SystemVerb::NavigateUp, BindSource::Key(KeyCode::KeyX));
+        let r = BindResolver::from_bindings(&b);
+        assert_eq!(r.lane_for_key(KeyCode::KeyX), Some(0));
+        assert!(r
+            .system_for_key(KeyCode::KeyX)
+            .any(|v| v == SystemVerb::NavigateUp));
+    }
+
+    #[test]
+    fn live_system_verb_still_loses_a_lane_tie() {
+        let mut b = InputBindings::default();
+        b.bind_system(SystemVerb::OpenSystemMenu, BindSource::Midi { note: 38 });
+        let r = BindResolver::from_bindings(&b);
+        assert!(
+            !r.system_for_note(38)
+                .any(|v| v == SystemVerb::OpenSystemMenu),
+            "OpenSystemMenu must stay lane-exclusive"
+        );
+    }
+
+    #[test]
+    fn unbound_menu_verb_falls_back_to_builtin_keyboard_defaults() {
+        // A migrated version-1 profile has no menu binds at all.
+        let mut b = InputBindings::default();
+        b.system.clear();
+        let r = BindResolver::from_bindings(&b);
+        assert!(r
+            .system_for_key(KeyCode::ArrowUp)
+            .any(|v| v == SystemVerb::NavigateUp));
+        assert!(r
+            .system_for_key(KeyCode::Enter)
+            .any(|v| v == SystemVerb::Confirm));
+        assert!(r
+            .system_for_key(KeyCode::Escape)
+            .any(|v| v == SystemVerb::Back));
+        // Live-system verbs are never injected.
+        assert_eq!(
+            r.key_to_system
+                .values()
+                .flatten()
+                .filter(|v| !v.allows_lane_sharing())
+                .count(),
+            0
+        );
+        // A custom bind suppresses the fallback for that verb.
+        let mut b = InputBindings::default();
+        b.system.clear();
+        b.bind_system(SystemVerb::Confirm, BindSource::Key(KeyCode::Space)); // shares BD lane: fine
+        let r = BindResolver::from_bindings(&b);
+        assert!(!r
+            .system_for_key(KeyCode::Enter)
+            .any(|v| v == SystemVerb::Confirm));
+        assert!(r
+            .system_for_key(KeyCode::Space)
+            .any(|v| v == SystemVerb::Confirm));
     }
 
     #[test]

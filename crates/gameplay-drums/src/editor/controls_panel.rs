@@ -10,7 +10,7 @@ use bevy::prelude::*;
 use dtx_core::EChannel;
 use dtx_input::{SystemVerb, SYSTEM_VERBS};
 use dtx_layout::{lane_chips, LaneArrangement};
-use game_shell::{NavAction, NavSource, NavVerb};
+use game_shell::{InputSource, NavAction};
 
 use super::bindings_capture::{CaptureState, SelectedChannel};
 use super::bindings_panel::BindingsRev;
@@ -121,21 +121,23 @@ pub enum ControlsFocus {
 pub fn reduce_controls_nav(
     focus: ControlsFocus,
     segment: ControlsSegment,
-    verb: NavVerb,
+    verb: SystemVerb,
 ) -> (ControlsFocus, ControlsSegment) {
     match focus {
         ControlsFocus::TabBar => match verb {
-            NavVerb::Down | NavVerb::Confirm => (ControlsFocus::SegmentSelector, segment),
+            SystemVerb::NavigateDown | SystemVerb::Confirm => {
+                (ControlsFocus::SegmentSelector, segment)
+            }
             _ => (focus, segment),
         },
         ControlsFocus::SegmentSelector => match verb {
-            NavVerb::Dec | NavVerb::Inc => (focus, segment.toggled()),
-            NavVerb::Down | NavVerb::Confirm => (ControlsFocus::Rows, segment),
-            NavVerb::Up | NavVerb::Back => (ControlsFocus::TabBar, segment),
+            SystemVerb::Decrease | SystemVerb::Increase => (focus, segment.toggled()),
+            SystemVerb::NavigateDown | SystemVerb::Confirm => (ControlsFocus::Rows, segment),
+            SystemVerb::NavigateUp | SystemVerb::Back => (ControlsFocus::TabBar, segment),
             _ => (focus, segment),
         },
         ControlsFocus::Rows => match verb {
-            NavVerb::Up | NavVerb::Back => (ControlsFocus::SegmentSelector, segment),
+            SystemVerb::NavigateUp | SystemVerb::Back => (ControlsFocus::SegmentSelector, segment),
             _ => (focus, segment),
         },
     }
@@ -155,12 +157,20 @@ pub enum ControlsRow {
 #[derive(Resource, Debug, Clone, Copy, Default)]
 pub struct SelectedSystem(pub Option<SystemVerb>);
 
+/// Live-system verbs only: the legacy editor Controls tab never exposes
+/// menu-navigation binds (those belong to the Settings surface).
+fn live_system_verbs() -> impl Iterator<Item = SystemVerb> {
+    SYSTEM_VERBS
+        .into_iter()
+        .filter(|verb| !verb.allows_lane_sharing())
+}
+
 /// Every Controls row, in focus order: lanes (display order), then verbs.
 pub fn controls_rows(arrangement: &LaneArrangement) -> Vec<ControlsRow> {
     super::bindings_panel::bindable_channels_in_order(arrangement)
         .into_iter()
         .map(ControlsRow::Channel)
-        .chain(SYSTEM_VERBS.into_iter().map(ControlsRow::System))
+        .chain(live_system_verbs().map(ControlsRow::System))
         .collect()
 }
 
@@ -252,7 +262,7 @@ pub(super) fn controls_nav_consumer(
         return;
     }
     let rows = controls_rows(&lanes.0);
-    // Backspace is not a NavVerb — read it directly, Rows level only.
+    // Backspace is not a SystemVerb — read it directly, Rows level only.
     if *focus == ControlsFocus::Rows && keys.just_pressed(KeyCode::Backspace) {
         match current_row(selected.0, system.0) {
             Some(ControlsRow::Channel(channel)) => {
@@ -279,16 +289,21 @@ pub(super) fn controls_nav_consumer(
         }
     }
     for action in actions.read() {
-        if action.source != NavSource::Keyboard {
+        if action.source != InputSource::Keyboard {
             continue;
         }
         match (*focus, action.verb) {
-            (ControlsFocus::Rows, NavVerb::Up) | (ControlsFocus::Rows, NavVerb::Down) => {
-                let dir = if action.verb == NavVerb::Up { -1 } else { 1 };
+            (ControlsFocus::Rows, SystemVerb::NavigateUp)
+            | (ControlsFocus::Rows, SystemVerb::NavigateDown) => {
+                let dir = if action.verb == SystemVerb::NavigateUp {
+                    -1
+                } else {
+                    1
+                };
                 match step_row(&rows, current_row(selected.0, system.0), dir) {
                     RowStep::ToSegmentSelector => {
                         let (next_focus, next_segment) =
-                            reduce_controls_nav(*focus, *segment, NavVerb::Up);
+                            reduce_controls_nav(*focus, *segment, SystemVerb::NavigateUp);
                         if *focus != next_focus {
                             *focus = next_focus;
                         }
@@ -312,7 +327,7 @@ pub(super) fn controls_nav_consumer(
                     RowStep::None => {}
                 }
             }
-            (ControlsFocus::Rows, NavVerb::Confirm) => {
+            (ControlsFocus::Rows, SystemVerb::Confirm) => {
                 match current_row(selected.0, system.0).filter(|row| rows.contains(row)) {
                     Some(ControlsRow::Channel(channel)) => {
                         *capture = match *segment {
@@ -483,12 +498,15 @@ mod tests {
         let (focus, segment) = reduce_controls_nav(
             ControlsFocus::SegmentSelector,
             ControlsSegment::Keyboard,
-            NavVerb::Inc,
+            SystemVerb::Increase,
         );
         assert_eq!(focus, ControlsFocus::SegmentSelector);
         assert_eq!(segment, ControlsSegment::Midi);
-        let (_, segment) =
-            reduce_controls_nav(ControlsFocus::SegmentSelector, segment, NavVerb::Dec);
+        let (_, segment) = reduce_controls_nav(
+            ControlsFocus::SegmentSelector,
+            segment,
+            SystemVerb::Decrease,
+        );
         assert_eq!(segment, ControlsSegment::Keyboard);
     }
 
@@ -497,19 +515,23 @@ mod tests {
         let (focus, segment) = reduce_controls_nav(
             ControlsFocus::TabBar,
             ControlsSegment::Keyboard,
-            NavVerb::Down,
+            SystemVerb::NavigateDown,
         );
         assert_eq!(focus, ControlsFocus::SegmentSelector);
-        let (focus, _) = reduce_controls_nav(focus, segment, NavVerb::Down);
+        let (focus, _) = reduce_controls_nav(focus, segment, SystemVerb::NavigateDown);
         assert_eq!(focus, ControlsFocus::Rows);
     }
 
     #[test]
     fn controls_up_returns_one_level() {
-        let (focus, _) =
-            reduce_controls_nav(ControlsFocus::Rows, ControlsSegment::Midi, NavVerb::Up);
+        let (focus, _) = reduce_controls_nav(
+            ControlsFocus::Rows,
+            ControlsSegment::Midi,
+            SystemVerb::NavigateUp,
+        );
         assert_eq!(focus, ControlsFocus::SegmentSelector);
-        let (focus, segment) = reduce_controls_nav(focus, ControlsSegment::Midi, NavVerb::Up);
+        let (focus, segment) =
+            reduce_controls_nav(focus, ControlsSegment::Midi, SystemVerb::NavigateUp);
         assert_eq!(focus, ControlsFocus::TabBar);
         assert_eq!(segment, ControlsSegment::Midi, "segment survives leaving");
     }
@@ -558,15 +580,15 @@ mod tests {
     fn controls_rows_put_system_verbs_after_the_lane_rows() {
         use dtx_input::{SystemVerb, BINDABLE_CHANNELS};
         let rows = controls_rows(&dtx_layout::classic());
-        assert_eq!(rows.len(), BINDABLE_CHANNELS.len() + 2);
-        assert_eq!(
-            rows[BINDABLE_CHANNELS.len()],
-            ControlsRow::System(SystemVerb::Pause)
-        );
-        assert_eq!(
-            rows[BINDABLE_CHANNELS.len() + 1],
-            ControlsRow::System(SystemVerb::Restart)
-        );
+        let system: Vec<SystemVerb> = live_system_verbs().collect();
+        assert_eq!(rows.len(), BINDABLE_CHANNELS.len() + system.len());
+        for (offset, verb) in system.iter().enumerate() {
+            assert_eq!(
+                rows[BINDABLE_CHANNELS.len() + offset],
+                ControlsRow::System(*verb)
+            );
+        }
+        assert_eq!(system.first(), Some(&SystemVerb::OpenSystemMenu));
         assert!(matches!(rows[0], ControlsRow::Channel(_)));
     }
 
@@ -616,7 +638,7 @@ mod tests {
         use crate::editor::bindings_panel::BindingsRev;
         use bevy::prelude::*;
         use dtx_input::SystemVerb;
-        use game_shell::{NavAction, NavSource};
+        use game_shell::{InputSource, NavAction};
 
         let mut app = App::new();
         app.init_resource::<ButtonInput<KeyCode>>()
@@ -635,35 +657,36 @@ mod tests {
             .add_systems(Update, controls_nav_consumer);
         app.update();
 
-        fn nav(app: &mut App, verb: NavVerb) {
+        fn nav(app: &mut App, verb: SystemVerb) {
             app.world_mut()
                 .resource_mut::<Messages<NavAction>>()
                 .write(NavAction {
                     verb,
-                    source: NavSource::Keyboard,
+                    source: InputSource::Keyboard,
                     coarse: false,
+                    repeated: false,
                 });
             app.update();
         }
 
         // TabBar → SegmentSelector → Rows (cursor seeds on the first lane row).
-        nav(&mut app, NavVerb::Down);
-        nav(&mut app, NavVerb::Down);
-        // Walk past the twelve lane rows onto the Pause row.
+        nav(&mut app, SystemVerb::NavigateDown);
+        nav(&mut app, SystemVerb::NavigateDown);
+        // Walk past the twelve lane rows onto the first live-system row.
         for _ in 0..dtx_input::BINDABLE_CHANNELS.len() {
-            nav(&mut app, NavVerb::Down);
+            nav(&mut app, SystemVerb::NavigateDown);
         }
         assert_eq!(
             app.world().resource::<SelectedSystem>().0,
-            Some(SystemVerb::Pause),
+            Some(SystemVerb::OpenSystemMenu),
             "the cursor walks off the lanes into the System rows"
         );
 
-        nav(&mut app, NavVerb::Confirm);
+        nav(&mut app, SystemVerb::Confirm);
         assert!(matches!(
             *app.world().resource::<CaptureState>(),
             CaptureState::SystemKey {
-                verb: SystemVerb::Pause,
+                verb: SystemVerb::OpenSystemMenu,
                 refused: None
             }
         ));
@@ -675,7 +698,7 @@ mod tests {
         use crate::editor::bindings_panel::BindingsRev;
         use bevy::prelude::*;
         use dtx_core::EChannel;
-        use game_shell::{NavAction, NavSource};
+        use game_shell::{InputSource, NavAction};
 
         let mut app = App::new();
         app.init_resource::<ButtonInput<KeyCode>>()
@@ -695,23 +718,24 @@ mod tests {
         // First update flushes the ActiveTab insertion's change tick.
         app.update();
 
-        fn nav(app: &mut App, verb: NavVerb) {
+        fn nav(app: &mut App, verb: SystemVerb) {
             app.world_mut()
                 .resource_mut::<Messages<NavAction>>()
                 .write(NavAction {
                     verb,
-                    source: NavSource::Keyboard,
+                    source: InputSource::Keyboard,
                     coarse: false,
+                    repeated: false,
                 });
             app.update();
         }
 
-        nav(&mut app, NavVerb::Down);
+        nav(&mut app, SystemVerb::NavigateDown);
         assert_eq!(
             *app.world().resource::<ControlsFocus>(),
             ControlsFocus::SegmentSelector
         );
-        nav(&mut app, NavVerb::Down);
+        nav(&mut app, SystemVerb::NavigateDown);
         assert_eq!(
             *app.world().resource::<ControlsFocus>(),
             ControlsFocus::Rows
@@ -721,7 +745,7 @@ mod tests {
             Some(EChannel::LeftCymbal),
             "entering Rows seeds the cursor with the first display channel"
         );
-        nav(&mut app, NavVerb::Down);
+        nav(&mut app, SystemVerb::NavigateDown);
         assert_eq!(
             app.world().resource::<SelectedChannel>().0,
             Some(EChannel::HiHatClose)
@@ -759,14 +783,14 @@ mod tests {
         );
 
         // Enter arms keyboard capture for the selected channel.
-        nav(&mut app, NavVerb::Confirm);
+        nav(&mut app, SystemVerb::Confirm);
         assert!(matches!(
             *app.world().resource::<CaptureState>(),
             CaptureState::Keyboard(EChannel::HiHatClose)
         ));
 
         // While the capture is armed the consumer is inert.
-        nav(&mut app, NavVerb::Down);
+        nav(&mut app, SystemVerb::NavigateDown);
         assert_eq!(
             app.world().resource::<SelectedChannel>().0,
             Some(EChannel::HiHatClose),
@@ -783,7 +807,7 @@ mod tests {
         use crate::editor::bindings_capture::{CaptureState, SelectedChannel};
         use crate::editor::bindings_panel::BindingsRev;
         use bevy::prelude::*;
-        use game_shell::{NavAction, NavSource};
+        use game_shell::{InputSource, NavAction};
 
         fn touch_capture(mut capture: ResMut<CaptureState>) {
             let taken = std::mem::take(&mut *capture);
@@ -810,9 +834,10 @@ mod tests {
         app.world_mut()
             .resource_mut::<Messages<NavAction>>()
             .write(NavAction {
-                verb: NavVerb::Down,
-                source: NavSource::Keyboard,
+                verb: SystemVerb::NavigateDown,
+                source: InputSource::Keyboard,
                 coarse: false,
+                repeated: false,
             });
         app.update();
 

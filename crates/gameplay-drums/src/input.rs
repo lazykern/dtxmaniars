@@ -34,10 +34,12 @@ pub(super) fn plugin(app: &mut App) {
         )
         .add_systems(
             PreUpdate,
-            // NO PauseState gate: this is the key that has to un-pause the song.
-            dtx_input::keyboard::keyboard_system_verbs
-                .after(bevy::input::InputSystems)
-                .run_if(in_state(game_shell::AppState::Performance)),
+            // NO state gate: bound system-verb keys translate everywhere and
+            // the game-shell router decides delivery per context. In
+            // particular no PauseState gate — the key that paused the song has
+            // to un-pause it. `RawInputOwned` still silences the translator
+            // while a capture flow owns the keyboard.
+            dtx_input::keyboard::keyboard_system_verbs.after(bevy::input::InputSystems),
         )
         .add_systems(
             FixedUpdate,

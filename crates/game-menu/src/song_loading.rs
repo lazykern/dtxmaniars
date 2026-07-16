@@ -18,8 +18,6 @@
 //!
 //! BGM playback + real asset progress → M5.
 
-use bevy::input::ButtonInput;
-use bevy::input::keyboard::KeyCode;
 use bevy::prelude::*;
 use bevy::tasks::{AsyncComputeTaskPool, Task, block_on, futures_lite::future};
 use bevy_kira_audio::prelude::{Audio, AudioInstance};
@@ -31,7 +29,7 @@ use dtx_ui::widget::stage_background::spawn_stage_background;
 use dtx_ui::widget::stage_panel::panel;
 use dtx_ui::{Theme, ThemeResource};
 use game_shell::{
-    AppState, NavAction, NavVerb, TransitionRequest, despawn_stage, request_transition,
+    AppState, NavAction, SystemVerb, TransitionRequest, despawn_stage, request_transition,
 };
 use gameplay_drums::resources::ActiveChart as DrumsActiveChart;
 
@@ -255,7 +253,7 @@ pub fn plugin(app: &mut App) {
         .add_systems(
             Update,
             (
-                watch_cancel_key,
+                watch_cancel_key.after(game_shell::NavRouterSet),
                 poll_chart_parse,
                 wait_for_audio.after(poll_chart_parse),
                 update_status_text.after(wait_for_audio),
@@ -746,12 +744,12 @@ fn spawn_loading(
         });
 }
 
-/// Watch for a cancel during load: Esc on the keyboard, or `NavVerb::Back` — SD
-/// — from the kit (`game_shell::navigation` emits it while `NavContext::Loading` is active).
-/// On cancel, mark the load; the next `poll_chart_parse` tick sees the flag and
-/// fails fast, and `advance_when_loaded` routes back to SongSelect.
+/// Watch for a cancel during load: `SystemVerb::Back` as a `NavAction` — the
+/// router delivers keyboard Esc, the pad mapper delivers kit SD while
+/// `NavContext::SongLoading` is active. On cancel, mark the load; the next
+/// `poll_chart_parse` tick sees the flag and fails fast, and
+/// `advance_when_loaded` routes back to SongSelect.
 fn watch_cancel_key(
-    keys: Res<ButtonInput<KeyCode>>,
     mut actions: MessageReader<NavAction>,
     mut cancel: ResMut<CancelRequested>,
     phase: Res<LoadPhase>,
@@ -767,8 +765,7 @@ fn watch_cancel_key(
         actions.clear();
         return;
     }
-    let pad_back = actions.read().any(|action| action.verb == NavVerb::Back);
-    if keys.just_pressed(KeyCode::Escape) || pad_back {
+    if actions.read().any(|action| action.verb == SystemVerb::Back) {
         info!("SongLoading: cancel requested — cancelling load");
         cancel.0 = true;
     }
@@ -1066,41 +1063,41 @@ mod tests {
         assert!(required.contains(&3), "drum WAV must finish loading");
     }
 
-    /// SD (`NavVerb::Back`) from the kit cancels the load, same as Esc.
+    /// SD (`SystemVerb::Back`) from the kit cancels the load, same as Esc.
     #[test]
     fn pad_back_cancels_the_load() {
-        assert!(run_cancel_watch(Some(NavVerb::Back), LoadPhase::Parsing));
+        assert!(run_cancel_watch(Some(SystemVerb::Back), LoadPhase::Parsing));
     }
 
     #[test]
     fn pad_confirm_does_not_cancel_the_load() {
         assert!(!run_cancel_watch(
-            Some(NavVerb::Confirm),
+            Some(SystemVerb::Confirm),
             LoadPhase::Parsing
         ));
     }
 
     #[test]
     fn pad_back_after_load_finished_does_not_cancel() {
-        assert!(!run_cancel_watch(Some(NavVerb::Back), LoadPhase::Ready));
+        assert!(!run_cancel_watch(Some(SystemVerb::Back), LoadPhase::Ready));
     }
 
     /// Drive `watch_cancel_key` once with an optional pad action queued.
-    fn run_cancel_watch(verb: Option<NavVerb>, phase: LoadPhase) -> bool {
+    fn run_cancel_watch(verb: Option<SystemVerb>, phase: LoadPhase) -> bool {
         use bevy::ecs::message::Messages;
         use bevy::ecs::system::RunSystemOnce;
-        use game_shell::NavSource;
+        use game_shell::InputSource;
 
         let mut world = World::new();
-        world.init_resource::<ButtonInput<KeyCode>>();
         world.init_resource::<Messages<NavAction>>();
         world.init_resource::<CancelRequested>();
         world.insert_resource(phase);
         if let Some(verb) = verb {
             world.write_message(NavAction {
                 verb,
-                source: NavSource::Pad,
+                source: InputSource::MidiKit,
                 coarse: false,
+                repeated: false,
             });
         }
         world

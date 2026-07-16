@@ -459,7 +459,7 @@ mod midi_gate {
     use super::events::InputHit;
     use crate::resources::GameplayClock;
 
-    pub use dtx_input::{LastMidiHit, PadNavHit};
+    pub use dtx_input::LastMidiHit;
 
     pub(super) fn plugin(app: &mut App) {
         app.add_plugins(dtx_input::pump::plugin)
@@ -582,7 +582,7 @@ mod midi_gate {
     }
 }
 
-pub use midi_gate::{LastMidiHit, PadNavHit};
+pub use midi_gate::LastMidiHit;
 
 /// Re-export as struct form for callers that prefer `add_plugins(...)` syntax.
 pub use plugin as DrumsPlugin;

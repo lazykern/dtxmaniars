@@ -5,8 +5,8 @@ use bevy::prelude::*;
 use dtx_ui::motion::EnterChoreo;
 use dtx_ui::{Notification, NotificationQueue, Theme, ThemeResource};
 use game_shell::{
-    AppState, NavAction, NavSource, NavVerb, PracticeIntent, PracticeOrigin, TransitionRequest,
-    despawn_stage, request_transition,
+    AppState, InputSource, NavAction, PracticeIntent, PracticeOrigin, SystemVerb,
+    TransitionRequest, despawn_stage, request_transition,
 };
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -148,32 +148,39 @@ impl SongReadyState {
     }
 }
 
-fn reduce_ready_keyboard_browse(state: &mut SongReadyState, verb: NavVerb) -> ReadyKeyboardEffect {
+fn reduce_ready_keyboard_browse(
+    state: &mut SongReadyState,
+    verb: SystemVerb,
+) -> ReadyKeyboardEffect {
     match verb {
-        NavVerb::Dec => {
+        // Browse is not an edit context: router keyboard arrows arrive as
+        // NavigateLeft/Right. Decrease/Increase kept for legacy writers.
+        SystemVerb::Decrease | SystemVerb::NavigateLeft => {
             state.step_card(-1);
             ReadyKeyboardEffect::None
         }
-        NavVerb::Inc => {
+        SystemVerb::Increase | SystemVerb::NavigateRight => {
             state.step_card(1);
             ReadyKeyboardEffect::None
         }
-        NavVerb::Up if state.focus == ReadyCard::Song => ReadyKeyboardEffect::AdjustDifficulty(1),
-        NavVerb::Down if state.focus == ReadyCard::Song => {
+        SystemVerb::NavigateUp if state.focus == ReadyCard::Song => {
+            ReadyKeyboardEffect::AdjustDifficulty(1)
+        }
+        SystemVerb::NavigateDown if state.focus == ReadyCard::Song => {
             ReadyKeyboardEffect::AdjustDifficulty(-1)
         }
-        NavVerb::Up => ReadyKeyboardEffect::AdjustValue(-1),
-        NavVerb::Down => ReadyKeyboardEffect::AdjustValue(1),
-        NavVerb::Confirm if state.focus == ReadyCard::Song => ReadyKeyboardEffect::Launch,
-        NavVerb::Confirm if state.focus == ReadyCard::Audio => {
+        SystemVerb::NavigateUp => ReadyKeyboardEffect::AdjustValue(-1),
+        SystemVerb::NavigateDown => ReadyKeyboardEffect::AdjustValue(1),
+        SystemVerb::Confirm if state.focus == ReadyCard::Song => ReadyKeyboardEffect::Launch,
+        SystemVerb::Confirm if state.focus == ReadyCard::Audio => {
             state.audio_field = match state.audio_field {
                 AudioField::Bgm => AudioField::Drums,
                 AudioField::Drums => AudioField::Bgm,
             };
             ReadyKeyboardEffect::None
         }
-        NavVerb::Confirm => ReadyKeyboardEffect::None,
-        NavVerb::Back => ReadyKeyboardEffect::Close,
+        SystemVerb::Confirm => ReadyKeyboardEffect::None,
+        SystemVerb::Back => ReadyKeyboardEffect::Close,
         _ => ReadyKeyboardEffect::None,
     }
 }
@@ -326,7 +333,7 @@ pub fn plugin(app: &mut App) {
             Update,
             (
                 manage_song_ready_ui,
-                song_ready_nav_input.after(crate::song_select::song_select_kb_emit),
+                song_ready_nav_input.after(game_shell::NavRouterSet),
                 song_ready_pointer_input,
                 execute_ready_launch,
                 render_song_ready,
@@ -335,7 +342,39 @@ pub fn plugin(app: &mut App) {
                 .chain()
                 .run_if(in_state(AppState::SongSelect)),
         )
+        .add_systems(
+            Update,
+            refine_nav_stack_for_ready
+                .in_set(game_shell::NavStackRefineSet)
+                .run_if(in_state(AppState::SongSelect)),
+        )
         .add_systems(Last, clear_ready_action_capture);
+}
+
+/// The base publisher only knows "we're in SongSelect" and writes
+/// `SongSelectSongs`; it cannot see the Ready layers. Refine the stack top so
+/// the router translates Left/Right correctly (SongReadyEdit is an edit
+/// context). PrimaryDetail navigates like Browse.
+fn refine_nav_stack_for_ready(
+    state: Res<SongReadyState>,
+    mut stack: ResMut<game_shell::NavContextStack>,
+) {
+    use game_shell::NavContext;
+    let desired = match state.layer {
+        SongReadyLayer::Closed => return,
+        SongReadyLayer::Edit => NavContext::SongReadyEdit,
+        SongReadyLayer::Browse | SongReadyLayer::PrimaryDetail => NavContext::SongReadyBrowse,
+    };
+    if matches!(
+        stack.top(),
+        Some(NavContext::SongSelectSongs | NavContext::SongReadyBrowse | NavContext::SongReadyEdit)
+    ) && stack.top() != Some(desired)
+    {
+        stack.pop(NavContext::SongSelectSongs);
+        stack.pop(NavContext::SongReadyBrowse);
+        stack.pop(NavContext::SongReadyEdit);
+        stack.push(desired);
+    }
 }
 
 fn clear_ready_action_capture(mut capture: ResMut<ReadyActionCapture>) {
@@ -914,7 +953,7 @@ fn song_ready_nav_input(
         match state.layer {
             SongReadyLayer::Closed => {}
             SongReadyLayer::Browse => match action.source {
-                NavSource::Keyboard => {
+                InputSource::Keyboard => {
                     match reduce_ready_keyboard_browse(&mut state, action.verb) {
                         ReadyKeyboardEffect::None => {}
                         ReadyKeyboardEffect::AdjustValue(delta) => {
@@ -933,56 +972,66 @@ fn song_ready_nav_input(
                         ReadyKeyboardEffect::Close => state.close(),
                     }
                 }
-                NavSource::Pad => match action.verb {
-                    NavVerb::Up => state.step_card(-1),
-                    NavVerb::Down => state.step_card(1),
-                    NavVerb::Confirm if state.focus == ReadyCard::Song => {
+                InputSource::MidiKit => match action.verb {
+                    SystemVerb::NavigateUp => state.step_card(-1),
+                    SystemVerb::NavigateDown => state.step_card(1),
+                    SystemVerb::Confirm if state.focus == ReadyCard::Song => {
                         state.layer = SongReadyLayer::PrimaryDetail;
                     }
-                    NavVerb::Confirm => state.begin_edit(&draft),
-                    NavVerb::Back => state.close(),
+                    SystemVerb::Confirm => state.begin_edit(&draft),
+                    SystemVerb::Back => state.close(),
                     _ => {}
                 },
+                _ => {}
             },
             SongReadyLayer::Edit => match action.source {
-                NavSource::Keyboard => match action.verb {
-                    NavVerb::Dec => adjust_ready_value(&mut state, &mut draft, -1),
-                    NavVerb::Inc => adjust_ready_value(&mut state, &mut draft, 1),
-                    NavVerb::Up if state.focus == ReadyCard::Audio => {
+                InputSource::Keyboard => match action.verb {
+                    SystemVerb::Decrease => adjust_ready_value(&mut state, &mut draft, -1),
+                    SystemVerb::Increase => adjust_ready_value(&mut state, &mut draft, 1),
+                    SystemVerb::NavigateUp if state.focus == ReadyCard::Audio => {
                         state.audio_field = AudioField::Bgm;
                     }
-                    NavVerb::Down if state.focus == ReadyCard::Audio => {
+                    SystemVerb::NavigateDown if state.focus == ReadyCard::Audio => {
                         state.audio_field = AudioField::Drums;
                     }
-                    NavVerb::Confirm => {
+                    SystemVerb::Confirm => {
                         finish_ready_edit(&mut state, &mut draft, &mut notifications)
                     }
-                    NavVerb::Back => state.cancel_edit(&mut draft),
+                    SystemVerb::Back => state.cancel_edit(&mut draft),
                     _ => {}
                 },
-                NavSource::Pad => match action.verb {
-                    NavVerb::Up => adjust_ready_value(&mut state, &mut draft, -1),
-                    NavVerb::Down => adjust_ready_value(&mut state, &mut draft, 1),
-                    NavVerb::Practice if state.focus == ReadyCard::Audio => {
+                InputSource::MidiKit => match action.verb {
+                    SystemVerb::NavigateUp => adjust_ready_value(&mut state, &mut draft, -1),
+                    SystemVerb::NavigateDown => adjust_ready_value(&mut state, &mut draft, 1),
+                    // HT/LT switch the audio sub-field (the FT shortcut is
+                    // gone: Practice is no longer a shared semantic verb).
+                    SystemVerb::Decrease | SystemVerb::Increase
+                        if state.focus == ReadyCard::Audio =>
+                    {
                         state.audio_field = match state.audio_field {
                             AudioField::Bgm => AudioField::Drums,
                             AudioField::Drums => AudioField::Bgm,
                         };
                     }
-                    NavVerb::Confirm => {
+                    SystemVerb::Confirm => {
                         finish_ready_edit(&mut state, &mut draft, &mut notifications)
                     }
-                    NavVerb::Back => state.cancel_edit(&mut draft),
+                    SystemVerb::Back => state.cancel_edit(&mut draft),
                     _ => {}
                 },
+                _ => {}
             },
             SongReadyLayer::PrimaryDetail => match action.verb {
-                NavVerb::Up => step_ready_difficulty(&mut selection, &selection_state, 1),
-                NavVerb::Down => step_ready_difficulty(&mut selection, &selection_state, -1),
-                NavVerb::Confirm => {
+                SystemVerb::NavigateUp => {
+                    step_ready_difficulty(&mut selection, &selection_state, 1)
+                }
+                SystemVerb::NavigateDown => {
+                    step_ready_difficulty(&mut selection, &selection_state, -1)
+                }
+                SystemVerb::Confirm => {
                     launches.write(ReadyLaunch::Current);
                 }
-                NavVerb::Back => state.layer = SongReadyLayer::Browse,
+                SystemVerb::Back => state.layer = SongReadyLayer::Browse,
                 _ => {}
             },
         }
@@ -1499,6 +1548,7 @@ mod tests {
             .insert_resource(SongReadyState::default())
             .insert_resource(ReadyConfigDraft::default())
             .insert_resource(ReadyActionCapture::default())
+            .init_resource::<crate::song_select::SearchEscConsumed>()
             .insert_resource(intent)
             .insert_resource(NotificationQueue::default())
             .add_systems(
@@ -1513,11 +1563,16 @@ mod tests {
         app
     }
 
-    fn send_nav(app: &mut App, verb: NavVerb) {
+    fn send_nav(app: &mut App, verb: SystemVerb) {
+        send_nav_coarse(app, verb, false);
+    }
+
+    fn send_nav_coarse(app: &mut App, verb: SystemVerb, coarse: bool) {
         app.world_mut().write_message(NavAction {
             verb,
-            source: NavSource::Keyboard,
-            coarse: false,
+            source: InputSource::Keyboard,
+            coarse,
+            repeated: false,
         });
         app.update();
     }
@@ -1546,12 +1601,12 @@ mod tests {
         state.open(ReadyMode::Normal);
 
         assert_eq!(
-            reduce_ready_keyboard_browse(&mut state, NavVerb::Dec),
+            reduce_ready_keyboard_browse(&mut state, SystemVerb::Decrease),
             ReadyKeyboardEffect::None
         );
         assert_eq!(state.focus, ReadyCard::Mode);
         assert_eq!(
-            reduce_ready_keyboard_browse(&mut state, NavVerb::Up),
+            reduce_ready_keyboard_browse(&mut state, SystemVerb::NavigateUp),
             ReadyKeyboardEffect::AdjustValue(-1)
         );
         assert_eq!(state.layer, SongReadyLayer::Browse);
@@ -1563,11 +1618,11 @@ mod tests {
         state.open(ReadyMode::Normal);
 
         assert_eq!(
-            reduce_ready_keyboard_browse(&mut state, NavVerb::Up),
+            reduce_ready_keyboard_browse(&mut state, SystemVerb::NavigateUp),
             ReadyKeyboardEffect::AdjustDifficulty(1)
         );
         assert_eq!(
-            reduce_ready_keyboard_browse(&mut state, NavVerb::Down),
+            reduce_ready_keyboard_browse(&mut state, SystemVerb::NavigateDown),
             ReadyKeyboardEffect::AdjustDifficulty(-1)
         );
     }
@@ -1580,7 +1635,7 @@ mod tests {
         state.audio_field = AudioField::Bgm;
 
         assert_eq!(
-            reduce_ready_keyboard_browse(&mut state, NavVerb::Confirm),
+            reduce_ready_keyboard_browse(&mut state, SystemVerb::Confirm),
             ReadyKeyboardEffect::None
         );
         assert_eq!(state.audio_field, AudioField::Drums);
@@ -1593,14 +1648,14 @@ mod tests {
         state.open(ReadyMode::Normal);
         state.focus = ReadyCard::LaneSpeed;
         assert_eq!(
-            reduce_ready_keyboard_browse(&mut state, NavVerb::Confirm),
+            reduce_ready_keyboard_browse(&mut state, SystemVerb::Confirm),
             ReadyKeyboardEffect::None
         );
         assert_eq!(state.layer, SongReadyLayer::Browse);
 
         state.focus = ReadyCard::Song;
         assert_eq!(
-            reduce_ready_keyboard_browse(&mut state, NavVerb::Confirm),
+            reduce_ready_keyboard_browse(&mut state, SystemVerb::Confirm),
             ReadyKeyboardEffect::Launch
         );
     }
@@ -1756,7 +1811,7 @@ mod tests {
     fn practice_ready_opens_without_launch_then_confirms_into_song_loading() {
         let mut app = ready_handoff_app(PracticeIntent::None);
 
-        send_nav(&mut app, NavVerb::Practice);
+        send_nav_coarse(&mut app, SystemVerb::Confirm, true);
 
         let ready = app.world().resource::<SongReadyState>();
         assert_eq!(ready.layer, SongReadyLayer::Browse);
@@ -1773,7 +1828,7 @@ mod tests {
         );
         assert!(transition_targets(&mut app).is_empty());
 
-        send_nav(&mut app, NavVerb::Confirm);
+        send_nav(&mut app, SystemVerb::Confirm);
 
         assert_eq!(
             app.world().resource::<crate::song_select::SelectedSong>().0,
@@ -1794,7 +1849,7 @@ mod tests {
         let stale = PracticeIntent::manual(PracticeOrigin::Results);
         let mut app = ready_handoff_app(stale);
 
-        send_nav(&mut app, NavVerb::Confirm);
+        send_nav(&mut app, SystemVerb::Confirm);
 
         assert_eq!(*app.world().resource::<PracticeIntent>(), stale);
         assert!(
@@ -1805,7 +1860,7 @@ mod tests {
         );
         assert!(transition_targets(&mut app).is_empty());
 
-        send_nav(&mut app, NavVerb::Confirm);
+        send_nav(&mut app, SystemVerb::Confirm);
 
         assert_eq!(
             *app.world().resource::<PracticeIntent>(),
@@ -1837,7 +1892,8 @@ mod tests {
             .init_resource::<PracticeIntent>()
             .init_resource::<NotificationQueue>()
             .init_resource::<ThemeResource>()
-            .init_resource::<dtx_ui::AccessibilityPolicy>();
+            .init_resource::<dtx_ui::AccessibilityPolicy>()
+            .init_resource::<game_shell::NavContextStack>();
         plugin(&mut app);
         app.world_mut()
             .resource_mut::<NextState<AppState>>()

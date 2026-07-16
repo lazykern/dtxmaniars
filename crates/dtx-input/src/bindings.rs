@@ -33,25 +33,98 @@ pub const BINDABLE_CHANNELS: [EChannel; 12] = [
 
 /// A non-lane action a key or pad can trigger.
 ///
-/// System verbs are **not** DTX chart channels, so `EChannel` gains no pseudo-
-/// variants; they live in a parallel map on `InputBindings`.
+/// The single canonical persisted semantic vocabulary for all non-lane
+/// actions (menus and live-system). System verbs are **not** DTX chart
+/// channels, so `EChannel` gains no pseudo-variants; they live in a parallel
+/// map on `InputBindings`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum SystemVerb {
+    /// Move focus up / previous item.
+    NavigateUp,
+    /// Move focus down / next item.
+    NavigateDown,
+    /// Move focus left / previous card.
+    NavigateLeft,
+    /// Move focus right / next card.
+    NavigateRight,
+    /// Enter / select / apply.
+    Confirm,
+    /// Back out / cancel one layer.
+    Back,
+    /// Previous top-level tab/category.
+    PreviousTab,
+    /// Next top-level tab/category.
+    NextTab,
+    /// Previous page in a paged list.
+    PreviousPage,
+    /// Next page in a paged list.
+    NextPage,
+    /// Decrement the focused value.
+    Decrease,
+    /// Increment the focused value.
+    Increase,
+    /// Toggle a non-judged preview where a screen offers one.
+    Preview,
+    /// Open the pause/system overlay from the kit during live play.
+    OpenSystemMenu,
     /// Toggle the pause overlay during a performance.
     Pause,
     /// Restart the current song from the top.
     Restart,
 }
 
+/// When a verb is active, which drives its lane-sharing policy.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum VerbScope {
+    /// Active only while a menu surface owns input (gameplay judging
+    /// inactive). May share a key/MIDI note with a gameplay lane.
+    Menu,
+    /// Active during live gameplay. Must stay lane-exclusive: the same hit
+    /// would both judge and fire the verb.
+    LiveSystem,
+}
+
 /// Every bindable system verb, in Controls-tab row order.
-pub const SYSTEM_VERBS: [SystemVerb; 2] = [SystemVerb::Pause, SystemVerb::Restart];
+pub const SYSTEM_VERBS: [SystemVerb; 16] = [
+    SystemVerb::NavigateUp,
+    SystemVerb::NavigateDown,
+    SystemVerb::NavigateLeft,
+    SystemVerb::NavigateRight,
+    SystemVerb::Confirm,
+    SystemVerb::Back,
+    SystemVerb::PreviousTab,
+    SystemVerb::NextTab,
+    SystemVerb::PreviousPage,
+    SystemVerb::NextPage,
+    SystemVerb::Decrease,
+    SystemVerb::Increase,
+    SystemVerb::Preview,
+    SystemVerb::OpenSystemMenu,
+    SystemVerb::Pause,
+    SystemVerb::Restart,
+];
 
 impl SystemVerb {
     /// Stable on-disk key (the TOML table key under `[system]`). Mirrors the
-    /// channel short-name scheme: the file never depends on Rust variant names.
+    /// channel short-name scheme: the file never depends on Rust variant
+    /// names. `pause`/`restart` keys are frozen (version-1 files).
     pub fn key(self) -> &'static str {
         match self {
+            SystemVerb::NavigateUp => "navigate-up",
+            SystemVerb::NavigateDown => "navigate-down",
+            SystemVerb::NavigateLeft => "navigate-left",
+            SystemVerb::NavigateRight => "navigate-right",
+            SystemVerb::Confirm => "confirm",
+            SystemVerb::Back => "back",
+            SystemVerb::PreviousTab => "previous-tab",
+            SystemVerb::NextTab => "next-tab",
+            SystemVerb::PreviousPage => "previous-page",
+            SystemVerb::NextPage => "next-page",
+            SystemVerb::Decrease => "decrease",
+            SystemVerb::Increase => "increase",
+            SystemVerb::Preview => "preview",
+            SystemVerb::OpenSystemMenu => "open-system-menu",
             SystemVerb::Pause => "pause",
             SystemVerb::Restart => "restart",
         }
@@ -65,10 +138,112 @@ impl SystemVerb {
     /// Human label for the Controls-tab row.
     pub fn label(self) -> &'static str {
         match self {
+            SystemVerb::NavigateUp => "Navigate Up",
+            SystemVerb::NavigateDown => "Navigate Down",
+            SystemVerb::NavigateLeft => "Navigate Left",
+            SystemVerb::NavigateRight => "Navigate Right",
+            SystemVerb::Confirm => "Confirm",
+            SystemVerb::Back => "Back",
+            SystemVerb::PreviousTab => "Previous Tab",
+            SystemVerb::NextTab => "Next Tab",
+            SystemVerb::PreviousPage => "Previous Page",
+            SystemVerb::NextPage => "Next Page",
+            SystemVerb::Decrease => "Decrease",
+            SystemVerb::Increase => "Increase",
+            SystemVerb::Preview => "Preview",
+            SystemVerb::OpenSystemMenu => "Open System Menu",
             SystemVerb::Pause => "Pause",
             SystemVerb::Restart => "Restart",
         }
     }
+
+    /// When the verb is active (drives the lane-sharing policy).
+    pub fn activation_scope(self) -> VerbScope {
+        match self {
+            SystemVerb::OpenSystemMenu | SystemVerb::Pause | SystemVerb::Restart => {
+                VerbScope::LiveSystem
+            }
+            _ => VerbScope::Menu,
+        }
+    }
+
+    /// Whether the verb may share a key/MIDI note with a gameplay lane.
+    /// Menu verbs may (menus own input while judging is inactive);
+    /// live-system verbs may not (lane-wins collision protection).
+    pub fn allows_lane_sharing(self) -> bool {
+        self.activation_scope() == VerbScope::Menu
+    }
+}
+
+/// Built-in keyboard sources for the menu verbs. Independent of MIDI: a
+/// keyboard-only user can drive every surface with these. Also the resolver's
+/// fallback when a (possibly migrated v1) profile leaves a menu verb fully
+/// unbound — navigation must never brick.
+pub fn default_menu_keyboard_sources(verb: SystemVerb) -> &'static [BindSource] {
+    use BindSource::Key;
+    use KeyCode as K;
+    match verb {
+        SystemVerb::NavigateUp => &[Key(K::ArrowUp)],
+        SystemVerb::NavigateDown => &[Key(K::ArrowDown)],
+        SystemVerb::NavigateLeft => &[Key(K::ArrowLeft)],
+        SystemVerb::NavigateRight => &[Key(K::ArrowRight)],
+        SystemVerb::Confirm => &[Key(K::Enter)],
+        SystemVerb::Back => &[Key(K::Escape)],
+        SystemVerb::NextTab => &[Key(K::Tab)],
+        SystemVerb::PreviousPage => &[Key(K::PageUp)],
+        SystemVerb::NextPage => &[Key(K::PageDown)],
+        // PreviousTab is Shift+Tab: the router derives it from NextTab +
+        // coarse; Decrease/Increase are context translations of Left/Right;
+        // Preview is screen-declared; live-system verbs are never defaulted.
+        _ => &[],
+    }
+}
+
+/// Built-in MIDI menu sources: the established drum convention, expressed as
+/// profile bindings (never hard-coded by lane). Lane-shared on purpose —
+/// menus own input while judging is inactive. `OpenSystemMenu` gets no
+/// default: note maps vary by brand, we never guess a spare zone note.
+fn default_menu_midi_sources(verb: SystemVerb) -> &'static [BindSource] {
+    use BindSource::Midi;
+    match verb {
+        // HH close/open
+        SystemVerb::NavigateUp => &[Midi { note: 42 }, Midi { note: 46 }],
+        // CY / RD
+        SystemVerb::NavigateDown => &[
+            Midi { note: 57 },
+            Midi { note: 52 },
+            Midi { note: 51 },
+            Midi { note: 59 },
+        ],
+        // HT
+        SystemVerb::NavigateLeft => &[Midi { note: 48 }, Midi { note: 50 }],
+        // LT
+        SystemVerb::NavigateRight => &[Midi { note: 45 }, Midi { note: 47 }],
+        // BD
+        SystemVerb::Confirm => &[Midi { note: 36 }, Midi { note: 35 }],
+        // SD
+        SystemVerb::Back => &[Midi { note: 38 }, Midi { note: 40 }],
+        // FT
+        SystemVerb::NextTab => &[Midi { note: 43 }, Midi { note: 41 }],
+        _ => &[],
+    }
+}
+
+/// The default `[system]` table: built-in keyboard menu bindings plus the
+/// MIDI drum convention.
+pub fn default_system_bindings() -> HashMap<SystemVerb, Vec<BindSource>> {
+    let mut system = HashMap::new();
+    for verb in SYSTEM_VERBS {
+        let sources: Vec<BindSource> = default_menu_keyboard_sources(verb)
+            .iter()
+            .chain(default_menu_midi_sources(verb))
+            .copied()
+            .collect();
+        if !sources.is_empty() {
+            system.insert(verb, sources);
+        }
+    }
+    system
 }
 
 /// The lane channel that already owns `src`, if any. A system verb may not
@@ -133,8 +308,9 @@ pub struct InputBindings {
     /// Channel → sources. Keyboard and MIDI sources may each appear under
     /// multiple channels (`bind_shared`); every owning channel's lane fires.
     pub map: HashMap<EChannel, Vec<BindSource>>,
-    /// System verb → sources. Empty by default: Escape keeps working, and note
-    /// maps vary by brand, so we never guess a pad on the user's behalf.
+    /// System verb → sources. Menu verbs default to the built-in keyboard
+    /// bindings + MIDI drum convention (`default_system_bindings`); live-system
+    /// verbs default unbound — note maps vary by brand, we never guess a pad.
     pub system: HashMap<SystemVerb, Vec<BindSource>>,
 }
 
@@ -227,7 +403,7 @@ impl Default for InputBindings {
         Self {
             midi: MidiDeviceConfig::default(),
             map,
-            system: HashMap::new(),
+            system: default_system_bindings(),
         }
     }
 }
@@ -587,7 +763,7 @@ SD = [{ midi = { note = 36 } }]
     }
 
     #[test]
-    fn old_file_without_system_table_loads_empty_system_map() {
+    fn old_file_without_system_table_loads_with_builtin_menu_defaults() {
         let raw = r#"
 version = 1
 [midi]
@@ -596,7 +772,10 @@ velocity_threshold = 10
 HH = [{ key = "KeyX" }]
 "#;
         let b = parse_with_migrations(raw).resolve();
-        assert!(b.system.is_empty(), "no [system] table → empty system map");
+        // Container serde(default): a missing [system] table inherits the
+        // built-in menu defaults, so a version-1 file keeps keyboard nav.
+        assert_eq!(b.system, default_system_bindings());
+        assert!(b.system_sources(SystemVerb::Pause).is_empty());
         assert_eq!(b.channel_for_key(KeyCode::KeyX), Some(EChannel::HiHatClose));
     }
 
@@ -620,11 +799,87 @@ HH = [{ key = "KeyX" }]
 
     #[test]
     fn system_verb_file_keys_are_stable() {
+        // Version-1 keys are frozen.
         assert_eq!(SystemVerb::Pause.key(), "pause");
         assert_eq!(SystemVerb::Restart.key(), "restart");
         assert_eq!(SystemVerb::from_key("pause"), Some(SystemVerb::Pause));
         assert_eq!(SystemVerb::from_key("nope"), None);
-        assert_eq!(SYSTEM_VERBS.len(), 2);
+        assert_eq!(SYSTEM_VERBS.len(), 16);
+        assert_eq!(SystemVerb::NavigateUp.key(), "navigate-up");
+        assert_eq!(SystemVerb::OpenSystemMenu.key(), "open-system-menu");
+    }
+
+    #[test]
+    fn every_canonical_verb_has_a_unique_stable_key_and_round_trips() {
+        let mut keys: Vec<&str> = SYSTEM_VERBS.iter().map(|v| v.key()).collect();
+        keys.sort();
+        keys.dedup();
+        assert_eq!(keys.len(), SYSTEM_VERBS.len(), "keys must be unique");
+        for verb in SYSTEM_VERBS {
+            assert_eq!(SystemVerb::from_key(verb.key()), Some(verb));
+            // serde's kebab-case rename must agree with key() — the file and
+            // any serde-serialized form must never diverge.
+            let serialized = toml::to_string(&BTreeMap::from([("v", verb)])).unwrap();
+            assert!(serialized.contains(verb.key()), "{serialized}");
+            assert!(!verb.label().is_empty());
+        }
+    }
+
+    #[test]
+    fn lane_sharing_policy_follows_activation_scope() {
+        for verb in SYSTEM_VERBS {
+            match verb {
+                SystemVerb::OpenSystemMenu | SystemVerb::Pause | SystemVerb::Restart => {
+                    assert_eq!(verb.activation_scope(), VerbScope::LiveSystem);
+                    assert!(!verb.allows_lane_sharing());
+                }
+                _ => {
+                    assert_eq!(verb.activation_scope(), VerbScope::Menu);
+                    assert!(verb.allows_lane_sharing());
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn default_menu_bindings_cover_keyboard_navigation_without_midi() {
+        let b = InputBindings::default();
+        for verb in [
+            SystemVerb::NavigateUp,
+            SystemVerb::NavigateDown,
+            SystemVerb::NavigateLeft,
+            SystemVerb::NavigateRight,
+            SystemVerb::Confirm,
+            SystemVerb::Back,
+            SystemVerb::NextTab,
+            SystemVerb::PreviousPage,
+            SystemVerb::NextPage,
+        ] {
+            assert!(
+                b.system_sources(verb)
+                    .iter()
+                    .any(|s| matches!(s, BindSource::Key(_))),
+                "{verb:?} needs a keyboard default"
+            );
+        }
+        // Live-system verbs are never defaulted; no guessed OpenSystemMenu note.
+        assert!(b.system_sources(SystemVerb::OpenSystemMenu).is_empty());
+        assert!(b.system_sources(SystemVerb::Pause).is_empty());
+        assert!(b.system_sources(SystemVerb::Restart).is_empty());
+    }
+
+    #[test]
+    fn default_midi_menu_bindings_follow_the_drum_convention() {
+        let b = InputBindings::default();
+        let has = |verb: SystemVerb, note: u8| {
+            b.system_sources(verb).contains(&BindSource::Midi { note })
+        };
+        assert!(has(SystemVerb::NavigateUp, 42)); // HH
+        assert!(has(SystemVerb::NavigateDown, 51)); // RD
+        assert!(has(SystemVerb::NavigateLeft, 48)); // HT
+        assert!(has(SystemVerb::NavigateRight, 45)); // LT
+        assert!(has(SystemVerb::Confirm, 36)); // BD
+        assert!(has(SystemVerb::Back, 38)); // SD
     }
 
     #[test]

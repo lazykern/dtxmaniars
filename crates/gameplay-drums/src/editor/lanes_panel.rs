@@ -107,19 +107,19 @@ pub fn reduce_lanes_nav(
     focus: LanesFocus,
     selected: usize,
     lane_count: usize,
-    verb: game_shell::NavVerb,
+    verb: game_shell::SystemVerb,
     coarse: bool,
 ) -> (LanesFocus, usize, LanesNavEffect) {
-    use game_shell::NavVerb;
+    use game_shell::SystemVerb;
     match focus {
         LanesFocus::TabBar => match verb {
-            NavVerb::Down | NavVerb::Confirm if lane_count > 0 => {
+            SystemVerb::NavigateDown | SystemVerb::Confirm if lane_count > 0 => {
                 (LanesFocus::Rows, selected, LanesNavEffect::None)
             }
             _ => (focus, selected, LanesNavEffect::None),
         },
         LanesFocus::Rows => match verb {
-            NavVerb::Up if coarse && selected > 0 => (
+            SystemVerb::NavigateUp if coarse && selected > 0 => (
                 focus,
                 selected - 1,
                 LanesNavEffect::Reorder {
@@ -127,7 +127,7 @@ pub fn reduce_lanes_nav(
                     dir: -1,
                 },
             ),
-            NavVerb::Down if coarse && selected + 1 < lane_count => (
+            SystemVerb::NavigateDown if coarse && selected + 1 < lane_count => (
                 focus,
                 selected + 1,
                 LanesNavEffect::Reorder {
@@ -135,26 +135,26 @@ pub fn reduce_lanes_nav(
                     dir: 1,
                 },
             ),
-            NavVerb::Up => {
+            SystemVerb::NavigateUp => {
                 if selected == 0 {
                     (LanesFocus::TabBar, selected, LanesNavEffect::None)
                 } else {
                     (focus, selected - 1, LanesNavEffect::None)
                 }
             }
-            NavVerb::Down => (
+            SystemVerb::NavigateDown => (
                 focus,
                 (selected + 1).min(lane_count.saturating_sub(1)),
                 LanesNavEffect::None,
             ),
-            NavVerb::Confirm if lane_count > 0 => {
+            SystemVerb::Confirm if lane_count > 0 => {
                 (LanesFocus::Detail, selected, LanesNavEffect::None)
             }
-            NavVerb::Back => (LanesFocus::TabBar, selected, LanesNavEffect::None),
+            SystemVerb::Back => (LanesFocus::TabBar, selected, LanesNavEffect::None),
             _ => (focus, selected, LanesNavEffect::None),
         },
         LanesFocus::Detail => match verb {
-            NavVerb::Dec => (
+            SystemVerb::Decrease => (
                 focus,
                 selected,
                 LanesNavEffect::AdjustWidth {
@@ -162,7 +162,7 @@ pub fn reduce_lanes_nav(
                     dir: -1,
                 },
             ),
-            NavVerb::Inc => (
+            SystemVerb::Increase => (
                 focus,
                 selected,
                 LanesNavEffect::AdjustWidth {
@@ -170,7 +170,9 @@ pub fn reduce_lanes_nav(
                     dir: 1,
                 },
             ),
-            NavVerb::Up | NavVerb::Back => (LanesFocus::Rows, selected, LanesNavEffect::None),
+            SystemVerb::NavigateUp | SystemVerb::Back => {
+                (LanesFocus::Rows, selected, LanesNavEffect::None)
+            }
             // Confirm would cycle between detail sub-controls once the card
             // grows a second adjustable one; width is the only one today, so
             // this is a no-op (mirrors `reduce_controls_nav`'s catch-all arm).
@@ -184,7 +186,7 @@ pub fn reduce_lanes_nav(
 /// the returned effects: `Reorder` = one undo snapshot PER keypress + the
 /// same adjacent-swap walk mouse drag uses; `AdjustWidth` = one undo
 /// snapshot per Detail VISIT (drag's `pushed`-flag pattern) + clamped
-/// `set_lane_width`. Esc maps to `NavVerb::Back` while Detail is focused
+/// `set_lane_width`. Esc maps to `SystemVerb::Back` while Detail is focused
 /// (`close_on_escape` is suppressed for that case and ordered before this).
 #[allow(clippy::too_many_arguments)]
 pub(super) fn lanes_nav_consumer(
@@ -199,7 +201,7 @@ pub(super) fn lanes_nav_consumer(
     mut undo: ResMut<UndoStack>,
     mut width_undo_pushed: Local<bool>,
 ) {
-    use game_shell::{NavSource, NavVerb};
+    use game_shell::{InputSource, SystemVerb};
 
     // A Customize session that ended mid-edit in Detail (Esc, or the song
     // ending) leaves BOTH the focus level and the once-per-visit width snapshot
@@ -216,13 +218,13 @@ pub(super) fn lanes_nav_consumer(
     if *focus != LanesFocus::Detail {
         *width_undo_pushed = false;
     }
-    let mut pending: Vec<(NavVerb, bool)> = actions
+    let mut pending: Vec<(SystemVerb, bool)> = actions
         .read()
-        .filter(|action| action.source == NavSource::Keyboard)
+        .filter(|action| action.source == InputSource::Keyboard)
         .map(|action| (action.verb, action.coarse))
         .collect();
     if *focus == LanesFocus::Detail && keys.just_pressed(KeyCode::Escape) {
-        pending.push((NavVerb::Back, false));
+        pending.push((SystemVerb::Back, false));
     }
     for (verb, coarse) in pending {
         let lane_count = lanes.0.lanes.len();
@@ -873,7 +875,7 @@ fn refresh_lane_panel_values(
 mod tests {
     use super::*;
     use dtx_core::EChannel;
-    use game_shell::NavVerb;
+    use game_shell::SystemVerb;
 
     #[test]
     fn addable_channels_includes_unassigned_and_other_secondaries() {
@@ -895,7 +897,7 @@ mod tests {
     #[test]
     fn lanes_tabbar_confirm_enters_rows() {
         let (focus, selected, effect) =
-            reduce_lanes_nav(LanesFocus::TabBar, 0, 10, NavVerb::Confirm, false);
+            reduce_lanes_nav(LanesFocus::TabBar, 0, 10, SystemVerb::Confirm, false);
         assert_eq!(focus, LanesFocus::Rows);
         assert_eq!(selected, 0);
         assert_eq!(effect, LanesNavEffect::None);
@@ -903,32 +905,38 @@ mod tests {
 
     #[test]
     fn lanes_tabbar_ignores_down_with_no_lanes() {
-        let (focus, ..) = reduce_lanes_nav(LanesFocus::TabBar, 0, 0, NavVerb::Down, false);
+        let (focus, ..) =
+            reduce_lanes_nav(LanesFocus::TabBar, 0, 0, SystemVerb::NavigateDown, false);
         assert_eq!(focus, LanesFocus::TabBar);
     }
 
     #[test]
     fn lanes_rows_down_moves_selection_and_clamps_at_bottom() {
-        let (_, selected, effect) = reduce_lanes_nav(LanesFocus::Rows, 0, 3, NavVerb::Down, false);
+        let (_, selected, effect) =
+            reduce_lanes_nav(LanesFocus::Rows, 0, 3, SystemVerb::NavigateDown, false);
         assert_eq!(selected, 1);
         assert_eq!(effect, LanesNavEffect::None);
-        let (_, selected, _) = reduce_lanes_nav(LanesFocus::Rows, 2, 3, NavVerb::Down, false);
+        let (_, selected, _) =
+            reduce_lanes_nav(LanesFocus::Rows, 2, 3, SystemVerb::NavigateDown, false);
         assert_eq!(selected, 2, "clamps at the last row");
     }
 
     #[test]
     fn lanes_rows_up_at_top_returns_to_tabbar() {
-        let (focus, selected, _) = reduce_lanes_nav(LanesFocus::Rows, 0, 3, NavVerb::Up, false);
+        let (focus, selected, _) =
+            reduce_lanes_nav(LanesFocus::Rows, 0, 3, SystemVerb::NavigateUp, false);
         assert_eq!(focus, LanesFocus::TabBar);
         assert_eq!(selected, 0);
-        let (focus, selected, _) = reduce_lanes_nav(LanesFocus::Rows, 2, 3, NavVerb::Up, false);
+        let (focus, selected, _) =
+            reduce_lanes_nav(LanesFocus::Rows, 2, 3, SystemVerb::NavigateUp, false);
         assert_eq!(focus, LanesFocus::Rows);
         assert_eq!(selected, 1);
     }
 
     #[test]
     fn lanes_rows_coarse_up_reorders_and_moves_selection_with_it() {
-        let (focus, selected, effect) = reduce_lanes_nav(LanesFocus::Rows, 2, 5, NavVerb::Up, true);
+        let (focus, selected, effect) =
+            reduce_lanes_nav(LanesFocus::Rows, 2, 5, SystemVerb::NavigateUp, true);
         assert_eq!(focus, LanesFocus::Rows);
         assert_eq!(selected, 1, "selection follows the moved lane");
         assert_eq!(effect, LanesNavEffect::Reorder { index: 2, dir: -1 });
@@ -937,7 +945,7 @@ mod tests {
     #[test]
     fn lanes_rows_coarse_down_at_bottom_is_a_plain_noop() {
         let (focus, selected, effect) =
-            reduce_lanes_nav(LanesFocus::Rows, 2, 3, NavVerb::Down, true);
+            reduce_lanes_nav(LanesFocus::Rows, 2, 3, SystemVerb::NavigateDown, true);
         assert_eq!(focus, LanesFocus::Rows);
         assert_eq!(selected, 2, "already at the bottom, no reorder target");
         assert_eq!(effect, LanesNavEffect::None);
@@ -946,7 +954,7 @@ mod tests {
     #[test]
     fn lanes_rows_confirm_enters_detail() {
         let (focus, selected, effect) =
-            reduce_lanes_nav(LanesFocus::Rows, 1, 3, NavVerb::Confirm, false);
+            reduce_lanes_nav(LanesFocus::Rows, 1, 3, SystemVerb::Confirm, false);
         assert_eq!(focus, LanesFocus::Detail);
         assert_eq!(selected, 1);
         assert_eq!(effect, LanesNavEffect::None);
@@ -954,17 +962,19 @@ mod tests {
 
     #[test]
     fn lanes_detail_left_right_emit_width_adjust_effects() {
-        let (focus, _, effect) = reduce_lanes_nav(LanesFocus::Detail, 3, 5, NavVerb::Dec, false);
+        let (focus, _, effect) =
+            reduce_lanes_nav(LanesFocus::Detail, 3, 5, SystemVerb::Decrease, false);
         assert_eq!(focus, LanesFocus::Detail, "stays in Detail while adjusting");
         assert_eq!(effect, LanesNavEffect::AdjustWidth { index: 3, dir: -1 });
-        let (_, _, effect) = reduce_lanes_nav(LanesFocus::Detail, 3, 5, NavVerb::Inc, false);
+        let (_, _, effect) =
+            reduce_lanes_nav(LanesFocus::Detail, 3, 5, SystemVerb::Increase, false);
         assert_eq!(effect, LanesNavEffect::AdjustWidth { index: 3, dir: 1 });
     }
 
     #[test]
     fn lanes_detail_back_returns_to_rows_keeping_selection() {
         let (focus, selected, effect) =
-            reduce_lanes_nav(LanesFocus::Detail, 4, 6, NavVerb::Back, false);
+            reduce_lanes_nav(LanesFocus::Detail, 4, 6, SystemVerb::Back, false);
         assert_eq!(focus, LanesFocus::Rows);
         assert_eq!(selected, 4);
         assert_eq!(effect, LanesNavEffect::None);
@@ -973,7 +983,7 @@ mod tests {
     #[test]
     fn lanes_consumer_reorders_adjusts_width_and_batches_undo_per_visit() {
         use bevy::prelude::*;
-        use game_shell::{NavAction, NavSource};
+        use game_shell::{InputSource, NavAction};
 
         use crate::editor::undo::{Snapshot, UndoStack};
         use crate::widget_layout::WidgetLayouts;
@@ -993,36 +1003,37 @@ mod tests {
             .add_systems(Update, lanes_nav_consumer);
         app.update(); // flush insertion change ticks
 
-        let nav = |app: &mut App, verb: NavVerb, coarse: bool| {
+        let nav = |app: &mut App, verb: SystemVerb, coarse: bool| {
             app.world_mut()
                 .resource_mut::<Messages<NavAction>>()
                 .write(NavAction {
                     verb,
-                    source: NavSource::Keyboard,
+                    source: InputSource::Keyboard,
                     coarse,
+                    repeated: false,
                 });
             app.update();
         };
 
         // TabBar → Rows; None selection bridges to 0.
-        nav(&mut app, NavVerb::Down, false);
+        nav(&mut app, SystemVerb::NavigateDown, false);
         assert_eq!(*app.world().resource::<LanesFocus>(), LanesFocus::Rows);
         assert_eq!(app.world().resource::<SelectedLane>().0, Some(0));
 
         // Shift+Down twice: two reorders, one undo snapshot EACH.
         let id0 = app.world().resource::<Lanes>().0.lanes[0].id.clone();
-        nav(&mut app, NavVerb::Down, true);
-        nav(&mut app, NavVerb::Down, true);
+        nav(&mut app, SystemVerb::NavigateDown, true);
+        nav(&mut app, SystemVerb::NavigateDown, true);
         assert_eq!(app.world().resource::<Lanes>().0.lanes[2].id, id0);
         assert_eq!(app.world().resource::<SelectedLane>().0, Some(2));
 
         // Enter → Detail; ←/→ adjust width with ONE snapshot for the visit.
-        nav(&mut app, NavVerb::Confirm, false);
+        nav(&mut app, SystemVerb::Confirm, false);
         assert_eq!(*app.world().resource::<LanesFocus>(), LanesFocus::Detail);
         let w0 = app.world().resource::<Lanes>().0.lanes[2].width;
-        nav(&mut app, NavVerb::Inc, false); // +4
-        nav(&mut app, NavVerb::Inc, true); // +16 (coarse ×4)
-        nav(&mut app, NavVerb::Dec, false); // −4
+        nav(&mut app, SystemVerb::Increase, false); // +4
+        nav(&mut app, SystemVerb::Increase, true); // +16 (coarse ×4)
+        nav(&mut app, SystemVerb::Decrease, false); // −4
         let w1 = app.world().resource::<Lanes>().0.lanes[2].width;
         assert!(
             (w1 - (w0 + 16.0)).abs() < 0.01,
@@ -1041,8 +1052,8 @@ mod tests {
         assert_eq!(*app.world().resource::<LanesFocus>(), LanesFocus::Rows);
 
         // Second Detail visit: width undo re-arms → one MORE snapshot.
-        nav(&mut app, NavVerb::Confirm, false);
-        nav(&mut app, NavVerb::Inc, false);
+        nav(&mut app, SystemVerb::Confirm, false);
+        nav(&mut app, SystemVerb::Increase, false);
 
         // Snapshot ledger: 2 (reorders) + 1 (visit one) + 1 (visit two) = 4.
         let world = app.world_mut();
@@ -1072,7 +1083,7 @@ mod tests {
     #[test]
     fn reopening_rearms_detail_focus_and_width_undo() {
         use bevy::prelude::*;
-        use game_shell::{NavAction, NavSource};
+        use game_shell::{InputSource, NavAction};
 
         use crate::editor::undo::{Snapshot, UndoStack};
         use crate::widget_layout::WidgetLayouts;
@@ -1092,22 +1103,23 @@ mod tests {
             .add_systems(Update, lanes_nav_consumer);
         app.update(); // flush insertion change ticks
 
-        let nav = |app: &mut App, verb: NavVerb, coarse: bool| {
+        let nav = |app: &mut App, verb: SystemVerb, coarse: bool| {
             app.world_mut()
                 .resource_mut::<Messages<NavAction>>()
                 .write(NavAction {
                     verb,
-                    source: NavSource::Keyboard,
+                    source: InputSource::Keyboard,
                     coarse,
+                    repeated: false,
                 });
             app.update();
         };
         let width = |app: &App| app.world().resource::<Lanes>().0.lanes[0].width;
 
         // Session one: descend into Detail and adjust width (arms the flag).
-        nav(&mut app, NavVerb::Down, false); // TabBar → Rows
-        nav(&mut app, NavVerb::Confirm, false); // Rows → Detail
-        nav(&mut app, NavVerb::Inc, false);
+        nav(&mut app, SystemVerb::NavigateDown, false); // TabBar → Rows
+        nav(&mut app, SystemVerb::Confirm, false); // Rows → Detail
+        nav(&mut app, SystemVerb::Increase, false);
         assert_eq!(*app.world().resource::<LanesFocus>(), LanesFocus::Detail);
         let w_session_one = width(&app);
 
@@ -1128,7 +1140,7 @@ mod tests {
         );
 
         // Stale focus would have let this ← adjust width with no snapshot.
-        nav(&mut app, NavVerb::Dec, false);
+        nav(&mut app, SystemVerb::Decrease, false);
         assert_eq!(
             width(&app),
             w_session_one,
@@ -1140,9 +1152,9 @@ mod tests {
             layouts: app.world().resource::<WidgetLayouts>().clone(),
             lanes: app.world().resource::<Lanes>().clone(),
         };
-        nav(&mut app, NavVerb::Down, false);
-        nav(&mut app, NavVerb::Confirm, false);
-        nav(&mut app, NavVerb::Inc, false);
+        nav(&mut app, SystemVerb::NavigateDown, false);
+        nav(&mut app, SystemVerb::Confirm, false);
+        nav(&mut app, SystemVerb::Increase, false);
         assert_ne!(width(&app), w_session_one, "the visit's adjust applied");
         let current = Snapshot {
             layouts: app.world().resource::<WidgetLayouts>().clone(),
