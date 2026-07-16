@@ -6,7 +6,7 @@
 //! mutation.
 
 use bevy::prelude::*;
-use game_shell::{CustomizeTab, NavAction, NavSource, SystemVerb};
+use game_shell::{CustomizeTab, InputSource, NavAction, SystemVerb};
 
 /// Which settings row is focused for nav. Reset to 0 on tab change.
 #[derive(Resource, Default)]
@@ -62,10 +62,10 @@ fn keyboard_can_enter(tab: CustomizeTab) -> bool {
 
 /// Delta a verb applies to the focused row, if any. Pads reuse Up/Down as −/+
 /// once in adjust mode; the keyboard uses Dec/Inc directly.
-fn adjust_delta(verb: SystemVerb, source: NavSource) -> Option<i32> {
+fn adjust_delta(verb: SystemVerb, source: InputSource) -> Option<i32> {
     match (verb, source) {
-        (SystemVerb::NavigateUp, NavSource::Pad) | (SystemVerb::Decrease, _) => Some(-1),
-        (SystemVerb::NavigateDown, NavSource::Pad) | (SystemVerb::Increase, _) => Some(1),
+        (SystemVerb::NavigateUp, InputSource::MidiKit) | (SystemVerb::Decrease, _) => Some(-1),
+        (SystemVerb::NavigateDown, InputSource::MidiKit) | (SystemVerb::Increase, _) => Some(1),
         _ => None,
     }
 }
@@ -196,8 +196,9 @@ fn keyboard_emit_nav(
     };
     out.write(NavAction {
         verb,
-        source: NavSource::Keyboard,
+        source: InputSource::Keyboard,
         coarse,
+        repeated: false,
     });
 }
 
@@ -227,7 +228,7 @@ fn settings_nav_consumer(
     for action in actions.read() {
         // A kit tab whose own focus machine is below the tab bar owns
         // Dec/Inc (segment toggle / width adjust) — don't also switch tabs.
-        if action.source == NavSource::Keyboard
+        if action.source == InputSource::Keyboard
             && matches!(action.verb, SystemVerb::Decrease | SystemVerb::Increase)
             && matches!(*level, NavLevel::Rail)
             && subtab_focus_captured(active.0, *controls_focus, *lanes_focus)
@@ -236,7 +237,7 @@ fn settings_nav_consumer(
         }
         let items = crate::editor::settings_data::settings_items(active.0);
         match action.source {
-            NavSource::Keyboard => match &mut *level {
+            InputSource::Keyboard => match &mut *level {
                 NavLevel::Rail => match action.verb {
                     SystemVerb::Decrease => active.0 = active.0.prev(),
                     SystemVerb::Increase => active.0 = active.0.next(),
@@ -266,7 +267,7 @@ fn settings_nav_consumer(
                         }
                         verb => {
                             if let (Some(delta), Some(item)) = (
-                                adjust_delta(verb, NavSource::Keyboard),
+                                adjust_delta(verb, InputSource::Keyboard),
                                 items.get(focused.0),
                             ) {
                                 for _ in 0..reps {
@@ -277,7 +278,7 @@ fn settings_nav_consumer(
                     }
                 }
             },
-            NavSource::Pad => match &mut *level {
+            InputSource::MidiKit => match &mut *level {
                 NavLevel::Rail => match action.verb {
                     SystemVerb::NavigateUp => active.0 = active.0.prev(),
                     SystemVerb::NavigateDown => active.0 = active.0.next(),
@@ -314,14 +315,16 @@ fn settings_nav_consumer(
                         *level = NavLevel::Rows;
                     }
                     verb => {
-                        if let (Some(delta), Some(item)) =
-                            (adjust_delta(verb, NavSource::Pad), items.get(focused.0))
-                        {
+                        if let (Some(delta), Some(item)) = (
+                            adjust_delta(verb, InputSource::MidiKit),
+                            items.get(focused.0),
+                        ) {
                             (item.adjust)(&mut draft.0, delta);
                         }
                     }
                 },
             },
+            _ => {}
         }
     }
 }
@@ -372,7 +375,7 @@ mod tests {
             }
             v => {
                 if let (Some(delta), Some(item)) =
-                    (adjust_delta(v, NavSource::Keyboard), items.get(*focused))
+                    (adjust_delta(v, InputSource::Keyboard), items.get(*focused))
                 {
                     for _ in 0..reps {
                         (item.adjust)(draft, delta);
@@ -396,29 +399,32 @@ mod tests {
     #[test]
     fn pad_verbs_in_adjust_mode_map_to_steps() {
         assert_eq!(
-            adjust_delta(SystemVerb::NavigateUp, NavSource::Pad),
+            adjust_delta(SystemVerb::NavigateUp, InputSource::MidiKit),
             Some(-1)
         );
         assert_eq!(
-            adjust_delta(SystemVerb::NavigateDown, NavSource::Pad),
+            adjust_delta(SystemVerb::NavigateDown, InputSource::MidiKit),
             Some(1)
         );
         assert_eq!(
-            adjust_delta(SystemVerb::Decrease, NavSource::Keyboard),
+            adjust_delta(SystemVerb::Decrease, InputSource::Keyboard),
             Some(-1)
         );
         assert_eq!(
-            adjust_delta(SystemVerb::Increase, NavSource::Keyboard),
+            adjust_delta(SystemVerb::Increase, InputSource::Keyboard),
             Some(1)
         );
-        assert_eq!(adjust_delta(SystemVerb::Confirm, NavSource::Pad), None);
-        assert_eq!(adjust_delta(SystemVerb::Back, NavSource::Pad), None);
         assert_eq!(
-            adjust_delta(SystemVerb::NavigateUp, NavSource::Keyboard),
+            adjust_delta(SystemVerb::Confirm, InputSource::MidiKit),
+            None
+        );
+        assert_eq!(adjust_delta(SystemVerb::Back, InputSource::MidiKit), None);
+        assert_eq!(
+            adjust_delta(SystemVerb::NavigateUp, InputSource::Keyboard),
             None
         );
         assert_eq!(
-            adjust_delta(SystemVerb::NavigateDown, NavSource::Keyboard),
+            adjust_delta(SystemVerb::NavigateDown, InputSource::Keyboard),
             None
         );
     }
@@ -587,7 +593,7 @@ mod tests {
         let mut draft = base.clone();
 
         let saved = draft.clone();
-        let delta = adjust_delta(SystemVerb::NavigateDown, NavSource::Pad).unwrap();
+        let delta = adjust_delta(SystemVerb::NavigateDown, InputSource::MidiKit).unwrap();
         (items[scroll].adjust)(&mut draft, delta);
         assert_ne!(
             (items[scroll].raw)(&draft),

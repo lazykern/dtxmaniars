@@ -809,7 +809,7 @@ fn despawn_overlay(mut commands: Commands, overlays: Query<Entity, With<PauseOve
 
 /// Keyboard → `NavAction` for the pause overlay. Esc keeps its own toggle path.
 fn pause_kb_emit(keys: Res<ButtonInput<KeyCode>>, mut out: MessageWriter<game_shell::NavAction>) {
-    use game_shell::{NavAction, NavSource, SystemVerb};
+    use game_shell::{InputSource, NavAction, SystemVerb};
     let verb = if keys.just_pressed(KeyCode::ArrowDown) {
         SystemVerb::NavigateDown
     } else if keys.just_pressed(KeyCode::ArrowUp) {
@@ -825,8 +825,9 @@ fn pause_kb_emit(keys: Res<ButtonInput<KeyCode>>, mut out: MessageWriter<game_sh
     };
     out.write(NavAction {
         verb,
-        source: NavSource::Keyboard,
+        source: InputSource::Keyboard,
         coarse: false,
+        repeated: false,
     });
 }
 
@@ -853,7 +854,7 @@ fn pause_pointer_emit(
     >,
     mut out: MessageWriter<game_shell::NavAction>,
 ) {
-    use game_shell::{NavAction, NavSource, SystemVerb};
+    use game_shell::{InputSource, NavAction, SystemVerb};
     let context = if practice.is_some() {
         PauseContext::Practice
     } else {
@@ -868,8 +869,9 @@ fn pause_pointer_emit(
             *view = PauseView::Menu;
             out.write(NavAction {
                 verb: SystemVerb::Confirm,
-                source: NavSource::Keyboard,
+                source: InputSource::Keyboard,
                 coarse: false,
+                repeated: false,
             });
         }
     }
@@ -886,8 +888,9 @@ fn pause_pointer_emit(
                 } else {
                     SystemVerb::Increase
                 },
-                source: NavSource::Keyboard,
+                source: InputSource::Keyboard,
                 coarse: false,
+                repeated: false,
             });
         }
     }
@@ -907,8 +910,9 @@ fn pause_pointer_emit(
                 } else {
                     SystemVerb::Increase
                 },
-                source: NavSource::Keyboard,
+                source: InputSource::Keyboard,
                 coarse: false,
+                repeated: false,
             });
         }
     }
@@ -1416,8 +1420,9 @@ mod tests {
         world.init_resource::<Assets<AudioInstance>>();
         world.write_message(game_shell::NavAction {
             verb: game_shell::SystemVerb::Confirm,
-            source: game_shell::NavSource::Keyboard,
+            source: game_shell::InputSource::Keyboard,
             coarse: false,
+            repeated: false,
         });
         world
     }

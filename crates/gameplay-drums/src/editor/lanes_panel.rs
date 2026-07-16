@@ -201,7 +201,7 @@ pub(super) fn lanes_nav_consumer(
     mut undo: ResMut<UndoStack>,
     mut width_undo_pushed: Local<bool>,
 ) {
-    use game_shell::{NavSource, SystemVerb};
+    use game_shell::{InputSource, SystemVerb};
 
     // A Customize session that ended mid-edit in Detail (Esc, or the song
     // ending) leaves BOTH the focus level and the once-per-visit width snapshot
@@ -220,7 +220,7 @@ pub(super) fn lanes_nav_consumer(
     }
     let mut pending: Vec<(SystemVerb, bool)> = actions
         .read()
-        .filter(|action| action.source == NavSource::Keyboard)
+        .filter(|action| action.source == InputSource::Keyboard)
         .map(|action| (action.verb, action.coarse))
         .collect();
     if *focus == LanesFocus::Detail && keys.just_pressed(KeyCode::Escape) {
@@ -983,7 +983,7 @@ mod tests {
     #[test]
     fn lanes_consumer_reorders_adjusts_width_and_batches_undo_per_visit() {
         use bevy::prelude::*;
-        use game_shell::{NavAction, NavSource};
+        use game_shell::{InputSource, NavAction};
 
         use crate::editor::undo::{Snapshot, UndoStack};
         use crate::widget_layout::WidgetLayouts;
@@ -1008,8 +1008,9 @@ mod tests {
                 .resource_mut::<Messages<NavAction>>()
                 .write(NavAction {
                     verb,
-                    source: NavSource::Keyboard,
+                    source: InputSource::Keyboard,
                     coarse,
+                    repeated: false,
                 });
             app.update();
         };
@@ -1082,7 +1083,7 @@ mod tests {
     #[test]
     fn reopening_rearms_detail_focus_and_width_undo() {
         use bevy::prelude::*;
-        use game_shell::{NavAction, NavSource};
+        use game_shell::{InputSource, NavAction};
 
         use crate::editor::undo::{Snapshot, UndoStack};
         use crate::widget_layout::WidgetLayouts;
@@ -1107,8 +1108,9 @@ mod tests {
                 .resource_mut::<Messages<NavAction>>()
                 .write(NavAction {
                     verb,
-                    source: NavSource::Keyboard,
+                    source: InputSource::Keyboard,
                     coarse,
+                    repeated: false,
                 });
             app.update();
         };

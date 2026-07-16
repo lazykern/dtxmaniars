@@ -310,7 +310,7 @@ mod tests {
     use bevy::ecs::message::Messages;
     use bevy::ecs::system::RunSystemOnce;
     use dtx_ui::motion::EnterChoreo;
-    use game_shell::{NavAction, NavSource, PracticeIntent};
+    use game_shell::{InputSource, NavAction, PracticeIntent};
     use gameplay_drums::resources::ActiveChart;
 
     use crate::ui::{RevealState, StatRow};
@@ -339,8 +339,9 @@ mod tests {
     fn pad(verb: SystemVerb) -> NavAction {
         NavAction {
             verb,
-            source: NavSource::Pad,
+            source: InputSource::MidiKit,
             coarse: false,
+            repeated: false,
         }
     }
 

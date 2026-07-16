@@ -5,8 +5,8 @@ use bevy::prelude::*;
 use dtx_ui::motion::EnterChoreo;
 use dtx_ui::{Notification, NotificationQueue, Theme, ThemeResource};
 use game_shell::{
-    AppState, NavAction, NavSource, PracticeIntent, PracticeOrigin, SystemVerb, TransitionRequest,
-    despawn_stage, request_transition,
+    AppState, InputSource, NavAction, PracticeIntent, PracticeOrigin, SystemVerb,
+    TransitionRequest, despawn_stage, request_transition,
 };
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -919,7 +919,7 @@ fn song_ready_nav_input(
         match state.layer {
             SongReadyLayer::Closed => {}
             SongReadyLayer::Browse => match action.source {
-                NavSource::Keyboard => {
+                InputSource::Keyboard => {
                     match reduce_ready_keyboard_browse(&mut state, action.verb) {
                         ReadyKeyboardEffect::None => {}
                         ReadyKeyboardEffect::AdjustValue(delta) => {
@@ -938,7 +938,7 @@ fn song_ready_nav_input(
                         ReadyKeyboardEffect::Close => state.close(),
                     }
                 }
-                NavSource::Pad => match action.verb {
+                InputSource::MidiKit => match action.verb {
                     SystemVerb::NavigateUp => state.step_card(-1),
                     SystemVerb::NavigateDown => state.step_card(1),
                     SystemVerb::Confirm if state.focus == ReadyCard::Song => {
@@ -948,9 +948,10 @@ fn song_ready_nav_input(
                     SystemVerb::Back => state.close(),
                     _ => {}
                 },
+                _ => {}
             },
             SongReadyLayer::Edit => match action.source {
-                NavSource::Keyboard => match action.verb {
+                InputSource::Keyboard => match action.verb {
                     SystemVerb::Decrease => adjust_ready_value(&mut state, &mut draft, -1),
                     SystemVerb::Increase => adjust_ready_value(&mut state, &mut draft, 1),
                     SystemVerb::NavigateUp if state.focus == ReadyCard::Audio => {
@@ -965,7 +966,7 @@ fn song_ready_nav_input(
                     SystemVerb::Back => state.cancel_edit(&mut draft),
                     _ => {}
                 },
-                NavSource::Pad => match action.verb {
+                InputSource::MidiKit => match action.verb {
                     SystemVerb::NavigateUp => adjust_ready_value(&mut state, &mut draft, -1),
                     SystemVerb::NavigateDown => adjust_ready_value(&mut state, &mut draft, 1),
                     // HT/LT switch the audio sub-field (the FT shortcut is
@@ -984,6 +985,7 @@ fn song_ready_nav_input(
                     SystemVerb::Back => state.cancel_edit(&mut draft),
                     _ => {}
                 },
+                _ => {}
             },
             SongReadyLayer::PrimaryDetail => match action.verb {
                 SystemVerb::NavigateUp => {
@@ -1533,8 +1535,9 @@ mod tests {
     fn send_nav_coarse(app: &mut App, verb: SystemVerb, coarse: bool) {
         app.world_mut().write_message(NavAction {
             verb,
-            source: NavSource::Keyboard,
+            source: InputSource::Keyboard,
             coarse,
+            repeated: false,
         });
         app.update();
     }

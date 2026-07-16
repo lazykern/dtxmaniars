@@ -13,7 +13,7 @@ mod transition;
 
 pub use navigation::{
     InputSource, LastIntentionalInputSource, MidiConnected, MouseIntent, NavAction, NavContext,
-    NavContextStack, NavSource, PromptSourcePreference, SystemVerb,
+    NavContextStack, PromptSourcePreference, SystemVerb,
 };
 pub use score_store::ScoreStoreResource;
 pub use states::{

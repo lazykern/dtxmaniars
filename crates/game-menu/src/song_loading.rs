@@ -1089,7 +1089,7 @@ mod tests {
     fn run_cancel_watch(verb: Option<SystemVerb>, phase: LoadPhase) -> bool {
         use bevy::ecs::message::Messages;
         use bevy::ecs::system::RunSystemOnce;
-        use game_shell::NavSource;
+        use game_shell::InputSource;
 
         let mut world = World::new();
         world.init_resource::<ButtonInput<KeyCode>>();
@@ -1099,8 +1099,9 @@ mod tests {
         if let Some(verb) = verb {
             world.write_message(NavAction {
                 verb,
-                source: NavSource::Pad,
+                source: InputSource::MidiKit,
                 coarse: false,
+                repeated: false,
             });
         }
         world

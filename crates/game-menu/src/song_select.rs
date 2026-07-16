@@ -53,7 +53,7 @@ use dtx_ui::widget::song_wheel::{SongWheel, VISIBLE_HALF, WheelRow, WheelSpring,
 use dtx_ui::widget::stage_background::spawn_stage_background;
 use dtx_ui::widget::stage_panel::{BadgeValueText, panel, set_panel_selected, spawn_badge_row};
 use game_shell::{
-    AppState, NavAction, NavSource, ResultReturnState, ScoreStoreResource, SystemVerb,
+    AppState, InputSource, NavAction, ResultReturnState, ScoreStoreResource, SystemVerb,
     TransitionRequest, despawn_stage, request_transition,
 };
 
@@ -2130,7 +2130,7 @@ pub(crate) fn song_select_kb_emit(
     mut selection_state: ResMut<SongSelectSelection>,
     ready: Res<crate::song_ready::SongReadyState>,
 ) {
-    use game_shell::{NavSource, SystemVerb};
+    use game_shell::{InputSource, SystemVerb};
     let shift = keys.pressed(KeyCode::ShiftLeft) || keys.pressed(KeyCode::ShiftRight);
     let verb = if keys.just_pressed(KeyCode::ArrowDown) {
         SystemVerb::NavigateDown
@@ -2161,23 +2161,26 @@ pub(crate) fn song_select_kb_emit(
     };
     out.write(NavAction {
         verb,
-        source: NavSource::Keyboard,
+        source: InputSource::Keyboard,
         coarse: shift,
+        repeated: false,
     });
 }
 
 fn ready_mode_for_action(
-    source: NavSource,
+    source: InputSource,
     focus: SongSelectFocus,
     verb: SystemVerb,
     coarse: bool,
 ) -> Option<crate::song_ready::ReadyMode> {
     match (source, focus, verb) {
-        (NavSource::Keyboard, _, SystemVerb::Confirm) if coarse => {
+        (InputSource::Keyboard, _, SystemVerb::Confirm) if coarse => {
             Some(crate::song_ready::ReadyMode::Practice)
         }
-        (NavSource::Keyboard, _, SystemVerb::Confirm) => Some(crate::song_ready::ReadyMode::Normal),
-        (NavSource::Pad, SongSelectFocus::Difficulty, SystemVerb::Confirm) => {
+        (InputSource::Keyboard, _, SystemVerb::Confirm) => {
+            Some(crate::song_ready::ReadyMode::Normal)
+        }
+        (InputSource::MidiKit, SongSelectFocus::Difficulty, SystemVerb::Confirm) => {
             Some(crate::song_ready::ReadyMode::Normal)
         }
         _ => None,
@@ -2194,7 +2197,7 @@ pub(crate) fn song_select_nav_consumer(
     mut ready: ResMut<crate::song_ready::SongReadyState>,
     mut draft: ResMut<crate::song_ready::ReadyConfigDraft>,
 ) {
-    use game_shell::{NavSource, SystemVerb};
+    use game_shell::{InputSource, SystemVerb};
     if ready.layer != crate::song_ready::SongReadyLayer::Closed {
         actions.clear();
         return;
@@ -2255,18 +2258,23 @@ pub(crate) fn song_select_nav_consumer(
         let leaves = matches!(
             (action.source, *focus, action.verb),
             (
-                NavSource::Keyboard,
+                InputSource::Keyboard,
                 SongSelectFocus::Songs,
                 SystemVerb::Back
-            ) | (NavSource::Pad, SongSelectFocus::Songs, SystemVerb::Back)
+            ) | (
+                InputSource::MidiKit,
+                SongSelectFocus::Songs,
+                SystemVerb::Back
+            )
         );
         if leaves {
             request_transition(&mut requests, AppState::Title);
         }
 
         *focus = match action.source {
-            NavSource::Keyboard => focus.on_keyboard_verb(action.verb),
-            NavSource::Pad => focus.on_pad_verb(action.verb),
+            InputSource::Keyboard => focus.on_keyboard_verb(action.verb),
+            InputSource::MidiKit => focus.on_pad_verb(action.verb),
+            _ => *focus,
         };
     }
 }
@@ -2720,11 +2728,15 @@ mod tests {
             .insert_resource(crate::song_ready::ReadyConfigDraft::default())
             .add_systems(Update, song_select_nav_consumer);
 
-        for source in [game_shell::NavSource::Keyboard, game_shell::NavSource::Pad] {
+        for source in [
+            game_shell::InputSource::Keyboard,
+            game_shell::InputSource::MidiKit,
+        ] {
             app.world_mut().write_message(NavAction {
                 verb: game_shell::SystemVerb::NavigateUp,
                 source,
                 coarse: false,
+                repeated: false,
             });
             app.update();
             assert_eq!(app.world().resource::<Selection>().difficulty, 2);
@@ -2733,6 +2745,7 @@ mod tests {
                 verb: game_shell::SystemVerb::NavigateDown,
                 source,
                 coarse: false,
+                repeated: false,
             });
             app.update();
             assert_eq!(app.world().resource::<Selection>().difficulty, 1);
@@ -2744,7 +2757,7 @@ mod tests {
         for focus in [SongSelectFocus::Songs, SongSelectFocus::Difficulty] {
             assert_eq!(
                 ready_mode_for_action(
-                    game_shell::NavSource::Keyboard,
+                    game_shell::InputSource::Keyboard,
                     focus,
                     game_shell::SystemVerb::Confirm,
                     false,
@@ -2754,7 +2767,7 @@ mod tests {
             // Shift+Enter accelerator: coarse Confirm opens in Practice mode.
             assert_eq!(
                 ready_mode_for_action(
-                    game_shell::NavSource::Keyboard,
+                    game_shell::InputSource::Keyboard,
                     focus,
                     game_shell::SystemVerb::Confirm,
                     true,
@@ -2768,7 +2781,7 @@ mod tests {
     fn pad_ready_entry_still_requires_difficulty_focus() {
         assert_eq!(
             ready_mode_for_action(
-                game_shell::NavSource::Pad,
+                game_shell::InputSource::MidiKit,
                 SongSelectFocus::Songs,
                 game_shell::SystemVerb::Confirm,
                 false,
@@ -2777,7 +2790,7 @@ mod tests {
         );
         assert_eq!(
             ready_mode_for_action(
-                game_shell::NavSource::Pad,
+                game_shell::InputSource::MidiKit,
                 SongSelectFocus::Difficulty,
                 game_shell::SystemVerb::Confirm,
                 false,

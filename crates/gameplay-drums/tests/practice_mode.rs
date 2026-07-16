@@ -537,8 +537,9 @@ fn paused_stale_gameplay_queues_are_cleared_before_resume() {
     queue_key_cap_flash_messages(&mut app);
     app.world_mut().write_message(game_shell::NavAction {
         verb: game_shell::SystemVerb::Back,
-        source: game_shell::NavSource::Keyboard,
+        source: game_shell::InputSource::Keyboard,
         coarse: false,
+        repeated: false,
     });
     app.update();
     app.update();
@@ -1715,8 +1716,9 @@ fn pause_menu_settings_hands_off_to_editing_before_unpausing() {
 
     app.world_mut().write_message(game_shell::NavAction {
         verb: game_shell::SystemVerb::Confirm,
-        source: game_shell::NavSource::Keyboard,
+        source: game_shell::InputSource::Keyboard,
         coarse: false,
+        repeated: false,
     });
     app.update();
 
@@ -1778,8 +1780,9 @@ fn pause_restart_loop_applies_seek_and_fresh_attempt_before_unpausing() {
     queue_key_cap_flash_messages(&mut app);
     app.world_mut().write_message(game_shell::NavAction {
         verb: game_shell::SystemVerb::Confirm,
-        source: game_shell::NavSource::Keyboard,
+        source: game_shell::InputSource::Keyboard,
         coarse: false,
+        repeated: false,
     });
 
     app.update();
@@ -1815,7 +1818,7 @@ fn pause_restart_loop_applies_seek_and_fresh_attempt_before_unpausing() {
 }
 
 fn assert_competing_pause_exit_cancels_restart_seek(
-    source: game_shell::NavSource,
+    source: game_shell::InputSource,
     back_first: bool,
 ) {
     let mut app = build_lifecycle_app(PracticeIntent::manual(PracticeOrigin::SongSelect));
@@ -1841,13 +1844,15 @@ fn assert_competing_pause_exit_cancels_restart_seek(
         .0 = 1;
     let restart = game_shell::NavAction {
         verb: game_shell::SystemVerb::Confirm,
-        source: game_shell::NavSource::Keyboard,
+        source: game_shell::InputSource::Keyboard,
         coarse: false,
+        repeated: false,
     };
     let exit = game_shell::NavAction {
         verb: game_shell::SystemVerb::Back,
         source,
         coarse: false,
+        repeated: false,
     };
     if back_first {
         app.world_mut().write_message(exit);
@@ -1901,7 +1906,10 @@ fn assert_competing_pause_exit_cancels_restart_seek(
 
 #[test]
 fn keyboard_and_pad_back_cancel_simultaneous_paused_restart() {
-    for source in [game_shell::NavSource::Keyboard, game_shell::NavSource::Pad] {
+    for source in [
+        game_shell::InputSource::Keyboard,
+        game_shell::InputSource::MidiKit,
+    ] {
         for back_first in [false, true] {
             assert_competing_pause_exit_cancels_restart_seek(source, back_first);
         }
@@ -1933,8 +1941,9 @@ fn bound_pause_cancels_simultaneous_paused_restart() {
         .0 = 1;
     app.world_mut().write_message(game_shell::NavAction {
         verb: game_shell::SystemVerb::Confirm,
-        source: game_shell::NavSource::Keyboard,
+        source: game_shell::InputSource::Keyboard,
         coarse: false,
+        repeated: false,
     });
     app.world_mut()
         .write_message(gameplay_drums::events::SystemVerbHit {
@@ -2004,8 +2013,9 @@ fn rejected_paused_restart_cannot_resume_later() {
         .0 = 1;
     app.world_mut().write_message(game_shell::NavAction {
         verb: game_shell::SystemVerb::Confirm,
-        source: game_shell::NavSource::Keyboard,
+        source: game_shell::InputSource::Keyboard,
         coarse: false,
+        repeated: false,
     });
     app.update();
     app.world_mut().resource_mut::<GameplayClock>().reset();
@@ -2021,8 +2031,9 @@ fn rejected_paused_restart_cannot_resume_later() {
 
     app.world_mut().write_message(game_shell::NavAction {
         verb: game_shell::SystemVerb::Back,
-        source: game_shell::NavSource::Keyboard,
+        source: game_shell::InputSource::Keyboard,
         coarse: false,
+        repeated: false,
     });
     app.update();
     ready_clock(&mut app, 2_000);
@@ -2079,8 +2090,9 @@ fn out_of_range_paused_restart_is_cancelled_after_seek_clamps() {
         .0 = 1;
     app.world_mut().write_message(game_shell::NavAction {
         verb: game_shell::SystemVerb::Confirm,
-        source: game_shell::NavSource::Keyboard,
+        source: game_shell::InputSource::Keyboard,
         coarse: false,
+        repeated: false,
     });
     app.update();
 
@@ -2130,8 +2142,9 @@ fn competing_seek_cancels_paused_restart_without_starting_requested_attempt() {
         .0 = 1;
     app.world_mut().write_message(game_shell::NavAction {
         verb: game_shell::SystemVerb::Confirm,
-        source: game_shell::NavSource::Keyboard,
+        source: game_shell::InputSource::Keyboard,
         coarse: false,
+        repeated: false,
     });
     app.update();
     app.world_mut().write_message(SeekToChartTime {
@@ -2178,8 +2191,9 @@ fn paused_restart_is_cancelled_across_performance_transition() {
         .0 = 1;
     app.world_mut().write_message(game_shell::NavAction {
         verb: game_shell::SystemVerb::Confirm,
-        source: game_shell::NavSource::Keyboard,
+        source: game_shell::InputSource::Keyboard,
         coarse: false,
+        repeated: false,
     });
     app.update();
 
@@ -2572,8 +2586,9 @@ fn escape_and_nav_back_route_every_initial_setup_origin() {
             if use_nav {
                 app.world_mut().write_message(game_shell::NavAction {
                     verb: game_shell::SystemVerb::Back,
-                    source: game_shell::NavSource::Pad,
+                    source: game_shell::InputSource::MidiKit,
                     coarse: false,
+                    repeated: false,
                 });
             } else {
                 app.world_mut()
@@ -2807,8 +2822,9 @@ fn normal_pause_practice_this_section_enters_loaded_setup_and_abandons_run() {
         .0 = 2;
     app.world_mut().write_message(game_shell::NavAction {
         verb: game_shell::SystemVerb::Confirm,
-        source: game_shell::NavSource::Keyboard,
+        source: game_shell::InputSource::Keyboard,
         coarse: false,
+        repeated: false,
     });
 
     app.update();

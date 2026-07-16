@@ -16,7 +16,7 @@ use crate::editor::calibration::CalibrationState;
 
 // Compat adapter (migration): keeps `gameplay_drums::menu_nav::…` paths alive
 // for the Practice branch and integration tests.
-pub use game_shell::navigation::{NavAction, NavContext, NavGuard, NavSource, SystemVerb};
+pub use game_shell::navigation::{InputSource, NavAction, NavContext, NavGuard, SystemVerb};
 
 pub(super) fn plugin(app: &mut App) {
     // NavGuard/ActiveNavContext are normally registered by game-shell's

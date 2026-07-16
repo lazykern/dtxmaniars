@@ -195,8 +195,9 @@ fn press_key(app: &mut App, key: KeyCode) {
 fn send_nav(app: &mut App, verb: game_shell::SystemVerb) {
     app.world_mut().write_message(game_shell::NavAction {
         verb,
-        source: game_shell::NavSource::Keyboard,
+        source: game_shell::InputSource::Keyboard,
         coarse: false,
+        repeated: false,
     });
     app.update();
 }

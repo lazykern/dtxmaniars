@@ -15,20 +15,12 @@ pub use dtx_input::MidiConnected;
 pub use dtx_input::SystemVerb;
 
 pub mod context;
+pub mod router;
 pub mod source;
 
 pub use context::{NavContext, NavContextStack};
+pub use router::{LiveVerb, NavRouterSet, Routed, route};
 pub use source::{InputSource, LastIntentionalInputSource, MouseIntent, PromptSourcePreference};
-
-/// Which device produced the action. Consumers may branch on this: keyboard
-/// keeps its flat navigation model, pads use the two-level model.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum NavSource {
-    /// Physical keyboard.
-    Keyboard,
-    /// Drum pad / MIDI device.
-    Pad,
-}
 
 /// One navigation action. Screens consume these instead of raw keys/pads.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Message)]
@@ -36,9 +28,12 @@ pub struct NavAction {
     /// Semantic meaning of the action.
     pub verb: SystemVerb,
     /// Device that produced it.
-    pub source: NavSource,
+    pub source: InputSource,
     /// Shift held (keyboard only) — consumers multiply steps by 10.
     pub coarse: bool,
+    /// Repeat of a held input; initial presses are false. No producer emits
+    /// true yet.
+    pub repeated: bool,
 }
 
 /// Minimum gap between accepted pad nav actions (double-trigger/flam guard).
@@ -69,6 +64,15 @@ impl NavGuard {
         self.context = None;
         self.entered_at = None;
         self.last_accept = None;
+    }
+
+    /// Follow the context stack: entering a different top resets the grace
+    /// window; an empty stack clears the guard.
+    pub fn sync(&mut self, top: Option<NavContext>, now: Instant) {
+        match top {
+            Some(ctx) => self.enter_context(ctx, now),
+            None => self.clear_context(),
+        }
     }
 
     /// True if a pad hit at `now` may become a [`NavAction`].
@@ -140,8 +144,9 @@ fn pad_nav_mapper(
         }
         out.write(NavAction {
             verb,
-            source: NavSource::Pad,
+            source: InputSource::MidiKit,
             coarse: false,
+            repeated: false,
         });
     }
 }
@@ -149,6 +154,7 @@ fn pad_nav_mapper(
 /// Registers the NavAction message, nav resources, and the pad mapper.
 pub fn plugin(app: &mut App) {
     app.add_message::<NavAction>()
+        .add_message::<LiveVerb>()
         .add_message::<MouseIntent>()
         .init_resource::<MidiConnected>()
         .init_resource::<NavGuard>()
@@ -156,7 +162,8 @@ pub fn plugin(app: &mut App) {
         .init_resource::<NavContextStack>()
         .init_resource::<LastIntentionalInputSource>()
         .init_resource::<PromptSourcePreference>()
-        .add_systems(Update, pad_nav_mapper.in_set(NavMapSet));
+        .add_systems(Update, pad_nav_mapper.in_set(NavMapSet))
+        .add_systems(Update, router::route_verbs.in_set(NavRouterSet));
 }
 
 #[cfg(test)]
@@ -167,8 +174,9 @@ mod tests {
     fn nav_action_is_copy_and_comparable() {
         let a = NavAction {
             verb: SystemVerb::NavigateUp,
-            source: NavSource::Pad,
+            source: InputSource::MidiKit,
             coarse: false,
+            repeated: false,
         };
         let b = a;
         assert_eq!(a, b);

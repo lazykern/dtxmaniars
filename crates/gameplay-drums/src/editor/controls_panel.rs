@@ -10,7 +10,7 @@ use bevy::prelude::*;
 use dtx_core::EChannel;
 use dtx_input::{SystemVerb, SYSTEM_VERBS};
 use dtx_layout::{lane_chips, LaneArrangement};
-use game_shell::{NavAction, NavSource};
+use game_shell::{InputSource, NavAction};
 
 use super::bindings_capture::{CaptureState, SelectedChannel};
 use super::bindings_panel::BindingsRev;
@@ -289,7 +289,7 @@ pub(super) fn controls_nav_consumer(
         }
     }
     for action in actions.read() {
-        if action.source != NavSource::Keyboard {
+        if action.source != InputSource::Keyboard {
             continue;
         }
         match (*focus, action.verb) {
@@ -638,7 +638,7 @@ mod tests {
         use crate::editor::bindings_panel::BindingsRev;
         use bevy::prelude::*;
         use dtx_input::SystemVerb;
-        use game_shell::{NavAction, NavSource};
+        use game_shell::{InputSource, NavAction};
 
         let mut app = App::new();
         app.init_resource::<ButtonInput<KeyCode>>()
@@ -662,8 +662,9 @@ mod tests {
                 .resource_mut::<Messages<NavAction>>()
                 .write(NavAction {
                     verb,
-                    source: NavSource::Keyboard,
+                    source: InputSource::Keyboard,
                     coarse: false,
+                    repeated: false,
                 });
             app.update();
         }
@@ -697,7 +698,7 @@ mod tests {
         use crate::editor::bindings_panel::BindingsRev;
         use bevy::prelude::*;
         use dtx_core::EChannel;
-        use game_shell::{NavAction, NavSource};
+        use game_shell::{InputSource, NavAction};
 
         let mut app = App::new();
         app.init_resource::<ButtonInput<KeyCode>>()
@@ -722,8 +723,9 @@ mod tests {
                 .resource_mut::<Messages<NavAction>>()
                 .write(NavAction {
                     verb,
-                    source: NavSource::Keyboard,
+                    source: InputSource::Keyboard,
                     coarse: false,
+                    repeated: false,
                 });
             app.update();
         }
@@ -805,7 +807,7 @@ mod tests {
         use crate::editor::bindings_capture::{CaptureState, SelectedChannel};
         use crate::editor::bindings_panel::BindingsRev;
         use bevy::prelude::*;
-        use game_shell::{NavAction, NavSource};
+        use game_shell::{InputSource, NavAction};
 
         fn touch_capture(mut capture: ResMut<CaptureState>) {
             let taken = std::mem::take(&mut *capture);
@@ -833,8 +835,9 @@ mod tests {
             .resource_mut::<Messages<NavAction>>()
             .write(NavAction {
                 verb: SystemVerb::NavigateDown,
-                source: NavSource::Keyboard,
+                source: InputSource::Keyboard,
                 coarse: false,
+                repeated: false,
             });
         app.update();
 
