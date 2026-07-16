@@ -111,9 +111,10 @@ pub(crate) fn verb_for_lane(lane: u8) -> Option<SystemVerb> {
 }
 
 /// Which menu surface currently owns pad navigation. `None` = pads are
-/// gameplay input, or a capture/calibration overlay owns raw hits. Written by
-/// the crate that knows the surface state (gameplay-drums publishes it every
-/// frame, before [`NavMapSet`]); consumed by [`pad_nav_mapper`].
+/// gameplay input, or a capture/calibration overlay owns raw hits.
+/// Transitional: derived from [`NavContextStack`] by
+/// [`mirror_stack_to_active`]; consumed by [`pad_nav_mapper`] until the
+/// screens migrate to the router.
 #[derive(Resource, Debug, Default, Clone, Copy, PartialEq, Eq)]
 pub struct ActiveNavContext(pub Option<NavContext>);
 
@@ -121,6 +122,24 @@ pub struct ActiveNavContext(pub Option<NavContext>);
 /// themselves `.before(NavMapSet)`.
 #[derive(SystemSet, Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct NavMapSet;
+
+/// Update-schedule set for systems that write [`NavContextStack`]. Stack
+/// consumers ([`mirror_stack_to_active`], the router) order themselves
+/// `.after(NavStackWriteSet)`.
+#[derive(SystemSet, Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct NavStackWriteSet;
+
+/// Derives the transitional [`ActiveNavContext`] from the stack top.
+/// Exclusive contexts and [`NavContext::LiveGameplay`] mirror to `None`: the
+/// pad mapper must stay suppressed there exactly as before the stack existed.
+pub fn mirror_stack_to_active(stack: Res<NavContextStack>, mut active: ResMut<ActiveNavContext>) {
+    let next = stack
+        .top()
+        .filter(|c| !c.exclusive() && *c != NavContext::LiveGameplay);
+    if active.0 != next {
+        active.0 = next;
+    }
+}
 
 fn pad_nav_mapper(
     ctx: Res<ActiveNavContext>,
@@ -162,8 +181,19 @@ pub fn plugin(app: &mut App) {
         .init_resource::<NavContextStack>()
         .init_resource::<LastIntentionalInputSource>()
         .init_resource::<PromptSourcePreference>()
+        .add_systems(
+            Update,
+            mirror_stack_to_active
+                .after(NavStackWriteSet)
+                .before(NavMapSet),
+        )
         .add_systems(Update, pad_nav_mapper.in_set(NavMapSet))
-        .add_systems(Update, router::route_verbs.in_set(NavRouterSet));
+        .add_systems(
+            Update,
+            router::route_verbs
+                .in_set(NavRouterSet)
+                .after(NavStackWriteSet),
+        );
 }
 
 #[cfg(test)]
@@ -246,6 +276,35 @@ mod tests {
         assert!(!g.accept(confirm), "same-instant hit is inside the grace");
         assert!(!g.accept(confirm + std::time::Duration::from_millis(499)));
         assert!(g.accept(confirm + std::time::Duration::from_millis(500)));
+    }
+
+    fn mirror(stack: &NavContextStack) -> Option<NavContext> {
+        let mut app = App::new();
+        app.insert_resource(stack.clone())
+            .init_resource::<ActiveNavContext>()
+            .add_systems(Update, mirror_stack_to_active);
+        app.update();
+        app.world().resource::<ActiveNavContext>().0
+    }
+
+    #[test]
+    fn mirror_passes_plain_menu_contexts_through() {
+        let mut stack = NavContextStack::default();
+        stack.push(NavContext::SongSelectSongs);
+        assert_eq!(mirror(&stack), Some(NavContext::SongSelectSongs));
+        stack.push(NavContext::PauseMenu);
+        assert_eq!(mirror(&stack), Some(NavContext::PauseMenu));
+    }
+
+    #[test]
+    fn mirror_maps_exclusive_and_live_gameplay_to_none() {
+        let mut stack = NavContextStack::default();
+        assert_eq!(mirror(&stack), None, "empty stack");
+        stack.push(NavContext::BindingCapture);
+        assert_eq!(mirror(&stack), None, "exclusive capture suppresses pads");
+        stack.clear();
+        stack.push(NavContext::LiveGameplay);
+        assert_eq!(mirror(&stack), None, "live play: pads are gameplay input");
     }
 
     /// The mapper must read `PadNavHit`, never `LaneHit` — autoplay (forced on
