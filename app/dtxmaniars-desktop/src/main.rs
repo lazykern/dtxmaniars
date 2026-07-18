@@ -18,6 +18,11 @@ use gameplay_drums::DrumsPlugin;
 #[cfg(feature = "brp")]
 use bevy_brp_extras::BrpExtrasPlugin;
 
+/// Held for the app's lifetime so the OS doesn't sleep during MIDI-only play
+/// (idle/power daemons only watch keyboard/mouse activity, not MIDI traffic).
+#[derive(Resource)]
+struct KeepAwakeGuard(#[allow(dead_code)] keepawake::KeepAwake);
+
 fn main() {
     let windowed = std::env::var("DTXMANIARS_WINDOWED").is_ok();
     let config_report = dtx_config::load_with_report(&dtx_config::default_path());
@@ -80,6 +85,7 @@ fn main() {
             log_boot,
             log_config_summary,
             spawn_ui_camera,
+            keep_awake,
         ),
     )
     .add_systems(Update, log_state_transitions);
@@ -92,6 +98,20 @@ fn main() {
 
 fn spawn_ui_camera(mut commands: Commands) {
     commands.spawn(Camera2d);
+}
+
+fn keep_awake(mut commands: Commands) {
+    match keepawake::Builder::default()
+        .display(true)
+        .idle(true)
+        .reason("Playing dtxmaniars")
+        .app_name("dtxmaniars")
+        .app_reverse_domain("io.github.dtxmaniars")
+        .create()
+    {
+        Ok(awake) => commands.insert_resource(KeepAwakeGuard(awake)),
+        Err(e) => warn!("keepawake init failed, system may sleep during play: {e}"),
+    }
 }
 
 fn load_score_store(mut store: ResMut<ScoreStoreResource>) {
